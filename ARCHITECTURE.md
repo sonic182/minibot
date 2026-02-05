@@ -98,6 +98,20 @@ Purpose: handle bot-triggered background work such as delayed replies, reminders
 - **Extensibility**: replace the in-memory queue with Redis Streams, NATS, or RabbitMQ by implementing the same interface. Multiple consumers per topic can be supported via fan-out composites.
 - **Observability**: expose queue depth, processing latency, and dropped-event counters; log events with `event_type`/`event_id` to trace cross-service flows.
 
+## Future Interfaces & Control Planes
+
+- **Messaging Ports**: the same channel abstraction can power future adapters beyond Telegram—Slack (Events API + Bolt RTM), Discord (gateway websockets), Matrix, generic webhooks, or even email/SMS relays. Each lives under `adapters/messaging/<channel>/` and plugs into the existing event bus.
+- **HTTP/WebSocket API**: expose a control-plane server (FastAPI/Starlette) that surfaces REST/WebSocket endpoints for health checks, metrics, task CRUD, and manual message injection. This allows automation tools or dashboards to interact with the daemon without going through chat platforms.
+- **Web Dashboard**: lightweight SPA (React/Svelte) or server-rendered UI for:
+  - viewing live message streams and LLM responses
+  - browsing/sorting tasks (pending, running, completed) and editing schedules
+  - inspecting job history, memory entries, channel status, and config snapshots
+  - triggering manual commands (pause channel, retry task, flush cache)
+  The dashboard would consume the HTTP API and can be hosted separately or embedded in the daemon under `/admin`.
+- **Programmatic Hooks**: provide outgoing webhooks or gRPC endpoints so external systems can subscribe to bot events (e.g., notify CI/CD). These reuse the event bus by adding dedicated subscribers that publish externally.
+
+These interfaces are optional for MVP but the architecture keeps ports/adapters ready so they can be layered on without rewriting core logic.
+
 ## Memory Backend
 
 The memory subsystem maintains conversation context, scheduler state, and ephemeral tool data.
