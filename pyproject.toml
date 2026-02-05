@@ -25,6 +25,7 @@ logfmter = "^0.0.11"
 pytest = "^9.0.2"
 pytest-asyncio = "^1.3.0"
 pytest-cov = "^7.0.0"
+ruff = "^0.15.0"
 
 [build-system]
 requires = ["poetry-core"]

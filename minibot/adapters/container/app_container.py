@@ -4,13 +4,13 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from ...app.event_bus import EventBus
-from ...core.memory import MemoryBackend
-from ...llm.provider_factory import LLMClient
-from ..config.loader import load_settings
-from ..config.schema import Settings, TelegramChannelConfig
-from ..logging.setup import configure_logging
-from ..memory.sqlalchemy import SQLAlchemyMemoryBackend
+from minibot.app.event_bus import EventBus
+from minibot.core.memory import MemoryBackend
+from minibot.llm.provider_factory import LLMClient
+from minibot.adapters.config.loader import load_settings
+from minibot.adapters.config.schema import Settings, TelegramChannelConfig
+from minibot.adapters.logging.setup import configure_logging
+from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 
 
 class AppContainer:

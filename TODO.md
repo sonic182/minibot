@@ -3,14 +3,14 @@
 Reference `ARCHITECTURE.md` for full design context; each stage below narrows the build focus and expected test coverage.
 
 ## Stage 1 – MVP (Telegram + SQLite Memory, No Scheduler)
-- [ ] Scaffold the hexagonal layout under `minibot/` (app/core/adapters/shared) with poetry scripts.
-- [ ] Implement config loader + container wiring to hydrate services from `config.toml` and env vars.
-- [ ] Set up structured logging via `python-logfmter` (logfmt default) and ensure correlation IDs propagate.
-- [ ] Provide in-process event bus abstraction and the main daemon loop supervising it alongside the Telegram channel service.
-- [ ] Implement Telegram adapter (aiogram/PTB async) with allowed user/chat whitelists and simple request→LLM response handler.
-- [ ] Integrate `sonic182/llm-async` provider factory with initial OpenAI-like provider; handle streaming + retries.
-- [ ] Ship memory backend using SQLite via `aiosqlite`/SQLAlchemy for storing conversation history/context.
-- [ ] Add pytest + pytest-asyncio test suite covering config, memory backend, event bus, and handler pipeline (with Telegram adapter mocked).
+- [x] Scaffold the hexagonal layout under `minibot/` (app/core/adapters/shared) with poetry scripts.
+- [x] Implement config loader + container wiring to hydrate services from `config.toml` and env vars.
+- [x] Set up structured logging via `python-logfmter` (logfmt default) and ensure correlation IDs propagate.
+- [x] Provide in-process event bus abstraction and the main daemon loop supervising it alongside the Telegram channel service.
+- [x] Implement Telegram adapter (aiogram/PTB async) with allowed user/chat whitelists and simple request→LLM response handler.
+- [x] Integrate `sonic182/llm-async` provider factory with initial OpenAI-like provider; handle streaming + retries.
+- [x] Ship memory backend using SQLite via `aiosqlite`/SQLAlchemy for storing conversation history/context.
+- [x] Add pytest + pytest-asyncio test suite covering config, memory backend, event bus, and handler pipeline (with Telegram adapter mocked).
 
 ## Stage 2 – Scheduler & File-Based Task Store
 - [ ] Implement domain/job models, scheduler facade, and asyncio scheduler adapter persisting jobs via the file-backed task storage (`flock` guarded).

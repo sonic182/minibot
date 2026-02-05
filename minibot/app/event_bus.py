@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator, List
 
-from ..core.events import BaseEvent
+from minibot.core.events import BaseEvent
 
 
 class EventSubscription:

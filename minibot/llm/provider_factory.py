@@ -4,9 +4,9 @@ from typing import Sequence
 
 import logging
 
-from ..core.memory import MemoryEntry
+from minibot.core.memory import MemoryEntry
 from llm_async.providers import ClaudeProvider, GoogleProvider, OpenAIProvider, OpenRouterProvider
-from ..adapters.config.schema import LLMMConfig
+from minibot.adapters.config.schema import LLMMConfig
 
 
 LLM_PROVIDERS = {

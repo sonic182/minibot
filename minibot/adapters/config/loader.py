@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import os
 
-from .schema import Settings
+from minibot.adapters.config.schema import Settings
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
 

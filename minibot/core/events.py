@@ -5,7 +5,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .channels import ChannelMessage, ChannelResponse
+from minibot.core.channels import ChannelMessage, ChannelResponse
 
 
 class BaseEvent(BaseModel):

@@ -9,8 +9,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from ...core.memory import MemoryBackend, MemoryEntry
-from ..config.schema import MemoryConfig
+from minibot.core.memory import MemoryBackend, MemoryEntry
+from minibot.adapters.config.schema import MemoryConfig
 
 
 Base = declarative_base()

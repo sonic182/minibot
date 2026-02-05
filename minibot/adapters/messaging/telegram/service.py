@@ -8,10 +8,10 @@ from typing import Optional
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message as TelegramMessage
 
-from ....app.event_bus import EventBus
-from ....core.channels import ChannelMessage
-from ....core.events import MessageEvent, OutboundEvent
-from ...config.schema import TelegramChannelConfig
+from minibot.app.event_bus import EventBus
+from minibot.core.channels import ChannelMessage
+from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.adapters.config.schema import TelegramChannelConfig
 
 
 class TelegramService:

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 
-from ...core.channels import ChannelResponse
-from ...core.events import MessageEvent
-from ...core.memory import MemoryBackend
-from ...llm.provider_factory import LLMClient
-from ...shared.utils import session_id_for
+from minibot.core.channels import ChannelResponse
+from minibot.core.events import MessageEvent
+from minibot.core.memory import MemoryBackend
+from minibot.llm.provider_factory import LLMClient
+from minibot.shared.utils import session_id_for
 
 
 class LLMMessageHandler:

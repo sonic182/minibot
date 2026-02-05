@@ -5,9 +5,9 @@ import signal
 from contextlib import asynccontextmanager
 from typing import Any
 
-from ..adapters.container import AppContainer
-from ..adapters.messaging.telegram.service import TelegramService
-from .dispatcher import Dispatcher
+from minibot.adapters.container import AppContainer
+from minibot.adapters.messaging.telegram.service import TelegramService
+from minibot.app.dispatcher import Dispatcher
 
 
 async def run() -> None:

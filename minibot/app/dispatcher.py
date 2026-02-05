@@ -4,10 +4,10 @@ import asyncio
 import contextlib
 from typing import Optional
 
-from .event_bus import EventBus
-from .handlers import LLMMessageHandler
-from ..core.events import MessageEvent, OutboundEvent
-from ..adapters.container import AppContainer
+from minibot.app.event_bus import EventBus
+from minibot.app.handlers import LLMMessageHandler
+from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.adapters.container import AppContainer
 import logging
 
 

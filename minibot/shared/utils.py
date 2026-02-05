@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha1
 
-from ..core.channels import ChannelMessage
+from minibot.core.channels import ChannelMessage
 
 
 def session_id_for(message: ChannelMessage) -> str:
