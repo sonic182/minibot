@@ -1,5 +1,4 @@
 import asyncio
-import asyncio
 import logging
 import signal
 from contextlib import asynccontextmanager
@@ -40,7 +39,6 @@ async def run() -> None:
 async def _graceful_shutdown(services: list, logger: logging.Logger):
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
-    handles: list[int] = []
 
     def _on_signal(_: int) -> None:
         logger.info("received stop signal")

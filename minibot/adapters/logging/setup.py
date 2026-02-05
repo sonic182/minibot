@@ -9,9 +9,10 @@ from minibot.adapters.config.schema import LoggingConfig
 
 
 def configure_logging(config: LoggingConfig) -> logging.Logger:
-    formatter = (
-        Logfmter(keys=["levelname", "name", "msg"]) if config.logfmt_enabled else logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-    )
+    if config.logfmt_enabled:
+        formatter = Logfmter(keys=["levelname", "name", "msg"])
+    else:
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 
     logger = logging.getLogger("minibot")
     level = getattr(logging, getattr(config, "log_level", "INFO").upper(), logging.INFO)

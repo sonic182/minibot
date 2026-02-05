@@ -59,7 +59,13 @@ class TelegramService:
             text=message.text or message.caption or "",
             metadata={"username": getattr(message.from_user, "username", None)},
         )
-        self._logger.info("received message", extra={"chat_id": message.chat.id, "user_id": message.from_user.id if message.from_user else None})
+        self._logger.info(
+            "received message",
+            extra={
+                "chat_id": message.chat.id,
+                "user_id": message.from_user.id if message.from_user else None,
+            },
+        )
         await self._event_bus.publish(MessageEvent(message=channel_message))
 
     async def _publish_outgoing(self) -> None:
