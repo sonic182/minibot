@@ -5,7 +5,7 @@ from pathlib import Path
 
 from logfmter import Logfmter
 
-from ..config.schema import LoggingConfig
+from minibot.adapters.config.schema import LoggingConfig
 
 
 def configure_logging(config: LoggingConfig) -> logging.Logger:
