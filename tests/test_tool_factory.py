@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+from typing import Any, cast
+
+from minibot.adapters.config.schema import (
+    HTTPClientToolConfig,
+    KeyValueMemoryConfig,
+    LLMMConfig,
+    SchedulerConfig,
+    ScheduledPromptsConfig,
+    Settings,
+    TimeToolConfig,
+    ToolsConfig,
+)
+from minibot.llm.tools.factory import build_enabled_tools
+
+
+class _MemoryStub:
+    async def append_history(self, session_id: str, role: str, content: str) -> None:
+        del session_id, role, content
+
+    async def get_history(self, session_id: str, limit: int = 32):
+        del session_id, limit
+        return []
+
+    async def count_history(self, session_id: str) -> int:
+        del session_id
+        return 0
+
+    async def trim_history(self, session_id: str, keep_latest: int) -> int:
+        del session_id, keep_latest
+        return 0
+
+
+class _KVStub:
+    async def save_entry(self, **kwargs: Any):
+        del kwargs
+        return None
+
+    async def get_entry(self, **kwargs: Any):
+        del kwargs
+        return None
+
+    async def search_entries(self, **kwargs: Any):
+        del kwargs
+        return None
+
+    async def list_entries(self, **kwargs: Any):
+        del kwargs
+        return None
+
+
+class _PromptSchedulerStub:
+    async def schedule_prompt(self, **kwargs: Any):
+        del kwargs
+        return None
+
+    async def cancel_prompt(self, **kwargs: Any):
+        del kwargs
+        return None
+
+    async def list_prompts(self, **kwargs: Any):
+        del kwargs
+        return []
+
+
+def _settings(*, kv_enabled: bool, http_enabled: bool, time_enabled: bool, prompts_enabled: bool) -> Settings:
+    return Settings(
+        llm=LLMMConfig(api_key="secret"),
+        tools=ToolsConfig(
+            kv_memory=KeyValueMemoryConfig(enabled=kv_enabled),
+            http_client=HTTPClientToolConfig(enabled=http_enabled),
+            time=TimeToolConfig(enabled=time_enabled),
+        ),
+        scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
+    )
+
+
+def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
+    settings = _settings(kv_enabled=False, http_enabled=False, time_enabled=True, prompts_enabled=True)
+
+    tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None)
+    names = {binding.tool.name for binding in tools}
+
+    assert "chat_memory_info" in names
+    assert "chat_memory_trim" in names
+    assert "current_datetime" in names
+    assert "schedule_prompt" not in names
+
+
+def test_build_enabled_tools_includes_optional_toolsets() -> None:
+    settings = _settings(kv_enabled=True, http_enabled=True, time_enabled=False, prompts_enabled=True)
+
+    tools = build_enabled_tools(
+        settings,
+        memory=_MemoryStub(),
+        kv_memory=cast(Any, _KVStub()),
+        prompt_scheduler=cast(Any, _PromptSchedulerStub()),
+    )
+    names = {binding.tool.name for binding in tools}
+
+    assert {"kv_save", "kv_get", "kv_search"}.issubset(names)
+    assert "http_request" in names
+    assert {"schedule_prompt", "cancel_scheduled_prompt", "list_scheduled_prompts"}.issubset(names)
+    assert "current_datetime" not in names
