@@ -21,6 +21,7 @@ Reference `ARCHITECTURE.md` for full design context; each stage below narrows th
 - [ ] Implement domain/job models, scheduler facade, and asyncio scheduler adapter persisting jobs via the file-backed task storage (`flock` guarded).
 - [ ] Introduce task service and strategy abstraction for delayed/recurrent tasks, plus CRUD commands exposed through the bot.
 - [ ] Extend event bus consumers/producers for job completion + task lifecycle events.
+- [ ] Allow task/job completion events to optionally skip channel responses when no user notification is required.
 - [ ] Expand tests to cover scheduler timing, persistence crash recovery, and task CRUD flows.
 
 ## Stage 3 – Advanced Persistence & Additional Channels

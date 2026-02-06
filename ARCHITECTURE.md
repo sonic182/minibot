@@ -130,6 +130,7 @@ The memory subsystem maintains conversation context, scheduler state, and epheme
 - **Adapters**: `adapters/tasks/` hosts implementations such as `llm_prompt.py`, `web_fetch.py`, etc. Each implements `execute(payload, context)` returning status + result.
 - **Application Layer**: `app/tasks_service.py` maps incoming commands to strategies, validates user permissions, and manages lifecycle (queued → running → completed/failed). It supports enqueueing tasks immediately or with a delay/cron-like schedule via the scheduler facade.
 - **Persistence & History**: tasks maintain audit trails so the bot can list past tasks, inspect running tasks, and review future schedules. Application APIs expose CRUD (create/list/update/delete) plus query filters (status, owner, schedule window).
+- **Silent completions**: not every job needs a user-facing reply; the dispatcher must tolerate completion events that update state/logs only.
 - **Roadmap**:
   1. **Phase 1 (MVP)**: implement synchronous LLM request handler without formal task abstraction; responses are immediate.
   2. **Phase 2**: add scheduler integration for deferred tasks (reminders, long LLM jobs). Core job model + scheduler facade become stable.
