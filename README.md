@@ -44,3 +44,22 @@ Up & Running with Telegram
    * configure the LLM provider section (`provider`, `api_key`, `model`)
 3. Run `poetry run python -m minibot.app.daemon` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
 4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
+
+Configuration Reference
+-----------------------
+
+Use `config.example.toml` as the source of truth—copy it to `config.toml` and update secrets before launching. Key sections:
+
+- `[runtime]`: global flags such as log level and environment.
+- `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
+- `[llm]`: configures the chosen `sonic182/llm-async` provider (provider id, API key, model, temperature, token limits, system prompt, etc.).
+- `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows.
+- `[kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, pagination defaults, and `default_owner_id` so the server decides ownership without involving the LLM. Enable it only when you need tool-based memory storage.
+- `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
+
+Every section has comments + defaults in `config.example.toml`—read that file for hints.
+
+Tooling
+-------
+
+Tools are defined under `minibot/llm/tools/`. Each tool binding exposes a schema to `sonic182/llm-async` and executes via the server-side handler with a controlled `ToolContext`. Today the only tool is `kv_memory`, which persists notes that can be saved, retrieved, and searched without asking the LLM for an owner ID. Future tools (e.g., scheduler commands, external API calls) will live alongside the KV handlers and can be toggled via config without touching the handler pipeline.
