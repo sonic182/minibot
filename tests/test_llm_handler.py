@@ -136,7 +136,7 @@ async def test_handler_respects_silent_flag() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handler_reuses_previous_response_id() -> None:
+async def test_handler_does_not_reuse_previous_response_id() -> None:
     handler, stub_client, _ = _handler(
         {"answer": "hello", "should_answer_to_user": True},
         responses_provider=True,
@@ -145,7 +145,7 @@ async def test_handler_reuses_previous_response_id() -> None:
     await handler.handle(_message_event("ping"))
     stub_client.response_id = "resp-2"
     await handler.handle(_message_event("ping"))
-    assert stub_client.calls[-1]["kwargs"].get("previous_response_id") == "resp-1"
+    assert stub_client.calls[-1]["kwargs"].get("previous_response_id") is None
 
 
 @pytest.mark.asyncio

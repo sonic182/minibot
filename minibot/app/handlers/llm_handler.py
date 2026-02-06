@@ -29,7 +29,6 @@ class LLMMessageHandler:
         self._default_owner_id = default_owner_id
         self._max_history_messages = max_history_messages
         self._logger = logging.getLogger("minibot.handler")
-        self._previous_response_ids: dict[str, str] = {}
 
     async def handle(self, event: MessageEvent) -> ChannelResponse:
         message = event.message
@@ -46,9 +45,6 @@ class LLMMessageHandler:
             user_id=message.user_id,
         )
         prompt_cache_key = _prompt_cache_key(message)
-        previous_response_id = None
-        if self._llm_client.is_responses_provider():
-            previous_response_id = self._previous_response_ids.get(session_id)
         try:
             generation = await self._llm_client.generate(
                 history,
@@ -57,11 +53,9 @@ class LLMMessageHandler:
                 tool_context=tool_context,
                 response_schema=self._response_schema(),
                 prompt_cache_key=prompt_cache_key,
-                previous_response_id=previous_response_id,
+                previous_response_id=None,
             )
             answer, should_reply = self._extract_answer(generation.payload)
-            if self._llm_client.is_responses_provider() and generation.response_id:
-                self._previous_response_ids[session_id] = generation.response_id
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
             answer = "Sorry, I couldn't answer right now."
