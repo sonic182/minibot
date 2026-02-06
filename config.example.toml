@@ -32,6 +32,11 @@ default_limit = 20
 max_limit = 100
 default_owner_id = "primary"
 
+[tools.http_client]
+enabled = false
+timeout_seconds = 10
+max_bytes = 16384
+
 [logging]
 structured = true
 logfmt_enabled = true

@@ -46,6 +46,16 @@ class KeyValueMemoryConfig(BaseModel):
     default_owner_id: str | None = "primary"
 
 
+class HTTPClientToolConfig(BaseModel):
+    enabled: bool = False
+    timeout_seconds: PositiveInt = 10
+    max_bytes: PositiveInt = 16384
+
+
+class ToolsConfig(BaseModel):
+    http_client: HTTPClientToolConfig = HTTPClientToolConfig()
+
+
 class LoggingConfig(BaseModel):
     structured: bool = True
     logfmt_enabled: bool = True
@@ -62,6 +72,7 @@ class Settings(BaseModel):
     llm: LLMMConfig
     memory: MemoryConfig = MemoryConfig()
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
+    tools: ToolsConfig = ToolsConfig()
     logging: LoggingConfig = LoggingConfig()
 
     model_config = ConfigDict(extra="forbid")

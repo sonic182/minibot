@@ -31,4 +31,4 @@
 - **Event bus**: `app/event_bus.py` abstracts an `asyncio` queue with async iterators; keep observability (queue depth, latency) in mind for future monitoring.
 - **Memory backend**: SQLite/SQLAlchemy via `aiosqlite` powers Stage 1 conversation history; future adapters include Redis, Mongo, etc.
 - **Roadmap**: check `TODO.md` for Stage breakdown—Stage 1 is complete (Telegram + SQLite memory), Stage 2 adds scheduler/task store, Stage 3 brings advanced persistence and new channels, Stage 4 introduces tooling/observability.
-- **Config**: use `config.toml` (with `${ENV_VAR}` placeholders) to configure runtime, channels, logging, scheduler, memory, and tasks.
+- **Config**: use `config.toml` (with `${ENV_VAR}` placeholders) to configure runtime, channels, logging, scheduler, memory, tools (`kv_memory`, HTTP client), and tasks.

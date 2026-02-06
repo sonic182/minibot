@@ -16,6 +16,7 @@ Reference `ARCHITECTURE.md` for full design context; each stage below narrows th
 - [x] Introduce SQLAlchemy-backed key/value store with tool-call surface so the LLM can save, retrieve, and search structured notes (owner ID resolved server-side).
 - [x] Add configuration toggles for the KV store and ensure handlers wire tools only when enabled.
 - [x] Document tool usage patterns and cover repository/tool tests.
+- [x] Add optional HTTP client tool (aiosonic-based) with config toggles, logging, and tests.
 
 ## Stage 2 – Scheduler & File-Based Task Store
 - [ ] Implement domain/job models, scheduler facade, and asyncio scheduler adapter persisting jobs via the file-backed task storage (`flock` guarded).

@@ -55,6 +55,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[llm]`: configures the chosen `sonic182/llm-async` provider (provider id, API key, model, temperature, token limits, system prompt, etc.).
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows.
 - `[kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, pagination defaults, and `default_owner_id` so the server decides ownership without involving the LLM. Enable it only when you need tool-based memory storage.
+- `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` to cap responses when allowing the bot to fetch arbitrary URLs via `aiosonic`.
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
 Every section has comments + defaults in `config.example.toml`—read that file for hints.
@@ -62,4 +63,9 @@ Every section has comments + defaults in `config.example.toml`—read that file 
 Tooling
 -------
 
-Tools are defined under `minibot/llm/tools/`. Each tool binding exposes a schema to `sonic182/llm-async` and executes via the server-side handler with a controlled `ToolContext`. Today the only tool is `kv_memory`, which persists notes that can be saved, retrieved, and searched without asking the LLM for an owner ID. Future tools (e.g., scheduler commands, external API calls) will live alongside the KV handlers and can be toggled via config without touching the handler pipeline.
+Tools are defined under `minibot/llm/tools/`. Each tool binding exposes a schema to `sonic182/llm-async` and executes via the server-side handler with a controlled `ToolContext`. Current tools:
+
+- `kv_memory`: persists short notes and supports save/get/search operations without asking the LLM for `owner_id` (the server injects it).
+- `http_client`: builds on `aiosonic` so the bot can fetch HTTP/HTTPS resources with strict method/timeout/response-size guards; configure via `[tools.http_client]`.
+
+Future tools (scheduler commands, external API calls, etc.) can live alongside these handlers and be toggled via config without touching the handler pipeline.
