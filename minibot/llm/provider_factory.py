@@ -105,9 +105,20 @@ class LLMClient:
                     except Exception:
                         self._logger.warning("failed to parse structured response; falling back to text")
                 return LLMGeneration(payload, response_id)
-            conversation.append(message.original or message_to_dict(message))
-            tool_messages = await self._execute_tool_calls(message.tool_calls, tool_map, context)
-            conversation.extend(tool_messages)
+            tool_messages = await self._execute_tool_calls(
+                message.tool_calls,
+                tool_map,
+                context,
+                responses_mode=self._is_responses_provider,
+            )
+            if self._is_responses_provider:
+                response_id = self._extract_response_id(response)
+                if response_id:
+                    extra_kwargs["previous_response_id"] = response_id
+                conversation = tool_messages
+            else:
+                conversation.append(message.original or message_to_dict(message))
+                conversation.extend(tool_messages)
             iterations += 1
             if iterations >= 5:
                 raise RuntimeError("tool call loop exceeded maximum iterations")
@@ -129,6 +140,7 @@ class LLMClient:
         tool_calls: Sequence[ToolCall],
         tool_map: Mapping[str, ToolBinding],
         context: ToolContext,
+        responses_mode: bool = False,
     ) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         for call in tool_calls:
@@ -152,14 +164,28 @@ class LLMClient:
                     "owner_id": context.owner_id,
                 },
             )
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "name": tool_name,
-                    "content": self._stringify_result(result),
-                }
-            )
+            if responses_mode:
+                call_id = call.id
+                if isinstance(call.input, dict):
+                    input_call_id = call.input.get("call_id")
+                    if isinstance(input_call_id, str) and input_call_id:
+                        call_id = input_call_id
+                messages.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": self._stringify_result(result),
+                    }
+                )
+            else:
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "name": tool_name,
+                        "content": self._stringify_result(result),
+                    }
+                )
         return messages
 
     def _parse_tool_call(self, call: ToolCall) -> tuple[str, dict[str, Any]]:
