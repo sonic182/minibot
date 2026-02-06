@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import inspect
 from pathlib import Path
 from typing import Optional
 
@@ -28,8 +29,8 @@ class AppContainer:
         cls._logger = configure_logging(cls._settings.logging)
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
-        if cls._settings.kv_memory.enabled:
-            cls._kv_memory_backend = SQLAlchemyKeyValueMemory(cls._settings.kv_memory)
+        if cls._settings.tools.kv_memory.enabled:
+            cls._kv_memory_backend = SQLAlchemyKeyValueMemory(cls._settings.tools.kv_memory)
         else:
             cls._kv_memory_backend = None
         cls._llm_client = LLMClient(cls._settings.llm)
@@ -82,4 +83,6 @@ class AppContainer:
     async def _initialize_backend(cls, backend: object) -> None:
         init = getattr(backend, "initialize", None)
         if callable(init):
-            await init()
+            result = init()
+            if inspect.isawaitable(result):
+                await result

@@ -22,7 +22,7 @@ class Dispatcher:
             memory=AppContainer.get_memory_backend(),
             llm_client=AppContainer.get_llm_client(),
             tools=tools,
-            default_owner_id=settings.kv_memory.default_owner_id,
+            default_owner_id=settings.tools.kv_memory.default_owner_id,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
         self._task: Optional[asyncio.Task[None]] = None

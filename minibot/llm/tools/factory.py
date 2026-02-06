@@ -9,7 +9,7 @@ from minibot.llm.tools.kv import build_kv_tools
 
 def build_enabled_tools(settings: Settings, kv_memory: KeyValueMemory | None) -> list[ToolBinding]:
     tools: list[ToolBinding] = []
-    if settings.kv_memory.enabled and kv_memory is not None:
+    if settings.tools.kv_memory.enabled and kv_memory is not None:
         tools.extend(build_kv_tools(kv_memory))
     if settings.tools.http_client.enabled:
         http_tool = HTTPClientTool(settings.tools.http_client)

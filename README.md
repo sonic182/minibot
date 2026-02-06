@@ -54,7 +54,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
 - `[llm]`: configures the chosen `sonic182/llm-async` provider (provider id, API key, model, temperature, token limits, system prompt, etc.).
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows.
-- `[kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, pagination defaults, and `default_owner_id` so the server decides ownership without involving the LLM. Enable it only when you need tool-based memory storage.
+- `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, pagination defaults, and `default_owner_id` so the server decides ownership without involving the LLM. Enable it only when you need tool-based memory storage.
 - `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` to cap responses when allowing the bot to fetch arbitrary URLs via `aiosonic`.
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 

@@ -53,6 +53,7 @@ class HTTPClientToolConfig(BaseModel):
 
 
 class ToolsConfig(BaseModel):
+    kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
 
 
@@ -71,7 +72,6 @@ class Settings(BaseModel):
     )
     llm: LLMMConfig
     memory: MemoryConfig = MemoryConfig()
-    kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     tools: ToolsConfig = ToolsConfig()
     logging: LoggingConfig = LoggingConfig()
 
