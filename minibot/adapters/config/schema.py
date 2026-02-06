@@ -17,7 +17,7 @@ class TelegramChannelConfig(BaseModel):
     bot_token: str = ""
     allowed_chat_ids: List[int] = Field(default_factory=list)
     allowed_user_ids: List[int] = Field(default_factory=list)
-    mode: str = Field("long_polling")
+    mode: str = Field(default="long_polling")
     webhook_url: Optional[str] = None
     require_authorized: bool = False
 
@@ -36,6 +36,16 @@ class MemoryConfig(BaseModel):
     sqlite_url: str = "sqlite+aiosqlite:///./data/minibot.db"
 
 
+class KeyValueMemoryConfig(BaseModel):
+    enabled: bool = False
+    sqlite_url: str = "sqlite+aiosqlite:///./data/kv_memory.db"
+    pool_size: PositiveInt = 5
+    echo: bool = False
+    default_limit: PositiveInt = 20
+    max_limit: PositiveInt = 100
+    default_owner_id: str | None = "primary"
+
+
 class LoggingConfig(BaseModel):
     structured: bool = True
     logfmt_enabled: bool = True
@@ -51,6 +61,7 @@ class Settings(BaseModel):
     )
     llm: LLMMConfig
     memory: MemoryConfig = MemoryConfig()
+    kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     logging: LoggingConfig = LoggingConfig()
 
     model_config = ConfigDict(extra="forbid")

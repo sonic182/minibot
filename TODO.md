@@ -12,6 +12,11 @@ Reference `ARCHITECTURE.md` for full design context; each stage below narrows th
 - [x] Ship memory backend using SQLite via `aiosqlite`/SQLAlchemy for storing conversation history/context.
 - [x] Add pytest + pytest-asyncio test suite covering config, memory backend, event bus, and handler pipeline (with Telegram adapter mocked).
 
+## Stage 1.5 – KV Memory Tools
+- [ ] Introduce SQLAlchemy-backed key/value store with tool-call surface so the LLM can save, retrieve, and search structured notes gated by `owner_id`.
+- [ ] Add configuration toggles for the KV store and ensure handlers wire tools only when enabled.
+- [ ] Document tool usage patterns and cover repository/tool tests.
+
 ## Stage 2 – Scheduler & File-Based Task Store
 - [ ] Implement domain/job models, scheduler facade, and asyncio scheduler adapter persisting jobs via the file-backed task storage (`flock` guarded).
 - [ ] Introduce task service and strategy abstraction for delayed/recurrent tasks, plus CRUD commands exposed through the bot.

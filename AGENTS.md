@@ -26,7 +26,7 @@
 - **No `print`** (Ruff T201) — rely on structured logging.
 
 ## Architecture & Roadmap
-- **Hexagonal layout**: `minibot/` contains `app` (daemon, dispatcher, handlers), `core` (domain models), `adapters` (config, logging, messaging, memory, scheduler, etc.), and `shared`. Tests mirror this structure.
+- **Mini hex layout**: `minibot/` contains `app` (daemon, dispatcher, handlers), `core` (domain models/protocols), `adapters` (config, messaging, memory, logging, scheduler, etc.), `llm/` (provider factory + `llm/tools/` for LLM tool schemas/handlers), and `shared` helpers. Tests mirror this split so each layer has a dedicated suite. See `ARCHITECTURE.md` for the full map.
 - **Entry point**: `minibot.app.daemon` bootstraps config via `AppContainer`, wires dependencies, starts dispatcher + channel services, and uses graceful shutdown with signal handlers.
 - **Event bus**: `app/event_bus.py` abstracts an `asyncio` queue with async iterators; keep observability (queue depth, latency) in mind for future monitoring.
 - **Memory backend**: SQLite/SQLAlchemy via `aiosqlite` powers Stage 1 conversation history; future adapters include Redis, Mongo, etc.

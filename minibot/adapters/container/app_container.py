@@ -5,11 +5,12 @@ from pathlib import Path
 from typing import Optional
 
 from minibot.app.event_bus import EventBus
-from minibot.core.memory import MemoryBackend
+from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.llm.provider_factory import LLMClient
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings, TelegramChannelConfig
 from minibot.adapters.logging.setup import configure_logging
+from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 
 
@@ -18,6 +19,7 @@ class AppContainer:
     _logger: Optional[logging.Logger] = None
     _event_bus: Optional[EventBus] = None
     _memory_backend: Optional[MemoryBackend] = None
+    _kv_memory_backend: Optional[KeyValueMemory] = None
     _llm_client: Optional[LLMClient] = None
 
     @classmethod
@@ -26,6 +28,10 @@ class AppContainer:
         cls._logger = configure_logging(cls._settings.logging)
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
+        if cls._settings.kv_memory.enabled:
+            cls._kv_memory_backend = SQLAlchemyKeyValueMemory(cls._settings.kv_memory)
+        else:
+            cls._kv_memory_backend = None
         cls._llm_client = LLMClient(cls._settings.llm)
 
     @classmethod
@@ -53,6 +59,10 @@ class AppContainer:
         return cls._memory_backend
 
     @classmethod
+    def get_kv_memory_backend(cls) -> KeyValueMemory | None:
+        return cls._kv_memory_backend
+
+    @classmethod
     def get_llm_client(cls) -> LLMClient:
         if cls._llm_client is None:
             raise RuntimeError("LLM client not configured")
@@ -64,7 +74,12 @@ class AppContainer:
 
     @classmethod
     async def initialize_storage(cls) -> None:
-        backend = cls.get_memory_backend()
+        await cls._initialize_backend(cls.get_memory_backend())
+        if cls._kv_memory_backend is not None:
+            await cls._initialize_backend(cls._kv_memory_backend)
+
+    @classmethod
+    async def _initialize_backend(cls, backend: object) -> None:
         init = getattr(backend, "initialize", None)
         if callable(init):
             await init()

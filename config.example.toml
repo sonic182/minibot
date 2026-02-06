@@ -23,6 +23,15 @@ system_prompt = "You are Minibot, a helpful assistant."
 backend = "sqlite"
 sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
 
+[kv_memory]
+enabled = false
+sqlite_url = "sqlite+aiosqlite:///./data/kv_memory.db"
+pool_size = 5
+echo = false
+default_limit = 20
+max_limit = 100
+default_owner_id = "primary"
+
 [logging]
 structured = true
 logfmt_enabled = true

@@ -52,7 +52,8 @@ We keep the package directly at repository root (`minibot/`) and slice code into
 │   │   │   └── protocols.py   # Adapter-side ChannelService protocol
 │   │   ├── llm/
 │   │   │   ├── provider_factory.py # Wraps sonic182/llm-async providers
-│   │   │   └── clients.py     # Concrete provider adapters
+│   │   │   ├── clients.py     # Concrete provider adapters
+│   │   │   └── tools/         # Tool schemas + handlers surfaced to the LLM
 │   │   ├── memory/
 │   │   │   ├── in_memory.py   # Default backend
 │   │   │   └── redis.py       # Production backend
@@ -116,14 +117,11 @@ These interfaces are optional for MVP but the architecture keeps ports/adapters 
 
 The memory subsystem maintains conversation context, scheduler state, and ephemeral tool data.
 
-- **Abstraction** (`core/memory.py`): define `MemoryBackend` protocol with async CRUD operations: `store(session_id, key, value, ttl=None)`, `load(session_id, key)`, `append_history(session_id, message)`, `get_history(session_id, limit)`, `delete(session_id, key)`.
-- **Implementations** (`adapters/memory/`):
-  - `in_memory.py`: default `dict` + `asyncio.Lock` for development/testing.
-  - `redis.py`: production-ready backend with TTL support and pub/sub hooks (optional).
-  - `sqlalchemy.py`: async SQLAlchemy engine (SQLite via `aiosqlite` first, later MySQL/Postgres) for durable memory.
-  - `mongo.py` (future): optional MongoDB adapter if document storage fits better.
-- **Usage**: application services depend on the abstract interface; channel handlers read/write context, the scheduler persists job definitions, and LLM calls retrieve context windows. The adapter implementation is resolved via the container so environments can swap backends without touching core logic.
-- **Bot Tools Exposure**: the memory subsystem doubles as a set of tools handlers can call (e.g., “store note”, “fetch note”). Wrap memory operations behind task strategies so LLM prompts can request reads/writes safely with audited access.
+- **Conversation History** (`core/memory.py`): `MemoryBackend` protocol exposes async `append_history` + `get_history` methods. Production deployments rely on `adapters/memory/sqlalchemy.py` (SQLite via `aiosqlite`) while lighter environments can swap to in-memory or Redis implementations.
+- **Key/Value Store** (`core/memory.py`): `KeyValueMemory` protocol powers durable “note taking” for LLM tools. The first adapter (`adapters/memory/kv_sqlalchemy.py`) stores entries with `owner_id`, `title`, `data`, metadata JSON, and lifecycle timestamps to enable fuzzy lookup and pagination.
+- **Tool-Gated Access**: tool definitions under `minibot.llm.tools.*` wrap repository methods so the LLM must request reads/writes through declarative tool calls. Owner scoping is resolved server-side (using a configured `default_owner_id` or channel metadata), so prompts never expose tenant identifiers while still enforcing isolation.
+- **Configuration Flags**: `[kv_memory]` in `config.toml` toggles the SQLAlchemy KV store on/off and sets pool size plus query limits. When disabled, handlers simply avoid wiring KV tools so future tool integrations can be enabled independently.
+- **Usage**: application services depend on the abstract interfaces; channel handlers read/write context, future schedulers persist job definitions, and LLM calls retrieve context windows. Adapters are resolved via the container so environments can swap backends without code changes.
 
 ## Task System & Strategy
 
@@ -190,6 +188,15 @@ backend = "in_memory"          # or "redis"
 url = "redis://localhost:6379/0"
 password = ""
 ttl_seconds = 3600
+
+[kv_memory]
+enabled = false
+sqlite_url = "sqlite+aiosqlite:///./data/kv_memory.db"
+pool_size = 5
+echo = false
+default_limit = 20
+max_limit = 100
+default_owner_id = "primary"
 
 [tasks.storage]
 backend = "file"

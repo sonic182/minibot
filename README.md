@@ -10,6 +10,22 @@ Stage 1 targets:
 3. Structured `logfmter` logs with request correlation and event bus-based dispatcher.
 4. Pytest + pytest-asyncio tests for config, event bus, memory, and handler plumbing.
 
+Mini Hex Architecture
+---------------------
+
+MiniBot follows a lightweight hexagonal layout described in detail in `ARCHITECTURE.md`. The repository root keeps
+`minibot/` split into:
+
+- `core/` – Domain entities and protocols (channel DTOs, memory contracts, future job models).
+- `app/` – Application services such as the daemon, dispatcher, handlers, and event bus that orchestrate domain + adapters.
+- `adapters/` – Infrastructure edges (config, messaging, logging, memory, scheduler, LLM providers) wired through the
+  DI container.
+- `llm/` – Thin wrappers around `llm-async` providers plus `llm/tools/`, which defines the tool schemas and handlers that expose bot capabilities (KV memory, future scheduler hooks) to the model.
+- `shared/` – Cross-cutting utilities.
+
+Tests under `tests/` mirror this structure so every layer has a corresponding suite. This “mini hex” keeps the domain
+pure while letting adapters evolve independently.
+
 Quickstart
 ----------
 
