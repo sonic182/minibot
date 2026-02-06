@@ -17,6 +17,10 @@ class MemoryBackend(Protocol):
 
     async def get_history(self, session_id: str, limit: int = 32) -> Iterable[MemoryEntry]: ...
 
+    async def count_history(self, session_id: str) -> int: ...
+
+    async def trim_history(self, session_id: str, keep_latest: int) -> int: ...
+
 
 @dataclass(frozen=True)
 class KeyValueEntry:

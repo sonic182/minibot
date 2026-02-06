@@ -24,6 +24,7 @@ reasoning_effort = "medium"
 [memory]
 backend = "sqlite"
 sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
+max_history_messages = 200
 
 [tools.kv_memory]
 enabled = false

@@ -21,11 +21,13 @@ class LLMMessageHandler:
         llm_client: LLMClient,
         tools: Sequence[ToolBinding] | None = None,
         default_owner_id: str | None = None,
+        max_history_messages: int | None = None,
     ) -> None:
         self._memory = memory
         self._llm_client = llm_client
         self._tools = list(tools or [])
         self._default_owner_id = default_owner_id
+        self._max_history_messages = max_history_messages
         self._logger = logging.getLogger("minibot.handler")
         self._previous_response_ids: dict[str, str] = {}
 
@@ -33,6 +35,7 @@ class LLMMessageHandler:
         message = event.message
         session_id = session_id_for(message)
         await self._memory.append_history(session_id, "user", message.text)
+        await self._enforce_history_limit(session_id)
 
         history = list(await self._memory.get_history(session_id))
         owner_id = resolve_owner_id(message, self._default_owner_id)
@@ -64,6 +67,7 @@ class LLMMessageHandler:
             answer = "Sorry, I couldn't answer right now."
             should_reply = True
         await self._memory.append_history(session_id, "assistant", answer)
+        await self._enforce_history_limit(session_id)
 
         chat_id = message.chat_id or message.user_id or 0
         return ChannelResponse(
@@ -80,6 +84,11 @@ class LLMMessageHandler:
             "required": ["answer", "should_answer_to_user"],
             "additionalProperties": False,
         }
+
+    async def _enforce_history_limit(self, session_id: str) -> None:
+        if self._max_history_messages is None:
+            return
+        await self._memory.trim_history(session_id, self._max_history_messages)
 
     def _extract_answer(self, payload: Any) -> tuple[str, bool]:
         if isinstance(payload, dict):

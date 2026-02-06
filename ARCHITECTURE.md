@@ -118,10 +118,11 @@ These interfaces are optional for MVP but the architecture keeps ports/adapters 
 The memory subsystem maintains conversation context, scheduler state, and ephemeral tool data.
 
 - **Conversation History** (`core/memory.py`): `MemoryBackend` protocol exposes async `append_history` + `get_history` methods. Production deployments rely on `adapters/memory/sqlalchemy.py` (SQLite via `aiosqlite`) while lighter environments can swap to in-memory or Redis implementations.
+- **Chat History Controls**: chat transcript storage and retention are configured under `[memory]` (for example `max_history_messages` to auto-trim old messages). LLM-exposed chat-memory management tools are always available as system tools and operate only on conversation history for the current session.
 - **Key/Value Store** (`core/memory.py`): `KeyValueMemory` protocol powers durable “note taking” for LLM tools. The first adapter (`adapters/memory/kv_sqlalchemy.py`) stores entries with `owner_id`, `title`, `data`, metadata JSON, and lifecycle timestamps to enable fuzzy lookup and pagination.
 - **Tool-Gated Access**: tool definitions under `minibot.llm.tools.*` wrap repository methods so the LLM must request reads/writes through declarative tool calls. Owner scoping is resolved server-side (using a configured `default_owner_id` or channel metadata), so prompts never expose tenant identifiers while still enforcing isolation.
 - **HTTP Tooling**: optional HTTP client tools use `aiosonic` to fetch external URLs with strict method/timeout/output caps. Config toggles (`[tools.http_client]`) control availability per deployment.
-- **Configuration Flags**: `[tools.kv_memory]` in `config.toml` toggles the SQLAlchemy KV store on/off and sets pool size plus query limits. When disabled, handlers simply avoid wiring KV tools so future tool integrations can be enabled independently.
+- **Configuration Flags**: `[memory]` controls transcript persistence and optional retention limits, while `[tools.kv_memory]` toggles the SQLAlchemy KV store with pool/query limits. Chat-memory management tools remain always enabled as part of the core toolset.
 - **Usage**: application services depend on the abstract interfaces; channel handlers read/write context, future schedulers persist job definitions, and LLM calls retrieve context windows. Adapters are resolved via the container so environments can swap backends without code changes.
 
 ## Task System & Strategy

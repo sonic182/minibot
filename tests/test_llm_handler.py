@@ -50,6 +50,7 @@ def test_resolve_owner_falls_back_to_session_id():
 class StubMemory:
     def __init__(self) -> None:
         self._store: dict[str, list[MemoryEntry]] = {}
+        self.trim_calls: list[tuple[str, int]] = []
 
     async def append_history(self, session_id: str, role: str, content: str) -> None:
         entry = MemoryEntry(role=role, content=content, created_at=datetime.now(timezone.utc))
@@ -57,6 +58,22 @@ class StubMemory:
 
     async def get_history(self, session_id: str, limit: int = 32) -> list[MemoryEntry]:
         return self._store.get(session_id, [])[-limit:]
+
+    async def count_history(self, session_id: str) -> int:
+        return len(self._store.get(session_id, []))
+
+    async def trim_history(self, session_id: str, keep_latest: int) -> int:
+        self.trim_calls.append((session_id, keep_latest))
+        entries = self._store.get(session_id, [])
+        if keep_latest <= 0:
+            removed = len(entries)
+            self._store[session_id] = []
+            return removed
+        if len(entries) <= keep_latest:
+            return 0
+        removed = len(entries) - keep_latest
+        self._store[session_id] = entries[-keep_latest:]
+        return removed
 
 
 class StubLLMClient:
@@ -79,11 +96,11 @@ def _handler(
     *,
     response_id: str | None = None,
     responses_provider: bool = False,
-) -> tuple[LLMMessageHandler, StubLLMClient]:
+) -> tuple[LLMMessageHandler, StubLLMClient, StubMemory]:
     memory = StubMemory()
     client = StubLLMClient(llm_payload, response_id=response_id, is_responses=responses_provider)
     handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
-    return handler, client
+    return handler, client, memory
 
 
 def _message_event(text: str = "hi") -> MessageEvent:
@@ -92,7 +109,7 @@ def _message_event(text: str = "hi") -> MessageEvent:
 
 @pytest.mark.asyncio
 async def test_handler_returns_structured_answer() -> None:
-    handler, stub_client = _handler(
+    handler, stub_client, _ = _handler(
         {"answer": "hello", "should_answer_to_user": True},
         responses_provider=True,
         response_id="resp-1",
@@ -107,7 +124,7 @@ async def test_handler_returns_structured_answer() -> None:
 
 @pytest.mark.asyncio
 async def test_handler_respects_silent_flag() -> None:
-    handler, stub_client = _handler(
+    handler, stub_client, _ = _handler(
         {"answer": "internal", "should_answer_to_user": False},
         responses_provider=True,
         response_id="resp-2",
@@ -120,7 +137,7 @@ async def test_handler_respects_silent_flag() -> None:
 
 @pytest.mark.asyncio
 async def test_handler_reuses_previous_response_id() -> None:
-    handler, stub_client = _handler(
+    handler, stub_client, _ = _handler(
         {"answer": "hello", "should_answer_to_user": True},
         responses_provider=True,
         response_id="resp-1",
@@ -133,7 +150,22 @@ async def test_handler_reuses_previous_response_id() -> None:
 
 @pytest.mark.asyncio
 async def test_handler_falls_back_for_plain_text() -> None:
-    handler, _ = _handler("plain text")
+    handler, _, _ = _handler("plain text")
     response = await handler.handle(_message_event("ping"))
     assert response.text == "plain text"
     assert response.metadata.get("should_reply") is True
+
+
+@pytest.mark.asyncio
+async def test_handler_trims_history_when_limit_is_configured() -> None:
+    memory = StubMemory()
+    client = StubLLMClient({"answer": "ok", "should_answer_to_user": True})
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client), max_history_messages=2)
+
+    await handler.handle(_message_event("one"))
+    await handler.handle(_message_event("two"))
+
+    event = _message_event("two")
+    session_id = session_id_for(event.message)
+    assert await memory.count_history(session_id) == 2
+    assert memory.trim_calls

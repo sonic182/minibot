@@ -18,12 +18,14 @@ class Dispatcher:
         self._subscription = event_bus.subscribe()
         settings = AppContainer.get_settings()
         prompt_service = AppContainer.get_scheduled_prompt_service()
-        tools = build_enabled_tools(settings, AppContainer.get_kv_memory_backend(), prompt_service)
+        memory_backend = AppContainer.get_memory_backend()
+        tools = build_enabled_tools(settings, memory_backend, AppContainer.get_kv_memory_backend(), prompt_service)
         self._handler = LLMMessageHandler(
-            memory=AppContainer.get_memory_backend(),
+            memory=memory_backend,
             llm_client=AppContainer.get_llm_client(),
             tools=tools,
             default_owner_id=settings.tools.kv_memory.default_owner_id,
+            max_history_messages=settings.memory.max_history_messages,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
         self._task: Optional[asyncio.Task[None]] = None

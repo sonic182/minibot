@@ -36,6 +36,7 @@ class LLMMConfig(BaseModel):
 class MemoryConfig(BaseModel):
     backend: str = "sqlite"
     sqlite_url: str = "sqlite+aiosqlite:///./data/minibot.db"
+    max_history_messages: int | None = Field(default=None, ge=1)
 
 
 class KeyValueMemoryConfig(BaseModel):

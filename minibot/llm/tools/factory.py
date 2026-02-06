@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from minibot.adapters.config.schema import Settings
-from minibot.core.memory import KeyValueMemory
+from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.llm.tools.base import ToolBinding
+from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.kv import build_kv_tools
 from minibot.llm.tools.scheduler import SchedulePromptTool
@@ -18,10 +19,13 @@ if TYPE_CHECKING:  # pragma: no cover
 
 def build_enabled_tools(
     settings: Settings,
+    memory: MemoryBackend,
     kv_memory: KeyValueMemory | None,
     prompt_scheduler: ScheduledPromptService | None = None,
 ) -> list[ToolBinding]:
     tools: list[ToolBinding] = []
+    chat_memory_tool = ChatMemoryTool(memory, max_history_messages=settings.memory.max_history_messages)
+    tools.extend(chat_memory_tool.bindings())
     if settings.tools.kv_memory.enabled and kv_memory is not None:
         tools.extend(build_kv_tools(kv_memory))
     if settings.tools.http_client.enabled:
