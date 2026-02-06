@@ -33,6 +33,9 @@ default_format = "%Y-%m-%dT%H:%M:%SZ"
 enabled = false
 timeout_seconds = 10
 max_bytes = 16384
+response_processing_mode = "auto"
+max_chars = 6000
+normalize_whitespace = true
 
 [scheduler.prompts]
 enabled = true

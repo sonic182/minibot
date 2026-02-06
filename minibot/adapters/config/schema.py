@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
@@ -53,6 +53,9 @@ class HTTPClientToolConfig(BaseModel):
     enabled: bool = False
     timeout_seconds: PositiveInt = 10
     max_bytes: PositiveInt = 16384
+    response_processing_mode: Literal["none", "auto"] = "auto"
+    max_chars: PositiveInt | None = None
+    normalize_whitespace: bool = True
 
 
 class TimeToolConfig(BaseModel):

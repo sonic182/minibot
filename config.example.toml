@@ -50,6 +50,9 @@ default_owner_id = "primary"
 enabled = false
 timeout_seconds = 10
 max_bytes = 16384
+response_processing_mode = "auto"
+max_chars = 6000
+normalize_whitespace = true
 
 [logging]
 structured = true
