@@ -29,16 +29,16 @@ class SchedulePromptTool:
                         "description": "Message text to inject when the schedule is due.",
                     },
                     "run_at": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "ISO 8601 timestamp (UTC preferred) when the prompt should run.",
                     },
                     "delay_seconds": {
-                        "type": "integer",
+                        "type": ["integer", "null"],
                         "minimum": 1,
                         "description": "Alternative to run_at: delay from now in seconds.",
                     },
                     "role": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "enum": [role.value for role in PromptRole],
                         "description": (
                             "Optional role for the injected prompt."
@@ -47,11 +47,13 @@ class SchedulePromptTool:
                         ),
                     },
                     "metadata": {
-                        "type": "object",
+                        "type": ["object", "null"],
                         "description": "Optional metadata stored with the scheduled job.",
+                        "additionalProperties": False,
                     },
                 },
-                "required": ["content"],
+                "required": ["content", "run_at", "delay_seconds", "role", "metadata"],
+                "additionalProperties": False,
             },
         )
 

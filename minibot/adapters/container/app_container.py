@@ -30,6 +30,7 @@ class AppContainer:
     @classmethod
     def configure(cls, config_path: Path | None = None) -> None:
         cls._settings = load_settings(config_path)
+        cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)

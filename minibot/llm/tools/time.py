@@ -23,11 +23,12 @@ class CurrentTimeTool:
                 "type": "object",
                 "properties": {
                     "format": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Python strftime format string.",
                     }
                 },
-                "required": [],
+                "required": ["format"],
+                "additionalProperties": False,
             },
         )
 

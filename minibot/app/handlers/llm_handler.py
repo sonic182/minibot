@@ -27,6 +27,7 @@ class LLMMessageHandler:
         self._tools = list(tools or [])
         self._default_owner_id = default_owner_id
         self._logger = logging.getLogger("minibot.handler")
+        self._previous_response_ids: dict[str, str] = {}
 
     async def handle(self, event: MessageEvent) -> ChannelResponse:
         message = event.message
@@ -41,15 +42,23 @@ class LLMMessageHandler:
             chat_id=message.chat_id,
             user_id=message.user_id,
         )
+        prompt_cache_key = _prompt_cache_key(message)
+        previous_response_id = None
+        if self._llm_client.is_responses_provider():
+            previous_response_id = self._previous_response_ids.get(session_id)
         try:
-            structured = await self._llm_client.generate(
+            generation = await self._llm_client.generate(
                 history,
                 message.text,
                 tools=self._tools,
                 tool_context=tool_context,
                 response_schema=self._response_schema(),
+                prompt_cache_key=prompt_cache_key,
+                previous_response_id=previous_response_id,
             )
-            answer, should_reply = self._extract_answer(structured)
+            answer, should_reply = self._extract_answer(generation.payload)
+            if self._llm_client.is_responses_provider() and generation.response_id:
+                self._previous_response_ids[session_id] = generation.response_id
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
             answer = "Sorry, I couldn't answer right now."
@@ -100,3 +109,10 @@ def resolve_owner_id(message: ChannelMessage, default_owner_id: str | None) -> s
     if message.chat_id is not None:
         return str(message.chat_id)
     return session_id_for(message)
+
+
+def _prompt_cache_key(message: ChannelMessage) -> str | None:
+    if message.channel and (message.user_id is not None or message.chat_id is not None):
+        suffix = message.user_id if message.user_id is not None else message.chat_id
+        return f"{message.channel}:{suffix}"
+    return None

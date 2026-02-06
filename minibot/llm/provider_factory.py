@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 import json
 
@@ -8,6 +9,7 @@ import logging
 from llm_async.models.message import message_to_dict
 from llm_async.models.tool_call import ToolCall
 from llm_async.providers import ClaudeProvider, GoogleProvider, OpenAIProvider, OpenRouterProvider
+from llm_async.providers.openai_responses import OpenAIResponsesProvider
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
@@ -19,7 +21,14 @@ LLM_PROVIDERS = {
     "claude": ClaudeProvider,
     "google": GoogleProvider,
     "openrouter": OpenRouterProvider,
+    "openai_responses": OpenAIResponsesProvider,
 }
+
+
+@dataclass
+class LLMGeneration:
+    payload: Any
+    response_id: str | None = None
 
 
 class LLMClient:
@@ -28,8 +37,11 @@ class LLMClient:
         self._provider = provider_cls(api_key=config.api_key)
         self._model = config.model
         self._temperature = config.temperature
+        self._send_temperature = getattr(config, "send_temperature", True)
         self._max_new_tokens = config.max_new_tokens
         self._system_prompt = getattr(config, "system_prompt", "You are Minibot, a helpful assistant.")
+        self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
+        self._is_responses_provider = isinstance(self._provider, OpenAIResponsesProvider)
         self._logger = logging.getLogger("minibot.llm")
 
     async def generate(
@@ -39,7 +51,9 @@ class LLMClient:
         tools: Sequence[ToolBinding] | None = None,
         tool_context: ToolContext | None = None,
         response_schema: dict[str, Any] | None = None,
-    ) -> Any:
+        prompt_cache_key: str | None = None,
+        previous_response_id: str | None = None,
+    ) -> LLMGeneration:
         messages = [
             {"role": "system", "content": self._system_prompt},
         ]
@@ -48,7 +62,7 @@ class LLMClient:
 
         if not self._provider.api_key:
             self._logger.warning("LLM provider key missing, falling back to echo", extra={"component": "llm"})
-            return f"Echo: {user_message}"
+            return LLMGeneration(f"Echo: {user_message}")
 
         conversation = list(messages)
         tool_bindings = list(tools or [])
@@ -56,32 +70,59 @@ class LLMClient:
         tool_map = {binding.tool.name: binding for binding in tool_bindings}
         context = tool_context or ToolContext()
         iterations = 0
+        extra_kwargs: dict[str, Any] = {}
+        if prompt_cache_key and self._is_responses_provider:
+            extra_kwargs["prompt_cache_key"] = prompt_cache_key
+        if previous_response_id and self._is_responses_provider:
+            extra_kwargs["previous_response_id"] = previous_response_id
+        if self._is_responses_provider and self._reasoning_effort:
+            extra_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
+
         while True:
-            response = await self._provider.acomplete(
-                self._model,
-                conversation,
-                temperature=self._temperature,
-                max_tokens=self._max_new_tokens,
-                tools=tool_specs,
-                response_schema=response_schema,
-            )
+            call_kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": conversation,
+                "tools": tool_specs,
+                "response_schema": response_schema,
+            }
+            if self._send_temperature:
+                call_kwargs["temperature"] = self._temperature
+            if not self._is_responses_provider:
+                call_kwargs["max_tokens"] = self._max_new_tokens
+            call_kwargs.update(extra_kwargs)
+
+            response = await self._provider.acomplete(**call_kwargs)
             message = response.main_response
             if not message:
                 raise RuntimeError("LLM did not return a completion")
             if not message.tool_calls or not tool_map:
                 payload = message.content
-                if response_schema:
+                response_id = self._extract_response_id(response)
+                if response_schema and isinstance(payload, str):
                     try:
-                        return json.loads(payload)
+                        parsed = json.loads(payload)
+                        return LLMGeneration(parsed, response_id)
                     except Exception:
                         self._logger.warning("failed to parse structured response; falling back to text")
-                return payload
+                return LLMGeneration(payload, response_id)
             conversation.append(message.original or message_to_dict(message))
             tool_messages = await self._execute_tool_calls(message.tool_calls, tool_map, context)
             conversation.extend(tool_messages)
             iterations += 1
             if iterations >= 5:
                 raise RuntimeError("tool call loop exceeded maximum iterations")
+
+    def is_responses_provider(self) -> bool:
+        return self._is_responses_provider
+
+    @staticmethod
+    def _extract_response_id(response: Any) -> str | None:
+        original = getattr(response, "original", None)
+        if isinstance(original, dict):
+            resp_id = original.get("id")
+            if isinstance(resp_id, str):
+                return resp_id
+        return None
 
     async def _execute_tool_calls(
         self,

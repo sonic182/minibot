@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -96,7 +97,10 @@ class HTTPClientTool:
         if payload.get("json") is not None and payload.get("body") is not None:
             raise ValueError("provide either json or body, not both")
         if payload.get("json") is not None:
-            return None, payload["json"]
+            json_payload = payload["json"]
+            if isinstance(json_payload, str):
+                return None, json.loads(json_payload)
+            raise ValueError("json must be a JSON string")
         body = payload.get("body")
         if body is None:
             return None, None
@@ -123,19 +127,20 @@ def _http_tool_schema() -> Tool:
                     "description": "Absolute http(s) URL to request",
                 },
                 "headers": {
-                    "type": "object",
+                    "type": ["object", "null"],
                     "additionalProperties": {"type": "string"},
                 },
                 "body": {
-                    "type": "string",
+                    "type": ["string", "null"],
                     "description": "Optional request body (UTF-8 string)",
                 },
                 "json": {
-                    "type": "object",
-                    "description": "Optional JSON payload",
+                    "type": ["string", "null"],
+                    "description": "Optional JSON payload encoded as a JSON string",
                 },
             },
-            "required": ["url"],
+            "required": ["url", "method", "headers", "body", "json"],
+            "additionalProperties": False,
         },
     )
 

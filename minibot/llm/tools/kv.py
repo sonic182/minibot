@@ -27,11 +27,21 @@ def _save_tool() -> Tool:
             "properties": {
                 "title": {"type": "string", "description": "Short title for the entry", "maxLength": 100},
                 "data": {"type": "string", "description": "Full content"},
-                "metadata": {"type": "object", "description": "Optional JSON metadata"},
-                "source": {"type": "string", "description": "Optional source or URL"},
-                "expires_at": {"type": "string", "description": "ISO datetime when entry expires"},
+                "metadata": {
+                    "type": ["string", "null"],
+                    "description": "Optional JSON metadata",
+                },
+                "source": {
+                    "type": ["string", "null"],
+                    "description": "Optional source or URL",
+                },
+                "expires_at": {
+                    "type": ["string", "null"],
+                    "description": "ISO datetime when entry expires",
+                },
             },
-            "required": ["title", "data"],
+            "required": ["title", "data", "metadata", "source", "expires_at"],
+            "additionalProperties": False,
         },
     )
 
@@ -43,10 +53,11 @@ def _get_tool() -> Tool:
         parameters={
             "type": "object",
             "properties": {
-                "entry_id": {"type": "string"},
-                "title": {"type": "string"},
+                "entry_id": {"type": ["string", "null"]},
+                "title": {"type": ["string", "null"]},
             },
-            "required": [],
+            "required": ["entry_id", "title"],
+            "additionalProperties": False,
         },
     )
 
@@ -58,11 +69,15 @@ def _search_tool() -> Tool:
         parameters={
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Text to search in title/data"},
-                "limit": {"type": "integer", "minimum": 1},
-                "offset": {"type": "integer", "minimum": 0},
+                "query": {
+                    "type": ["string", "null"],
+                    "description": "Text to search in title/data",
+                },
+                "limit": {"type": ["integer", "null"], "minimum": 1},
+                "offset": {"type": ["integer", "null"], "minimum": 0},
             },
-            "required": [],
+            "required": ["query", "limit", "offset"],
+            "additionalProperties": False,
         },
     )
 

@@ -27,8 +27,10 @@ class LLMMConfig(BaseModel):
     api_key: str = ""
     model: str = "gpt-4o-mini"
     temperature: float = 0.4
+    send_temperature: bool = True
     max_new_tokens: PositiveInt = 512
     system_prompt: str = "You are Minibot, a helpful assistant."
+    reasoning_effort: str = "medium"
 
 
 class MemoryConfig(BaseModel):
