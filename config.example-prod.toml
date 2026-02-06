@@ -23,6 +23,23 @@ system_prompt = "You are Minibot deployed in a production-grade environment."
 backend = "sqlite"
 sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
 
+[tools.time]
+enabled = true
+default_format = "%Y-%m-%dT%H:%M:%SZ"
+
+[tools.http_client]
+enabled = false
+timeout_seconds = 10
+max_bytes = 16384
+
+[scheduler.prompts]
+enabled = true
+sqlite_url = "sqlite+aiosqlite:///./data/scheduled_prompts.db"
+poll_interval_seconds = 60
+lease_timeout_seconds = 120
+batch_size = 10
+max_attempts = 3
+
 [logging]
 structured = true
 logfmt_enabled = true

@@ -11,6 +11,9 @@ ToolPayload = dict[str, Any]
 @dataclass(frozen=True)
 class ToolContext:
     owner_id: str | None = None
+    channel: str | None = None
+    chat_id: int | None = None
+    user_id: int | None = None
 
 
 ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[Any]]

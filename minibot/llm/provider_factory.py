@@ -38,7 +38,8 @@ class LLMClient:
         user_message: str,
         tools: Sequence[ToolBinding] | None = None,
         tool_context: ToolContext | None = None,
-    ) -> str:
+        response_schema: dict[str, Any] | None = None,
+    ) -> Any:
         messages = [
             {"role": "system", "content": self._system_prompt},
         ]
@@ -62,12 +63,19 @@ class LLMClient:
                 temperature=self._temperature,
                 max_tokens=self._max_new_tokens,
                 tools=tool_specs,
+                response_schema=response_schema,
             )
             message = response.main_response
             if not message:
                 raise RuntimeError("LLM did not return a completion")
             if not message.tool_calls or not tool_map:
-                return message.content
+                payload = message.content
+                if response_schema:
+                    try:
+                        return json.loads(payload)
+                    except Exception:
+                        self._logger.warning("failed to parse structured response; falling back to text")
+                return payload
             conversation.append(message.original or message_to_dict(message))
             tool_messages = await self._execute_tool_calls(message.tool_calls, tool_map, context)
             conversation.extend(tool_messages)

@@ -3,6 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Sequence
 
+import json
+from typing import Any
+
 from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
@@ -32,21 +35,61 @@ class LLMMessageHandler:
 
         history = list(await self._memory.get_history(session_id))
         owner_id = resolve_owner_id(message, self._default_owner_id)
-        tool_context = ToolContext(owner_id=owner_id)
+        tool_context = ToolContext(
+            owner_id=owner_id,
+            channel=message.channel,
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+        )
         try:
-            text = await self._llm_client.generate(
+            structured = await self._llm_client.generate(
                 history,
                 message.text,
                 tools=self._tools,
                 tool_context=tool_context,
+                response_schema=self._response_schema(),
             )
+            answer, should_reply = self._extract_answer(structured)
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
-            text = "Sorry, I couldn't answer right now."
-        await self._memory.append_history(session_id, "assistant", text)
+            answer = "Sorry, I couldn't answer right now."
+            should_reply = True
+        await self._memory.append_history(session_id, "assistant", answer)
 
         chat_id = message.chat_id or message.user_id or 0
-        return ChannelResponse(channel=message.channel, chat_id=chat_id, text=text)
+        return ChannelResponse(
+            channel=message.channel, chat_id=chat_id, text=answer, metadata={"should_reply": should_reply}
+        )
+
+    def _response_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "answer": {"type": "string"},
+                "should_answer_to_user": {"type": "boolean"},
+            },
+            "required": ["answer", "should_answer_to_user"],
+            "additionalProperties": True,
+        }
+
+    def _extract_answer(self, payload: Any) -> tuple[str, bool]:
+        if isinstance(payload, dict):
+            answer = payload.get("answer")
+            should = payload.get("should_answer_to_user")
+            if isinstance(answer, str) and isinstance(should, bool):
+                return answer, should
+        if isinstance(payload, str):
+            try:
+                parsed = json.loads(payload)
+                if isinstance(parsed, dict):
+                    answer = parsed.get("answer")
+                    should = parsed.get("should_answer_to_user")
+                    if isinstance(answer, str) and isinstance(should, bool):
+                        return answer, should
+            except Exception:
+                pass
+            return payload, True
+        return str(payload), True
 
 
 def resolve_owner_id(message: ChannelMessage, default_owner_id: str | None) -> str:

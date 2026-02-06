@@ -52,9 +52,30 @@ class HTTPClientToolConfig(BaseModel):
     max_bytes: PositiveInt = 16384
 
 
+class TimeToolConfig(BaseModel):
+    enabled: bool = True
+    default_format: str = "%Y-%m-%dT%H:%M:%SZ"
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
+    time: TimeToolConfig = TimeToolConfig()
+
+
+class ScheduledPromptsConfig(BaseModel):
+    enabled: bool = True
+    sqlite_url: str = "sqlite+aiosqlite:///./data/scheduled_prompts.db"
+    poll_interval_seconds: PositiveInt = 60
+    lease_timeout_seconds: PositiveInt = 120
+    batch_size: PositiveInt = 10
+    max_attempts: PositiveInt = 3
+    pool_size: PositiveInt = 5
+    echo: bool = False
+
+
+class SchedulerConfig(BaseModel):
+    prompts: ScheduledPromptsConfig = ScheduledPromptsConfig()
 
 
 class LoggingConfig(BaseModel):
@@ -73,6 +94,7 @@ class Settings(BaseModel):
     llm: LLMMConfig
     memory: MemoryConfig = MemoryConfig()
     tools: ToolsConfig = ToolsConfig()
+    scheduler: SchedulerConfig = SchedulerConfig()
     logging: LoggingConfig = LoggingConfig()
 
     model_config = ConfigDict(extra="forbid")

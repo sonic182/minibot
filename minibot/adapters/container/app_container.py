@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from minibot.app.event_bus import EventBus
+from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.llm.provider_factory import LLMClient
 from minibot.adapters.config.loader import load_settings
@@ -13,6 +14,7 @@ from minibot.adapters.config.schema import Settings, TelegramChannelConfig
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
+from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
 
 
 class AppContainer:
@@ -22,6 +24,8 @@ class AppContainer:
     _memory_backend: Optional[MemoryBackend] = None
     _kv_memory_backend: Optional[KeyValueMemory] = None
     _llm_client: Optional[LLMClient] = None
+    _prompt_store: Optional[SQLAlchemyScheduledPromptStore] = None
+    _prompt_service: Optional[ScheduledPromptService] = None
 
     @classmethod
     def configure(cls, config_path: Path | None = None) -> None:
@@ -34,6 +38,17 @@ class AppContainer:
         else:
             cls._kv_memory_backend = None
         cls._llm_client = LLMClient(cls._settings.llm)
+        prompts_config = cls._settings.scheduler.prompts
+        if prompts_config.enabled:
+            cls._prompt_store = SQLAlchemyScheduledPromptStore(prompts_config)
+            cls._prompt_service = ScheduledPromptService(
+                repository=cls._prompt_store,
+                event_bus=cls._event_bus,
+                config=prompts_config,
+            )
+        else:
+            cls._prompt_store = None
+            cls._prompt_service = None
 
     @classmethod
     def get_settings(cls) -> Settings:
@@ -70,6 +85,10 @@ class AppContainer:
         return cls._llm_client
 
     @classmethod
+    def get_scheduled_prompt_service(cls) -> ScheduledPromptService | None:
+        return cls._prompt_service
+
+    @classmethod
     def get_telegram_config(cls) -> TelegramChannelConfig:
         return cls.get_settings().channels.get("telegram")  # type: ignore[return-value]
 
@@ -78,6 +97,8 @@ class AppContainer:
         await cls._initialize_backend(cls.get_memory_backend())
         if cls._kv_memory_backend is not None:
             await cls._initialize_backend(cls._kv_memory_backend)
+        if cls._prompt_store is not None:
+            await cls._initialize_backend(cls._prompt_store)
 
     @classmethod
     async def _initialize_backend(cls, backend: object) -> None:

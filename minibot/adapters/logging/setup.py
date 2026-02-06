@@ -10,7 +10,11 @@ from minibot.adapters.config.schema import LoggingConfig
 
 def configure_logging(config: LoggingConfig) -> logging.Logger:
     if config.logfmt_enabled:
-        formatter = Logfmter(keys=["levelname", "name", "msg"])
+        formatter = Logfmter(
+            keys=["at", "when", "name", "msg"],
+            mapping={"at": "levelname", "when": "asctime"},
+            datefmt="%Y%m%d %H:%M:%S",
+        )
     else:
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 
