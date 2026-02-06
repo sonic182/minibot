@@ -12,6 +12,16 @@ from minibot.app.dispatcher import Dispatcher
 async def run() -> None:
     AppContainer.configure()
     logger = AppContainer.get_logger()
+    settings = AppContainer.get_settings()
+    enabled_tools = []
+    if settings.tools.kv_memory.enabled:
+        enabled_tools.append("kv_memory")
+    if settings.tools.http_client.enabled:
+        enabled_tools.append("http_client")
+    logger.info(
+        "tool configuration loaded",
+        extra={"tools_enabled": enabled_tools or ["none"]},
+    )
     logger.info("booting minibot", extra={"component": "daemon"})
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
