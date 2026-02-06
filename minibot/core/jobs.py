@@ -11,7 +11,6 @@ class PromptRole(str, Enum):
     SYSTEM = "system"
     DEVELOPER = "developer"
     AGENT = "agent"
-    ASSISTANT = "assistant"
 
 
 class ScheduledPromptStatus(str, Enum):
@@ -31,7 +30,7 @@ class ScheduledPrompt:
     status: ScheduledPromptStatus = ScheduledPromptStatus.PENDING
     chat_id: int | None = None
     user_id: int | None = None
-    role: PromptRole = PromptRole.ASSISTANT
+    role: PromptRole = PromptRole.USER
     lease_expires_at: datetime | None = None
     retry_count: int = 0
     max_attempts: int = 3
@@ -50,7 +49,7 @@ class ScheduledPromptCreate:
     run_at: datetime
     chat_id: int | None = None
     user_id: int | None = None
-    role: PromptRole = PromptRole.ASSISTANT
+    role: PromptRole = PromptRole.USER
     metadata: Mapping[str, Any] | None = None
     max_attempts: int = 3
 

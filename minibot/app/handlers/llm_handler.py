@@ -69,7 +69,7 @@ class LLMMessageHandler:
                 "should_answer_to_user": {"type": "boolean"},
             },
             "required": ["answer", "should_answer_to_user"],
-            "additionalProperties": True,
+            "additionalProperties": False,
         }
 
     def _extract_answer(self, payload: Any) -> tuple[str, bool]:

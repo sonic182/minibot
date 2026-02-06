@@ -11,7 +11,7 @@ from minibot.adapters.config.schema import ScheduledPromptsConfig
 from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
 from minibot.app.event_bus import EventBus
 from minibot.app.scheduler_service import ScheduledPromptService
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.events import MessageEvent
 from minibot.core.jobs import PromptRole, ScheduledPromptStatus
 
 
@@ -62,7 +62,8 @@ async def test_service_dispatches_user_prompt(tmp_path: Path) -> None:
     iterator = subscription.__aiter__()
     published = await iterator.__anext__()
     assert isinstance(published, MessageEvent)
-    assert published.message.text == "wake up"
+    assert "scheduled a prompt" in published.message.text
+    assert "wake up" in published.message.text
     stored = await store.get(job.id)
     assert stored is not None
     assert stored.status == ScheduledPromptStatus.COMPLETED
@@ -95,34 +96,6 @@ async def test_service_retries_on_publish_failure(tmp_path: Path) -> None:
     assert stored.status == ScheduledPromptStatus.PENDING
     assert stored.retry_count == 1
     assert stored.run_at > datetime.now(timezone.utc)
-
-
-@pytest.mark.asyncio
-async def test_service_sends_direct_response_for_assistant_role(tmp_path: Path) -> None:
-    db_path = tmp_path / "scheduler.db"
-    config = _config(db_path)
-    store = SQLAlchemyScheduledPromptStore(config)
-    await store.initialize()
-    bus = EventBus()
-    svc = ScheduledPromptService(store, bus, config)
-    subscription = bus.subscribe()
-
-    job = await svc.schedule_prompt(
-        owner_id="tenant",
-        channel="telegram",
-        text="hello later",
-        run_at=datetime.now(timezone.utc),
-        chat_id=123,
-        user_id=456,
-    )
-
-    await svc.run_pending()
-    event = await subscription.__aiter__().__anext__()
-    assert isinstance(event, OutboundEvent)
-    assert event.response.text == "hello later"
-    stored = await store.get(job.id)
-    assert stored is not None and stored.status == ScheduledPromptStatus.COMPLETED
-    await subscription.close()
 
 
 @pytest.mark.asyncio
@@ -159,8 +132,8 @@ async def test_background_scheduler_wakes_for_near_term_jobs(tmp_path: Path) -> 
             return event
 
     event = await asyncio.wait_for(_next_event(), timeout=5)
-    assert isinstance(event, OutboundEvent)
-    assert event.response.text == "soon"
+    assert isinstance(event, MessageEvent)
+    assert "soon" in event.message.text
 
     await svc.stop()
     await subscription.close()

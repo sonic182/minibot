@@ -27,7 +27,7 @@ class StubPromptService:
             status=ScheduledPromptStatus.PENDING,
             chat_id=kwargs.get("chat_id"),
             user_id=kwargs.get("user_id"),
-            role=kwargs.get("role", PromptRole.ASSISTANT),
+            role=kwargs.get("role", PromptRole.USER),
             metadata=dict(kwargs.get("metadata") or {}),
         )
 

@@ -122,7 +122,7 @@ def _resolve_run_at(payload: dict[str, Any]) -> datetime:
 
 def _resolve_role(role: Any) -> PromptRole:
     if not role:
-        return PromptRole.ASSISTANT
+        return PromptRole.USER
     if isinstance(role, PromptRole):
         return role
     if isinstance(role, str):

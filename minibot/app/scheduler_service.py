@@ -8,8 +8,8 @@ from typing import Any
 
 from minibot.adapters.config.schema import ScheduledPromptsConfig
 from minibot.app.event_bus import EventBus
-from minibot.core.channels import ChannelMessage, ChannelResponse
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.channels import ChannelMessage
+from minibot.core.events import MessageEvent
 from minibot.core.jobs import PromptRole, ScheduledPrompt, ScheduledPromptCreate, ScheduledPromptRepository
 
 
@@ -75,7 +75,7 @@ class ScheduledPromptService:
         run_at: datetime,
         chat_id: int | None = None,
         user_id: int | None = None,
-        role: PromptRole = PromptRole.ASSISTANT,
+        role: PromptRole = PromptRole.USER,
         metadata: dict[str, Any] | None = None,
     ) -> ScheduledPrompt:
         normalized_text = text.strip()
@@ -153,10 +153,7 @@ class ScheduledPromptService:
 
     async def _dispatch_job(self, job: ScheduledPrompt) -> None:
         try:
-            if job.role == PromptRole.ASSISTANT:
-                await self._publish_direct_response(job)
-            else:
-                await self._publish_prompt(job)
+            await self._publish_prompt(job)
         except Exception as exc:
             await self._handle_dispatch_failure(job, str(exc))
             return
@@ -165,27 +162,16 @@ class ScheduledPromptService:
         self._logger.info("scheduled prompt dispatched", extra={"job_id": job.id})
 
     async def _publish_prompt(self, job: ScheduledPrompt) -> None:
+        text = self._format_scheduled_prompt(job)
         message = ChannelMessage(
             channel=job.channel,
             user_id=job.user_id,
             chat_id=job.chat_id,
             message_id=None,
-            text=job.text,
+            text=text,
             metadata=self._message_metadata(job),
         )
         await self._event_bus.publish(MessageEvent(message=message))
-
-    async def _publish_direct_response(self, job: ScheduledPrompt) -> None:
-        chat_id = job.chat_id or job.user_id
-        if chat_id is None:
-            raise ValueError("scheduled prompt missing chat_id/user_id for delivery")
-        response = ChannelResponse(
-            channel=job.channel,
-            chat_id=chat_id,
-            text=job.text,
-            metadata=self._message_metadata(job),
-        )
-        await self._event_bus.publish(OutboundEvent(response=response))
 
     async def _handle_dispatch_failure(self, job: ScheduledPrompt, error: str | None) -> None:
         if job.retry_count + 1 >= job.max_attempts:
@@ -213,6 +199,14 @@ class ScheduledPromptService:
         metadata.setdefault("scheduled_job_id", job.id)
         metadata.setdefault("scheduled", True)
         return metadata
+
+    def _format_scheduled_prompt(self, job: ScheduledPrompt) -> str:
+        instructions = job.text.strip()
+        prefix = (
+            "The user scheduled a prompt for this time with the following instructions. "
+            "Fulfill them now and use tools if required:\n"
+        )
+        return f"{prefix}{instructions}"
 
     def _normalize_datetime(self, run_at: datetime) -> datetime:
         normalized = run_at
