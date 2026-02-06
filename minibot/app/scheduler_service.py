@@ -10,7 +10,14 @@ from minibot.adapters.config.schema import ScheduledPromptsConfig
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage
 from minibot.core.events import MessageEvent
-from minibot.core.jobs import PromptRole, ScheduledPrompt, ScheduledPromptCreate, ScheduledPromptRepository
+from minibot.core.jobs import (
+    PromptRecurrence,
+    PromptRole,
+    ScheduledPrompt,
+    ScheduledPromptCreate,
+    ScheduledPromptRepository,
+    ScheduledPromptStatus,
+)
 
 
 def _utcnow() -> datetime:
@@ -77,6 +84,9 @@ class ScheduledPromptService:
         user_id: int | None = None,
         role: PromptRole = PromptRole.USER,
         metadata: dict[str, Any] | None = None,
+        recurrence: PromptRecurrence = PromptRecurrence.NONE,
+        recurrence_interval_seconds: int | None = None,
+        recurrence_end_at: datetime | None = None,
     ) -> ScheduledPrompt:
         normalized_text = text.strip()
         if not normalized_text:
@@ -86,6 +96,14 @@ class ScheduledPromptService:
         if not channel:
             raise ValueError("channel is required")
         normalized_run_at = self._normalize_datetime(run_at)
+        resolved_recurrence = self._resolve_recurrence(
+            recurrence=recurrence,
+            recurrence_interval_seconds=recurrence_interval_seconds,
+            recurrence_end_at=recurrence_end_at,
+        )
+        recurrence_end = resolved_recurrence["recurrence_end_at"]
+        if recurrence_end is not None and recurrence_end <= normalized_run_at:
+            raise ValueError("recurrence_end_at must be after run_at")
         payload = ScheduledPromptCreate(
             owner_id=owner_id,
             channel=channel,
@@ -96,6 +114,9 @@ class ScheduledPromptService:
             role=role,
             metadata=metadata or {},
             max_attempts=self._max_attempts,
+            recurrence=resolved_recurrence["recurrence"],
+            recurrence_interval_seconds=resolved_recurrence["recurrence_interval_seconds"],
+            recurrence_end_at=recurrence_end,
         )
         job = await self._repository.create(payload)
         self._logger.info(
@@ -104,6 +125,58 @@ class ScheduledPromptService:
         )
         self._schedule_wake(job.run_at)
         return job
+
+    async def list_prompts(
+        self,
+        *,
+        owner_id: str,
+        channel: str | None = None,
+        chat_id: int | None = None,
+        user_id: int | None = None,
+        active_only: bool = True,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[ScheduledPrompt]:
+        statuses: list[ScheduledPromptStatus] | None = None
+        if active_only:
+            statuses = [ScheduledPromptStatus.PENDING, ScheduledPromptStatus.LEASED]
+        jobs = await self._repository.list_jobs(
+            owner_id=owner_id,
+            channel=channel,
+            chat_id=chat_id,
+            user_id=user_id,
+            statuses=statuses,
+            limit=limit,
+            offset=offset,
+        )
+        return list(jobs)
+
+    async def cancel_prompt(
+        self,
+        *,
+        job_id: str,
+        owner_id: str,
+        channel: str | None = None,
+        chat_id: int | None = None,
+        user_id: int | None = None,
+    ) -> ScheduledPrompt | None:
+        job = await self._repository.get(job_id)
+        if job is None or job.owner_id != owner_id:
+            return None
+        if channel is not None and job.channel != channel:
+            return None
+        if chat_id is not None and job.chat_id != chat_id:
+            return None
+        if user_id is not None and job.user_id != user_id:
+            return None
+        if job.status in {
+            ScheduledPromptStatus.COMPLETED,
+            ScheduledPromptStatus.FAILED,
+            ScheduledPromptStatus.CANCELLED,
+        }:
+            return job
+        await self._repository.mark_cancelled(job_id)
+        return await self._repository.get(job_id)
 
     async def _run_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -158,6 +231,16 @@ class ScheduledPromptService:
             await self._handle_dispatch_failure(job, str(exc))
             return
 
+        next_run = self._next_run_for_recurrence(job)
+        if next_run is not None:
+            await self._repository.reschedule_recurring(job.id, next_run)
+            self._schedule_wake(next_run)
+            self._logger.info(
+                "scheduled prompt recurrence rescheduled",
+                extra={"job_id": job.id, "next_run_at": next_run.isoformat()},
+            )
+            return
+
         await self._repository.mark_completed(job.id)
         self._logger.info("scheduled prompt dispatched", extra={"job_id": job.id})
 
@@ -209,12 +292,63 @@ class ScheduledPromptService:
         return f"{prefix}{instructions}"
 
     def _normalize_datetime(self, run_at: datetime) -> datetime:
-        normalized = run_at
-        if run_at.tzinfo is None:
-            normalized = run_at.replace(tzinfo=timezone.utc)
-        else:
-            normalized = run_at.astimezone(timezone.utc)
+        normalized = self._ensure_utc(run_at)
         now = _utcnow()
         if normalized <= now:
             return now
         return normalized
+
+    def _ensure_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def _resolve_recurrence(
+        self,
+        *,
+        recurrence: PromptRecurrence,
+        recurrence_interval_seconds: int | None,
+        recurrence_end_at: datetime | None,
+    ) -> dict[str, Any]:
+        if recurrence == PromptRecurrence.NONE:
+            if recurrence_interval_seconds is not None or recurrence_end_at is not None:
+                raise ValueError("recurrence_interval_seconds/recurrence_end_at require recurrence='interval'")
+            return {
+                "recurrence": PromptRecurrence.NONE,
+                "recurrence_interval_seconds": None,
+                "recurrence_end_at": None,
+            }
+
+        if recurrence != PromptRecurrence.INTERVAL:
+            raise ValueError("unsupported recurrence type")
+        if recurrence_interval_seconds is None:
+            raise ValueError("recurrence_interval_seconds is required for interval recurrence")
+        interval = max(1, int(recurrence_interval_seconds))
+        if interval < self._config.min_recurrence_interval_seconds:
+            raise ValueError(f"recurrence_interval_seconds must be >= {self._config.min_recurrence_interval_seconds}")
+        normalized_end_at = None
+        if recurrence_end_at is not None:
+            normalized_end_at = self._ensure_utc(recurrence_end_at)
+        return {
+            "recurrence": PromptRecurrence.INTERVAL,
+            "recurrence_interval_seconds": interval,
+            "recurrence_end_at": normalized_end_at,
+        }
+
+    def _next_run_for_recurrence(self, job: ScheduledPrompt) -> datetime | None:
+        if job.recurrence != PromptRecurrence.INTERVAL:
+            return None
+        interval = job.recurrence_interval_seconds
+        if interval is None or interval <= 0:
+            return None
+
+        now = _utcnow()
+        next_run = job.run_at
+        if next_run <= now:
+            elapsed_seconds = (now - job.run_at).total_seconds()
+            steps = int(elapsed_seconds // interval) + 1
+            next_run = job.run_at + timedelta(seconds=steps * interval)
+
+        if job.recurrence_end_at is not None and next_run > job.recurrence_end_at:
+            return None
+        return next_run

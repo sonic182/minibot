@@ -18,6 +18,12 @@ class ScheduledPromptStatus(str, Enum):
     LEASED = "leased"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class PromptRecurrence(str, Enum):
+    NONE = "none"
+    INTERVAL = "interval"
 
 
 @dataclass(slots=True)
@@ -36,6 +42,9 @@ class ScheduledPrompt:
     max_attempts: int = 3
     metadata: dict[str, Any] = field(default_factory=dict)
     last_error: str | None = None
+    recurrence: PromptRecurrence = PromptRecurrence.NONE
+    recurrence_interval_seconds: int | None = None
+    recurrence_end_at: datetime | None = None
 
     def should_retry(self) -> bool:
         return self.retry_count < self.max_attempts
@@ -52,6 +61,9 @@ class ScheduledPromptCreate:
     role: PromptRole = PromptRole.USER
     metadata: Mapping[str, Any] | None = None
     max_attempts: int = 3
+    recurrence: PromptRecurrence = PromptRecurrence.NONE
+    recurrence_interval_seconds: int | None = None
+    recurrence_end_at: datetime | None = None
 
 
 class ScheduledPromptRepository(Protocol):
@@ -71,4 +83,22 @@ class ScheduledPromptRepository(Protocol):
 
     async def retry_job(self, job_id: str, next_run_at: datetime, error: str | None = None) -> None: ...
 
+    async def reschedule_recurring(self, job_id: str, next_run_at: datetime) -> None: ...
+
     async def mark_failed(self, job_id: str, error: str | None = None) -> None: ...
+
+    async def mark_cancelled(self, job_id: str) -> None: ...
+
+    async def get(self, job_id: str) -> ScheduledPrompt | None: ...
+
+    async def list_jobs(
+        self,
+        *,
+        owner_id: str,
+        channel: str | None = None,
+        chat_id: int | None = None,
+        user_id: int | None = None,
+        statuses: Sequence[ScheduledPromptStatus] | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Sequence[ScheduledPrompt]: ...

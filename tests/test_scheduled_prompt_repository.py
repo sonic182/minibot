@@ -8,7 +8,7 @@ import pytest_asyncio
 
 from minibot.adapters.config.schema import ScheduledPromptsConfig
 from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
-from minibot.core.jobs import PromptRole, ScheduledPromptCreate, ScheduledPromptStatus
+from minibot.core.jobs import PromptRecurrence, PromptRole, ScheduledPromptCreate, ScheduledPromptStatus
 
 
 def _utcnow() -> datetime:
@@ -108,3 +108,47 @@ async def test_lease_respects_timeout(prompt_store: SQLAlchemyScheduledPromptSto
         lease_timeout_seconds=1,
     )
     assert second and second[0].id == job.id
+
+
+@pytest.mark.asyncio
+async def test_store_persists_recurrence_and_supports_cancel_and_list(
+    prompt_store: SQLAlchemyScheduledPromptStore,
+) -> None:
+    now = _utcnow()
+    recurring = await prompt_store.create(
+        ScheduledPromptCreate(
+            owner_id="tenant",
+            channel="telegram",
+            text="repeat",
+            run_at=now,
+            recurrence=PromptRecurrence.INTERVAL,
+            recurrence_interval_seconds=600,
+        )
+    )
+    one_shot = await prompt_store.create(
+        ScheduledPromptCreate(
+            owner_id="tenant",
+            channel="telegram",
+            text="once",
+            run_at=now + timedelta(minutes=1),
+        )
+    )
+
+    loaded = await prompt_store.get(recurring.id)
+    assert loaded is not None
+    assert loaded.recurrence == PromptRecurrence.INTERVAL
+    assert loaded.recurrence_interval_seconds == 600
+
+    await prompt_store.mark_cancelled(one_shot.id)
+    cancelled = await prompt_store.get(one_shot.id)
+    assert cancelled is not None
+    assert cancelled.status == ScheduledPromptStatus.CANCELLED
+
+    jobs = await prompt_store.list_jobs(
+        owner_id="tenant",
+        channel="telegram",
+        statuses=[ScheduledPromptStatus.PENDING],
+        limit=10,
+        offset=0,
+    )
+    assert [job.id for job in jobs] == [recurring.id]

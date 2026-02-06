@@ -35,6 +35,9 @@ def build_enabled_tools(
         current_time_tool = CurrentTimeTool(settings.tools.time.default_format)
         tools.extend(current_time_tool.bindings())
     if settings.scheduler.prompts.enabled and prompt_scheduler is not None:
-        schedule_tool = SchedulePromptTool(prompt_scheduler)
+        schedule_tool = SchedulePromptTool(
+            prompt_scheduler,
+            min_recurrence_interval_seconds=settings.scheduler.prompts.min_recurrence_interval_seconds,
+        )
         tools.extend(schedule_tool.bindings())
     return tools

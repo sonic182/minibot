@@ -73,6 +73,7 @@ class ScheduledPromptsConfig(BaseModel):
     lease_timeout_seconds: PositiveInt = 120
     batch_size: PositiveInt = 10
     max_attempts: PositiveInt = 3
+    min_recurrence_interval_seconds: PositiveInt = 60
     pool_size: PositiveInt = 5
     echo: bool = False
 

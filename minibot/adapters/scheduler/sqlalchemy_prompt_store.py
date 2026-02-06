@@ -5,13 +5,14 @@ from pathlib import Path
 from typing import Any, Sequence
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, and_, or_, select, update
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, and_, or_, select, text, update
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from minibot.adapters.config.schema import ScheduledPromptsConfig
 from minibot.core.jobs import (
+    PromptRecurrence,
     PromptRole,
     ScheduledPrompt,
     ScheduledPromptCreate,
@@ -56,6 +57,9 @@ class ScheduledPromptModel(Base):
     max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     metadata_payload: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recurrence: Mapped[str] = mapped_column(String(16), nullable=False, default=PromptRecurrence.NONE.value)
+    recurrence_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    recurrence_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
@@ -82,11 +86,26 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
 
     async def initialize(self) -> None:
         async with self._engine.begin() as connection:
-            await connection.run_sync(self._create_schema)
+            await connection.run_sync(self._initialize_schema)
 
     @staticmethod
-    def _create_schema(connection: Connection) -> None:
+    def _initialize_schema(connection: Connection) -> None:
         Base.metadata.create_all(connection)
+        SQLAlchemyScheduledPromptStore._ensure_additive_schema(connection)
+
+    @staticmethod
+    def _ensure_additive_schema(connection: Connection) -> None:
+        if connection.dialect.name != "sqlite":
+            return
+        columns = {str(row[1]) for row in connection.execute(text("PRAGMA table_info(scheduled_prompts)"))}
+        if "recurrence" not in columns:
+            connection.execute(
+                text("ALTER TABLE scheduled_prompts ADD COLUMN recurrence VARCHAR(16) NOT NULL DEFAULT 'none'")
+            )
+        if "recurrence_interval_seconds" not in columns:
+            connection.execute(text("ALTER TABLE scheduled_prompts ADD COLUMN recurrence_interval_seconds INTEGER"))
+        if "recurrence_end_at" not in columns:
+            connection.execute(text("ALTER TABLE scheduled_prompts ADD COLUMN recurrence_end_at DATETIME"))
 
     async def create(self, prompt: ScheduledPromptCreate) -> ScheduledPrompt:
         metadata = dict(prompt.metadata or {})
@@ -104,6 +123,9 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
                 retry_count=0,
                 max_attempts=prompt.max_attempts,
                 metadata_payload=metadata,
+                recurrence=prompt.recurrence.value,
+                recurrence_interval_seconds=prompt.recurrence_interval_seconds,
+                recurrence_end_at=_as_utc(prompt.recurrence_end_at),
             )
             session.add(model)
             await session.commit()
@@ -199,6 +221,23 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             )
             await session.commit()
 
+    async def reschedule_recurring(self, job_id: str, next_run_at: datetime) -> None:
+        now = _utcnow()
+        async with self._session_factory() as session:
+            await session.execute(
+                update(ScheduledPromptModel)
+                .where(ScheduledPromptModel.id == job_id)
+                .values(
+                    status=ScheduledPromptStatus.PENDING.value,
+                    run_at=_ensure_utc(next_run_at),
+                    lease_expires_at=None,
+                    last_error=None,
+                    retry_count=0,
+                    updated_at=now,
+                )
+            )
+            await session.commit()
+
     async def mark_failed(self, job_id: str, error: str | None = None) -> None:
         await self._update_job(
             job_id,
@@ -209,12 +248,57 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             },
         )
 
+    async def mark_cancelled(self, job_id: str) -> None:
+        await self._update_job(
+            job_id,
+            {
+                "status": ScheduledPromptStatus.CANCELLED.value,
+                "lease_expires_at": None,
+                "last_error": None,
+            },
+        )
+
     async def get(self, job_id: str) -> ScheduledPrompt | None:
         async with self._session_factory() as session:
             stmt = select(ScheduledPromptModel).where(ScheduledPromptModel.id == job_id).limit(1)
             result = await session.execute(stmt)
             model = result.scalars().first()
             return self._to_domain(model) if model else None
+
+    async def list_jobs(
+        self,
+        *,
+        owner_id: str,
+        channel: str | None = None,
+        chat_id: int | None = None,
+        user_id: int | None = None,
+        statuses: Sequence[ScheduledPromptStatus] | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Sequence[ScheduledPrompt]:
+        resolved_limit = max(1, min(limit, 100))
+        resolved_offset = max(offset, 0)
+        filters = [ScheduledPromptModel.owner_id == owner_id]
+        if channel is not None:
+            filters.append(ScheduledPromptModel.channel == channel)
+        if chat_id is not None:
+            filters.append(ScheduledPromptModel.chat_id == chat_id)
+        if user_id is not None:
+            filters.append(ScheduledPromptModel.user_id == user_id)
+        if statuses:
+            status_values = [status.value for status in statuses]
+            filters.append(ScheduledPromptModel.status.in_(status_values))
+
+        async with self._session_factory() as session:
+            stmt = (
+                select(ScheduledPromptModel)
+                .where(*filters)
+                .order_by(ScheduledPromptModel.run_at.asc(), ScheduledPromptModel.created_at.desc())
+                .offset(resolved_offset)
+                .limit(resolved_limit)
+            )
+            result = await session.execute(stmt)
+            return [self._to_domain(model) for model in result.scalars().all()]
 
     async def _update_job(self, job_id: str, values: dict[str, Any]) -> None:
         now = _utcnow()
@@ -229,6 +313,13 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
     def _to_domain(self, model: ScheduledPromptModel) -> ScheduledPrompt:
         run_at = _ensure_utc(model.run_at)
         lease_expires = _as_utc(model.lease_expires_at)
+        recurrence = PromptRecurrence.NONE
+        if model.recurrence:
+            with_value = str(model.recurrence).lower()
+            for candidate in PromptRecurrence:
+                if candidate.value == with_value:
+                    recurrence = candidate
+                    break
         return ScheduledPrompt(
             id=model.id,
             owner_id=model.owner_id,
@@ -244,6 +335,9 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             max_attempts=model.max_attempts,
             metadata=dict(model.metadata_payload or {}),
             last_error=model.last_error,
+            recurrence=recurrence,
+            recurrence_interval_seconds=model.recurrence_interval_seconds,
+            recurrence_end_at=_as_utc(model.recurrence_end_at),
         )
 
     def _resolve_storage_path(self, sqlite_url: str) -> Path | None:

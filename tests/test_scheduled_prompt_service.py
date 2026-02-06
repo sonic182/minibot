@@ -12,7 +12,7 @@ from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemySchedul
 from minibot.app.event_bus import EventBus
 from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.core.events import MessageEvent
-from minibot.core.jobs import PromptRole, ScheduledPromptStatus
+from minibot.core.jobs import PromptRecurrence, PromptRole, ScheduledPromptStatus
 
 
 def _config(db_path: Path) -> ScheduledPromptsConfig:
@@ -137,3 +137,70 @@ async def test_background_scheduler_wakes_for_near_term_jobs(tmp_path: Path) -> 
 
     await svc.stop()
     await subscription.close()
+
+
+@pytest.mark.asyncio
+async def test_service_reschedules_recurring_job_and_skips_missed_runs(tmp_path: Path) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    run_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+    interval_seconds = 300
+    job = await svc.schedule_prompt(
+        owner_id="tenant",
+        channel="telegram",
+        text="heartbeat",
+        run_at=run_at,
+        recurrence=PromptRecurrence.INTERVAL,
+        recurrence_interval_seconds=interval_seconds,
+    )
+
+    await svc.run_pending()
+
+    stored = await store.get(job.id)
+    assert stored is not None
+    assert stored.status == ScheduledPromptStatus.PENDING
+    assert stored.recurrence == PromptRecurrence.INTERVAL
+    assert stored.run_at > datetime.now(timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_service_cancel_prompt_scoped_to_owner_and_chat(tmp_path: Path) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    job = await svc.schedule_prompt(
+        owner_id="tenant-a",
+        channel="telegram",
+        text="ping",
+        run_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+        chat_id=100,
+        user_id=200,
+    )
+
+    denied = await svc.cancel_prompt(
+        job_id=job.id,
+        owner_id="tenant-b",
+        channel="telegram",
+        chat_id=100,
+        user_id=200,
+    )
+    assert denied is None
+
+    cancelled = await svc.cancel_prompt(
+        job_id=job.id,
+        owner_id="tenant-a",
+        channel="telegram",
+        chat_id=100,
+        user_id=200,
+    )
+    assert cancelled is not None
+    assert cancelled.status == ScheduledPromptStatus.CANCELLED

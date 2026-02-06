@@ -26,6 +26,17 @@ backend = "sqlite"
 sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
 max_history_messages = 200
 
+[scheduler.prompts]
+enabled = true
+sqlite_url = "sqlite+aiosqlite:///./data/scheduled_prompts.db"
+poll_interval_seconds = 60
+lease_timeout_seconds = 120
+batch_size = 10
+max_attempts = 3
+min_recurrence_interval_seconds = 60
+pool_size = 5
+echo = false
+
 [tools.kv_memory]
 enabled = false
 sqlite_url = "sqlite+aiosqlite:///./data/kv_memory.db"
