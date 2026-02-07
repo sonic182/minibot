@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message as TelegramMessage
 
 from minibot.app.event_bus import EventBus
@@ -15,6 +16,8 @@ from minibot.adapters.config.schema import TelegramChannelConfig
 
 
 class TelegramService:
+    _MAX_MESSAGE_LENGTH = 4000
+
     def __init__(self, config: TelegramChannelConfig, event_bus: EventBus) -> None:
         self._config = config
         self._event_bus = event_bus
@@ -72,7 +75,30 @@ class TelegramService:
         async for event in self._outgoing_subscription:
             if isinstance(event, OutboundEvent) and event.response.channel == "telegram":
                 self._logger.info("sending response", extra={"chat_id": event.response.chat_id})
-                await self._bot.send_message(chat_id=event.response.chat_id, text=event.response.text)
+                chunks = self._chunk_text(event.response.text, self._MAX_MESSAGE_LENGTH)
+                self._logger.debug(
+                    "prepared telegram response chunks",
+                    extra={
+                        "chat_id": event.response.chat_id,
+                        "chunk_count": len(chunks),
+                        "text_length": len(event.response.text),
+                    },
+                )
+                for index, chunk in enumerate(chunks, start=1):
+                    try:
+                        await self._bot.send_message(chat_id=event.response.chat_id, text=chunk)
+                    except TelegramBadRequest as exc:
+                        self._logger.exception(
+                            "failed to send telegram response chunk",
+                            exc_info=exc,
+                            extra={
+                                "chat_id": event.response.chat_id,
+                                "chunk_index": index,
+                                "chunk_length": len(chunk),
+                                "chunk_count": len(chunks),
+                            },
+                        )
+                        break
 
     async def stop(self) -> None:
         if self._poll_task:
@@ -117,3 +143,31 @@ class TelegramService:
             return False
 
         return chat_allowed and user_allowed
+
+    @classmethod
+    def _chunk_text(cls, text: str, max_length: int) -> list[str]:
+        if max_length < 1:
+            raise ValueError("max_length must be >= 1")
+        if not text:
+            return [""]
+        if len(text) <= max_length:
+            return [text]
+
+        chunks: list[str] = []
+        remaining = text
+        while remaining:
+            if len(remaining) <= max_length:
+                chunks.append(remaining)
+                break
+
+            split_at = remaining.rfind("\n", 0, max_length + 1)
+            if split_at <= 0:
+                split_at = max_length
+            chunk = remaining[:split_at]
+            chunks.append(chunk)
+
+            remaining = remaining[split_at:]
+            if remaining.startswith("\n"):
+                remaining = remaining[1:]
+
+        return chunks

@@ -76,3 +76,19 @@ def test_is_authorized_denies_when_enforced_with_empty_whitelists() -> None:
     service = _service(config)
 
     assert service._is_authorized(_Message(chat=_Chat(123), from_user=_User(456))) is False
+
+
+def test_chunk_text_splits_long_messages_preserving_limits() -> None:
+    text = "line1\n" + ("x" * 4100)
+    chunks = TelegramService._chunk_text(text, 4000)
+
+    assert len(chunks) >= 2
+    assert all(len(chunk) <= 4000 for chunk in chunks)
+    assert "".join(chunks).replace("\n", "") in text.replace("\n", "")
+
+
+def test_chunk_text_returns_single_chunk_for_short_message() -> None:
+    text = "hola"
+    chunks = TelegramService._chunk_text(text, 4000)
+
+    assert chunks == [text]
