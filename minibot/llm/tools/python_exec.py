@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -19,6 +20,7 @@ from minibot.llm.tools.base import ToolBinding, ToolContext
 class HostPythonExecTool:
     def __init__(self, config: PythonExecToolConfig) -> None:
         self._config = config
+        self._logger = logging.getLogger("minibot.python_exec")
 
     def bindings(self) -> list[ToolBinding]:
         return [ToolBinding(tool=self._schema(), handler=self._handle)]
@@ -53,6 +55,14 @@ class HostPythonExecTool:
         )
 
     async def _handle(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        self._logger.debug(
+            "python exec request received",
+            extra={
+                "sandbox_mode": self._config.sandbox_mode,
+                "has_stdin": payload.get("stdin") is not None,
+                "has_timeout_override": payload.get("timeout_seconds") is not None,
+            },
+        )
         code = payload.get("code")
         if not isinstance(code, str):
             return {"ok": False, "error": "code must be a string"}
@@ -70,6 +80,14 @@ class HostPythonExecTool:
 
         timeout_seconds = self._coerce_timeout(payload.get("timeout_seconds"))
         executable = self._resolve_python_executable()
+        self._logger.debug(
+            "python exec runtime resolved",
+            extra={
+                "python_executable": executable,
+                "timeout_seconds": timeout_seconds,
+                "code_bytes": code_size,
+            },
+        )
         started = time.perf_counter()
 
         try:
@@ -80,6 +98,7 @@ class HostPythonExecTool:
                 executable=executable,
             )
         except Exception as exc:
+            self._logger.exception("python exec failed before process start", exc_info=exc)
             return {
                 "ok": False,
                 "error": str(exc),
@@ -90,6 +109,17 @@ class HostPythonExecTool:
         result["duration_ms"] = duration_ms
         result["sandbox_mode"] = result.get("sandbox_mode") or self._config.sandbox_mode
         result["python_executable"] = executable
+        self._logger.debug(
+            "python exec completed",
+            extra={
+                "ok": result.get("ok"),
+                "exit_code": result.get("exit_code"),
+                "timed_out": result.get("timed_out"),
+                "truncated": result.get("truncated"),
+                "duration_ms": duration_ms,
+                "sandbox_mode": result.get("sandbox_mode"),
+            },
+        )
         return result
 
     def _coerce_timeout(self, value: Any) -> int:
@@ -151,6 +181,17 @@ class HostPythonExecTool:
             elif mode == "rlimit":
                 preexec_fn, sandbox_applied = self._build_rlimit_preexec()
 
+            self._logger.debug(
+                "python exec launching process",
+                extra={
+                    "sandbox_requested": mode,
+                    "sandbox_applied": sandbox_applied,
+                    "command_argv0": command[0] if command else "",
+                    "cwd": tmp_dir,
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+
             process = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=tmp_dir,
@@ -171,10 +212,30 @@ class HostPythonExecTool:
                 )
             except asyncio.TimeoutError:
                 timed_out = True
+                self._logger.warning(
+                    "python exec timed out",
+                    extra={
+                        "pid": process.pid,
+                        "timeout_seconds": timeout_seconds,
+                        "sandbox_mode": sandbox_applied,
+                    },
+                )
                 await self._terminate_process(process)
                 stdout_data, stderr_data = await process.communicate()
 
             stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
+
+            self._logger.debug(
+                "python exec process ended",
+                extra={
+                    "pid": process.pid,
+                    "returncode": process.returncode,
+                    "stdout_bytes": len(stdout_data),
+                    "stderr_bytes": len(stderr_data),
+                    "truncated": truncated,
+                    "sandbox_mode": sandbox_applied,
+                },
+            )
 
             return {
                 "ok": process.returncode == 0 and not timed_out,
@@ -189,23 +250,37 @@ class HostPythonExecTool:
     def _wrap_jail(self, command: list[str]) -> tuple[list[str], str]:
         jail_cfg = self._config.jail
         if not jail_cfg.enabled:
+            self._logger.debug("python exec jail disabled; using basic mode")
             return command, "basic"
         prefix = list(jail_cfg.command_prefix)
         if not prefix:
+            self._logger.debug("python exec jail prefix missing; using basic mode")
             return command, "basic"
         if shutil.which(prefix[0]) is None:
+            self._logger.warning(
+                "python exec jail binary not found; using basic mode",
+                extra={"jail_binary": prefix[0]},
+            )
             return command, "basic"
+        self._logger.debug(
+            "python exec jail wrapper applied",
+            extra={"jail_binary": prefix[0]},
+        )
         return prefix + command, "jail"
 
     def _wrap_cgroup(self, command: list[str]) -> tuple[list[str], str]:
         cgroup_cfg = self._config.cgroup
         if not cgroup_cfg.enabled:
+            self._logger.debug("python exec cgroup disabled; using basic mode")
             return command, "basic"
         if os.name != "posix" or sys.platform != "linux":
+            self._logger.debug("python exec cgroup unsupported platform; using basic mode")
             return command, "basic"
         if cgroup_cfg.driver != "systemd":
+            self._logger.debug("python exec cgroup unsupported driver; using basic mode")
             return command, "basic"
         if shutil.which("systemd-run") is None:
+            self._logger.warning("python exec systemd-run missing; using basic mode")
             return command, "basic"
         wrapped = ["systemd-run", "--user", "--scope", "--quiet"]
         if cgroup_cfg.memory_max_mb is not None:
@@ -213,13 +288,16 @@ class HostPythonExecTool:
         if cgroup_cfg.cpu_quota_percent is not None:
             wrapped.extend(["-p", f"CPUQuota={cgroup_cfg.cpu_quota_percent}%"])
         wrapped.extend(command)
+        self._logger.debug("python exec cgroup wrapper applied")
         return wrapped, "cgroup"
 
     def _build_rlimit_preexec(self) -> tuple[Any, str]:
         rlimit_cfg = self._config.rlimit
         if not rlimit_cfg.enabled:
+            self._logger.debug("python exec rlimit disabled; using basic mode")
             return None, "basic"
         if os.name != "posix":
+            self._logger.debug("python exec rlimit unsupported platform; using basic mode")
             return None, "basic"
 
         import resource
@@ -245,6 +323,16 @@ class HostPythonExecTool:
             if nofile is not None:
                 resource.setrlimit(resource.RLIMIT_NOFILE, (nofile, nofile))
 
+        self._logger.debug(
+            "python exec rlimit preexec prepared",
+            extra={
+                "cpu_seconds": cpu_seconds,
+                "memory_mb": memory_mb,
+                "fsize_mb": fsize_mb,
+                "nproc": nproc,
+                "nofile": nofile,
+            },
+        )
         return _apply_limits, "rlimit"
 
     async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
@@ -262,12 +350,17 @@ class HostPythonExecTool:
     def _build_env(self) -> dict[str, str]:
         if self._config.pass_parent_env:
             env = dict(os.environ)
+            self._logger.debug("python exec environment uses parent env")
         else:
             env = {}
             for key in self._config.env_allowlist:
                 value = os.environ.get(key)
                 if value is not None:
                     env[key] = value
+            self._logger.debug(
+                "python exec environment uses allowlist",
+                extra={"allowlist_size": len(self._config.env_allowlist), "injected_size": len(env)},
+            )
         env["PYTHONUNBUFFERED"] = "1"
         return env
 
