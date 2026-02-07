@@ -18,6 +18,7 @@ model = "gpt-4o-mini"
 temperature = 0.3
 send_temperature = true
 max_new_tokens = 512
+max_tool_iterations = 15
 system_prompt = "You are Minibot deployed in a production-grade environment."
 reasoning_effort = "medium"
 
@@ -36,6 +37,12 @@ max_bytes = 16384
 response_processing_mode = "auto"
 max_chars = 6000
 normalize_whitespace = true
+
+[tools.calculator]
+enabled = true
+default_scale = 28
+max_expression_length = 200
+max_exponent_abs = 1000
 
 [scheduler.prompts]
 enabled = true

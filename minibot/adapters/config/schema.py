@@ -29,6 +29,7 @@ class LLMMConfig(BaseModel):
     temperature: float = 0.4
     send_temperature: bool = True
     max_new_tokens: PositiveInt = 512
+    max_tool_iterations: PositiveInt = 15
     system_prompt: str = "You are Minibot, a helpful assistant."
     reasoning_effort: str = "medium"
 
@@ -63,10 +64,18 @@ class TimeToolConfig(BaseModel):
     default_format: str = "%Y-%m-%dT%H:%M:%SZ"
 
 
+class CalculatorToolConfig(BaseModel):
+    enabled: bool = True
+    default_scale: PositiveInt = 28
+    max_expression_length: PositiveInt = 200
+    max_exponent_abs: PositiveInt = 1000
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
     time: TimeToolConfig = TimeToolConfig()
+    calculator: CalculatorToolConfig = CalculatorToolConfig()
 
 
 class ScheduledPromptsConfig(BaseModel):

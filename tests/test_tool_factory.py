@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from minibot.adapters.config.schema import (
+    CalculatorToolConfig,
     HTTPClientToolConfig,
     KeyValueMemoryConfig,
     LLMMConfig,
@@ -64,20 +65,34 @@ class _PromptSchedulerStub:
         return []
 
 
-def _settings(*, kv_enabled: bool, http_enabled: bool, time_enabled: bool, prompts_enabled: bool) -> Settings:
+def _settings(
+    *,
+    kv_enabled: bool,
+    http_enabled: bool,
+    time_enabled: bool,
+    calculator_enabled: bool,
+    prompts_enabled: bool,
+) -> Settings:
     return Settings(
         llm=LLMMConfig(api_key="secret"),
         tools=ToolsConfig(
             kv_memory=KeyValueMemoryConfig(enabled=kv_enabled),
             http_client=HTTPClientToolConfig(enabled=http_enabled),
             time=TimeToolConfig(enabled=time_enabled),
+            calculator=CalculatorToolConfig(enabled=calculator_enabled),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
     )
 
 
 def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
-    settings = _settings(kv_enabled=False, http_enabled=False, time_enabled=True, prompts_enabled=True)
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=True,
+        calculator_enabled=True,
+        prompts_enabled=True,
+    )
 
     tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None)
     names = {binding.tool.name for binding in tools}
@@ -85,11 +100,18 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
     assert "chat_memory_info" in names
     assert "chat_memory_trim" in names
     assert "current_datetime" in names
+    assert "calculate_expression" in names
     assert "schedule_prompt" not in names
 
 
 def test_build_enabled_tools_includes_optional_toolsets() -> None:
-    settings = _settings(kv_enabled=True, http_enabled=True, time_enabled=False, prompts_enabled=True)
+    settings = _settings(
+        kv_enabled=True,
+        http_enabled=True,
+        time_enabled=False,
+        calculator_enabled=False,
+        prompts_enabled=True,
+    )
 
     tools = build_enabled_tools(
         settings,
@@ -103,3 +125,4 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
     assert "http_request" in names
     assert {"schedule_prompt", "cancel_scheduled_prompt", "list_scheduled_prompts"}.issubset(names)
     assert "current_datetime" not in names
+    assert "calculate_expression" not in names

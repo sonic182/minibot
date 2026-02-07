@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from minibot.adapters.config.schema import Settings
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.llm.tools.base import ToolBinding
+from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.kv import build_kv_tools
@@ -34,6 +35,13 @@ def build_enabled_tools(
     if settings.tools.time.enabled:
         current_time_tool = CurrentTimeTool(settings.tools.time.default_format)
         tools.extend(current_time_tool.bindings())
+    if settings.tools.calculator.enabled:
+        calculator_tool = CalculatorTool(
+            default_scale=settings.tools.calculator.default_scale,
+            max_expression_length=settings.tools.calculator.max_expression_length,
+            max_exponent_abs=settings.tools.calculator.max_exponent_abs,
+        )
+        tools.extend(calculator_tool.bindings())
     if settings.scheduler.prompts.enabled and prompt_scheduler is not None:
         schedule_tool = SchedulePromptTool(
             prompt_scheduler,

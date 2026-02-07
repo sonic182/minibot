@@ -39,6 +39,7 @@ class LLMClient:
         self._temperature = config.temperature
         self._send_temperature = getattr(config, "send_temperature", True)
         self._max_new_tokens = config.max_new_tokens
+        self._max_tool_iterations = config.max_tool_iterations
         self._system_prompt = getattr(config, "system_prompt", "You are Minibot, a helpful assistant.")
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
         self._is_responses_provider = isinstance(self._provider, OpenAIResponsesProvider)
@@ -124,7 +125,7 @@ class LLMClient:
                 conversation.append(message.original or message_to_dict(message))
                 conversation.extend(tool_messages)
             iterations += 1
-            if iterations >= 5:
+            if iterations >= self._max_tool_iterations:
                 self._logger.warning(
                     "tool call loop exceeded maximum iterations; returning fallback",
                     extra={"tool_names": recent_tool_names[-10:]},
