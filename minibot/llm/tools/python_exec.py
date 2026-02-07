@@ -166,11 +166,8 @@ class HostPythonExecTool:
 
     async def _execute(self, code: str, stdin: str | None, timeout_seconds: int, executable: str) -> dict[str, Any]:
         with tempfile.TemporaryDirectory(prefix="minibot_pyexec_") as tmp_dir:
-            script_path = Path(tmp_dir) / "snippet.py"
-            script_path.write_text(code, encoding="utf-8")
-
             mode = self._config.sandbox_mode
-            command = [executable, "-u", "-B", "-I", str(script_path)]
+            command = [executable, "-u", "-B", "-I", "-c", code]
             sandbox_applied = mode
             preexec_fn = None
 
@@ -232,6 +229,7 @@ class HostPythonExecTool:
                     "returncode": process.returncode,
                     "stdout_bytes": len(stdout_data),
                     "stderr_bytes": len(stderr_data),
+                    "stderr_preview": stderr_data[:300].decode("utf-8", errors="replace"),
                     "truncated": truncated,
                     "sandbox_mode": sandbox_applied,
                 },
