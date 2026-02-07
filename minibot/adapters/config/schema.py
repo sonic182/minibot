@@ -71,11 +71,50 @@ class CalculatorToolConfig(BaseModel):
     max_exponent_abs: PositiveInt = 1000
 
 
+class PythonExecRLimitConfig(BaseModel):
+    enabled: bool = False
+    cpu_seconds: PositiveInt | None = 2
+    memory_mb: PositiveInt | None = 256
+    fsize_mb: PositiveInt | None = 16
+    nproc: PositiveInt | None = 64
+    nofile: PositiveInt | None = 256
+
+
+class PythonExecCgroupConfig(BaseModel):
+    enabled: bool = False
+    driver: Literal["systemd"] = "systemd"
+    cpu_quota_percent: PositiveInt | None = 100
+    memory_max_mb: PositiveInt | None = 256
+
+
+class PythonExecJailConfig(BaseModel):
+    enabled: bool = False
+    command_prefix: List[str] = Field(default_factory=list)
+
+
+class PythonExecToolConfig(BaseModel):
+    enabled: bool = True
+    backend: Literal["host"] = "host"
+    python_path: str | None = None
+    venv_path: str | None = None
+    sandbox_mode: Literal["none", "basic", "rlimit", "cgroup", "jail"] = "basic"
+    default_timeout_seconds: PositiveInt = 8
+    max_timeout_seconds: PositiveInt = 20
+    max_output_bytes: PositiveInt = 64000
+    max_code_bytes: PositiveInt = 32000
+    pass_parent_env: bool = False
+    env_allowlist: List[str] = Field(default_factory=lambda: ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"])
+    rlimit: PythonExecRLimitConfig = PythonExecRLimitConfig()
+    cgroup: PythonExecCgroupConfig = PythonExecCgroupConfig()
+    jail: PythonExecJailConfig = PythonExecJailConfig()
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
     time: TimeToolConfig = TimeToolConfig()
     calculator: CalculatorToolConfig = CalculatorToolConfig()
+    python_exec: PythonExecToolConfig = PythonExecToolConfig()
 
 
 class ScheduledPromptsConfig(BaseModel):

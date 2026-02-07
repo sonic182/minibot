@@ -61,6 +61,37 @@ default_scale = 28
 max_expression_length = 200
 max_exponent_abs = 1000
 
+[tools.python_exec]
+enabled = true
+backend = "host"
+python_path = ""
+venv_path = ""
+sandbox_mode = "basic"
+default_timeout_seconds = 8
+max_timeout_seconds = 20
+max_output_bytes = 64000
+max_code_bytes = 32000
+pass_parent_env = false
+env_allowlist = ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"]
+
+[tools.python_exec.rlimit]
+enabled = false
+cpu_seconds = 2
+memory_mb = 256
+fsize_mb = 16
+nproc = 64
+nofile = 256
+
+[tools.python_exec.cgroup]
+enabled = false
+driver = "systemd"
+cpu_quota_percent = 100
+memory_max_mb = 256
+
+[tools.python_exec.jail]
+enabled = false
+command_prefix = []
+
 [logging]
 structured = true
 logfmt_enabled = true
