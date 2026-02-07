@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -23,7 +24,10 @@ class HostPythonExecTool:
         self._logger = logging.getLogger("minibot.python_exec")
 
     def bindings(self) -> list[ToolBinding]:
-        return [ToolBinding(tool=self._schema(), handler=self._handle)]
+        return [
+            ToolBinding(tool=self._schema(), handler=self._handle),
+            ToolBinding(tool=self._environment_schema(), handler=self._handle_environment_info),
+        ]
 
     def _schema(self) -> Tool:
         return Tool(
@@ -50,6 +54,35 @@ class HostPythonExecTool:
                     },
                 },
                 "required": ["code", "stdin", "timeout_seconds"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _environment_schema(self) -> Tool:
+        return Tool(
+            name="python_environment_info",
+            description=(
+                "Return details about the configured Python runtime and installed packages available "
+                "to python_execute."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "include_packages": {
+                        "type": ["boolean", "null"],
+                        "description": "When true, include installed packages.",
+                    },
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Maximum packages returned when include_packages is true.",
+                    },
+                    "name_prefix": {
+                        "type": ["string", "null"],
+                        "description": "Optional case-insensitive package prefix filter.",
+                    },
+                },
+                "required": ["include_packages", "limit", "name_prefix"],
                 "additionalProperties": False,
             },
         )
@@ -122,6 +155,78 @@ class HostPythonExecTool:
         )
         return result
 
+    async def _handle_environment_info(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        include_packages = self._coerce_optional_bool(payload.get("include_packages"), default=True)
+        limit = self._coerce_package_limit(payload.get("limit"))
+        name_prefix = self._coerce_prefix(payload.get("name_prefix"))
+        executable = self._resolve_python_executable()
+        timeout_seconds = self._config.default_timeout_seconds
+
+        self._logger.debug(
+            "python env info request received",
+            extra={
+                "python_executable": executable,
+                "include_packages": include_packages,
+                "limit": limit,
+                "name_prefix": name_prefix,
+            },
+        )
+
+        script = self._environment_probe_script(
+            include_packages=include_packages,
+            limit=limit,
+            name_prefix=name_prefix,
+        )
+        started = time.perf_counter()
+        try:
+            execution_result = await self._execute(
+                code=script,
+                stdin=None,
+                timeout_seconds=timeout_seconds,
+                executable=executable,
+            )
+        except Exception as exc:
+            self._logger.exception("python env info failed before process start", exc_info=exc)
+            return {
+                "ok": False,
+                "error": str(exc),
+                "timed_out": False,
+                "python_executable": executable,
+            }
+
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        if not execution_result.get("ok"):
+            error_text = execution_result.get("stderr") or execution_result.get("stdout") or "environment probe failed"
+            return {
+                "ok": False,
+                "error": error_text,
+                "exit_code": execution_result.get("exit_code"),
+                "timed_out": execution_result.get("timed_out", False),
+                "truncated": execution_result.get("truncated", False),
+                "duration_ms": duration_ms,
+                "sandbox_mode": execution_result.get("sandbox_mode") or self._config.sandbox_mode,
+                "python_executable": executable,
+            }
+
+        try:
+            parsed = json.loads(execution_result.get("stdout") or "{}")
+        except Exception as exc:
+            self._logger.warning("python env info JSON parse failed", extra={"error": str(exc)})
+            return {
+                "ok": False,
+                "error": "failed to parse environment probe output",
+                "raw_stdout": execution_result.get("stdout", "")[:600],
+                "duration_ms": duration_ms,
+                "sandbox_mode": execution_result.get("sandbox_mode") or self._config.sandbox_mode,
+                "python_executable": executable,
+            }
+
+        parsed["ok"] = True
+        parsed["duration_ms"] = duration_ms
+        parsed["sandbox_mode"] = execution_result.get("sandbox_mode") or self._config.sandbox_mode
+        parsed["python_executable"] = executable
+        return parsed
+
     def _coerce_timeout(self, value: Any) -> int:
         max_timeout = self._config.max_timeout_seconds
         if value is None:
@@ -143,6 +248,49 @@ class HostPythonExecTool:
             return max_timeout
         return timeout
 
+    def _coerce_package_limit(self, value: Any) -> int:
+        default_limit = 100
+        max_limit = 500
+        if value is None:
+            return default_limit
+        if isinstance(value, bool):
+            raise ValueError("limit must be an integer")
+        if isinstance(value, int):
+            limit = value
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return default_limit
+            limit = int(stripped)
+        else:
+            raise ValueError("limit must be an integer")
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        return min(limit, max_limit)
+
+    @staticmethod
+    def _coerce_optional_bool(value: Any, default: bool) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "1", "yes", "on"}:
+                return True
+            if lowered in {"false", "0", "no", "off"}:
+                return False
+        raise ValueError("include_packages must be a boolean")
+
+    @staticmethod
+    def _coerce_prefix(value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("name_prefix must be a string")
+        stripped = value.strip()
+        return stripped or None
+
     def _resolve_python_executable(self) -> str:
         explicit_path = (self._config.python_path or "").strip()
         if explicit_path:
@@ -163,6 +311,50 @@ class HostPythonExecTool:
             return str(candidate)
 
         return sys.executable
+
+    @staticmethod
+    def _environment_probe_script(include_packages: bool, limit: int, name_prefix: str | None) -> str:
+        prefix_literal = json.dumps(name_prefix or "")
+        include_literal = "True" if include_packages else "False"
+        return (
+            "import json\n"
+            "import platform\n"
+            "import sys\n"
+            "from importlib import metadata\n"
+            f"include_packages = {include_literal}\n"
+            f"limit = {limit}\n"
+            f"name_prefix = {prefix_literal}.lower()\n"
+            "packages = []\n"
+            "package_count = 0\n"
+            "truncated_packages = False\n"
+            "if include_packages:\n"
+            "    collected = []\n"
+            "    for dist in metadata.distributions():\n"
+            "        name = (dist.metadata.get('Name') or '').strip()\n"
+            "        if not name:\n"
+            "            continue\n"
+            "        if name_prefix and not name.lower().startswith(name_prefix):\n"
+            "            continue\n"
+            "        collected.append((name, str(dist.version or '')))\n"
+            "    collected.sort(key=lambda item: item[0].lower())\n"
+            "    package_count = len(collected)\n"
+            "    selected = collected[:limit]\n"
+            "    truncated_packages = package_count > len(selected)\n"
+            "    for name, version in selected:\n"
+            "        packages.append(f'{name}=={version}' if version else name)\n"
+            "result = {\n"
+            "    'runtime_executable': sys.executable,\n"
+            "    'python_version': sys.version.split()[0],\n"
+            "    'implementation': platform.python_implementation(),\n"
+            "    'include_packages': include_packages,\n"
+            "    'name_prefix': name_prefix or None,\n"
+            "    'limit': limit,\n"
+            "    'package_count': package_count,\n"
+            "    'truncated_packages': truncated_packages,\n"
+            "    'packages': packages,\n"
+            "}\n"
+            "print(json.dumps(result, ensure_ascii=True))\n"
+        )
 
     async def _execute(self, code: str, stdin: str | None, timeout_seconds: int, executable: str) -> dict[str, Any]:
         with tempfile.TemporaryDirectory(prefix="minibot_pyexec_") as tmp_dir:

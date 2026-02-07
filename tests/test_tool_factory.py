@@ -106,6 +106,7 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
     assert "current_datetime" in names
     assert "calculate_expression" in names
     assert "python_execute" in names
+    assert "python_environment_info" in names
     assert "schedule_prompt" not in names
 
 
@@ -133,3 +134,4 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
     assert "current_datetime" not in names
     assert "calculate_expression" not in names
     assert "python_execute" not in names
+    assert "python_environment_info" not in names
