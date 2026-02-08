@@ -1,22 +1,44 @@
 MiniBot
 =======
 
-Asynchronous Telegram assistant that routes user prompts through `sonic182/llm-async` providers.
+Your personal AI assistant for Telegram - self-hosted, auditable, and intentionally opinionated.
 
 Overview
 --------
 
-MiniBot is a lightweight, self-hosted Telegram assistant optimized for single-user or small-team use. It
-routes chat messages to pluggable LLM providers, stores minimal local state (SQLite), and exposes a
-small, auditable toolset so you can automate reminders, fetch HTTP resources, or run limited code in
-controlled environments.
+MiniBot is a lightweight personal AI assistant you run on your own infrastructure. It is built for people
+who want reliable automation and chat assistance without a giant platform footprint.
+
+The project is intentionally opinionated: Telegram-first, SQLite-first, async-first. You get a focused,
+production-practical bot with clear boundaries, predictable behavior, and enough tools to be useful daily.
+
+Quickstart
+----------
+
+1. `poetry install`
+2. `cp config.example.toml config.toml`
+3. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
+4. `poetry run python -m minibot.app.daemon`
+
+Up & Running with Telegram
+---------------------------
+
+1. Launch Telegram [`@BotFather`](https://t.me/BotFather) and create a bot to obtain a token.
+2. Update `config.toml`:
+   * set `channels.telegram.bot_token`
+   * populate `allowed_chat_ids` or `allowed_user_ids` with your ID numbers
+   * configure the LLM provider section (`provider`, `api_key`, `model`)
+3. Run `poetry run python -m minibot.app.daemon` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
+4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
 
 Top features
 ------------
 
+- Personal assistant, not SaaS: your chats, memory, and scheduled prompts stay in your instance.
+- Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
 - Self-hostable: Dockerfile + docker-compose provided for easy local deployment.
 - Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
-- Provider-agnostic LLM integration (via `sonic182/llm-async`) with multimodal inputs supported on `openai_responses`, `openai`, and `openrouter`.
+- Provider-agnostic LLM integration (via [llm-async]) with multimodal inputs supported on `openai_responses`, `openai`, and `openrouter`.
 - Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
 - Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, and optional Python execution.
 - Optional browser automation with Playwright (`browser_navigate`, `browser_info`, `browser_get_data`, `browser_wait_for`, `browser_click`, `browser_query_selector`, `browser_close`).
@@ -29,6 +51,25 @@ Why self-host
 - Privacy & ownership: all transcripts, KV notes, and scheduled prompts are stored in your instance (SQLite files), not a third-party service.
 - Cost & provider control: pick where to route LLM calls and manage API usage independently.
 - Network & runtime control: deploy behind your firewall, restrict outbound access, and run the daemon as an unprivileged user.
+
+Configuration Reference
+-----------------------
+
+Use `config.example.toml` as the source of truth—copy it to `config.toml` and update secrets before launching. Key sections:
+
+- `[runtime]`: global flags such as log level and environment.
+- `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
+- `[llm]`: configures the chosen [llm-async] provider (provider id, API key, model, optional temperature/token/reasoning params, `max_tool_iterations`, system prompt, etc.). Request params are only sent when present in `config.toml` (omit keys like `temperature`, `max_new_tokens`, or `reasoning_effort` to avoid sending them). For OpenRouter, optional `llm.openrouter.models` lets you provide a fallback model pool, `llm.openrouter.provider` lets you send routing controls (`order`, `allow_fallbacks`, `only`, `ignore`, `sort`, throughput/latency preferences, `max_price`, and `provider_extra` for future keys), and `llm.openrouter.plugins` lets you pass request plugins (for example `file-parser` PDF engine selection).
+- `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; when unset, transcript retention is unlimited.
+- `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
+- `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, pagination defaults, and `default_owner_id` so the server decides ownership without involving the LLM. Enable it only when you need tool-based memory storage.
+- `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` (raw byte cap), optional `max_chars` (LLM-facing char cap), and `response_processing_mode` (`auto`/`none`) for response shaping via `aiosonic`.
+- `[tools.playwright]`: enables browser automation with Playwright. Configure `browser` (`chromium`, `firefox`, `webkit`), Chromium `launch_channel` (for example `chrome`) and optional `chromium_executable_path`, launch args, browser fingerprint/context defaults (UA, viewport, locale, timezone, geolocation, headers), output caps, session TTL, and egress restrictions (`allowed_domains`, `allow_http`, `block_private_networks`). Browser outputs can be post-processed in Python before reaching the LLM (`postprocess_outputs`, enabled by default), with optional raw snapshot exposure (`postprocess_expose_raw`) and a snapshot cache TTL (`postprocess_snapshot_ttl_seconds`). Post-processed text is emitted as compact Markdown with links preserved.
+- `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
+- `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, and optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`).
+- `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
+
+Every section has comments + defaults in `config.example.toml`—read that file for hints.
 
 Security & sandboxing
 ---------------------
@@ -69,7 +110,7 @@ MiniBot follows a lightweight hexagonal layout described in detail in `ARCHITECT
 - `app/` – Application services such as the daemon, dispatcher, handlers, and event bus that orchestrate domain + adapters.
 - `adapters/` – Infrastructure edges (config, messaging, logging, memory, scheduler persistence) wired through the
   DI container.
-- `llm/` – Thin wrappers around `llm-async` providers plus `llm/tools/`, which defines tool schemas/handlers that expose bot capabilities (KV memory, scheduler controls, utilities) to the model.
+- `llm/` – Thin wrappers around [llm-async] providers plus `llm/tools/`, which defines tool schemas/handlers that expose bot capabilities (KV memory, scheduler controls, utilities) to the model.
 - `shared/` – Cross-cutting utilities.
 
 Tests under `tests/` mirror this structure so every layer has a corresponding suite. This “mini hex” keeps the domain
@@ -100,14 +141,6 @@ flowchart TD
     AD --> SEND[Telegram sendMessage]
     DEC -- no --> SKIP[No outbound message]
 ```
-
-Quickstart
-----------
-
-1. `poetry install`
-2. `cp config.example.toml config.toml`
-3. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
-4. `poetry run python -m minibot.app.daemon`
 
 Playwright Tool Setup (Chromium Minimal)
 ----------------------------------------
@@ -197,40 +230,10 @@ If you want the shortest possible enablement for local debugging/testing:
 enabled = true
 ```
 
-Up & Running with Telegram
----------------------------
-
-1. Launch Telegram [`@BotFather`](https://t.me/BotFather) and create a bot to obtain a token.
-2. Update `config.toml`:
-   * set `channels.telegram.bot_token`
-   * populate `allowed_chat_ids` or `allowed_user_ids` with your ID numbers
-   * configure the LLM provider section (`provider`, `api_key`, `model`)
-3. Run `poetry run python -m minibot.app.daemon` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
-4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
-
-Configuration Reference
------------------------
-
-Use `config.example.toml` as the source of truth—copy it to `config.toml` and update secrets before launching. Key sections:
-
-- `[runtime]`: global flags such as log level and environment.
-- `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
-- `[llm]`: configures the chosen `sonic182/llm-async` provider (provider id, API key, model, optional temperature/token/reasoning params, `max_tool_iterations`, system prompt, etc.). Request params are only sent when present in `config.toml` (omit keys like `temperature`, `max_new_tokens`, or `reasoning_effort` to avoid sending them). For OpenRouter, optional `llm.openrouter.models` lets you provide a fallback model pool, `llm.openrouter.provider` lets you send routing controls (`order`, `allow_fallbacks`, `only`, `ignore`, `sort`, throughput/latency preferences, `max_price`, and `provider_extra` for future keys), and `llm.openrouter.plugins` lets you pass request plugins (for example `file-parser` PDF engine selection).
-- `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; when unset, transcript retention is unlimited.
-- `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
-- `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, pagination defaults, and `default_owner_id` so the server decides ownership without involving the LLM. Enable it only when you need tool-based memory storage.
-- `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` (raw byte cap), optional `max_chars` (LLM-facing char cap), and `response_processing_mode` (`auto`/`none`) for response shaping via `aiosonic`.
-- `[tools.playwright]`: enables browser automation with Playwright. Configure `browser` (`chromium`, `firefox`, `webkit`), Chromium `launch_channel` (for example `chrome`) and optional `chromium_executable_path`, launch args, browser fingerprint/context defaults (UA, viewport, locale, timezone, geolocation, headers), output caps, session TTL, and egress restrictions (`allowed_domains`, `allow_http`, `block_private_networks`). Browser outputs can be post-processed in Python before reaching the LLM (`postprocess_outputs`, enabled by default), with optional raw snapshot exposure (`postprocess_expose_raw`) and a snapshot cache TTL (`postprocess_snapshot_ttl_seconds`). Post-processed text is emitted as compact Markdown with links preserved.
-- `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
-- `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, and optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`).
-- `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
-
-Every section has comments + defaults in `config.example.toml`—read that file for hints.
-
 Tooling
 -------
 
-Tools are defined under `minibot/llm/tools/`. Each tool binding exposes a schema to `sonic182/llm-async` and executes via the server-side handler with a controlled `ToolContext`. Current tools:
+Tools are defined under `minibot/llm/tools/`. Each tool binding exposes a schema to [llm-async] and executes via the server-side handler with a controlled `ToolContext`. Current tools:
 
 - Structured tool outputs are serialized to YAML before being sent back through the LLM tool channel, reducing noisy JSON escaping and improving readability.
 
@@ -260,3 +263,5 @@ Roadmap / Todos
 
 - [ ] Add more channels: WhatsApp, Discord — implement adapters under `adapters/messaging/<channel>` reusing the event bus and dispatcher.
 - [ ] Minimal web UI for analytics & debug — a small FastAPI control plane + lightweight SPA to inspect events, scheduled prompts, and recent logs.
+
+[llm-async]: https://github.com/sonic182/llm-async
