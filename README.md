@@ -1,4 +1,4 @@
-MiniBot
+MiniBot 🤖
 =======
 
 Your personal AI assistant for Telegram - self-hosted, auditable, and intentionally opinionated.
