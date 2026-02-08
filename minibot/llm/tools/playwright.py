@@ -858,6 +858,7 @@ class PlaywrightTool:
             description=(
                 "Return a chunk of visible body text from the current page using offset+limit pagination. "
                 "Use offset_type='characters' by default for minified pages."
+                "Use large limits to quickly see data data, eg: 12000."
             ),
             parameters={
                 "type": "object",
