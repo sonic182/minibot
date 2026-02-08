@@ -439,29 +439,18 @@ async def test_generate_retries_with_required_tool_choice_for_explicit_tool_requ
 
 
 @pytest.mark.asyncio
-async def test_generate_retries_when_continue_loop_hint_is_true(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_generate_ignores_continue_loop_hint_when_no_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm import provider_factory
 
     class _ContinueLoopProvider(_FakeProvider):
         async def acomplete(self, **kwargs: Any) -> _FakeResponse:
             self.calls.append(kwargs)
-            if len(self.calls) == 1:
-                payload = {
-                    "answer": "I will continue with tools.",
-                    "should_answer_to_user": False,
-                    "continue_loop": True,
-                }
-                return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
-            if len(self.calls) == 2:
-                call = _FakeToolCall(id="tc-1", function={"name": "current_datetime", "arguments": "{}"})
-                return _FakeResponse(
-                    main_response=_FakeMessage(
-                        content="",
-                        tool_calls=[call],
-                        original={"role": "assistant", "content": "", "tool_calls": []},
-                    )
-                )
-            return _FakeResponse(main_response=_FakeMessage(content='{"answer":"done","should_answer_to_user":true}'))
+            payload = {
+                "answer": "I will continue with tools.",
+                "should_answer_to_user": False,
+                "continue_loop": True,
+            }
+            return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
 
     async def _time_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
         return {"timestamp": "2026-02-08T14:00:00Z"}
@@ -478,6 +467,9 @@ async def test_generate_retries_when_continue_loop_hint_is_true(monkeypatch: pyt
 
     result = await client.generate([], "continue", tools=[binding], response_schema={"type": "object"})
 
-    assert result.payload == {"answer": "done", "should_answer_to_user": True}
-    assert len(client._provider.calls) == 3
-    assert client._provider.calls[1]["tool_choice"] == "required"
+    assert result.payload == {
+        "answer": "I will continue with tools.",
+        "should_answer_to_user": False,
+        "continue_loop": True,
+    }
+    assert len(client._provider.calls) == 1

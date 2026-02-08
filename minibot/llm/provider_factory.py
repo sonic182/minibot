@@ -87,7 +87,6 @@ class LLMClient:
         iterations = 0
         tool_choice_override: str | dict[str, Any] | None = None
         tool_intent_retry_attempted = False
-        continue_loop_retry_attempted = False
         last_tool_messages: list[dict[str, Any]] = []
         recent_tool_names: list[str] = []
         last_iteration_signature: str | None = None
@@ -122,16 +121,6 @@ class LLMClient:
                 raise RuntimeError("LLM did not return a completion")
             if not message.tool_calls or not tool_map:
                 payload = message.content
-                parsed_payload = self._coerce_payload_dict(payload)
-                continue_loop_hint = self._continue_loop_requested(parsed_payload)
-                if tool_map and continue_loop_hint and not continue_loop_retry_attempted:
-                    continue_loop_retry_attempted = True
-                    tool_choice_override = "required"
-                    self._logger.info(
-                        "retrying completion because continue_loop was requested",
-                        extra={"provider": self._provider_name, "model": self._model},
-                    )
-                    continue
                 if (
                     tool_map
                     and not message.tool_calls
@@ -384,33 +373,6 @@ class LLMClient:
             or re.search(r"\bwith\s+tool\b", text)
             or re.search(r"\busing\s+tool\b", text)
         )
-
-    @staticmethod
-    def _coerce_payload_dict(payload: Any) -> dict[str, Any] | None:
-        if isinstance(payload, dict):
-            return payload
-        if not isinstance(payload, str):
-            return None
-        text = payload.strip()
-        if not text:
-            return None
-        try:
-            parsed = json.loads(text)
-        except Exception:
-            try:
-                parsed = ast.literal_eval(text)
-            except Exception:
-                return None
-        if isinstance(parsed, dict):
-            return parsed
-        return None
-
-    @staticmethod
-    def _continue_loop_requested(payload: dict[str, Any] | None) -> bool:
-        if not isinstance(payload, dict):
-            return False
-        value = payload.get("continue_loop")
-        return isinstance(value, bool) and value
 
     def _stringify_result(self, result: Any) -> str:
         if isinstance(result, str):
