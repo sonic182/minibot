@@ -116,12 +116,59 @@ class PythonExecToolConfig(BaseModel):
     jail: PythonExecJailConfig = PythonExecJailConfig()
 
 
+class PlaywrightToolConfig(BaseModel):
+    enabled: bool = False
+    browser: Literal["chromium", "firefox", "webkit"] = "chromium"
+    launch_channel: str | None = "chrome"
+    headless: bool = False
+    user_agent: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+    viewport_width: PositiveInt = 1920
+    viewport_height: PositiveInt = 1080
+    locale: str = "en-US"
+    timezone_id: str = "America/New_York"
+    permissions: List[str] = Field(default_factory=lambda: ["geolocation"])
+    geolocation_latitude: float = 40.7128
+    geolocation_longitude: float = -74.0060
+    screen_width: PositiveInt = 1920
+    screen_height: PositiveInt = 1080
+    extra_http_headers: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+        }
+    )
+    navigation_timeout_seconds: PositiveInt = 20
+    action_timeout_seconds: PositiveInt = 10
+    max_text_chars: PositiveInt = 6000
+    max_screenshot_bytes: PositiveInt = 2000000
+    session_ttl_seconds: PositiveInt = 600
+    allowed_domains: List[str] = Field(default_factory=list)
+    allow_http: bool = False
+    block_private_networks: bool = True
+    launch_args: List[str] = Field(
+        default_factory=lambda: [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--disable-extensions",
+            "--lang=en-US,en",
+            "--disable-notifications",
+        ]
+    )
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
     time: TimeToolConfig = TimeToolConfig()
     calculator: CalculatorToolConfig = CalculatorToolConfig()
     python_exec: PythonExecToolConfig = PythonExecToolConfig()
+    playwright: PlaywrightToolConfig = PlaywrightToolConfig()
 
 
 class ScheduledPromptsConfig(BaseModel):

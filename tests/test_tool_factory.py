@@ -7,6 +7,7 @@ from minibot.adapters.config.schema import (
     HTTPClientToolConfig,
     KeyValueMemoryConfig,
     LLMMConfig,
+    PlaywrightToolConfig,
     PythonExecToolConfig,
     SchedulerConfig,
     ScheduledPromptsConfig,
@@ -78,6 +79,7 @@ def _settings(
     calculator_enabled: bool,
     python_exec_enabled: bool,
     prompts_enabled: bool,
+    playwright_enabled: bool,
 ) -> Settings:
     return Settings(
         llm=LLMMConfig(api_key="secret"),
@@ -87,6 +89,7 @@ def _settings(
             time=TimeToolConfig(enabled=time_enabled),
             calculator=CalculatorToolConfig(enabled=calculator_enabled),
             python_exec=PythonExecToolConfig(enabled=python_exec_enabled),
+            playwright=PlaywrightToolConfig(enabled=playwright_enabled),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
     )
@@ -100,6 +103,7 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
         calculator_enabled=True,
         python_exec_enabled=True,
         prompts_enabled=True,
+        playwright_enabled=False,
     )
 
     tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None)
@@ -111,6 +115,7 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
     assert "calculate_expression" in names
     assert "python_execute" in names
     assert "python_environment_info" in names
+    assert "browser_open" not in names
     assert "schedule_prompt" not in names
 
 
@@ -122,6 +127,7 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         calculator_enabled=False,
         python_exec_enabled=False,
         prompts_enabled=True,
+        playwright_enabled=True,
     )
 
     tools = build_enabled_tools(
@@ -134,6 +140,7 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
 
     assert {"kv_save", "kv_get", "kv_search"}.issubset(names)
     assert "http_request" in names
+    assert {"browser_open", "browser_click", "browser_extract", "browser_screenshot", "browser_close"}.issubset(names)
     assert {
         "schedule_prompt",
         "cancel_scheduled_prompt",

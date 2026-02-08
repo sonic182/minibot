@@ -1,0 +1,556 @@
+from __future__ import annotations
+
+import asyncio
+import base64
+from dataclasses import dataclass
+import ipaddress
+import logging
+import time
+from typing import Any, Callable
+from urllib.parse import urlparse
+
+from llm_async.models import Tool
+
+from minibot.adapters.config.schema import PlaywrightToolConfig
+from minibot.llm.tools.base import ToolBinding, ToolContext
+
+_WAIT_UNTIL_VALUES = {"load", "domcontentloaded", "networkidle"}
+_IMAGE_TYPES = {"png", "jpeg"}
+
+
+@dataclass
+class _BrowserSession:
+    playwright: Any
+    browser: Any
+    context: Any
+    page: Any
+    browser_name: str
+    last_used_monotonic: float
+
+
+def _load_playwright() -> Callable[[], Any]:
+    try:
+        from playwright.async_api import async_playwright
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Playwright dependency is not installed. Install with: poetry install --extras playwright"
+        ) from exc
+
+    return async_playwright
+
+
+class PlaywrightTool:
+    def __init__(self, config: PlaywrightToolConfig) -> None:
+        self._config = config
+        self._logger = logging.getLogger("minibot.playwright")
+        self._sessions: dict[str, _BrowserSession] = {}
+        self._owner_locks: dict[str, asyncio.Lock] = {}
+
+    def bindings(self) -> list[ToolBinding]:
+        return [
+            ToolBinding(tool=self._open_schema(), handler=self._handle_open),
+            ToolBinding(tool=self._click_schema(), handler=self._handle_click),
+            ToolBinding(tool=self._extract_schema(), handler=self._handle_extract),
+            ToolBinding(tool=self._screenshot_schema(), handler=self._handle_screenshot),
+            ToolBinding(tool=self._close_schema(), handler=self._handle_close),
+        ]
+
+    async def _handle_open(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        owner_id = _require_owner(context)
+        await self._cleanup_expired_sessions()
+        async with self._owner_lock(owner_id):
+            requested_browser = self._coerce_browser(payload.get("browser"))
+            url = self._coerce_url(payload.get("url"))
+            wait_until = self._coerce_wait_until(payload.get("wait_until"))
+            timeout_seconds = self._coerce_timeout(
+                payload.get("timeout_seconds"),
+                default=self._config.navigation_timeout_seconds,
+                field="timeout_seconds",
+            )
+            await self._validate_url(url)
+
+            existing = self._sessions.get(owner_id)
+            if existing is None:
+                existing = await self._create_session(requested_browser)
+                self._sessions[owner_id] = existing
+            elif existing.browser_name != requested_browser:
+                await self._close_session(existing)
+                existing = await self._create_session(requested_browser)
+                self._sessions[owner_id] = existing
+
+            await existing.page.goto(url, wait_until=wait_until, timeout=timeout_seconds * 1000)
+            title = await existing.page.title()
+            existing.last_used_monotonic = time.monotonic()
+            return {
+                "ok": True,
+                "url": existing.page.url,
+                "title": title,
+                "browser": existing.browser_name,
+            }
+
+    async def _handle_click(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        owner_id = _require_owner(context)
+        await self._cleanup_expired_sessions()
+        async with self._owner_lock(owner_id):
+            selector = _coerce_non_empty_string(payload.get("selector"), "selector")
+            timeout_seconds = self._coerce_timeout(
+                payload.get("timeout_seconds"),
+                default=self._config.action_timeout_seconds,
+                field="timeout_seconds",
+            )
+            session = self._require_session(owner_id)
+            await session.page.click(selector, timeout=timeout_seconds * 1000)
+            session.last_used_monotonic = time.monotonic()
+            return {
+                "ok": True,
+                "selector": selector,
+                "url": session.page.url,
+            }
+
+    async def _handle_extract(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        owner_id = _require_owner(context)
+        await self._cleanup_expired_sessions()
+        async with self._owner_lock(owner_id):
+            selector = _coerce_non_empty_string(payload.get("selector"), "selector")
+            timeout_seconds = self._coerce_timeout(
+                payload.get("timeout_seconds"),
+                default=self._config.action_timeout_seconds,
+                field="timeout_seconds",
+            )
+            max_chars = self._coerce_timeout(
+                payload.get("max_chars"),
+                default=self._config.max_text_chars,
+                field="max_chars",
+            )
+            session = self._require_session(owner_id)
+            try:
+                text = await session.page.text_content(selector, timeout=timeout_seconds * 1000)
+            except Exception as exc:  # noqa: BLE001
+                return {
+                    "ok": False,
+                    "selector": selector,
+                    "timed_out": _is_timeout_error(exc),
+                    "error": str(exc),
+                    "url": session.page.url,
+                }
+            normalized = (text or "").strip()
+            truncated = len(normalized) > max_chars
+            session.last_used_monotonic = time.monotonic()
+            return {
+                "ok": True,
+                "selector": selector,
+                "text": normalized[:max_chars],
+                "truncated": truncated,
+                "url": session.page.url,
+            }
+
+    async def _handle_screenshot(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        owner_id = _require_owner(context)
+        await self._cleanup_expired_sessions()
+        async with self._owner_lock(owner_id):
+            image_type = self._coerce_image_type(payload.get("image_type"))
+            full_page = _coerce_bool(payload.get("full_page"), default=True, field="full_page")
+            return_base64 = _coerce_bool(payload.get("return_base64"), default=True, field="return_base64")
+            quality = self._coerce_optional_quality(payload.get("quality"), image_type=image_type)
+            session = self._require_session(owner_id)
+
+            screenshot_kwargs: dict[str, Any] = {
+                "full_page": full_page,
+                "type": image_type,
+            }
+            if quality is not None:
+                screenshot_kwargs["quality"] = quality
+
+            raw_bytes = await session.page.screenshot(**screenshot_kwargs)
+            if len(raw_bytes) > self._config.max_screenshot_bytes:
+                return {
+                    "ok": False,
+                    "error": (
+                        "screenshot exceeds configured size limit "
+                        f"({len(raw_bytes)} > {self._config.max_screenshot_bytes} bytes)"
+                    ),
+                    "byte_size": len(raw_bytes),
+                    "max_screenshot_bytes": self._config.max_screenshot_bytes,
+                }
+            session.last_used_monotonic = time.monotonic()
+
+            result: dict[str, Any] = {
+                "ok": True,
+                "byte_size": len(raw_bytes),
+                "image_type": image_type,
+                "url": session.page.url,
+            }
+            if return_base64:
+                result["image_base64"] = base64.b64encode(raw_bytes).decode("ascii")
+            return result
+
+    async def _handle_close(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        del payload
+        owner_id = _require_owner(context)
+        async with self._owner_lock(owner_id):
+            session = self._sessions.pop(owner_id, None)
+            if session is None:
+                return {"ok": True, "closed": False}
+            await self._close_session(session)
+            return {"ok": True, "closed": True}
+
+    async def _create_session(self, browser_name: str) -> _BrowserSession:
+        playwright_factory = _load_playwright()
+        manager = playwright_factory()
+        playwright = await manager.start()
+        browser_launcher = getattr(playwright, browser_name)
+        launch_kwargs: dict[str, Any] = {
+            "headless": self._config.headless,
+            "args": list(self._config.launch_args),
+        }
+        if browser_name == "chromium" and self._config.launch_channel:
+            launch_kwargs["channel"] = self._config.launch_channel
+        browser = await browser_launcher.launch(**launch_kwargs)
+        context = await browser.new_context(
+            user_agent=self._config.user_agent,
+            viewport={"width": self._config.viewport_width, "height": self._config.viewport_height},
+            locale=self._config.locale,
+            timezone_id=self._config.timezone_id,
+            permissions=list(self._config.permissions),
+            geolocation={
+                "latitude": self._config.geolocation_latitude,
+                "longitude": self._config.geolocation_longitude,
+            },
+            screen={"width": self._config.screen_width, "height": self._config.screen_height},
+            extra_http_headers=dict(self._config.extra_http_headers),
+        )
+        page = await context.new_page()
+        return _BrowserSession(
+            playwright=playwright,
+            browser=browser,
+            context=context,
+            page=page,
+            browser_name=browser_name,
+            last_used_monotonic=time.monotonic(),
+        )
+
+    def _require_session(self, owner_id: str) -> _BrowserSession:
+        session = self._sessions.get(owner_id)
+        if session is None:
+            raise ValueError("browser session not started; call browser_open first")
+        return session
+
+    async def _cleanup_expired_sessions(self) -> None:
+        expired_owner_ids: list[str] = []
+        now = time.monotonic()
+        for owner_id, session in self._sessions.items():
+            age = now - session.last_used_monotonic
+            if age > self._config.session_ttl_seconds:
+                expired_owner_ids.append(owner_id)
+        for owner_id in expired_owner_ids:
+            async with self._owner_lock(owner_id):
+                session = self._sessions.pop(owner_id, None)
+                if session is None:
+                    continue
+                await self._close_session(session)
+
+    async def _close_session(self, session: _BrowserSession) -> None:
+        try:
+            await session.context.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await session.browser.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await session.playwright.stop()
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _validate_url(self, url: str) -> None:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if not host:
+            raise ValueError("url must include a hostname")
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("url scheme must be http or https")
+        if parsed.scheme == "http" and not self._config.allow_http:
+            raise ValueError("http URLs are disabled by configuration")
+        if self._config.allowed_domains and not _is_allowed_domain(host, self._config.allowed_domains):
+            raise ValueError("url host is not in allowed_domains")
+        if not self._config.block_private_networks:
+            return
+        addresses = await _resolve_ip_addresses(host)
+        for address in addresses:
+            if _is_private_like_ip(address):
+                raise ValueError("private or local network targets are blocked")
+
+    def _owner_lock(self, owner_id: str) -> asyncio.Lock:
+        lock = self._owner_locks.get(owner_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._owner_locks[owner_id] = lock
+        return lock
+
+    def _coerce_browser(self, value: Any) -> str:
+        if value is None:
+            return self._config.browser
+        if not isinstance(value, str):
+            raise ValueError("browser must be a string")
+        normalized = value.strip().lower()
+        if normalized not in {"chromium", "firefox", "webkit"}:
+            raise ValueError("browser must be one of chromium, firefox, webkit")
+        return normalized
+
+    def _coerce_url(self, value: Any) -> str:
+        return _coerce_non_empty_string(value, "url")
+
+    def _coerce_wait_until(self, value: Any) -> str:
+        if value is None:
+            return "domcontentloaded"
+        if not isinstance(value, str):
+            raise ValueError("wait_until must be a string")
+        normalized = value.strip().lower()
+        if normalized not in _WAIT_UNTIL_VALUES:
+            raise ValueError("wait_until must be one of load, domcontentloaded, networkidle")
+        return normalized
+
+    def _coerce_timeout(self, value: Any, *, default: int, field: str) -> int:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            raise ValueError(f"{field} must be numeric")
+        if isinstance(value, int):
+            timeout = value
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return default
+            timeout = int(stripped)
+        else:
+            raise ValueError(f"{field} must be numeric")
+        if timeout < 1:
+            raise ValueError(f"{field} must be >= 1")
+        return timeout
+
+    def _coerce_image_type(self, value: Any) -> str:
+        if value is None:
+            return "png"
+        if not isinstance(value, str):
+            raise ValueError("image_type must be a string")
+        normalized = value.strip().lower()
+        if normalized not in _IMAGE_TYPES:
+            raise ValueError("image_type must be png or jpeg")
+        return normalized
+
+    def _coerce_optional_quality(self, value: Any, *, image_type: str) -> int | None:
+        if image_type != "jpeg":
+            return None
+        if value is None:
+            return 80
+        if isinstance(value, bool):
+            raise ValueError("quality must be numeric")
+        if isinstance(value, int):
+            quality = value
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return 80
+            quality = int(stripped)
+        else:
+            raise ValueError("quality must be numeric")
+        if quality < 1 or quality > 100:
+            raise ValueError("quality must be between 1 and 100")
+        return quality
+
+    def _open_schema(self) -> Tool:
+        return Tool(
+            name="browser_open",
+            description=(
+                "Open a URL in a persistent browser session for this owner. "
+                "Creates the session if needed and returns current page URL/title."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Absolute URL to open."},
+                    "browser": {
+                        "type": ["string", "null"],
+                        "description": "Optional browser engine override: chromium, firefox, or webkit.",
+                    },
+                    "wait_until": {
+                        "type": ["string", "null"],
+                        "description": "Navigation readiness: load, domcontentloaded, or networkidle.",
+                    },
+                    "timeout_seconds": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Optional navigation timeout in seconds.",
+                    },
+                },
+                "required": ["url", "browser", "wait_until", "timeout_seconds"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _click_schema(self) -> Tool:
+        return Tool(
+            name="browser_click",
+            description="Click an element in the current page using a CSS selector.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to click.",
+                    },
+                    "timeout_seconds": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Optional click timeout in seconds.",
+                    },
+                },
+                "required": ["selector", "timeout_seconds"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _extract_schema(self) -> Tool:
+        return Tool(
+            name="browser_extract",
+            description="Extract text content from a CSS selector in the current page.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to read text from.",
+                    },
+                    "timeout_seconds": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Optional wait timeout in seconds.",
+                    },
+                    "max_chars": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Optional response cap for extracted text.",
+                    },
+                },
+                "required": ["selector", "timeout_seconds", "max_chars"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _screenshot_schema(self) -> Tool:
+        return Tool(
+            name="browser_screenshot",
+            description="Capture a screenshot of the current page.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "full_page": {
+                        "type": ["boolean", "null"],
+                        "description": "Capture full page instead of viewport.",
+                    },
+                    "image_type": {
+                        "type": ["string", "null"],
+                        "description": "png or jpeg.",
+                    },
+                    "quality": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "maximum": 100,
+                        "description": "JPEG quality (ignored for png).",
+                    },
+                    "return_base64": {
+                        "type": ["boolean", "null"],
+                        "description": "When true, include base64 image payload.",
+                    },
+                },
+                "required": ["full_page", "image_type", "quality", "return_base64"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _close_schema(self) -> Tool:
+        return Tool(
+            name="browser_close",
+            description="Close the active browser session for this owner.",
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        )
+
+
+def _require_owner(context: ToolContext) -> str:
+    if not context.owner_id:
+        raise ValueError("owner context is required")
+    return context.owner_id
+
+
+def _coerce_non_empty_string(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field} cannot be empty")
+    return normalized
+
+
+def _coerce_bool(value: Any, *, default: bool, field: str) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError(f"{field} must be boolean")
+
+
+def _is_allowed_domain(hostname: str, allowed_domains: list[str]) -> bool:
+    normalized_host = hostname.strip().lower().rstrip(".")
+    for domain in allowed_domains:
+        candidate = domain.strip().lower().rstrip(".")
+        if not candidate:
+            continue
+        if normalized_host == candidate or normalized_host.endswith(f".{candidate}"):
+            return True
+    return False
+
+
+def _is_private_like_ip(ip_text: str) -> bool:
+    addr = ipaddress.ip_address(ip_text)
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_unspecified
+    )
+
+
+def _is_timeout_error(exc: Exception) -> bool:
+    name = exc.__class__.__name__.lower()
+    return "timeout" in name
+
+
+async def _resolve_ip_addresses(hostname: str) -> list[str]:
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(hostname, None, proto=0)
+    except Exception:
+        return []
+    addresses: list[str] = []
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        ip_text = sockaddr[0]
+        if isinstance(ip_text, str):
+            addresses.append(ip_text)
+    return list(dict.fromkeys(addresses))

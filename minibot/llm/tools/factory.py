@@ -11,6 +11,7 @@ from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.kv import build_kv_tools
+from minibot.llm.tools.playwright import PlaywrightTool
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.scheduler import SchedulePromptTool
 from minibot.llm.tools.time import CurrentTimeTool
@@ -46,6 +47,9 @@ def build_enabled_tools(
     if settings.tools.python_exec.enabled:
         python_exec_tool = HostPythonExecTool(settings.tools.python_exec)
         tools.extend(python_exec_tool.bindings())
+    if settings.tools.playwright.enabled:
+        playwright_tool = PlaywrightTool(settings.tools.playwright)
+        tools.extend(playwright_tool.bindings())
     if settings.scheduler.prompts.enabled and prompt_scheduler is not None:
         schedule_tool = SchedulePromptTool(
             prompt_scheduler,

@@ -26,7 +26,7 @@ provider = "openai_responses"
 api_key = ""
 model = "gpt-5-mini"
 temperature = 0.2
-send_temperature = false                                # gpt-5-mini doens't allow it
+send_temperature = false                                # gpt-5-mini doesn't allow it
 send_reasoning_effort = true
 max_new_tokens = 512
 max_tool_iterations = 15
@@ -69,6 +69,40 @@ max_bytes = 16384
 response_processing_mode = "auto"
 max_chars = 6000
 normalize_whitespace = true
+
+# Optional browser automation tool (Playwright).
+[tools.playwright]
+enabled = false
+browser = "chromium"
+launch_channel = "chrome"
+headless = false
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+viewport_width = 1920
+viewport_height = 1080
+locale = "en-US"
+timezone_id = "America/New_York"
+permissions = ["geolocation"]
+geolocation_latitude = 40.7128
+geolocation_longitude = -74.0060
+screen_width = 1920
+screen_height = 1080
+extra_http_headers = { Accept-Language = "en-US,en;q=0.9", Sec-Ch-Ua = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"', Sec-Ch-Ua-Mobile = "?0", Sec-Ch-Ua-Platform = '"Windows"' }
+navigation_timeout_seconds = 20
+action_timeout_seconds = 10
+max_text_chars = 6000
+max_screenshot_bytes = 2000000
+session_ttl_seconds = 600
+allowed_domains = []
+allow_http = false
+block_private_networks = true
+launch_args = [
+  "--disable-blink-features=AutomationControlled",
+  "--disable-dev-shm-usage",
+  "--no-sandbox",
+  "--disable-extensions",
+  "--lang=en-US,en",
+  "--disable-notifications",
+]
 
 # Built-in calculator tool.
 [tools.calculator]
