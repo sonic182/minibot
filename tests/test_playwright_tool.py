@@ -415,7 +415,7 @@ async def test_playwright_open_returns_partial_result_when_navigation_times_out(
 
 
 @pytest.mark.asyncio
-async def test_playwright_open_caps_navigation_timeout_to_10_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_playwright_open_caps_navigation_timeout_to_30_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
     recording_page = _RecordingTimeoutPage()
     fake_playwright = _RecordingTimeoutPlaywright(recording_page)
     monkeypatch.setattr(
@@ -444,7 +444,7 @@ async def test_playwright_open_caps_navigation_timeout_to_10_seconds(monkeypatch
 
     assert opened["ok"] is True
     assert recording_page.timeouts
-    assert recording_page.timeouts[-1] == 10000
+    assert recording_page.timeouts[-1] == 30000
 
 
 @pytest.mark.asyncio

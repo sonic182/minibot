@@ -21,7 +21,7 @@ from minibot.llm.tools.base import ToolBinding, ToolContext
 
 _WAIT_UNTIL_VALUES = {"load", "domcontentloaded", "networkidle"}
 _IMAGE_TYPES = {"png", "jpeg"}
-_MAX_GOTO_TIMEOUT_SECONDS = 10
+_MAX_GOTO_TIMEOUT_SECONDS = 30
 _DROP_BLOCK_TAGS = ("script", "style", "noscript", "template", "svg", "canvas", "iframe", "object", "embed")
 _LOW_SIGNAL_ATTR_PATTERN = re.compile(
     r"(cookie|consent|banner|ads?|advert|newsletter|subscribe|social|breadcrumb)",
