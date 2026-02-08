@@ -76,6 +76,7 @@ Tools are defined under `minibot/llm/tools/`. Each tool binding exposes a schema
 - `http_client`: builds on `aiosonic` so the bot can fetch HTTP/HTTPS resources with strict method/timeout/output guards plus optional content-type-aware response processing; configure via `[tools.http_client]`.
 - `schedule_prompt`: creates one-shot jobs (`run_at`/`delay_seconds`) and interval recurrence (`recurrence_type="interval"` + `recurrence_interval_seconds`). Missed intervals are skipped on wake-up; the next future run is scheduled to avoid backlog bursts. Minimum interval is controlled by `scheduler.prompts.min_recurrence_interval_seconds` (default `60`).
 - `cancel_scheduled_prompt`: cancels a job by id when it belongs to the same owner/chat context.
+- `delete_scheduled_prompt`: permanently removes a job by id when it belongs to the same owner/chat context. If the job is active (`pending`/`leased`), it is cancelled first, then deleted.
 - `list_scheduled_prompts`: lists scheduled jobs for the same owner/chat context (`active_only` defaults to `true`).
 
 Conversation-context behavior:

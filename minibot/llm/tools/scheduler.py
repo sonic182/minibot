@@ -19,6 +19,7 @@ class SchedulePromptTool:
         return [
             ToolBinding(tool=self._schedule_schema(), handler=self._handle_schedule),
             ToolBinding(tool=self._cancel_schema(), handler=self._handle_cancel),
+            ToolBinding(tool=self._delete_schema(), handler=self._handle_delete),
             ToolBinding(tool=self._list_schema(), handler=self._handle_list),
         ]
 
@@ -126,6 +127,26 @@ class SchedulePromptTool:
                     },
                 },
                 "required": ["active_only", "limit", "offset"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _delete_schema(self) -> Tool:
+        return Tool(
+            name="delete_scheduled_prompt",
+            description=(
+                "Delete a scheduled prompt job by id for this owner/chat context."
+                " Active jobs are cancelled first and then deleted."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "description": "Identifier returned by schedule_prompt.",
+                    }
+                },
+                "required": ["job_id"],
                 "additionalProperties": False,
             },
         )
@@ -240,6 +261,32 @@ class SchedulePromptTool:
                 }
                 for job in jobs
             ],
+        }
+
+    async def _handle_delete(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        owner_id = _require_owner(context)
+        channel = _require_channel(context)
+        job_id = _require_string(payload.get("job_id"), "job_id")
+        result = await self._service.delete_prompt(
+            job_id=job_id,
+            owner_id=owner_id,
+            channel=channel,
+            chat_id=context.chat_id,
+            user_id=context.user_id,
+        )
+        job = result["job"]
+        if job is None:
+            return {
+                "job_id": job_id,
+                "deleted": False,
+                "stopped_before_delete": False,
+                "message": "Job not found for this owner/chat context",
+            }
+        return {
+            "job_id": job.id,
+            "deleted": bool(result["deleted"]),
+            "stopped_before_delete": bool(result["stopped_before_delete"]),
+            "status_before_delete": job.status.value,
         }
 
 

@@ -68,6 +68,27 @@ class StubPromptService:
             )
         ]
 
+    async def delete_prompt(self, **kwargs):  # type: ignore[override]
+        job_id = str(kwargs.get("job_id"))
+        if job_id == "missing":
+            return {"job": None, "deleted": False, "stopped_before_delete": False, "reason": "not_found"}
+        status = ScheduledPromptStatus.PENDING if job_id == "active" else ScheduledPromptStatus.COMPLETED
+        return {
+            "job": ScheduledPrompt(
+                id=job_id,
+                owner_id=str(kwargs.get("owner_id")),
+                channel=str(kwargs.get("channel")),
+                text="scheduled",
+                run_at=datetime.now(timezone.utc),
+                status=status,
+                chat_id=kwargs.get("chat_id"),
+                user_id=kwargs.get("user_id"),
+            ),
+            "deleted": True,
+            "stopped_before_delete": status == ScheduledPromptStatus.PENDING,
+            "reason": None,
+        }
+
 
 @pytest.mark.asyncio
 async def test_schedule_prompt_tool_accepts_delay_seconds() -> None:
@@ -118,6 +139,18 @@ async def test_list_scheduled_prompts_tool_returns_jobs() -> None:
     assert result["jobs"][0]["job_id"] == "job-1"
     assert result["jobs"][0]["recurrence"] == PromptRecurrence.INTERVAL.value
     assert service.list_calls
+
+
+@pytest.mark.asyncio
+async def test_delete_scheduled_prompt_tool_returns_deleted_status() -> None:
+    service = StubPromptService()
+    tool = SchedulePromptTool(cast(ScheduledPromptService, service))
+    bindings = {binding.tool.name: binding for binding in tool.bindings()}
+    context = ToolContext(owner_id="owner", channel="telegram", chat_id=1, user_id=2)
+    result = await bindings["delete_scheduled_prompt"].handler({"job_id": "active"}, context)
+    assert result["deleted"] is True
+    assert result["stopped_before_delete"] is True
+    assert result["status_before_delete"] == ScheduledPromptStatus.PENDING.value
 
 
 @pytest.mark.asyncio

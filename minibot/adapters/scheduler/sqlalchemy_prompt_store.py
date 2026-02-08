@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Sequence
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, and_, or_, select, text, update
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, and_, delete, or_, select, text, update
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
@@ -257,6 +257,12 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
                 "last_error": None,
             },
         )
+
+    async def delete_job(self, job_id: str) -> bool:
+        async with self._session_factory() as session:
+            result = await session.execute(delete(ScheduledPromptModel).where(ScheduledPromptModel.id == job_id))
+            await session.commit()
+            return bool(getattr(result, "rowcount", 0))
 
     async def get(self, job_id: str) -> ScheduledPrompt | None:
         async with self._session_factory() as session:

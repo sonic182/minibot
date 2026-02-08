@@ -178,6 +178,40 @@ class ScheduledPromptService:
         await self._repository.mark_cancelled(job_id)
         return await self._repository.get(job_id)
 
+    async def delete_prompt(
+        self,
+        *,
+        job_id: str,
+        owner_id: str,
+        channel: str | None = None,
+        chat_id: int | None = None,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
+        job = await self._repository.get(job_id)
+        if job is None:
+            return {"job": None, "deleted": False, "stopped_before_delete": False, "reason": "not_found"}
+        if job.owner_id != owner_id:
+            return {"job": None, "deleted": False, "stopped_before_delete": False, "reason": "not_found"}
+        if channel is not None and job.channel != channel:
+            return {"job": None, "deleted": False, "stopped_before_delete": False, "reason": "not_found"}
+        if chat_id is not None and job.chat_id != chat_id:
+            return {"job": None, "deleted": False, "stopped_before_delete": False, "reason": "not_found"}
+        if user_id is not None and job.user_id != user_id:
+            return {"job": None, "deleted": False, "stopped_before_delete": False, "reason": "not_found"}
+
+        stopped_before_delete = False
+        if job.status in {ScheduledPromptStatus.PENDING, ScheduledPromptStatus.LEASED}:
+            await self._repository.mark_cancelled(job_id)
+            stopped_before_delete = True
+
+        deleted = await self._repository.delete_job(job_id)
+        return {
+            "job": job,
+            "deleted": deleted,
+            "stopped_before_delete": stopped_before_delete,
+            "reason": None if deleted else "delete_failed",
+        }
+
     async def _run_loop(self) -> None:
         while not self._stop_event.is_set():
             try:

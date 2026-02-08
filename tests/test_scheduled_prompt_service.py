@@ -204,3 +204,98 @@ async def test_service_cancel_prompt_scoped_to_owner_and_chat(tmp_path: Path) ->
     )
     assert cancelled is not None
     assert cancelled.status == ScheduledPromptStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_service_delete_prompt_stops_active_job_before_delete(tmp_path: Path) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    job = await svc.schedule_prompt(
+        owner_id="tenant-a",
+        channel="telegram",
+        text="ping",
+        run_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        chat_id=100,
+        user_id=200,
+    )
+
+    result = await svc.delete_prompt(
+        job_id=job.id,
+        owner_id="tenant-a",
+        channel="telegram",
+        chat_id=100,
+        user_id=200,
+    )
+    assert result["deleted"] is True
+    assert result["stopped_before_delete"] is True
+    assert result["job"] is not None
+    assert result["job"].status == ScheduledPromptStatus.PENDING
+    assert await store.get(job.id) is None
+
+
+@pytest.mark.asyncio
+async def test_service_delete_prompt_deletes_terminal_job_directly(tmp_path: Path) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    job = await svc.schedule_prompt(
+        owner_id="tenant",
+        channel="telegram",
+        text="done",
+        run_at=datetime.now(timezone.utc),
+        chat_id=1,
+        user_id=2,
+    )
+    await svc.run_pending()
+
+    result = await svc.delete_prompt(
+        job_id=job.id,
+        owner_id="tenant",
+        channel="telegram",
+        chat_id=1,
+        user_id=2,
+    )
+    assert result["deleted"] is True
+    assert result["stopped_before_delete"] is False
+    assert result["job"] is not None
+    assert result["job"].status == ScheduledPromptStatus.COMPLETED
+    assert await store.get(job.id) is None
+
+
+@pytest.mark.asyncio
+async def test_service_delete_prompt_respects_scope(tmp_path: Path) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    job = await svc.schedule_prompt(
+        owner_id="tenant-a",
+        channel="telegram",
+        text="ping",
+        run_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+        chat_id=100,
+        user_id=200,
+    )
+
+    denied = await svc.delete_prompt(
+        job_id=job.id,
+        owner_id="tenant-b",
+        channel="telegram",
+        chat_id=100,
+        user_id=200,
+    )
+    assert denied["deleted"] is False
+    assert denied["reason"] == "not_found"
+    assert await store.get(job.id) is not None

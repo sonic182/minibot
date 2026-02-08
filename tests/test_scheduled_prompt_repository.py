@@ -152,3 +152,23 @@ async def test_store_persists_recurrence_and_supports_cancel_and_list(
         offset=0,
     )
     assert [job.id for job in jobs] == [recurring.id]
+
+
+@pytest.mark.asyncio
+async def test_delete_job_removes_record(prompt_store: SQLAlchemyScheduledPromptStore) -> None:
+    now = _utcnow()
+    job = await prompt_store.create(
+        ScheduledPromptCreate(
+            owner_id="tenant",
+            channel="telegram",
+            text="cleanup",
+            run_at=now,
+        )
+    )
+
+    deleted = await prompt_store.delete_job(job.id)
+    assert deleted is True
+    assert await prompt_store.get(job.id) is None
+
+    missing = await prompt_store.delete_job(job.id)
+    assert missing is False

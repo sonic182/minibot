@@ -65,6 +65,10 @@ class _PromptSchedulerStub:
         del kwargs
         return []
 
+    async def delete_prompt(self, **kwargs: Any):
+        del kwargs
+        return {"job": None, "deleted": False, "stopped_before_delete": False, "reason": "not_found"}
+
 
 def _settings(
     *,
@@ -130,7 +134,12 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
 
     assert {"kv_save", "kv_get", "kv_search"}.issubset(names)
     assert "http_request" in names
-    assert {"schedule_prompt", "cancel_scheduled_prompt", "list_scheduled_prompts"}.issubset(names)
+    assert {
+        "schedule_prompt",
+        "cancel_scheduled_prompt",
+        "delete_scheduled_prompt",
+        "list_scheduled_prompts",
+    }.issubset(names)
     assert "current_datetime" not in names
     assert "calculate_expression" not in names
     assert "python_execute" not in names
