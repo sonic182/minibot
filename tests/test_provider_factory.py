@@ -320,6 +320,16 @@ def test_parse_tool_call_repairs_unclosed_json_object() -> None:
     assert arguments == {"url": "https://www.ecosbox.com", "method": "GET"}
 
 
+def test_stringify_result_prefers_yaml_for_structured_payloads() -> None:
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+
+    rendered = client._stringify_result({"ok": True, "items": ["a", "b"]})
+
+    assert "ok: true" in rendered
+    assert "items:" in rendered
+    assert "- a" in rendered
+
+
 @pytest.mark.asyncio
 async def test_generate_surfaces_invalid_tool_arguments_for_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm import provider_factory

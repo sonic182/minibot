@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 import base64
 from dataclasses import dataclass
+import hashlib
+import html
 import ipaddress
 import logging
 from pathlib import Path
+import re
 import time
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -18,6 +21,8 @@ from minibot.llm.tools.base import ToolBinding, ToolContext
 _WAIT_UNTIL_VALUES = {"load", "domcontentloaded", "networkidle"}
 _IMAGE_TYPES = {"png", "jpeg"}
 _MAX_GOTO_TIMEOUT_SECONDS = 10
+_DROP_BLOCK_TAGS = ("script", "style", "noscript", "template", "svg", "canvas", "iframe", "object", "embed")
+_DROP_LAYOUT_TAGS = ("nav", "footer", "aside", "form")
 
 
 @dataclass
@@ -28,6 +33,16 @@ class _BrowserSession:
     page: Any
     browser_name: str
     last_used_monotonic: float
+    processed_snapshot: _ProcessedSnapshot | None = None
+
+
+@dataclass
+class _ProcessedSnapshot:
+    raw_html: str
+    clean_html: str
+    clean_text: str
+    content_hash: str
+    generated_monotonic: float
 
 
 def _load_playwright() -> Callable[[], Any]:
@@ -94,6 +109,8 @@ class PlaywrightTool:
             )
             if not goto_result["ok"]:
                 if goto_result.get("timed_out"):
+                    if self._config.postprocess_outputs:
+                        await self._refresh_processed_snapshot(existing)
                     title = await existing.page.title()
                     existing.last_used_monotonic = time.monotonic()
                     return {
@@ -105,6 +122,8 @@ class PlaywrightTool:
                         "error": goto_result.get("error"),
                     }
                 return goto_result
+            if self._config.postprocess_outputs:
+                await self._refresh_processed_snapshot(existing)
             title = await existing.page.title()
             existing.last_used_monotonic = time.monotonic()
             result = {
@@ -131,6 +150,7 @@ class PlaywrightTool:
             if session is None:
                 return _browser_not_open_result("browser_click")
             await session.page.click(selector, timeout=timeout_seconds * 1000)
+            session.processed_snapshot = None
             session.last_used_monotonic = time.monotonic()
             return {
                 "ok": True,
@@ -162,6 +182,8 @@ class PlaywrightTool:
             )
             if not goto_result["ok"]:
                 if goto_result.get("timed_out"):
+                    if self._config.postprocess_outputs:
+                        await self._refresh_processed_snapshot(session)
                     title = await session.page.title()
                     session.last_used_monotonic = time.monotonic()
                     return {
@@ -173,6 +195,8 @@ class PlaywrightTool:
                         "error": goto_result.get("error"),
                     }
                 return goto_result
+            if self._config.postprocess_outputs:
+                await self._refresh_processed_snapshot(session)
             title = await session.page.title()
             session.last_used_monotonic = time.monotonic()
             result = {
@@ -245,7 +269,12 @@ class PlaywrightTool:
             session = self._sessions.get(owner_id)
             if session is None:
                 return _browser_not_open_result("browser_get_html")
-            html = await session.page.content()
+            snapshot: _ProcessedSnapshot | None = None
+            if self._config.postprocess_outputs:
+                snapshot = await self._get_processed_snapshot(session)
+                html = snapshot.clean_html
+            else:
+                html = await session.page.content()
             chunk, total_units, next_offset, has_more = _slice_html(
                 html,
                 offset=offset,
@@ -253,7 +282,7 @@ class PlaywrightTool:
                 offset_type=offset_type,
             )
             session.last_used_monotonic = time.monotonic()
-            return {
+            result = {
                 "ok": True,
                 "offset_type": offset_type,
                 "offset": offset,
@@ -264,6 +293,12 @@ class PlaywrightTool:
                 "html": chunk,
                 "url": session.page.url,
             }
+            if snapshot is not None:
+                result["cleaned"] = True
+                result["content_hash"] = snapshot.content_hash
+                if self._config.postprocess_expose_raw:
+                    result["raw_html"] = snapshot.raw_html[: self._config.max_text_chars]
+            return result
 
     async def _handle_get_text(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         owner_id = _require_owner(context)
@@ -275,11 +310,16 @@ class PlaywrightTool:
             session = self._sessions.get(owner_id)
             if session is None:
                 return _browser_not_open_result("browser_get_text")
-            raw_text = await session.page.text_content(
-                "body",
-                timeout=self._config.action_timeout_seconds * 1000,
-            )
-            text = (raw_text or "").strip()
+            snapshot: _ProcessedSnapshot | None = None
+            if self._config.postprocess_outputs:
+                snapshot = await self._get_processed_snapshot(session)
+                text = snapshot.clean_text
+            else:
+                raw_text = await session.page.text_content(
+                    "body",
+                    timeout=self._config.action_timeout_seconds * 1000,
+                )
+                text = (raw_text or "").strip()
             chunk, total_units, next_offset, has_more = _slice_content(
                 text,
                 offset=offset,
@@ -287,7 +327,7 @@ class PlaywrightTool:
                 offset_type=offset_type,
             )
             session.last_used_monotonic = time.monotonic()
-            return {
+            result = {
                 "ok": True,
                 "offset_type": offset_type,
                 "offset": offset,
@@ -298,6 +338,12 @@ class PlaywrightTool:
                 "text": chunk,
                 "url": session.page.url,
             }
+            if snapshot is not None:
+                result["cleaned"] = True
+                result["content_hash"] = snapshot.content_hash
+                result["raw_chars"] = len(snapshot.raw_html)
+                result["clean_chars"] = len(snapshot.clean_text)
+            return result
 
     async def _handle_extract(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         owner_id = _require_owner(context)
@@ -554,6 +600,23 @@ class PlaywrightTool:
             await session.playwright.stop()
         except Exception:  # noqa: BLE001
             pass
+
+    async def _get_processed_snapshot(self, session: _BrowserSession) -> _ProcessedSnapshot:
+        now = time.monotonic()
+        snapshot = session.processed_snapshot
+        ttl_seconds = self._config.postprocess_snapshot_ttl_seconds
+        if snapshot is not None and (now - snapshot.generated_monotonic) <= ttl_seconds:
+            return snapshot
+        return await self._refresh_processed_snapshot(session)
+
+    async def _refresh_processed_snapshot(self, session: _BrowserSession) -> _ProcessedSnapshot:
+        try:
+            raw_html = await session.page.content()
+        except Exception:  # noqa: BLE001
+            raw_html = ""
+        snapshot = _build_processed_snapshot(raw_html)
+        session.processed_snapshot = snapshot
+        return snapshot
 
     async def _validate_url(self, url: str) -> None:
         parsed = urlparse(url)
@@ -827,6 +890,7 @@ class PlaywrightTool:
             name="browser_get_html",
             description=(
                 "Return a chunk of the current page HTML using offset+limit pagination. "
+                "When postprocess_outputs is enabled, this returns cleaned HTML from the Python snapshot. "
                 "Use offset_type='characters' by default for minified pages."
             ),
             parameters={
@@ -857,8 +921,8 @@ class PlaywrightTool:
             name="browser_get_text",
             description=(
                 "Return a chunk of visible body text from the current page using offset+limit pagination. "
+                "When postprocess_outputs is enabled, text comes from Python post-processed HTML snapshots. "
                 "Use offset_type='characters' by default for minified pages."
-                "Use large limits to quickly see data data, eg: 12000."
             ),
             parameters={
                 "type": "object",
@@ -1047,6 +1111,64 @@ async def _resolve_ip_addresses(hostname: str) -> list[str]:
         if isinstance(ip_text, str):
             addresses.append(ip_text)
     return list(dict.fromkeys(addresses))
+
+
+def _build_processed_snapshot(raw_html: str) -> _ProcessedSnapshot:
+    clean_html = _clean_html_for_llm(raw_html)
+    clean_text = _extract_text_from_html(clean_html)
+    if not clean_text:
+        clean_text = _extract_text_from_html(raw_html)
+    content_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()[:16]
+    return _ProcessedSnapshot(
+        raw_html=raw_html,
+        clean_html=clean_html,
+        clean_text=clean_text,
+        content_hash=content_hash,
+        generated_monotonic=time.monotonic(),
+    )
+
+
+def _clean_html_for_llm(raw_html: str) -> str:
+    if not raw_html:
+        return ""
+    cleaned = re.sub(r"<!--.*?-->", " ", raw_html, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = _drop_wrapped_tags(cleaned, _DROP_BLOCK_TAGS)
+    cleaned = _drop_wrapped_tags(cleaned, _DROP_LAYOUT_TAGS)
+    cleaned = _drop_low_signal_blocks(cleaned)
+    cleaned = re.sub(r"[ \t\f\v]+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _drop_wrapped_tags(content: str, tag_names: tuple[str, ...]) -> str:
+    if not content:
+        return content
+    tags = "|".join(tag_names)
+    pattern = rf"<(?P<tag>{tags})\b[^>]*>.*?</(?P=tag)\s*>"
+    return re.sub(pattern, " ", content, flags=re.IGNORECASE | re.DOTALL)
+
+
+def _drop_low_signal_blocks(content: str) -> str:
+    if not content:
+        return content
+    pattern = (
+        r"<(?P<tag>[a-z0-9]+)\b"
+        r"(?=[^>]*(?:id|class)\s*=\s*['\"][^'\"]*(?:cookie|consent|banner|ads?|advert|newsletter|subscribe|social|breadcrumb)[^'\"]*['\"])[^>]*>"
+        r".*?</(?P=tag)\s*>"
+    )
+    cleaned = re.sub(pattern, " ", content, flags=re.IGNORECASE | re.DOTALL)
+    return cleaned
+
+
+def _extract_text_from_html(source_html: str) -> str:
+    if not source_html:
+        return ""
+    block_tags = "p|div|section|article|li|h1|h2|h3|h4|h5|h6|tr|td|th|br|main"
+    block_split = re.sub(rf"</?(?:{block_tags})\b[^>]*>", "\n", source_html, flags=re.IGNORECASE)
+    stripped = re.sub(r"<[^>]+>", " ", block_split)
+    unescaped = html.unescape(stripped)
+    lines = [re.sub(r"\s+", " ", line).strip() for line in unescaped.splitlines()]
+    lines = [line for line in lines if line]
+    return "\n".join(lines)
 
 
 def _slice_content(content: str, *, offset: int, limit: int, offset_type: str) -> tuple[str, int, int | None, bool]:

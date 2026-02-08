@@ -30,12 +30,36 @@ class _ToolSettings:
     class _HTTP:
         enabled = False
 
+    class _Time:
+        enabled = False
+
+    class _Calculator:
+        enabled = False
+
+    class _PythonExec:
+        enabled = False
+
+    class _Playwright:
+        enabled = False
+
     kv_memory = _KV()
     http_client = _HTTP()
+    time = _Time()
+    calculator = _Calculator()
+    python_exec = _PythonExec()
+    playwright = _Playwright()
+
+
+class _SchedulerSettings:
+    class _Prompts:
+        enabled = True
+
+    prompts = _Prompts()
 
 
 class _Settings:
     tools = _ToolSettings()
+    scheduler = _SchedulerSettings()
 
 
 class _TelegramConfig:

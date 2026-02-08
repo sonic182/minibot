@@ -78,6 +78,18 @@ class _RecordingTimeoutPage(_FakePage):
         self._title = "Loaded"
 
 
+class _NoisyPage(_FakePage):
+    async def content(self) -> str:
+        return (
+            "<html><body>"
+            "<nav>Menu links</nav>"
+            "<article><h1>Headline</h1><p>Important body text</p></article>"
+            "<script>console.log('tracking')</script>"
+            "<footer>Footer links</footer>"
+            "</body></html>"
+        )
+
+
 class _FakeContext:
     async def new_page(self) -> _FakePage:
         return _FakePage()
@@ -102,6 +114,11 @@ class _RecordingTimeoutContext(_FakeContext):
 
     async def new_page(self) -> _RecordingTimeoutPage:
         return self._page
+
+
+class _NoisyContext(_FakeContext):
+    async def new_page(self) -> _NoisyPage:
+        return _NoisyPage()
 
 
 class _FakeBrowser:
@@ -134,6 +151,12 @@ class _RecordingTimeoutBrowser(_FakeBrowser):
         return _RecordingTimeoutContext(self._page)
 
 
+class _NoisyBrowser(_FakeBrowser):
+    async def new_context(self, **kwargs: Any) -> _NoisyContext:
+        del kwargs
+        return _NoisyContext()
+
+
 class _FakeLauncher:
     async def launch(self, **kwargs: Any) -> _FakeBrowser:
         del kwargs
@@ -159,6 +182,12 @@ class _RecordingTimeoutLauncher(_FakeLauncher):
     async def launch(self, **kwargs: Any) -> _RecordingTimeoutBrowser:
         del kwargs
         return _RecordingTimeoutBrowser(self._page)
+
+
+class _NoisyLauncher(_FakeLauncher):
+    async def launch(self, **kwargs: Any) -> _NoisyBrowser:
+        del kwargs
+        return _NoisyBrowser()
 
 
 class _FailingChannelLauncher:
@@ -198,6 +227,12 @@ class _RecordingTimeoutPlaywright(_FakePlaywright):
     def __init__(self, page: _RecordingTimeoutPage) -> None:
         super().__init__()
         self.chromium = _RecordingTimeoutLauncher(page)
+
+
+class _NoisyPlaywright(_FakePlaywright):
+    def __init__(self) -> None:
+        super().__init__()
+        self.chromium = _NoisyLauncher()
 
 
 class _FakeManager:
@@ -406,6 +441,55 @@ async def test_playwright_open_caps_navigation_timeout_to_10_seconds(monkeypatch
     assert opened["ok"] is True
     assert recording_page.timeouts
     assert recording_page.timeouts[-1] == 10000
+
+
+@pytest.mark.asyncio
+async def test_playwright_get_text_and_html_use_postprocessed_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_playwright = _NoisyPlaywright()
+    monkeypatch.setattr(
+        playwright_module,
+        "_load_playwright",
+        lambda: (lambda: _FakeManager(fake_playwright)),
+    )
+    config = PlaywrightToolConfig(
+        enabled=True,
+        browser="chromium",
+        allow_http=True,
+        block_private_networks=False,
+    )
+    bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
+    context = ToolContext(owner_id="owner-1")
+
+    await bindings["browser_open"].handler(
+        {
+            "url": "http://example.com",
+            "browser": "chromium",
+            "wait_until": None,
+            "timeout_seconds": None,
+        },
+        context,
+    )
+
+    html_result = await bindings["browser_get_html"].handler(
+        {"offset": 0, "limit": 5000, "offset_type": "characters"},
+        context,
+    )
+    assert html_result["ok"] is True
+    assert html_result["cleaned"] is True
+    assert "<script" not in html_result["html"].lower()
+    assert "<nav" not in html_result["html"].lower()
+
+    text_result = await bindings["browser_get_text"].handler(
+        {"offset": 0, "limit": 5000, "offset_type": "characters"},
+        context,
+    )
+    assert text_result["ok"] is True
+    assert text_result["cleaned"] is True
+    assert "Headline" in text_result["text"]
+    assert "Important body text" in text_result["text"]
+    assert "tracking" not in text_result["text"]
+    assert "Menu links" not in text_result["text"]
+    assert isinstance(text_result.get("content_hash"), str)
 
 
 @pytest.mark.asyncio

@@ -171,6 +171,9 @@ class PlaywrightToolConfig(BaseModel):
     action_timeout_seconds: PositiveInt = 10
     max_text_chars: PositiveInt = 6000
     max_screenshot_bytes: PositiveInt = 2000000
+    postprocess_outputs: bool = True
+    postprocess_expose_raw: bool = False
+    postprocess_snapshot_ttl_seconds: PositiveInt = 30
     session_ttl_seconds: PositiveInt = 600
     allowed_domains: List[str] = Field(default_factory=list)
     allow_http: bool = False

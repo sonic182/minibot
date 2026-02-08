@@ -7,6 +7,7 @@ import json
 import re
 
 import logging
+import yaml
 
 from llm_async.models.tool_call import ToolCall
 from llm_async.providers import ClaudeProvider, GoogleProvider, OpenAIProvider, OpenRouterProvider
@@ -394,7 +395,16 @@ class LLMClient:
         if isinstance(result, str):
             return result
         if isinstance(result, (list, dict)):
-            return json.dumps(result, default=str)
+            try:
+                return yaml.safe_dump(
+                    result,
+                    sort_keys=False,
+                    allow_unicode=False,
+                    default_flow_style=False,
+                    width=1000,
+                )
+            except Exception:
+                return json.dumps(result, default=str)
         return str(result)
 
     @staticmethod
