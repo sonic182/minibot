@@ -38,6 +38,7 @@ class LLMClient:
         self._model = config.model
         self._temperature = config.temperature
         self._send_temperature = getattr(config, "send_temperature", True)
+        self._send_reasoning_effort = getattr(config, "send_reasoning_effort", True)
         self._max_new_tokens = config.max_new_tokens
         self._max_tool_iterations = config.max_tool_iterations
         self._system_prompt = getattr(config, "system_prompt", "You are Minibot, a helpful assistant.")
@@ -82,7 +83,7 @@ class LLMClient:
             extra_kwargs["prompt_cache_key"] = prompt_cache_key
         if previous_response_id and self._is_responses_provider:
             extra_kwargs["previous_response_id"] = previous_response_id
-        if self._is_responses_provider and self._reasoning_effort:
+        if self._is_responses_provider and self._send_reasoning_effort and self._reasoning_effort:
             extra_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
 
         while True:

@@ -34,6 +34,7 @@ class LLMMConfig(BaseModel):
     model: str = "gpt-4o-mini"
     temperature: float = 0.4
     send_temperature: bool = True
+    send_reasoning_effort: bool = True
     max_new_tokens: PositiveInt = 512
     max_tool_iterations: PositiveInt = 15
     system_prompt: str = "You are Minibot, a helpful assistant."

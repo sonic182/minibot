@@ -143,3 +143,52 @@ async def test_generate_uses_user_content_when_provided(monkeypatch: pytest.Monk
 
     call = client._provider.calls[-1]
     assert call["messages"][-1]["content"] == multimodal_content
+
+
+@pytest.mark.asyncio
+async def test_generate_skips_reasoning_effort_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _FakeResponsesProvider(_FakeProvider):
+        pass
+
+    monkeypatch.setattr(provider_factory, "OpenAIResponsesProvider", _FakeResponsesProvider)
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _FakeResponsesProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai_responses",
+            api_key="secret",
+            model="gpt-4.1-mini",
+            send_reasoning_effort=False,
+        )
+    )
+
+    await client.generate([], "hello")
+
+    call = client._provider.calls[-1]
+    assert "reasoning" not in call
+
+
+@pytest.mark.asyncio
+async def test_generate_includes_reasoning_effort_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _FakeResponsesProvider(_FakeProvider):
+        pass
+
+    monkeypatch.setattr(provider_factory, "OpenAIResponsesProvider", _FakeResponsesProvider)
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _FakeResponsesProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai_responses",
+            api_key="secret",
+            model="gpt-5-mini",
+            send_reasoning_effort=True,
+            reasoning_effort="medium",
+        )
+    )
+
+    await client.generate([], "hello")
+
+    call = client._provider.calls[-1]
+    assert call["reasoning"] == {"effort": "medium"}

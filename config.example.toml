@@ -27,6 +27,7 @@ api_key = ""
 model = "gpt-5-mini"
 temperature = 0.2
 send_temperature = false                                # gpt-5-mini doens't allow it
+send_reasoning_effort = true
 max_new_tokens = 512
 max_tool_iterations = 15
 system_prompt = "You are Minibot, a helpful assistant."
