@@ -58,6 +58,26 @@ class _TimeoutOnNetworkIdlePage(_FakePage):
         self._title = "Recovered"
 
 
+class _AlwaysTimeoutPage(_FakePage):
+    async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+        del wait_until, timeout
+        self.url = url
+        self._title = "Partial"
+        raise TimeoutError("Page.goto: Timeout 30000ms exceeded")
+
+
+class _RecordingTimeoutPage(_FakePage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.timeouts: list[int] = []
+
+    async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+        del wait_until
+        self.timeouts.append(timeout)
+        self.url = url
+        self._title = "Loaded"
+
+
 class _FakeContext:
     async def new_page(self) -> _FakePage:
         return _FakePage()
@@ -69,6 +89,19 @@ class _FakeContext:
 class _TimeoutOnNetworkIdleContext(_FakeContext):
     async def new_page(self) -> _TimeoutOnNetworkIdlePage:
         return _TimeoutOnNetworkIdlePage()
+
+
+class _AlwaysTimeoutContext(_FakeContext):
+    async def new_page(self) -> _AlwaysTimeoutPage:
+        return _AlwaysTimeoutPage()
+
+
+class _RecordingTimeoutContext(_FakeContext):
+    def __init__(self, page: _RecordingTimeoutPage) -> None:
+        self._page = page
+
+    async def new_page(self) -> _RecordingTimeoutPage:
+        return self._page
 
 
 class _FakeBrowser:
@@ -86,6 +119,21 @@ class _TimeoutOnNetworkIdleBrowser(_FakeBrowser):
         return _TimeoutOnNetworkIdleContext()
 
 
+class _AlwaysTimeoutBrowser(_FakeBrowser):
+    async def new_context(self, **kwargs: Any) -> _AlwaysTimeoutContext:
+        del kwargs
+        return _AlwaysTimeoutContext()
+
+
+class _RecordingTimeoutBrowser(_FakeBrowser):
+    def __init__(self, page: _RecordingTimeoutPage) -> None:
+        self._page = page
+
+    async def new_context(self, **kwargs: Any) -> _RecordingTimeoutContext:
+        del kwargs
+        return _RecordingTimeoutContext(self._page)
+
+
 class _FakeLauncher:
     async def launch(self, **kwargs: Any) -> _FakeBrowser:
         del kwargs
@@ -96,6 +144,21 @@ class _TimeoutOnNetworkIdleLauncher(_FakeLauncher):
     async def launch(self, **kwargs: Any) -> _TimeoutOnNetworkIdleBrowser:
         del kwargs
         return _TimeoutOnNetworkIdleBrowser()
+
+
+class _AlwaysTimeoutLauncher(_FakeLauncher):
+    async def launch(self, **kwargs: Any) -> _AlwaysTimeoutBrowser:
+        del kwargs
+        return _AlwaysTimeoutBrowser()
+
+
+class _RecordingTimeoutLauncher(_FakeLauncher):
+    def __init__(self, page: _RecordingTimeoutPage) -> None:
+        self._page = page
+
+    async def launch(self, **kwargs: Any) -> _RecordingTimeoutBrowser:
+        del kwargs
+        return _RecordingTimeoutBrowser(self._page)
 
 
 class _FailingChannelLauncher:
@@ -123,6 +186,18 @@ class _TimeoutOnNetworkIdlePlaywright(_FakePlaywright):
     def __init__(self) -> None:
         super().__init__()
         self.chromium = _TimeoutOnNetworkIdleLauncher()
+
+
+class _AlwaysTimeoutPlaywright(_FakePlaywright):
+    def __init__(self) -> None:
+        super().__init__()
+        self.chromium = _AlwaysTimeoutLauncher()
+
+
+class _RecordingTimeoutPlaywright(_FakePlaywright):
+    def __init__(self, page: _RecordingTimeoutPage) -> None:
+        super().__init__()
+        self.chromium = _RecordingTimeoutLauncher(page)
 
 
 class _FakeManager:
@@ -264,6 +339,73 @@ async def test_playwright_open_retries_networkidle_timeout_with_domcontentloaded
     assert opened["ok"] is True
     assert opened["title"] == "Recovered"
     assert opened["wait_until_fallback"] == "domcontentloaded"
+
+
+@pytest.mark.asyncio
+async def test_playwright_open_returns_partial_result_when_navigation_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_playwright = _AlwaysTimeoutPlaywright()
+    monkeypatch.setattr(
+        playwright_module,
+        "_load_playwright",
+        lambda: (lambda: _FakeManager(fake_playwright)),
+    )
+    config = PlaywrightToolConfig(
+        enabled=True,
+        browser="chromium",
+        allow_http=True,
+        block_private_networks=False,
+    )
+    bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
+    context = ToolContext(owner_id="owner-1")
+
+    opened = await bindings["browser_open"].handler(
+        {
+            "url": "http://example.com",
+            "browser": "chromium",
+            "wait_until": "domcontentloaded",
+            "timeout_seconds": 60,
+        },
+        context,
+    )
+
+    assert opened["ok"] is True
+    assert opened["navigation_timed_out"] is True
+    assert opened["title"] == "Partial"
+
+
+@pytest.mark.asyncio
+async def test_playwright_open_caps_navigation_timeout_to_10_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    recording_page = _RecordingTimeoutPage()
+    fake_playwright = _RecordingTimeoutPlaywright(recording_page)
+    monkeypatch.setattr(
+        playwright_module,
+        "_load_playwright",
+        lambda: (lambda: _FakeManager(fake_playwright)),
+    )
+    config = PlaywrightToolConfig(
+        enabled=True,
+        browser="chromium",
+        allow_http=True,
+        block_private_networks=False,
+    )
+    bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
+    context = ToolContext(owner_id="owner-1")
+
+    opened = await bindings["browser_open"].handler(
+        {
+            "url": "http://example.com",
+            "browser": "chromium",
+            "wait_until": "domcontentloaded",
+            "timeout_seconds": 120,
+        },
+        context,
+    )
+
+    assert opened["ok"] is True
+    assert recording_page.timeouts
+    assert recording_page.timeouts[-1] == 10000
 
 
 @pytest.mark.asyncio

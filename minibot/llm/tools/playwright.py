@@ -17,6 +17,7 @@ from minibot.llm.tools.base import ToolBinding, ToolContext
 
 _WAIT_UNTIL_VALUES = {"load", "domcontentloaded", "networkidle"}
 _IMAGE_TYPES = {"png", "jpeg"}
+_MAX_GOTO_TIMEOUT_SECONDS = 10
 
 
 @dataclass
@@ -73,6 +74,7 @@ class PlaywrightTool:
                 default=self._config.navigation_timeout_seconds,
                 field="timeout_seconds",
             )
+            timeout_seconds = min(timeout_seconds, _MAX_GOTO_TIMEOUT_SECONDS)
             await self._validate_url(url)
 
             existing = self._sessions.get(owner_id)
@@ -91,6 +93,17 @@ class PlaywrightTool:
                 timeout_seconds=timeout_seconds,
             )
             if not goto_result["ok"]:
+                if goto_result.get("timed_out"):
+                    title = await existing.page.title()
+                    existing.last_used_monotonic = time.monotonic()
+                    return {
+                        "ok": True,
+                        "url": existing.page.url,
+                        "title": title,
+                        "browser": existing.browser_name,
+                        "navigation_timed_out": True,
+                        "error": goto_result.get("error"),
+                    }
                 return goto_result
             title = await existing.page.title()
             existing.last_used_monotonic = time.monotonic()
@@ -136,6 +149,7 @@ class PlaywrightTool:
                 default=self._config.navigation_timeout_seconds,
                 field="timeout_seconds",
             )
+            timeout_seconds = min(timeout_seconds, _MAX_GOTO_TIMEOUT_SECONDS)
             await self._validate_url(url)
             session = self._sessions.get(owner_id)
             if session is None:
@@ -147,6 +161,17 @@ class PlaywrightTool:
                 timeout_seconds=timeout_seconds,
             )
             if not goto_result["ok"]:
+                if goto_result.get("timed_out"):
+                    title = await session.page.title()
+                    session.last_used_monotonic = time.monotonic()
+                    return {
+                        "ok": True,
+                        "url": session.page.url,
+                        "title": title,
+                        "browser": session.browser_name,
+                        "navigation_timed_out": True,
+                        "error": goto_result.get("error"),
+                    }
                 return goto_result
             title = await session.page.title()
             session.last_used_monotonic = time.monotonic()
