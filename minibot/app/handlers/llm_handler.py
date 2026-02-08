@@ -217,7 +217,7 @@ class LLMMessageHandler:
                 "should_answer_to_user": {"type": "boolean"},
                 "continue_loop": {"type": "boolean"},
             },
-            "required": ["answer", "should_answer_to_user"],
+            "required": ["answer", "should_answer_to_user", "continue_loop"],
             "additionalProperties": False,
         }
 
