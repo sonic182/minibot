@@ -34,16 +34,16 @@ Up & Running with Telegram
 Top features
 ------------
 
-- Personal assistant, not SaaS: your chats, memory, and scheduled prompts stay in your instance.
-- Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
-- Self-hostable: Dockerfile + docker-compose provided for easy local deployment.
-- Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
-- Provider-agnostic LLM integration (via [llm-async]) with multimodal inputs supported on `openai_responses`, `openai`, and `openrouter`.
-- Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
-- Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, and optional Python execution.
-- Optional browser automation with Playwright (`browser_navigate`, `browser_info`, `browser_get_data`, `browser_wait_for`, `browser_click`, `browser_query_selector`, `browser_close`).
-- Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
-- Structured logfmt logs, request correlation IDs, and a focused test suite (`pytest` + `pytest-asyncio`).
+- 🤖 Personal assistant, not SaaS: your chats, memory, and scheduled prompts stay in your instance.
+- 🎯 Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
+- 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment.
+- 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
+- 🧠 Provider-agnostic LLM integration (via [llm-async]) with multimodal inputs supported on `openai_responses`, `openai`, and `openrouter`.
+- 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
+- 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, and optional Python execution.
+- 🌐 Optional browser automation with Playwright (`browser_navigate`, `browser_info`, `browser_get_data`, `browser_wait_for`, `browser_click`, `browser_query_selector`, `browser_close`).
+- ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
+- 📊 Structured logfmt logs, request correlation IDs, and a focused test suite (`pytest` + `pytest-asyncio`).
 
 Why self-host
 -------------
@@ -72,6 +72,28 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
 Every section has comments + defaults in `config.example.toml`—read that file for hints.
+
+Scheduler Guide
+---------------
+
+Schedule by chatting naturally. MiniBot understands reminders for one-time and recurring prompts, and keeps
+jobs persisted in SQLite so they survive restarts.
+
+Use plain prompts like:
+
+- "Remind me in 30 minutes to check my email."
+- "At 7:00 AM tomorrow, ask me for my daily priorities."
+- "Every day at 9 AM, remind me to send standup."
+- "List my active reminders."
+- "Cancel the standup reminder."
+
+Notes:
+
+- One-time and recurring reminders are supported.
+- Recurrence minimum interval is `scheduler.prompts.min_recurrence_interval_seconds` (default `60`).
+- Configure scheduler storage/polling under `[scheduler.prompts]` in `config.toml`.
+
+- Typical flow: ask for a reminder in plain language, then ask to list/cancel it later if needed.
 
 Security & sandboxing
 ---------------------

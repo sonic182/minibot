@@ -68,10 +68,15 @@ max_history_messages = 200
 [scheduler.prompts]
 enabled = true
 sqlite_url = "sqlite+aiosqlite:///./data/scheduled_prompts.db"
+# Poll cadence for scanning due jobs.
 poll_interval_seconds = 60
+# How long a claimed job stays leased before becoming claimable again.
 lease_timeout_seconds = 120
+# Max due jobs processed per poll cycle.
 batch_size = 10
+# Max attempts before job is marked failed.
 max_attempts = 3
+# Minimum allowed interval for recurring jobs (`recurrence_type = "interval"`).
 min_recurrence_interval_seconds = 60
 pool_size = 5
 echo = false
