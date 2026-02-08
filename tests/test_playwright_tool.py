@@ -62,11 +62,22 @@ class _FakeLauncher:
         return _FakeBrowser()
 
 
+class _FailingChannelLauncher:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def launch(self, **kwargs: Any) -> _FakeBrowser:
+        self.calls.append(dict(kwargs))
+        if kwargs.get("channel") == "chrome":
+            raise RuntimeError("Chromium distribution 'chrome' is not found")
+        return _FakeBrowser()
+
+
 class _FakePlaywright:
     def __init__(self) -> None:
-        self.chromium = _FakeLauncher()
-        self.firefox = _FakeLauncher()
-        self.webkit = _FakeLauncher()
+        self.chromium: Any = _FakeLauncher()
+        self.firefox: Any = _FakeLauncher()
+        self.webkit: Any = _FakeLauncher()
 
     async def stop(self) -> None:
         return None
@@ -218,3 +229,38 @@ async def test_playwright_tool_extract_returns_structured_timeout(monkeypatch: p
     assert result["ok"] is False
     assert result["timed_out"] is True
     assert result["selector"] == "#phrase"
+
+
+@pytest.mark.asyncio
+async def test_playwright_tool_retries_without_channel_on_chromium(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_playwright = _FakePlaywright()
+    failing_launcher = _FailingChannelLauncher()
+    fake_playwright.chromium = failing_launcher
+    monkeypatch.setattr(
+        playwright_module,
+        "_load_playwright",
+        lambda: (lambda: _FakeManager(fake_playwright)),
+    )
+    config = PlaywrightToolConfig(
+        enabled=True,
+        browser="chromium",
+        launch_channel="chrome",
+        allow_http=True,
+        block_private_networks=False,
+    )
+    bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
+    context = ToolContext(owner_id="owner-1")
+
+    opened = await bindings["browser_open"].handler(
+        {
+            "url": "http://example.com",
+            "browser": "chromium",
+            "wait_until": None,
+            "timeout_seconds": None,
+        },
+        context,
+    )
+    assert opened["ok"] is True
+    assert len(failing_launcher.calls) >= 2
+    assert failing_launcher.calls[0].get("channel") == "chrome"
+    assert failing_launcher.calls[1].get("channel") is None

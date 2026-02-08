@@ -120,6 +120,7 @@ class PlaywrightToolConfig(BaseModel):
     enabled: bool = False
     browser: Literal["chromium", "firefox", "webkit"] = "chromium"
     launch_channel: str | None = "chrome"
+    chromium_executable_path: str | None = None
     headless: bool = False
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

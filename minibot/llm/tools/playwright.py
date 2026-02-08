@@ -5,6 +5,7 @@ import base64
 from dataclasses import dataclass
 import ipaddress
 import logging
+from pathlib import Path
 import time
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -205,7 +206,7 @@ class PlaywrightTool:
         }
         if browser_name == "chromium" and self._config.launch_channel:
             launch_kwargs["channel"] = self._config.launch_channel
-        browser = await browser_launcher.launch(**launch_kwargs)
+        browser = await self._launch_browser(browser_launcher, browser_name, launch_kwargs)
         context = await browser.new_context(
             user_agent=self._config.user_agent,
             viewport={"width": self._config.viewport_width, "height": self._config.viewport_height},
@@ -228,6 +229,62 @@ class PlaywrightTool:
             browser_name=browser_name,
             last_used_monotonic=time.monotonic(),
         )
+
+    async def _launch_browser(self, browser_launcher: Any, browser_name: str, launch_kwargs: dict[str, Any]) -> Any:
+        try:
+            return await browser_launcher.launch(**launch_kwargs)
+        except Exception as first_exc:  # noqa: BLE001
+            if browser_name != "chromium":
+                raise
+            retries: list[dict[str, Any]] = []
+            if launch_kwargs.get("channel"):
+                without_channel = dict(launch_kwargs)
+                without_channel.pop("channel", None)
+                retries.append(without_channel)
+                for executable_path in self._chromium_executable_candidates():
+                    with_executable = dict(without_channel)
+                    with_executable["executable_path"] = executable_path
+                    retries.append(with_executable)
+            elif not launch_kwargs.get("executable_path"):
+                for executable_path in self._chromium_executable_candidates():
+                    with_executable = dict(launch_kwargs)
+                    with_executable["executable_path"] = executable_path
+                    retries.append(with_executable)
+
+            last_exc: Exception = first_exc
+            for retry_kwargs in retries:
+                try:
+                    self._logger.warning(
+                        "playwright chromium launch retry",
+                        extra={
+                            "channel": retry_kwargs.get("channel"),
+                            "executable_path": retry_kwargs.get("executable_path"),
+                        },
+                    )
+                    return await browser_launcher.launch(**retry_kwargs)
+                except Exception as retry_exc:  # noqa: BLE001
+                    last_exc = retry_exc
+            raise RuntimeError(
+                "failed to launch chromium. If you installed Debian chromium, set "
+                "tools.playwright.launch_channel = '' and optionally "
+                "tools.playwright.chromium_executable_path = '/usr/bin/chromium'."
+            ) from last_exc
+
+    def _chromium_executable_candidates(self) -> list[str]:
+        candidates: list[str] = []
+        configured = (self._config.chromium_executable_path or "").strip()
+        if configured and Path(configured).exists():
+            candidates.append(configured)
+        for path in [
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+        ]:
+            if Path(path).exists():
+                candidates.append(path)
+        return list(dict.fromkeys(candidates))
 
     def _require_session(self, owner_id: str) -> _BrowserSession:
         session = self._sessions.get(owner_id)

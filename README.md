@@ -136,6 +136,7 @@ Notes:
 - `playwright install-deps ...` is Linux-only; macOS/Windows ship required system libraries differently.
 - If you need all engines, replace `chromium` with `chromium firefox webkit`.
 - On minimal Linux images, missing libraries (for example `libnss3.so`) means deps were not installed; run `playwright install-deps chromium`.
+- If you install Debian's system Chromium with `apt install chromium`, set `launch_channel = ""` and optionally `chromium_executable_path = "/usr/bin/chromium"`.
 
 Docker image setup (during build, recommended):
 
@@ -153,7 +154,8 @@ If you only need basic browsing/extraction and want the safest practical baselin
 enabled = true
 browser = "chromium"
 headless = true
-launch_channel = "chrome"
+launch_channel = ""
+chromium_executable_path = "/usr/bin/chromium"
 
 # Network hardening
 allow_http = false
@@ -218,7 +220,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
 - `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, pagination defaults, and `default_owner_id` so the server decides ownership without involving the LLM. Enable it only when you need tool-based memory storage.
 - `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` (raw byte cap), optional `max_chars` (LLM-facing char cap), and `response_processing_mode` (`auto`/`none`) for response shaping via `aiosonic`.
-- `[tools.playwright]`: enables browser automation with Playwright. Configure `browser` (`chromium`, `firefox`, `webkit`), Chromium `launch_channel` (for example `chrome`), launch args, browser fingerprint/context defaults (UA, viewport, locale, timezone, geolocation, headers), output caps, session TTL, and egress restrictions (`allowed_domains`, `allow_http`, `block_private_networks`).
+- `[tools.playwright]`: enables browser automation with Playwright. Configure `browser` (`chromium`, `firefox`, `webkit`), Chromium `launch_channel` (for example `chrome`) and optional `chromium_executable_path`, launch args, browser fingerprint/context defaults (UA, viewport, locale, timezone, geolocation, headers), output caps, session TTL, and egress restrictions (`allowed_domains`, `allow_http`, `block_private_networks`).
 - `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
 - `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, and optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
