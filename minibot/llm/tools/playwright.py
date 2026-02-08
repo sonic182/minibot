@@ -50,9 +50,13 @@ class PlaywrightTool:
     def bindings(self) -> list[ToolBinding]:
         return [
             ToolBinding(tool=self._open_schema(), handler=self._handle_open),
+            ToolBinding(tool=self._navigate_schema(), handler=self._handle_navigate),
+            ToolBinding(tool=self._info_schema(), handler=self._handle_info),
+            ToolBinding(tool=self._get_html_schema(), handler=self._handle_get_html),
+            ToolBinding(tool=self._get_text_schema(), handler=self._handle_get_text),
+            ToolBinding(tool=self._wait_for_schema(), handler=self._handle_wait_for),
             ToolBinding(tool=self._click_schema(), handler=self._handle_click),
             ToolBinding(tool=self._extract_schema(), handler=self._handle_extract),
-            ToolBinding(tool=self._screenshot_schema(), handler=self._handle_screenshot),
             ToolBinding(tool=self._close_schema(), handler=self._handle_close),
         ]
 
@@ -99,12 +103,153 @@ class PlaywrightTool:
                 default=self._config.action_timeout_seconds,
                 field="timeout_seconds",
             )
-            session = self._require_session(owner_id)
+            session = self._sessions.get(owner_id)
+            if session is None:
+                return _browser_not_open_result("browser_click")
             await session.page.click(selector, timeout=timeout_seconds * 1000)
             session.last_used_monotonic = time.monotonic()
             return {
                 "ok": True,
                 "selector": selector,
+                "url": session.page.url,
+            }
+
+    async def _handle_navigate(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        owner_id = _require_owner(context)
+        await self._cleanup_expired_sessions()
+        async with self._owner_lock(owner_id):
+            url = self._coerce_url(payload.get("url"))
+            wait_until = self._coerce_wait_until(payload.get("wait_until"))
+            timeout_seconds = self._coerce_timeout(
+                payload.get("timeout_seconds"),
+                default=self._config.navigation_timeout_seconds,
+                field="timeout_seconds",
+            )
+            await self._validate_url(url)
+            session = self._sessions.get(owner_id)
+            if session is None:
+                return _browser_not_open_result("browser_navigate")
+            await session.page.goto(url, wait_until=wait_until, timeout=timeout_seconds * 1000)
+            title = await session.page.title()
+            session.last_used_monotonic = time.monotonic()
+            return {
+                "ok": True,
+                "url": session.page.url,
+                "title": title,
+                "browser": session.browser_name,
+            }
+
+    async def _handle_info(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        del payload
+        owner_id = _require_owner(context)
+        await self._cleanup_expired_sessions()
+        async with self._owner_lock(owner_id):
+            session = self._sessions.get(owner_id)
+            if session is None:
+                return _browser_not_open_result("browser_info")
+            title = await session.page.title()
+            session.last_used_monotonic = time.monotonic()
+            return {
+                "ok": True,
+                "url": session.page.url,
+                "title": title,
+                "browser": session.browser_name,
+            }
+
+    async def _handle_wait_for(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        owner_id = _require_owner(context)
+        await self._cleanup_expired_sessions()
+        async with self._owner_lock(owner_id):
+            selector = _coerce_non_empty_string(payload.get("selector"), "selector")
+            timeout_seconds = self._coerce_timeout(
+                payload.get("timeout_seconds"),
+                default=self._config.action_timeout_seconds,
+                field="timeout_seconds",
+            )
+            state = self._coerce_wait_for_state(payload.get("state"))
+            session = self._sessions.get(owner_id)
+            if session is None:
+                return _browser_not_open_result("browser_wait_for")
+            try:
+                await session.page.wait_for_selector(selector, state=state, timeout=timeout_seconds * 1000)
+            except Exception as exc:  # noqa: BLE001
+                return {
+                    "ok": False,
+                    "selector": selector,
+                    "state": state,
+                    "timed_out": _is_timeout_error(exc),
+                    "error": str(exc),
+                    "url": session.page.url,
+                }
+            session.last_used_monotonic = time.monotonic()
+            return {
+                "ok": True,
+                "selector": selector,
+                "state": state,
+                "url": session.page.url,
+            }
+
+    async def _handle_get_html(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        owner_id = _require_owner(context)
+        await self._cleanup_expired_sessions()
+        async with self._owner_lock(owner_id):
+            limit = self._coerce_limit(payload.get("limit"))
+            offset = self._coerce_offset(payload.get("offset"))
+            offset_type = self._coerce_offset_type(payload.get("offset_type"))
+            session = self._sessions.get(owner_id)
+            if session is None:
+                return _browser_not_open_result("browser_get_html")
+            html = await session.page.content()
+            chunk, total_units, next_offset, has_more = _slice_html(
+                html,
+                offset=offset,
+                limit=limit,
+                offset_type=offset_type,
+            )
+            session.last_used_monotonic = time.monotonic()
+            return {
+                "ok": True,
+                "offset_type": offset_type,
+                "offset": offset,
+                "limit": limit,
+                "total_units": total_units,
+                "next_offset": next_offset,
+                "has_more": has_more,
+                "html": chunk,
+                "url": session.page.url,
+            }
+
+    async def _handle_get_text(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        owner_id = _require_owner(context)
+        await self._cleanup_expired_sessions()
+        async with self._owner_lock(owner_id):
+            limit = self._coerce_limit(payload.get("limit"))
+            offset = self._coerce_offset(payload.get("offset"))
+            offset_type = self._coerce_offset_type(payload.get("offset_type"))
+            session = self._sessions.get(owner_id)
+            if session is None:
+                return _browser_not_open_result("browser_get_text")
+            raw_text = await session.page.text_content(
+                "body",
+                timeout=self._config.action_timeout_seconds * 1000,
+            )
+            text = (raw_text or "").strip()
+            chunk, total_units, next_offset, has_more = _slice_content(
+                text,
+                offset=offset,
+                limit=limit,
+                offset_type=offset_type,
+            )
+            session.last_used_monotonic = time.monotonic()
+            return {
+                "ok": True,
+                "offset_type": offset_type,
+                "offset": offset,
+                "limit": limit,
+                "total_units": total_units,
+                "next_offset": next_offset,
+                "has_more": has_more,
+                "text": chunk,
                 "url": session.page.url,
             }
 
@@ -123,7 +268,9 @@ class PlaywrightTool:
                 default=self._config.max_text_chars,
                 field="max_chars",
             )
-            session = self._require_session(owner_id)
+            session = self._sessions.get(owner_id)
+            if session is None:
+                return _browser_not_open_result("browser_extract")
             try:
                 text = await session.page.text_content(selector, timeout=timeout_seconds * 1000)
             except Exception as exc:  # noqa: BLE001
@@ -191,9 +338,9 @@ class PlaywrightTool:
         async with self._owner_lock(owner_id):
             session = self._sessions.pop(owner_id, None)
             if session is None:
-                return {"ok": True, "closed": False}
+                return {"ok": True, "closed": False, "browser_open": False}
             await self._close_session(session)
-            return {"ok": True, "closed": True}
+            return {"ok": True, "closed": True, "browser_open": False}
 
     async def _create_session(self, browser_name: str) -> _BrowserSession:
         playwright_factory = _load_playwright()
@@ -368,6 +515,64 @@ class PlaywrightTool:
             raise ValueError("wait_until must be one of load, domcontentloaded, networkidle")
         return normalized
 
+    def _coerce_wait_for_state(self, value: Any) -> str:
+        if value is None:
+            return "visible"
+        if not isinstance(value, str):
+            raise ValueError("state must be a string")
+        normalized = value.strip().lower()
+        if normalized not in {"attached", "detached", "visible", "hidden"}:
+            raise ValueError("state must be one of attached, detached, visible, hidden")
+        return normalized
+
+    def _coerce_offset_type(self, value: Any) -> str:
+        if value is None:
+            return "characters"
+        if not isinstance(value, str):
+            raise ValueError("offset_type must be a string")
+        normalized = value.strip().lower()
+        if normalized not in {"characters", "lines"}:
+            raise ValueError("offset_type must be one of characters or lines")
+        return normalized
+
+    def _coerce_limit(self, value: Any) -> int:
+        default_limit = 4000
+        max_limit = 50000
+        if value is None:
+            return default_limit
+        if isinstance(value, bool):
+            raise ValueError("limit must be numeric")
+        if isinstance(value, int):
+            limit = value
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return default_limit
+            limit = int(stripped)
+        else:
+            raise ValueError("limit must be numeric")
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        return min(limit, max_limit)
+
+    def _coerce_offset(self, value: Any) -> int:
+        if value is None:
+            return 0
+        if isinstance(value, bool):
+            raise ValueError("offset must be numeric")
+        if isinstance(value, int):
+            offset = value
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return 0
+            offset = int(stripped)
+        else:
+            raise ValueError("offset must be numeric")
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        return offset
+
     def _coerce_timeout(self, value: Any, *, default: int, field: str) -> int:
         if value is None:
             return default
@@ -464,6 +669,127 @@ class PlaywrightTool:
                     },
                 },
                 "required": ["selector", "timeout_seconds"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _navigate_schema(self) -> Tool:
+        return Tool(
+            name="browser_navigate",
+            description="Navigate the already open browser session to another URL.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Absolute URL to open."},
+                    "wait_until": {
+                        "type": ["string", "null"],
+                        "description": "Navigation readiness: load, domcontentloaded, or networkidle.",
+                    },
+                    "timeout_seconds": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Optional navigation timeout in seconds.",
+                    },
+                },
+                "required": ["url", "wait_until", "timeout_seconds"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _info_schema(self) -> Tool:
+        return Tool(
+            name="browser_info",
+            description="Return metadata for the current page in the active browser session.",
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        )
+
+    def _wait_for_schema(self) -> Tool:
+        return Tool(
+            name="browser_wait_for",
+            description="Wait for a selector on the current page before running additional actions.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to wait for.",
+                    },
+                    "state": {
+                        "type": ["string", "null"],
+                        "description": "attached, detached, visible, or hidden.",
+                    },
+                    "timeout_seconds": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Optional wait timeout in seconds.",
+                    },
+                },
+                "required": ["selector", "state", "timeout_seconds"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _get_html_schema(self) -> Tool:
+        return Tool(
+            name="browser_get_html",
+            description=(
+                "Return a chunk of the current page HTML using offset+limit pagination. "
+                "Use offset_type='characters' by default for minified pages."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Chunk size. Prefer characters for minified pages.",
+                    },
+                    "offset": {
+                        "type": ["integer", "null"],
+                        "minimum": 0,
+                        "description": "Start offset in selected unit type.",
+                    },
+                    "offset_type": {
+                        "type": ["string", "null"],
+                        "description": "Pagination units: characters or lines (default characters).",
+                    },
+                },
+                "required": ["limit", "offset", "offset_type"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _get_text_schema(self) -> Tool:
+        return Tool(
+            name="browser_get_text",
+            description=(
+                "Return a chunk of visible body text from the current page using offset+limit pagination. "
+                "Use offset_type='characters' by default for minified pages."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Chunk size. Prefer characters for minified pages.",
+                    },
+                    "offset": {
+                        "type": ["integer", "null"],
+                        "minimum": 0,
+                        "description": "Start offset in selected unit type.",
+                    },
+                    "offset_type": {
+                        "type": ["string", "null"],
+                        "description": "Pagination units: characters or lines (default characters).",
+                    },
+                },
+                "required": ["limit", "offset", "offset_type"],
                 "additionalProperties": False,
             },
         )
@@ -568,6 +894,15 @@ def _coerce_bool(value: Any, *, default: bool, field: str) -> bool:
     raise ValueError(f"{field} must be boolean")
 
 
+def _browser_not_open_result(action: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "browser_open": False,
+        "action": action,
+        "error": "browser session not started; call browser_open first",
+    }
+
+
 def _is_allowed_domain(hostname: str, allowed_domains: list[str]) -> bool:
     normalized_host = hostname.strip().lower().rstrip(".")
     for domain in allowed_domains:
@@ -611,3 +946,25 @@ async def _resolve_ip_addresses(hostname: str) -> list[str]:
         if isinstance(ip_text, str):
             addresses.append(ip_text)
     return list(dict.fromkeys(addresses))
+
+
+def _slice_content(content: str, *, offset: int, limit: int, offset_type: str) -> tuple[str, int, int | None, bool]:
+    if offset_type == "lines":
+        lines = content.splitlines()
+        total = len(lines)
+        start = min(offset, total)
+        end = min(start + limit, total)
+        chunk = "\n".join(lines[start:end])
+        has_more = end < total
+        return chunk, total, (end if has_more else None), has_more
+
+    total = len(content)
+    start = min(offset, total)
+    end = min(start + limit, total)
+    chunk = content[start:end]
+    has_more = end < total
+    return chunk, total, (end if has_more else None), has_more
+
+
+def _slice_html(html: str, *, offset: int, limit: int, offset_type: str) -> tuple[str, int, int | None, bool]:
+    return _slice_content(html, offset=offset, limit=limit, offset_type=offset_type)

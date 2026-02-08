@@ -30,6 +30,8 @@ class _FakePage:
         del timeout
         if selector == "#phrase":
             raise TimeoutError("waiting for locator('#phrase')")
+        if selector == "body":
+            return "Line1\nLine2\nLine3"
         if selector == "h1":
             return "Example Domain"
         return ""
@@ -37,6 +39,14 @@ class _FakePage:
     async def screenshot(self, **kwargs: Any) -> bytes:
         del kwargs
         return b"PNGDATA"
+
+    async def content(self) -> str:
+        return "<html><body>Line1\nLine2\nLine3</body></html>"
+
+    async def wait_for_selector(self, selector: str, state: str, timeout: int) -> None:
+        del timeout
+        if selector == "#missing":
+            raise TimeoutError(f"waiting for selector '{selector}' in state '{state}'")
 
 
 class _FakeContext:
@@ -92,7 +102,7 @@ class _FakeManager:
 
 
 @pytest.mark.asyncio
-async def test_playwright_tool_open_extract_screenshot_and_close(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_playwright_tool_open_extract_navigate_info_and_close(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_playwright = _FakePlaywright()
     monkeypatch.setattr(
         playwright_module,
@@ -129,15 +139,62 @@ async def test_playwright_tool_open_extract_screenshot_and_close(monkeypatch: py
     assert extracted["ok"] is True
     assert extracted["text"] == "Example Domain"
 
-    shot = await bindings["browser_screenshot"].handler(
-        {"full_page": True, "image_type": "png", "quality": None, "return_base64": False},
+    waited = await bindings["browser_wait_for"].handler(
+        {"selector": "h1", "state": "visible", "timeout_seconds": None},
         context,
     )
-    assert shot["ok"] is True
-    assert shot["byte_size"] == 7
+    assert waited["ok"] is True
+    assert waited["state"] == "visible"
+
+    html_chars = await bindings["browser_get_html"].handler(
+        {"offset": 0, "limit": 12, "offset_type": "characters"},
+        context,
+    )
+    assert html_chars["ok"] is True
+    assert html_chars["offset_type"] == "characters"
+    assert html_chars["has_more"] is True
+
+    html_lines = await bindings["browser_get_html"].handler(
+        {"offset": 1, "limit": 2, "offset_type": "lines"},
+        context,
+    )
+    assert html_lines["ok"] is True
+    assert html_lines["offset_type"] == "lines"
+
+    text_chars = await bindings["browser_get_text"].handler(
+        {"offset": 0, "limit": 5, "offset_type": "characters"},
+        context,
+    )
+    assert text_chars["ok"] is True
+    assert text_chars["text"] == "Line1"
+
+    text_lines = await bindings["browser_get_text"].handler(
+        {"offset": 1, "limit": 2, "offset_type": "lines"},
+        context,
+    )
+    assert text_lines["ok"] is True
+    assert text_lines["text"] == "Line2\nLine3"
+
+    navigated = await bindings["browser_navigate"].handler(
+        {
+            "url": "http://example.com/again",
+            "wait_until": None,
+            "timeout_seconds": None,
+        },
+        context,
+    )
+    assert navigated["ok"] is True
+    assert navigated["url"] == "http://example.com/again"
+
+    info = await bindings["browser_info"].handler(
+        {},
+        context,
+    )
+    assert info["ok"] is True
+    assert info["title"] == "Example Domain"
 
     closed = await bindings["browser_close"].handler({}, context)
-    assert closed == {"ok": True, "closed": True}
+    assert closed == {"ok": True, "closed": True, "browser_open": False}
 
 
 @pytest.mark.asyncio
@@ -229,6 +286,35 @@ async def test_playwright_tool_extract_returns_structured_timeout(monkeypatch: p
     assert result["ok"] is False
     assert result["timed_out"] is True
     assert result["selector"] == "#phrase"
+
+
+@pytest.mark.asyncio
+async def test_playwright_actions_report_when_session_not_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_playwright = _FakePlaywright()
+    monkeypatch.setattr(
+        playwright_module,
+        "_load_playwright",
+        lambda: (lambda: _FakeManager(fake_playwright)),
+    )
+    config = PlaywrightToolConfig(enabled=True, allow_http=True, block_private_networks=False)
+    bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
+    context = ToolContext(owner_id="owner-1")
+
+    for name, payload in [
+        ("browser_info", {}),
+        ("browser_navigate", {"url": "http://example.com", "wait_until": None, "timeout_seconds": None}),
+        ("browser_get_html", {"offset": 0, "limit": 100, "offset_type": "characters"}),
+        ("browser_get_text", {"offset": 0, "limit": 100, "offset_type": "characters"}),
+        ("browser_wait_for", {"selector": "h1", "state": None, "timeout_seconds": None}),
+        ("browser_click", {"selector": "button", "timeout_seconds": None}),
+        ("browser_extract", {"selector": "h1", "timeout_seconds": None, "max_chars": None}),
+    ]:
+        result = await bindings[name].handler(payload, context)
+        assert result["ok"] is False
+        assert result["browser_open"] is False
+
+    closed = await bindings["browser_close"].handler({}, context)
+    assert closed == {"ok": True, "closed": False, "browser_open": False}
 
 
 @pytest.mark.asyncio
