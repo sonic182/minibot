@@ -16,7 +16,7 @@ Top features
 
 - Self-hostable: Dockerfile + docker-compose provided for easy local deployment.
 - Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
-- Provider-agnostic LLM integration (via `sonic182/llm-async`) with explicit support for OpenAI Responses multimodal inputs.
+- Provider-agnostic LLM integration (via `sonic182/llm-async`) with multimodal inputs supported on `openai_responses`, `openai`, and `openrouter`.
 - Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
 - Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, and optional Python execution.
 - Optional browser automation with Playwright (`browser_open`, `browser_navigate`, `browser_info`, `browser_get_html`, `browser_get_text`, `browser_wait_for`, `browser_click`, `browser_extract`, `browser_close`, `browser_close_session`).
