@@ -29,6 +29,29 @@ class LLMMessageHandler:
         self._max_history_messages = max_history_messages
         self._logger = logging.getLogger("minibot.handler")
 
+    def _llm_provider_name(self) -> str | None:
+        provider_getter = getattr(self._llm_client, "provider_name", None)
+        if callable(provider_getter):
+            provider = provider_getter()
+            if isinstance(provider, str) and provider:
+                return provider
+        return None
+
+    def _llm_model_name(self) -> str | None:
+        model_getter = getattr(self._llm_client, "model_name", None)
+        if callable(model_getter):
+            model = model_getter()
+            if isinstance(model, str) and model:
+                return model
+        return None
+
+    def _response_metadata(self, should_reply: bool) -> dict[str, Any]:
+        return {
+            "should_reply": should_reply,
+            "llm_provider": self._llm_provider_name(),
+            "llm_model": self._llm_model_name(),
+        }
+
     async def handle(self, event: MessageEvent) -> ChannelResponse:
         message = event.message
         session_id = session_id_for(message)
@@ -59,7 +82,7 @@ class LLMMessageHandler:
                 channel=message.channel,
                 chat_id=chat_id,
                 text=answer,
-                metadata={"should_reply": True},
+                metadata=self._response_metadata(True),
             )
 
         history = list(await self._memory.get_history(session_id))
@@ -92,7 +115,10 @@ class LLMMessageHandler:
 
         chat_id = message.chat_id or message.user_id or 0
         return ChannelResponse(
-            channel=message.channel, chat_id=chat_id, text=answer, metadata={"should_reply": should_reply}
+            channel=message.channel,
+            chat_id=chat_id,
+            text=answer,
+            metadata=self._response_metadata(should_reply),
         )
 
     def _build_model_user_input(self, message: ChannelMessage) -> tuple[str, str | list[dict[str, Any]] | None]:

@@ -60,6 +60,8 @@ class Dispatcher:
                     "chat_id": response.chat_id,
                     "text": response.text,
                     "should_reply": should_reply,
+                    "llm_provider": response.metadata.get("llm_provider"),
+                    "llm_model": response.metadata.get("llm_model"),
                 },
             )
             if not should_reply:

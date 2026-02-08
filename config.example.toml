@@ -33,6 +33,28 @@ max_tool_iterations = 15
 system_prompt = "You are Minibot, a helpful assistant."
 reasoning_effort = "medium"
 
+# Optional OpenRouter-specific routing configuration.
+# Applied only when `llm.provider = "openrouter"`.
+[llm.openrouter]
+# Optional model pool for fallback routing.
+# models = ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
+
+[llm.openrouter.provider]
+# order = ["anthropic", "openai"]
+# allow_fallbacks = true
+# require_parameters = false
+# data_collection = "deny"
+# zdr = true
+# enforce_distillable_text = false
+# only = ["anthropic"]
+# ignore = ["parasail"]
+# quantizations = ["int8"]
+# sort = "price"
+# preferred_min_throughput = 20
+# preferred_max_latency = 2.0
+# max_price = { prompt = 3.0, completion = 15.0 }
+# provider_extra = {}
+
 # Conversation memory persistence.
 [memory]
 backend = "sqlite"

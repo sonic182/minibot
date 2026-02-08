@@ -18,6 +18,16 @@ async def run() -> None:
         enabled_tools.append("kv_memory")
     if settings.tools.http_client.enabled:
         enabled_tools.append("http_client")
+    if settings.tools.time.enabled:
+        enabled_tools.append("time")
+    if settings.tools.calculator.enabled:
+        enabled_tools.append("calculator")
+    if settings.tools.python_exec.enabled:
+        enabled_tools.append("python_exec")
+    if settings.tools.playwright.enabled:
+        enabled_tools.append("playwright")
+    if settings.scheduler.prompts.enabled:
+        enabled_tools.append("scheduler")
     logger.info(
         "tool configuration loaded",
         extra={"tools_enabled": enabled_tools or ["none"]},

@@ -6,7 +6,6 @@ import json
 
 import logging
 
-from llm_async.models.message import message_to_dict
 from llm_async.models.tool_call import ToolCall
 from llm_async.providers import ClaudeProvider, GoogleProvider, OpenAIProvider, OpenRouterProvider
 from llm_async.providers.openai_responses import OpenAIResponsesProvider
@@ -33,8 +32,10 @@ class LLMGeneration:
 
 class LLMClient:
     def __init__(self, config: LLMMConfig) -> None:
-        provider_cls = LLM_PROVIDERS.get(config.provider.lower(), OpenAIProvider)
+        configured_provider = config.provider.lower()
+        provider_cls = LLM_PROVIDERS.get(configured_provider, OpenAIProvider)
         self._provider = provider_cls(api_key=config.api_key)
+        self._provider_name = configured_provider if configured_provider in LLM_PROVIDERS else "openai"
         self._model = config.model
         self._temperature = config.temperature
         self._send_temperature = getattr(config, "send_temperature", True)
@@ -43,6 +44,8 @@ class LLMClient:
         self._max_tool_iterations = config.max_tool_iterations
         self._system_prompt = getattr(config, "system_prompt", "You are Minibot, a helpful assistant.")
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
+        self._openrouter_models = list(getattr(getattr(config, "openrouter", None), "models", []) or [])
+        self._openrouter_provider = self._build_openrouter_provider_payload(config)
         self._is_responses_provider = isinstance(self._provider, OpenAIResponsesProvider)
         self._logger = logging.getLogger("minibot.llm")
 
@@ -97,6 +100,7 @@ class LLMClient:
                 call_kwargs["temperature"] = self._temperature
             if not self._is_responses_provider:
                 call_kwargs["max_tokens"] = self._max_new_tokens
+            call_kwargs.update(self._openrouter_kwargs())
             call_kwargs.update(extra_kwargs)
 
             response = await self._provider.acomplete(**call_kwargs)
@@ -127,7 +131,7 @@ class LLMClient:
                     extra_kwargs["previous_response_id"] = response_id
                 conversation = tool_messages
             else:
-                conversation.append(message.original or message_to_dict(message))
+                conversation.append(self._assistant_message_for_followup(message))
                 conversation.extend(tool_messages)
             iterations += 1
             if iterations >= self._max_tool_iterations:
@@ -141,6 +145,12 @@ class LLMClient:
 
     def is_responses_provider(self) -> bool:
         return self._is_responses_provider
+
+    def provider_name(self) -> str:
+        return self._provider_name
+
+    def model_name(self) -> str:
+        return self._model
 
     @staticmethod
     def _extract_response_id(response: Any) -> str | None:
@@ -254,6 +264,69 @@ class LLMClient:
         if isinstance(result, (list, dict)):
             return json.dumps(result, default=str)
         return str(result)
+
+    @staticmethod
+    def _build_openrouter_provider_payload(config: LLMMConfig) -> dict[str, Any]:
+        provider_cfg = getattr(getattr(config, "openrouter", None), "provider", None)
+        if provider_cfg is None:
+            return {}
+
+        payload: dict[str, Any] = dict(getattr(provider_cfg, "provider_extra", {}) or {})
+        typed_fields = (
+            "order",
+            "allow_fallbacks",
+            "require_parameters",
+            "data_collection",
+            "zdr",
+            "enforce_distillable_text",
+            "only",
+            "ignore",
+            "quantizations",
+            "sort",
+            "preferred_min_throughput",
+            "preferred_max_latency",
+            "max_price",
+        )
+        for field_name in typed_fields:
+            value = getattr(provider_cfg, field_name, None)
+            if value is not None:
+                payload[field_name] = value
+        return payload
+
+    def _openrouter_kwargs(self) -> dict[str, Any]:
+        if self._provider_name != "openrouter":
+            return {}
+        kwargs: dict[str, Any] = {}
+        if self._openrouter_models:
+            kwargs["models"] = self._openrouter_models
+        if self._openrouter_provider:
+            kwargs["provider"] = self._openrouter_provider
+        return kwargs
+
+    @staticmethod
+    def _assistant_message_for_followup(message: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "role": getattr(message, "role", "assistant") or "assistant",
+            "content": getattr(message, "content", "") or "",
+        }
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            payload["tool_calls"] = [LLMClient._tool_call_to_payload(call) for call in tool_calls]
+        return payload
+
+    @staticmethod
+    def _tool_call_to_payload(call: ToolCall) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": call.id,
+            "type": call.type,
+        }
+        if call.function is not None:
+            payload["function"] = call.function
+        if call.name is not None:
+            payload["name"] = call.name
+        if call.input is not None:
+            payload["input"] = call.input
+        return payload
 
     def _tool_loop_fallback_payload(
         self,

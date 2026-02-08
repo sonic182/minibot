@@ -25,6 +25,7 @@ class _FakeToolCall:
 @dataclass
 class _FakeMessage:
     content: Any
+    role: str = "assistant"
     tool_calls: list[_FakeToolCall] | None = None
     original: dict[str, Any] | None = None
 
@@ -129,6 +130,53 @@ async def test_generate_stops_after_tool_loop_limit(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_generate_sanitizes_assistant_message_before_tool_followup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _ToolThenAnswerProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                call = _FakeToolCall(id="tc-1", function={"name": "noop", "arguments": "{}"}, name="noop")
+                message = _FakeMessage(
+                    content="",
+                    tool_calls=[call],
+                    original={
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "tc-1",
+                                "type": "function",
+                                "function": {"name": "noop", "arguments": "{}"},
+                            }
+                        ],
+                        "reasoning": {"trace": "provider-specific"},
+                    },
+                )
+                return _FakeResponse(main_response=message, original={"id": "resp-tool"})
+            return _FakeResponse(main_response=_FakeMessage(content='{"answer":"ok","should_answer_to_user":true}'))
+
+    async def _noop_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"ok": True}
+
+    tool = Tool(name="noop", description="noop", parameters={"type": "object", "properties": {}, "required": []})
+    binding = ToolBinding(tool=tool, handler=_noop_handler)
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openrouter", _ToolThenAnswerProvider)
+    client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
+
+    result = await client.generate([], "hello", tools=[binding], response_schema={"type": "object"})
+
+    assert result.payload == {"answer": "ok", "should_answer_to_user": True}
+    second_call_messages = client._provider.calls[1]["messages"]
+    assistant_message = second_call_messages[-2]
+    assert assistant_message["role"] == "assistant"
+    assert assistant_message["tool_calls"][0]["function"]["name"] == "noop"
+    assert "reasoning" not in assistant_message
+
+
+@pytest.mark.asyncio
 async def test_generate_uses_user_content_when_provided(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm import provider_factory
 
@@ -192,3 +240,35 @@ async def test_generate_includes_reasoning_effort_when_enabled(monkeypatch: pyte
 
     call = client._provider.calls[-1]
     assert call["reasoning"] == {"effort": "medium"}
+
+
+@pytest.mark.asyncio
+async def test_generate_includes_openrouter_routing_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openrouter", _FakeProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openrouter",
+            api_key="secret",
+            model="openrouter/auto",
+            openrouter={
+                "models": ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"],
+                "provider": {
+                    "order": ["anthropic", "openai"],
+                    "allow_fallbacks": True,
+                    "data_collection": "deny",
+                    "provider_extra": {"custom_hint": "value"},
+                },
+            },
+        )
+    )
+
+    await client.generate([], "hello")
+
+    call = client._provider.calls[-1]
+    assert call["models"] == ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
+    assert call["provider"]["order"] == ["anthropic", "openai"]
+    assert call["provider"]["allow_fallbacks"] is True
+    assert call["provider"]["data_collection"] == "deny"
+    assert call["provider"]["custom_hint"] == "value"

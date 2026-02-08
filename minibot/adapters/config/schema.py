@@ -28,6 +28,28 @@ class TelegramChannelConfig(BaseModel):
     allowed_document_mime_types: List[str] = Field(default_factory=list)
 
 
+class OpenRouterProviderRoutingConfig(BaseModel):
+    order: List[str] | None = None
+    allow_fallbacks: bool | None = None
+    require_parameters: bool | None = None
+    data_collection: Literal["allow", "deny"] | None = None
+    zdr: bool | None = None
+    enforce_distillable_text: bool | None = None
+    only: List[str] | None = None
+    ignore: List[str] | None = None
+    quantizations: List[str] | None = None
+    sort: str | Dict[str, Any] | None = None
+    preferred_min_throughput: float | Dict[str, float] | None = None
+    preferred_max_latency: float | Dict[str, float] | None = None
+    max_price: Dict[str, Any] | None = None
+    provider_extra: Dict[str, Any] = Field(default_factory=dict)
+
+
+class OpenRouterLLMConfig(BaseModel):
+    models: List[str] = Field(default_factory=list)
+    provider: OpenRouterProviderRoutingConfig | None = None
+
+
 class LLMMConfig(BaseModel):
     provider: str = "openai"
     api_key: str = ""
@@ -39,6 +61,7 @@ class LLMMConfig(BaseModel):
     max_tool_iterations: PositiveInt = 15
     system_prompt: str = "You are Minibot, a helpful assistant."
     reasoning_effort: str = "medium"
+    openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
 
 
 class MemoryConfig(BaseModel):
