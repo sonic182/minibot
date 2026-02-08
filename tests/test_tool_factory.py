@@ -150,6 +150,7 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         "browser_click",
         "browser_extract",
         "browser_close",
+        "browser_close_session",
     }.issubset(names)
     assert {
         "schedule_prompt",

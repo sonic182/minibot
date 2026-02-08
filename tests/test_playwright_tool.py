@@ -196,6 +196,9 @@ async def test_playwright_tool_open_extract_navigate_info_and_close(monkeypatch:
     closed = await bindings["browser_close"].handler({}, context)
     assert closed == {"ok": True, "closed": True, "browser_open": False}
 
+    closed_alias = await bindings["browser_close_session"].handler({}, context)
+    assert closed_alias == {"ok": True, "closed": False, "browser_open": False}
+
 
 @pytest.mark.asyncio
 async def test_playwright_tool_enforces_allowed_domains(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -315,6 +318,9 @@ async def test_playwright_actions_report_when_session_not_open(monkeypatch: pyte
 
     closed = await bindings["browser_close"].handler({}, context)
     assert closed == {"ok": True, "closed": False, "browser_open": False}
+
+    closed_alias = await bindings["browser_close_session"].handler({}, context)
+    assert closed_alias == {"ok": True, "closed": False, "browser_open": False}
 
 
 @pytest.mark.asyncio

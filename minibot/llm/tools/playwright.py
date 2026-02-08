@@ -58,6 +58,7 @@ class PlaywrightTool:
             ToolBinding(tool=self._click_schema(), handler=self._handle_click),
             ToolBinding(tool=self._extract_schema(), handler=self._handle_extract),
             ToolBinding(tool=self._close_schema(), handler=self._handle_close),
+            ToolBinding(tool=self._close_quick_schema(), handler=self._handle_close),
         ]
 
     async def _handle_open(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
@@ -856,6 +857,18 @@ class PlaywrightTool:
         return Tool(
             name="browser_close",
             description="Close the active browser session for this owner.",
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        )
+
+    def _close_quick_schema(self) -> Tool:
+        return Tool(
+            name="browser_close_session",
+            description="Quick alias to close the active browser session for this owner.",
             parameters={
                 "type": "object",
                 "properties": {},
