@@ -41,6 +41,7 @@ class _BrowserSession:
     page: Any
     browser_name: str
     last_used_monotonic: float
+    last_url: str | None = None
     processed_snapshot: _ProcessedSnapshot | None = None
 
 
@@ -110,40 +111,54 @@ class PlaywrightTool:
                 existing = await self._create_session(requested_browser)
                 self._sessions[owner_id] = existing
 
-            goto_result = await self._goto_with_timeout_fallback(
-                existing.page,
-                url=url,
-                wait_until=wait_until,
-                timeout_seconds=timeout_seconds,
-            )
-            if not goto_result["ok"]:
-                if goto_result.get("timed_out"):
+            for attempt in range(2):
+                try:
+                    goto_result = await self._goto_with_timeout_fallback(
+                        existing.page,
+                        url=url,
+                        wait_until=wait_until,
+                        timeout_seconds=timeout_seconds,
+                    )
+                    if not goto_result["ok"]:
+                        error_text = str(goto_result.get("error") or "")
+                        if attempt == 0 and _looks_like_target_closed_error(error_text):
+                            existing = await self._recreate_session(existing, requested_browser)
+                            continue
+                        if goto_result.get("timed_out"):
+                            if self._config.postprocess_outputs:
+                                await self._refresh_processed_snapshot(existing)
+                            title = await existing.page.title()
+                            existing.last_url = existing.page.url
+                            existing.last_used_monotonic = time.monotonic()
+                            return {
+                                "ok": True,
+                                "url": existing.page.url,
+                                "title": title,
+                                "browser": existing.browser_name,
+                                "navigation_timed_out": True,
+                                "error": goto_result.get("error"),
+                            }
+                        return goto_result
                     if self._config.postprocess_outputs:
                         await self._refresh_processed_snapshot(existing)
                     title = await existing.page.title()
+                    existing.last_url = existing.page.url
                     existing.last_used_monotonic = time.monotonic()
-                    return {
+                    result = {
                         "ok": True,
                         "url": existing.page.url,
                         "title": title,
                         "browser": existing.browser_name,
-                        "navigation_timed_out": True,
-                        "error": goto_result.get("error"),
                     }
-                return goto_result
-            if self._config.postprocess_outputs:
-                await self._refresh_processed_snapshot(existing)
-            title = await existing.page.title()
-            existing.last_used_monotonic = time.monotonic()
-            result = {
-                "ok": True,
-                "url": existing.page.url,
-                "title": title,
-                "browser": existing.browser_name,
-            }
-            if goto_result.get("wait_until_fallback"):
-                result["wait_until_fallback"] = goto_result["wait_until_fallback"]
-            return result
+                    if goto_result.get("wait_until_fallback"):
+                        result["wait_until_fallback"] = goto_result["wait_until_fallback"]
+                    return result
+                except Exception as exc:  # noqa: BLE001
+                    if attempt == 0 and _is_target_closed_error(exc):
+                        existing = await self._recreate_session(existing, requested_browser)
+                        continue
+                    raise
+            raise RuntimeError("browser_open failed after session recovery")
 
     async def _handle_click(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         owner_id = _require_owner(context)
@@ -158,7 +173,13 @@ class PlaywrightTool:
             session = self._sessions.get(owner_id)
             if session is None:
                 return _browser_not_open_result("browser_click")
-            await session.page.click(selector, timeout=timeout_seconds * 1000)
+            try:
+                await session.page.click(selector, timeout=timeout_seconds * 1000)
+            except Exception as exc:  # noqa: BLE001
+                if not _is_target_closed_error(exc):
+                    raise
+                session = await self._recreate_session(session, session.browser_name)
+                await session.page.click(selector, timeout=timeout_seconds * 1000)
             session.processed_snapshot = None
             session.last_used_monotonic = time.monotonic()
             return {
@@ -183,40 +204,54 @@ class PlaywrightTool:
             session = self._sessions.get(owner_id)
             if session is None:
                 return _browser_not_open_result("browser_navigate")
-            goto_result = await self._goto_with_timeout_fallback(
-                session.page,
-                url=url,
-                wait_until=wait_until,
-                timeout_seconds=timeout_seconds,
-            )
-            if not goto_result["ok"]:
-                if goto_result.get("timed_out"):
+            for attempt in range(2):
+                try:
+                    goto_result = await self._goto_with_timeout_fallback(
+                        session.page,
+                        url=url,
+                        wait_until=wait_until,
+                        timeout_seconds=timeout_seconds,
+                    )
+                    if not goto_result["ok"]:
+                        error_text = str(goto_result.get("error") or "")
+                        if attempt == 0 and _looks_like_target_closed_error(error_text):
+                            session = await self._recreate_session(session, session.browser_name)
+                            continue
+                        if goto_result.get("timed_out"):
+                            if self._config.postprocess_outputs:
+                                await self._refresh_processed_snapshot(session)
+                            title = await session.page.title()
+                            session.last_url = session.page.url
+                            session.last_used_monotonic = time.monotonic()
+                            return {
+                                "ok": True,
+                                "url": session.page.url,
+                                "title": title,
+                                "browser": session.browser_name,
+                                "navigation_timed_out": True,
+                                "error": goto_result.get("error"),
+                            }
+                        return goto_result
                     if self._config.postprocess_outputs:
                         await self._refresh_processed_snapshot(session)
                     title = await session.page.title()
+                    session.last_url = session.page.url
                     session.last_used_monotonic = time.monotonic()
-                    return {
+                    result = {
                         "ok": True,
                         "url": session.page.url,
                         "title": title,
                         "browser": session.browser_name,
-                        "navigation_timed_out": True,
-                        "error": goto_result.get("error"),
                     }
-                return goto_result
-            if self._config.postprocess_outputs:
-                await self._refresh_processed_snapshot(session)
-            title = await session.page.title()
-            session.last_used_monotonic = time.monotonic()
-            result = {
-                "ok": True,
-                "url": session.page.url,
-                "title": title,
-                "browser": session.browser_name,
-            }
-            if goto_result.get("wait_until_fallback"):
-                result["wait_until_fallback"] = goto_result["wait_until_fallback"]
-            return result
+                    if goto_result.get("wait_until_fallback"):
+                        result["wait_until_fallback"] = goto_result["wait_until_fallback"]
+                    return result
+                except Exception as exc:  # noqa: BLE001
+                    if attempt == 0 and _is_target_closed_error(exc):
+                        session = await self._recreate_session(session, session.browser_name)
+                        continue
+                    raise
+            raise RuntimeError("browser_navigate failed after session recovery")
 
     async def _handle_info(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         del payload
@@ -226,7 +261,13 @@ class PlaywrightTool:
             session = self._sessions.get(owner_id)
             if session is None:
                 return _browser_not_open_result("browser_info")
-            title = await session.page.title()
+            try:
+                title = await session.page.title()
+            except Exception as exc:  # noqa: BLE001
+                if not _is_target_closed_error(exc):
+                    raise
+                session = await self._recreate_session(session, session.browser_name)
+                title = await session.page.title()
             session.last_used_monotonic = time.monotonic()
             return {
                 "ok": True,
@@ -234,6 +275,28 @@ class PlaywrightTool:
                 "title": title,
                 "browser": session.browser_name,
             }
+
+    async def _recreate_session(self, previous: _BrowserSession, browser_name: str) -> _BrowserSession:
+        owner_id_to_replace: str | None = None
+        for owner_id, current in self._sessions.items():
+            if current is previous:
+                owner_id_to_replace = owner_id
+                break
+        await self._close_session(previous)
+        replacement = await self._create_session(browser_name)
+        replacement.last_url = previous.last_url
+        if replacement.last_url:
+            restore_result = await self._goto_with_timeout_fallback(
+                replacement.page,
+                url=replacement.last_url,
+                wait_until="domcontentloaded",
+                timeout_seconds=min(self._config.navigation_timeout_seconds, _MAX_GOTO_TIMEOUT_SECONDS),
+            )
+            if restore_result.get("ok"):
+                replacement.last_url = replacement.page.url
+        if owner_id_to_replace is not None:
+            self._sessions[owner_id_to_replace] = replacement
+        return replacement
 
     async def _handle_wait_for(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         owner_id = _require_owner(context)
@@ -252,6 +315,26 @@ class PlaywrightTool:
             try:
                 await session.page.wait_for_selector(selector, state=state, timeout=timeout_seconds * 1000)
             except Exception as exc:  # noqa: BLE001
+                if _is_target_closed_error(exc):
+                    session = await self._recreate_session(session, session.browser_name)
+                    try:
+                        await session.page.wait_for_selector(selector, state=state, timeout=timeout_seconds * 1000)
+                    except Exception as retry_exc:  # noqa: BLE001
+                        return {
+                            "ok": False,
+                            "selector": selector,
+                            "state": state,
+                            "timed_out": _is_timeout_error(retry_exc),
+                            "error": str(retry_exc),
+                            "url": session.page.url,
+                        }
+                    session.last_used_monotonic = time.monotonic()
+                    return {
+                        "ok": True,
+                        "selector": selector,
+                        "state": state,
+                        "url": session.page.url,
+                    }
                 return {
                     "ok": False,
                     "selector": selector,
@@ -280,10 +363,22 @@ class PlaywrightTool:
                 return _browser_not_open_result("browser_get_html")
             snapshot: _ProcessedSnapshot | None = None
             if self._config.postprocess_outputs:
-                snapshot = await self._get_processed_snapshot(session)
+                try:
+                    snapshot = await self._get_processed_snapshot(session)
+                except Exception as exc:  # noqa: BLE001
+                    if not _is_target_closed_error(exc):
+                        raise
+                    session = await self._recreate_session(session, session.browser_name)
+                    snapshot = await self._get_processed_snapshot(session)
                 html = snapshot.clean_html
             else:
-                html = await session.page.content()
+                try:
+                    html = await session.page.content()
+                except Exception as exc:  # noqa: BLE001
+                    if not _is_target_closed_error(exc):
+                        raise
+                    session = await self._recreate_session(session, session.browser_name)
+                    html = await session.page.content()
             chunk, total_units, next_offset, has_more = _slice_html(
                 html,
                 offset=offset,
@@ -323,13 +418,28 @@ class PlaywrightTool:
                 return _browser_not_open_result("browser_get_text")
             snapshot: _ProcessedSnapshot | None = None
             if self._config.postprocess_outputs:
-                snapshot = await self._get_processed_snapshot(session)
+                try:
+                    snapshot = await self._get_processed_snapshot(session)
+                except Exception as exc:  # noqa: BLE001
+                    if not _is_target_closed_error(exc):
+                        raise
+                    session = await self._recreate_session(session, session.browser_name)
+                    snapshot = await self._get_processed_snapshot(session)
                 text = snapshot.clean_markdown
             else:
-                raw_text = await session.page.text_content(
-                    "body",
-                    timeout=self._config.action_timeout_seconds * 1000,
-                )
+                try:
+                    raw_text = await session.page.text_content(
+                        "body",
+                        timeout=self._config.action_timeout_seconds * 1000,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    if not _is_target_closed_error(exc):
+                        raise
+                    session = await self._recreate_session(session, session.browser_name)
+                    raw_text = await session.page.text_content(
+                        "body",
+                        timeout=self._config.action_timeout_seconds * 1000,
+                    )
                 text = (raw_text or "").strip()
             chunk, total_units, next_offset, has_more = _slice_content(
                 text,
@@ -380,13 +490,26 @@ class PlaywrightTool:
             try:
                 text = await session.page.text_content(selector, timeout=timeout_seconds * 1000)
             except Exception as exc:  # noqa: BLE001
-                return {
-                    "ok": False,
-                    "selector": selector,
-                    "timed_out": _is_timeout_error(exc),
-                    "error": str(exc),
-                    "url": session.page.url,
-                }
+                if _is_target_closed_error(exc):
+                    session = await self._recreate_session(session, session.browser_name)
+                    try:
+                        text = await session.page.text_content(selector, timeout=timeout_seconds * 1000)
+                    except Exception as retry_exc:  # noqa: BLE001
+                        return {
+                            "ok": False,
+                            "selector": selector,
+                            "timed_out": _is_timeout_error(retry_exc),
+                            "error": str(retry_exc),
+                            "url": session.page.url,
+                        }
+                else:
+                    return {
+                        "ok": False,
+                        "selector": selector,
+                        "timed_out": _is_timeout_error(exc),
+                        "error": str(exc),
+                        "url": session.page.url,
+                    }
             normalized = (text or "").strip()
             truncated = len(normalized) > max_chars
             session.last_used_monotonic = time.monotonic()
@@ -626,7 +749,9 @@ class PlaywrightTool:
     async def _refresh_processed_snapshot(self, session: _BrowserSession) -> _ProcessedSnapshot:
         try:
             raw_html = await session.page.content()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            if _is_target_closed_error(exc):
+                raise
             raw_html = ""
         snapshot = _build_processed_snapshot(raw_html)
         session.processed_snapshot = snapshot
@@ -1111,6 +1236,24 @@ def _is_private_like_ip(ip_text: str) -> bool:
 def _is_timeout_error(exc: Exception) -> bool:
     name = exc.__class__.__name__.lower()
     return "timeout" in name
+
+
+def _looks_like_target_closed_error(text: str) -> bool:
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    return (
+        "target page, context or browser has been closed" in normalized
+        or "target closed" in normalized
+        or "browser has been closed" in normalized
+    )
+
+
+def _is_target_closed_error(exc: Exception) -> bool:
+    name = exc.__class__.__name__.lower()
+    if "targetclosed" in name:
+        return True
+    return _looks_like_target_closed_error(str(exc))
 
 
 async def _resolve_ip_addresses(hostname: str) -> list[str]:

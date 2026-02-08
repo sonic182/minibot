@@ -94,6 +94,30 @@ class _NoisyPage(_FakePage):
         )
 
 
+class _ClosedTargetPage(_FakePage):
+    async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+        del url, wait_until, timeout
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    async def title(self) -> str:
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    async def click(self, selector: str, timeout: int) -> None:
+        del selector, timeout
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    async def text_content(self, selector: str, timeout: int) -> str:
+        del selector, timeout
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    async def content(self) -> str:
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    async def wait_for_selector(self, selector: str, state: str, timeout: int) -> None:
+        del selector, state, timeout
+        raise RuntimeError("Target page, context or browser has been closed")
+
+
 class _FakeContext:
     async def new_page(self) -> _FakePage:
         return _FakePage()
@@ -123,6 +147,11 @@ class _RecordingTimeoutContext(_FakeContext):
 class _NoisyContext(_FakeContext):
     async def new_page(self) -> _NoisyPage:
         return _NoisyPage()
+
+
+class _ClosedTargetContext(_FakeContext):
+    async def new_page(self) -> _ClosedTargetPage:
+        return _ClosedTargetPage()
 
 
 class _FakeBrowser:
@@ -161,6 +190,12 @@ class _NoisyBrowser(_FakeBrowser):
         return _NoisyContext()
 
 
+class _ClosedTargetBrowser(_FakeBrowser):
+    async def new_context(self, **kwargs: Any) -> _ClosedTargetContext:
+        del kwargs
+        return _ClosedTargetContext()
+
+
 class _FakeLauncher:
     async def launch(self, **kwargs: Any) -> _FakeBrowser:
         del kwargs
@@ -192,6 +227,18 @@ class _NoisyLauncher(_FakeLauncher):
     async def launch(self, **kwargs: Any) -> _NoisyBrowser:
         del kwargs
         return _NoisyBrowser()
+
+
+class _ClosedThenHealthyLauncher:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def launch(self, **kwargs: Any) -> _FakeBrowser:
+        del kwargs
+        self.calls += 1
+        if self.calls == 1:
+            return _ClosedTargetBrowser()
+        return _FakeBrowser()
 
 
 class _FailingChannelLauncher:
@@ -445,6 +492,83 @@ async def test_playwright_open_caps_navigation_timeout_to_30_seconds(monkeypatch
     assert opened["ok"] is True
     assert recording_page.timeouts
     assert recording_page.timeouts[-1] == 30000
+
+
+@pytest.mark.asyncio
+async def test_playwright_open_recovers_from_closed_target_by_recreating_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_playwright = _FakePlaywright()
+    flaky_launcher = _ClosedThenHealthyLauncher()
+    fake_playwright.chromium = flaky_launcher
+    monkeypatch.setattr(
+        playwright_module,
+        "_load_playwright",
+        lambda: lambda: _FakeManager(fake_playwright),
+    )
+    config = PlaywrightToolConfig(
+        enabled=True,
+        browser="chromium",
+        allow_http=True,
+        block_private_networks=False,
+    )
+    bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
+    context = ToolContext(owner_id="owner-1")
+
+    opened = await bindings["browser_open"].handler(
+        {
+            "url": "http://example.com",
+            "browser": "chromium",
+            "wait_until": "domcontentloaded",
+            "timeout_seconds": 30,
+        },
+        context,
+    )
+
+    assert opened["ok"] is True
+    assert opened["title"] == "Example Domain"
+    assert flaky_launcher.calls >= 2
+
+
+@pytest.mark.asyncio
+async def test_playwright_get_text_recovers_from_closed_target_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_playwright = _FakePlaywright()
+    monkeypatch.setattr(
+        playwright_module,
+        "_load_playwright",
+        lambda: lambda: _FakeManager(fake_playwright),
+    )
+    config = PlaywrightToolConfig(
+        enabled=True,
+        browser="chromium",
+        allow_http=True,
+        block_private_networks=False,
+    )
+    tool = PlaywrightTool(config)
+    bindings = {binding.tool.name: binding for binding in tool.bindings()}
+    context = ToolContext(owner_id="owner-1")
+
+    opened = await bindings["browser_open"].handler(
+        {
+            "url": "http://example.com",
+            "browser": "chromium",
+            "wait_until": "domcontentloaded",
+            "timeout_seconds": 30,
+        },
+        context,
+    )
+    assert opened["ok"] is True
+
+    tool._sessions["owner-1"].page = _ClosedTargetPage()
+    tool._sessions["owner-1"].processed_snapshot = None
+
+    text_result = await bindings["browser_get_text"].handler(
+        {"offset": 0, "limit": 1000, "offset_type": "characters"},
+        context,
+    )
+    assert text_result["ok"] is True
+    assert text_result["cleaned"] is True
+    assert "Line1" in text_result["text"]
 
 
 @pytest.mark.asyncio
