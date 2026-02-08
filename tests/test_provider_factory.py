@@ -461,3 +461,43 @@ async def test_generate_ignores_continue_loop_hint_when_no_tool_call(monkeypatch
         "continue_loop": True,
     }
     assert len(client._provider.calls) == 1
+
+
+def test_sanitize_tool_arguments_for_log_masks_secrets_and_caps_size() -> None:
+    long_text = "x" * 500
+    sanitized = LLMClient._sanitize_tool_arguments_for_log(
+        {
+            "url": "https://example.com",
+            "api_key": "super-secret",
+            "payload": {
+                "Authorization": "Bearer abc",
+                "text": long_text,
+            },
+            "items": list(range(25)),
+        }
+    )
+
+    assert sanitized["url"] == "https://example.com"
+    assert sanitized["api_key"] == "***"
+    assert sanitized["payload"]["Authorization"] == "***"
+    assert isinstance(sanitized["payload"]["text"], str)
+    assert len(sanitized["payload"]["text"]) < len(long_text)
+    assert sanitized["items"][-1] == "...(+5 items)"
+
+
+def test_sanitize_tool_arguments_for_log_keeps_primitives() -> None:
+    sanitized = LLMClient._sanitize_tool_arguments_for_log(
+        {
+            "enabled": True,
+            "timeout_seconds": 15,
+            "temperature": 0.2,
+            "note": None,
+        }
+    )
+
+    assert sanitized == {
+        "enabled": True,
+        "timeout_seconds": 15,
+        "temperature": 0.2,
+        "note": None,
+    }

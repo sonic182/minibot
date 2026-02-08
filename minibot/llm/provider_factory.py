@@ -26,6 +26,18 @@ LLM_PROVIDERS = {
 }
 
 _MAX_REPEATED_TOOL_ITERATIONS = 3
+_MAX_LOG_ARGUMENT_STRING_CHARS = 300
+_MAX_LOG_ARGUMENT_COLLECTION_ITEMS = 20
+_SENSITIVE_ARGUMENT_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "authorization",
+    "cookie",
+)
 
 
 @dataclass
@@ -216,6 +228,7 @@ class LLMClient:
                         "tool": tool_name,
                         "owner_id": context.owner_id,
                         "argument_keys": sorted(arguments.keys()),
+                        "arguments": self._sanitize_tool_arguments_for_log(arguments),
                     },
                 )
                 result = await binding.handler(arguments, context)
@@ -293,8 +306,7 @@ class LLMClient:
                         if len(preview) > 220:
                             preview = f"{preview[:220]}..."
                         raise ValueError(
-                            "Tool call arguments must be a valid JSON object. "
-                            f"Received arguments preview: {preview}"
+                            f"Tool call arguments must be a valid JSON object. Received arguments preview: {preview}"
                         ) from exc
             else:
                 arguments_dict = dict(arguments or {})
@@ -357,6 +369,54 @@ class LLMClient:
             except Exception:
                 return json.dumps(result, default=str)
         return str(result)
+
+    @staticmethod
+    def _sanitize_tool_arguments_for_log(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        sanitized: dict[str, Any] = {}
+        for key, value in arguments.items():
+            key_text = str(key)
+            if LLMClient._is_sensitive_argument_key(key_text):
+                sanitized[key_text] = "***"
+                continue
+            sanitized[key_text] = LLMClient._sanitize_tool_argument_value(value)
+        return sanitized
+
+    @staticmethod
+    def _sanitize_tool_argument_value(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            if len(value) <= _MAX_LOG_ARGUMENT_STRING_CHARS:
+                return value
+            return f"{value[:_MAX_LOG_ARGUMENT_STRING_CHARS]}..."
+        if isinstance(value, list):
+            capped = value[:_MAX_LOG_ARGUMENT_COLLECTION_ITEMS]
+            sanitized_list = [LLMClient._sanitize_tool_argument_value(item) for item in capped]
+            if len(value) > _MAX_LOG_ARGUMENT_COLLECTION_ITEMS:
+                sanitized_list.append(f"...(+{len(value) - _MAX_LOG_ARGUMENT_COLLECTION_ITEMS} items)")
+            return sanitized_list
+        if isinstance(value, dict):
+            capped_items = list(value.items())[:_MAX_LOG_ARGUMENT_COLLECTION_ITEMS]
+            sanitized_dict: dict[str, Any] = {}
+            for item_key, item_value in capped_items:
+                item_key_text = str(item_key)
+                if LLMClient._is_sensitive_argument_key(item_key_text):
+                    sanitized_dict[item_key_text] = "***"
+                else:
+                    sanitized_dict[item_key_text] = LLMClient._sanitize_tool_argument_value(item_value)
+            if len(value) > _MAX_LOG_ARGUMENT_COLLECTION_ITEMS:
+                sanitized_dict["..."] = f"+{len(value) - _MAX_LOG_ARGUMENT_COLLECTION_ITEMS} keys"
+            return sanitized_dict
+        return str(value)
+
+    @staticmethod
+    def _is_sensitive_argument_key(key: str) -> bool:
+        normalized = key.strip().lower().replace("-", "_")
+        if not normalized:
+            return False
+        return any(part in normalized for part in _SENSITIVE_ARGUMENT_KEY_PARTS)
 
     @staticmethod
     def _build_openrouter_provider_payload(config: LLMMConfig) -> dict[str, Any]:
