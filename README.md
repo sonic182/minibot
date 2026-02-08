@@ -38,7 +38,7 @@ Top features
 - 🎯 Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
 - 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment.
 - 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
-- 🧠 Provider-agnostic LLM integration (via [llm-async]) with multimodal inputs supported on `openai_responses`, `openai`, and `openrouter`.
+- 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
 - 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
 - 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, and optional Python execution.
 - 🌐 Optional browser automation with Playwright (`browser_navigate`, `browser_info`, `browser_get_data`, `browser_wait_for`, `browser_click`, `browser_query_selector`, `browser_close`).
@@ -61,10 +61,10 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 
 - `[runtime]`: global flags such as log level and environment.
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
-- `[llm]`: configures the chosen [llm-async] provider (provider id, API key, model, optional temperature/token/reasoning params, `max_tool_iterations`, system prompt, etc.). Request params are only sent when present in `config.toml` (omit keys like `temperature`, `max_new_tokens`, or `reasoning_effort` to avoid sending them). For OpenRouter, optional `llm.openrouter.models` lets you provide a fallback model pool, `llm.openrouter.provider` lets you send routing controls (`order`, `allow_fallbacks`, `only`, `ignore`, `sort`, throughput/latency preferences, `max_price`, and `provider_extra` for future keys), and `llm.openrouter.plugins` lets you pass request plugins (for example `file-parser` PDF engine selection).
+- `[llm]`: configures the chosen [llm-async] provider (currently `openai`, `openai_responses`, or `openrouter`), plus API key, model, optional temperature/token/reasoning params, `max_tool_iterations`, and system prompt. Request params are only sent when present in `config.toml` (omit keys like `temperature`, `max_new_tokens`, or `reasoning_effort` to avoid sending them). For OpenRouter, optional `llm.openrouter.models` lets you provide a fallback model pool, `llm.openrouter.provider` lets you send routing controls (`order`, `allow_fallbacks`, `only`, `ignore`, `sort`, throughput/latency preferences, `max_price`, and `provider_extra` for future keys), and `llm.openrouter.plugins` lets you pass request plugins (for example `file-parser` PDF engine selection).
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; when unset, transcript retention is unlimited.
 - `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
-- `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, pagination defaults, and `default_owner_id` so the server decides ownership without involving the LLM. Enable it only when you need tool-based memory storage.
+- `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, and pagination defaults. Enable it only when you need tool-based memory storage.
 - `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` (raw byte cap), optional `max_chars` (LLM-facing char cap), and `response_processing_mode` (`auto`/`none`) for response shaping via [aiosonic].
 - `[tools.playwright]`: enables browser automation with Playwright. Configure `browser` (`chromium`, `firefox`, `webkit`), Chromium `launch_channel` (for example `chrome`) and optional `chromium_executable_path`, launch args, browser fingerprint/context defaults (UA, viewport, locale, timezone, geolocation, headers), output caps, session TTL, and egress restrictions (`allowed_domains`, `allow_http`, `block_private_networks`). Browser outputs can be post-processed in Python before reaching the LLM (`postprocess_outputs`, enabled by default), with optional raw snapshot exposure (`postprocess_expose_raw`) and a snapshot cache TTL (`postprocess_snapshot_ttl_seconds`). Post-processed text is emitted as compact Markdown with links preserved.
 - `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
@@ -205,30 +205,21 @@ Notes:
 Tooling
 -------
 
-Tools are defined under `minibot/llm/tools/`. Each tool binding exposes a schema to [llm-async] and executes via the server-side handler with a controlled `ToolContext`. Current tools:
+Tools live under `minibot/llm/tools/` and are exposed to [llm-async] with server-side execution controls.
 
-- Structured tool outputs are serialized to YAML before being sent back through the LLM tool channel, reducing noisy JSON escaping and improving readability.
+- 🧠 `chat_history`: inspect/trim chat transcript history for the current session.
+- 🧮 `calculate_expression` + 🕒 `current_datetime`: quick built-in utility tools.
+- 📝 `kv_memory`: save/get/search short notes.
+- 🌐 `http_client`: guarded HTTP/HTTPS fetches via [aiosonic].
+- ⏰ `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`: one-time and recurring reminder scheduling.
+- 🐍 `python_execute` + `python_environment_info`: optional host Python execution and runtime/package inspection.
+- 🧭 `browser_*` (optional): Playwright navigation and extraction with domain/network guardrails.
+- 🖼️ Telegram media inputs (`photo`/`document`) are supported on `openai_responses`, `openai`, and `openrouter`.
 
-- `chat_history` (system tool, always enabled): manages transcript history for the current chat/session. `chat_history_info` is read-only (count/status) and should be used only for explicit history-status requests. `chat_history_trim` is destructive (permanently deletes older history, keeping latest N; `keep_latest=0` clears all) and should be used only when the user explicitly asks to clear/reset/forget/trim chat history. This affects chat transcript history only, not `kv_memory` entries.
-- `calculate_expression` (system tool, enabled by default): safely evaluates arithmetic expressions with Decimal precision and support for `+`, `-`, `*`, `/`, `%`, `**`, parentheses, and unary signs.
-- `current_datetime` (system tool, enabled by default): returns the current UTC datetime with an optional `strftime` format override.
-- `python_execute` (system tool, enabled by default): executes arbitrary Python code on the host backend with configurable interpreter (`python_path` or `venv_path`) and optional isolation modes, including external jail wrapping (`sandbox_mode = "jail"` with `tools.python_exec.jail.command_prefix`, e.g. Firejail).
-- `python_environment_info` (system tool, enabled by default): reports the runtime that `python_execute` uses and can list installed packages (with optional prefix filtering and limit) so the model can pick available libraries before execution.
-- `browser_navigate`, `browser_info`, `browser_get_data`, `browser_wait_for`, `browser_click`, `browser_query_selector`, `browser_close` (optional): browser session per owner using Playwright. `browser_navigate` creates a session on first use and navigates to the requested URL. Other browser tools auto-recover by reopening the last known URL when possible, and return `browser_open=false` only when no URL has been established yet. `browser_get_data` supports paginated reads with `limit`, `offset`, `offset_type` (`characters` preferred for minified pages, `lines` optional), and `type` (`markdown` default, `raw_html` optional). With post-processing enabled, default output is compact Markdown with links preserved. Screenshot output is intentionally disabled for now to avoid passing large base64 payloads as plain text tool output. Use `[tools.playwright]` to choose engine (`chromium`/`firefox`/`webkit`) and apply network guardrails.
-- Telegram inbound media (`photo` / `document`) is supported when `llm.provider` is `openai_responses`, `openai`, or `openrouter`. Images are sent as data URLs and mapped to provider-specific message content (`input_image` for Responses API, `image_url` for Chat Completions). Documents are mapped similarly (`input_file` for Responses API, `file` for Chat Completions).
-- `kv_memory`: persists short notes and supports save/get/search operations without asking the LLM for `owner_id` (the server injects it).
-- `http_client`: builds on [aiosonic] so the bot can fetch HTTP/HTTPS resources with strict method/timeout/output guards plus optional content-type-aware response processing; configure via `[tools.http_client]`.
-- `schedule_prompt`: creates one-shot jobs (`run_at`/`delay_seconds`) and interval recurrence (`recurrence_type="interval"` + `recurrence_interval_seconds`). Missed intervals are skipped on wake-up; the next future run is scheduled to avoid backlog bursts. Minimum interval is controlled by `scheduler.prompts.min_recurrence_interval_seconds` (default `60`).
-- `cancel_scheduled_prompt`: cancels a job by id when it belongs to the same owner/chat context.
-- `delete_scheduled_prompt`: permanently removes a job by id when it belongs to the same owner/chat context. If the job is active (`pending`/`leased`), it is cancelled first, then deleted.
-- `list_scheduled_prompts`: lists scheduled jobs for the same owner/chat context (`active_only` defaults to `true`).
+Conversation context:
 
-Conversation-context behavior:
-
-- The LLM receives the latest chat history window (`get_history` default limit is 32 messages), not the full lifetime transcript.
-- For OpenAI Responses mode, the handler intentionally does not reuse `previous_response_id`; each turn is reconstructed from stored chat history so transcript trimming/reset behavior is respected.
-
-Future tools (scheduler commands, external API calls, etc.) can live alongside these handlers and be toggled via config without touching the handler pipeline.
+- Uses a rolling history window (`get_history` default `32` messages), not full lifetime transcript.
+- In OpenAI Responses mode, turns are rebuilt from stored history (no `previous_response_id` reuse).
 
 Roadmap / Todos
 ---------------
