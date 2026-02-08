@@ -15,6 +15,7 @@ import unicodedata
 from urllib.parse import urlparse
 
 from llm_async.models import Tool
+from markdownify import markdownify
 
 from minibot.adapters.config.schema import PlaywrightToolConfig
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -23,6 +24,7 @@ _WAIT_UNTIL_VALUES = {"load", "domcontentloaded", "networkidle"}
 _IMAGE_TYPES = {"png", "jpeg"}
 _MAX_GOTO_TIMEOUT_SECONDS = 30
 _DROP_BLOCK_TAGS = ("script", "style", "noscript", "template", "svg", "canvas", "iframe", "object", "embed")
+_DROP_LAYOUT_TAGS = ("nav", "footer", "aside", "form")
 _LOW_SIGNAL_ATTR_PATTERN = re.compile(
     r"(cookie|consent|banner|ads?|advert|newsletter|subscribe|social|breadcrumb)",
     re.IGNORECASE,
@@ -46,7 +48,7 @@ class _BrowserSession:
 class _ProcessedSnapshot:
     raw_html: str
     clean_html: str
-    clean_text: str
+    clean_markdown: str
     links: list[dict[str, str]]
     content_hash: str
     generated_monotonic: float
@@ -322,7 +324,7 @@ class PlaywrightTool:
             snapshot: _ProcessedSnapshot | None = None
             if self._config.postprocess_outputs:
                 snapshot = await self._get_processed_snapshot(session)
-                text = snapshot.clean_text
+                text = snapshot.clean_markdown
             else:
                 raw_text = await session.page.text_content(
                     "body",
@@ -349,9 +351,10 @@ class PlaywrightTool:
             }
             if snapshot is not None:
                 result["cleaned"] = True
+                result["text_format"] = "markdown"
                 result["content_hash"] = snapshot.content_hash
                 result["raw_chars"] = len(snapshot.raw_html)
-                result["clean_chars"] = len(snapshot.clean_text)
+                result["clean_chars"] = len(snapshot.clean_markdown)
                 if snapshot.links:
                     result["links"] = snapshot.links[:_MAX_LINKS_IN_TEXT_OUTPUT]
             return result
@@ -932,7 +935,8 @@ class PlaywrightTool:
             name="browser_get_text",
             description=(
                 "Return a chunk of visible body text from the current page using offset+limit pagination. "
-                "When postprocess_outputs is enabled, text comes from Python post-processed HTML snapshots. "
+                "When postprocess_outputs is enabled, text is generated as compact Markdown from Python "
+                "post-processed HTML snapshots. "
                 "Use offset_type='characters' by default for minified pages."
             ),
             parameters={
@@ -1128,19 +1132,53 @@ async def _resolve_ip_addresses(hostname: str) -> list[str]:
 
 def _build_processed_snapshot(raw_html: str) -> _ProcessedSnapshot:
     clean_html, links = _clean_html_for_llm(raw_html)
-    clean_text = _extract_text_from_html(clean_html)
-    if not clean_text:
-        clean_text = _extract_text_from_html(raw_html)
-    clean_text = _normalize_text_for_llm(clean_text)
-    content_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()[:16]
+    clean_markdown = _convert_html_to_markdown_for_llm(clean_html)
+    if not clean_markdown:
+        fallback_text = _extract_text_from_html(clean_html)
+        if not fallback_text:
+            fallback_text = _extract_text_from_html(raw_html)
+        clean_markdown = _normalize_text_for_llm(fallback_text)
+    else:
+        clean_markdown = _normalize_markdown_for_llm(clean_markdown)
+    content_hash = hashlib.sha256(clean_markdown.encode("utf-8")).hexdigest()[:16]
     return _ProcessedSnapshot(
         raw_html=raw_html,
         clean_html=clean_html,
-        clean_text=clean_text,
+        clean_markdown=clean_markdown,
         links=links,
         content_hash=content_hash,
         generated_monotonic=time.monotonic(),
     )
+
+
+def _convert_html_to_markdown_for_llm(source_html: str) -> str:
+    if not source_html:
+        return ""
+    compact_html = _drop_wrapped_tags(source_html, _DROP_LAYOUT_TAGS)
+    try:
+        return markdownify(
+            compact_html,
+            heading_style="ATX",
+            strip=list(_DROP_BLOCK_TAGS),
+            bullets="-",
+        )
+    except Exception:
+        return ""
+
+
+def _normalize_markdown_for_llm(markdown_text: str) -> str:
+    if not markdown_text:
+        return ""
+    normalized = markdown_text.translate(_ZERO_WIDTH_TRANSLATION)
+    normalized = normalized.replace("\xa0", " ")
+    normalized = unicodedata.normalize("NFKC", normalized)
+    normalized = normalized.replace("•", " | ")
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"[ \t\f\v]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    lines = [line.rstrip() for line in normalized.splitlines()]
+    lines = [line for line in lines if line.strip()]
+    return "\n".join(lines)
 
 
 def _clean_html_for_llm(raw_html: str) -> tuple[str, list[dict[str, str]]]:

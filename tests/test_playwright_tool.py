@@ -488,9 +488,11 @@ async def test_playwright_get_text_and_html_use_postprocessed_snapshot(monkeypat
     )
     assert text_result["ok"] is True
     assert text_result["cleaned"] is True
+    assert text_result["text_format"] == "markdown"
     assert "Headline" in text_result["text"]
     assert "Important body text" in text_result["text"]
     assert " | gasolina" in text_result["text"]
+    assert "[Toyota RAV 4](/listing?id=123&ref=srp)" in text_result["text"]
     assert "tracking" not in text_result["text"]
     assert "Menu links" not in text_result["text"]
     assert text_result["links"]
