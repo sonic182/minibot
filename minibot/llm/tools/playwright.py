@@ -84,15 +84,25 @@ class PlaywrightTool:
                 existing = await self._create_session(requested_browser)
                 self._sessions[owner_id] = existing
 
-            await existing.page.goto(url, wait_until=wait_until, timeout=timeout_seconds * 1000)
+            goto_result = await self._goto_with_timeout_fallback(
+                existing.page,
+                url=url,
+                wait_until=wait_until,
+                timeout_seconds=timeout_seconds,
+            )
+            if not goto_result["ok"]:
+                return goto_result
             title = await existing.page.title()
             existing.last_used_monotonic = time.monotonic()
-            return {
+            result = {
                 "ok": True,
                 "url": existing.page.url,
                 "title": title,
                 "browser": existing.browser_name,
             }
+            if goto_result.get("wait_until_fallback"):
+                result["wait_until_fallback"] = goto_result["wait_until_fallback"]
+            return result
 
     async def _handle_click(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         owner_id = _require_owner(context)
@@ -130,15 +140,25 @@ class PlaywrightTool:
             session = self._sessions.get(owner_id)
             if session is None:
                 return _browser_not_open_result("browser_navigate")
-            await session.page.goto(url, wait_until=wait_until, timeout=timeout_seconds * 1000)
+            goto_result = await self._goto_with_timeout_fallback(
+                session.page,
+                url=url,
+                wait_until=wait_until,
+                timeout_seconds=timeout_seconds,
+            )
+            if not goto_result["ok"]:
+                return goto_result
             title = await session.page.title()
             session.last_used_monotonic = time.monotonic()
-            return {
+            result = {
                 "ok": True,
                 "url": session.page.url,
                 "title": title,
                 "browser": session.browser_name,
             }
+            if goto_result.get("wait_until_fallback"):
+                result["wait_until_fallback"] = goto_result["wait_until_fallback"]
+            return result
 
     async def _handle_info(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         del payload
@@ -417,6 +437,48 @@ class PlaywrightTool:
                 "tools.playwright.launch_channel = '' and optionally "
                 "tools.playwright.chromium_executable_path = '/usr/bin/chromium'."
             ) from last_exc
+
+    async def _goto_with_timeout_fallback(
+        self,
+        page: Any,
+        *,
+        url: str,
+        wait_until: str,
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
+        timeout_ms = timeout_seconds * 1000
+        try:
+            await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            if wait_until == "networkidle" and _is_timeout_error(exc):
+                fallback_wait_until = "domcontentloaded"
+                self._logger.warning(
+                    "playwright goto timeout on networkidle; retrying with domcontentloaded",
+                    extra={
+                        "url": url,
+                        "timeout_seconds": timeout_seconds,
+                    },
+                )
+                try:
+                    await page.goto(url, wait_until=fallback_wait_until, timeout=timeout_ms)
+                    return {
+                        "ok": True,
+                        "wait_until_fallback": fallback_wait_until,
+                    }
+                except Exception as fallback_exc:  # noqa: BLE001
+                    return {
+                        "ok": False,
+                        "timed_out": _is_timeout_error(fallback_exc),
+                        "error": str(fallback_exc),
+                        "url": getattr(page, "url", ""),
+                    }
+            return {
+                "ok": False,
+                "timed_out": _is_timeout_error(exc),
+                "error": str(exc),
+                "url": getattr(page, "url", ""),
+            }
 
     def _chromium_executable_candidates(self) -> list[str]:
         candidates: list[str] = []

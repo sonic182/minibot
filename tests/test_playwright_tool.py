@@ -49,12 +49,26 @@ class _FakePage:
             raise TimeoutError(f"waiting for selector '{selector}' in state '{state}'")
 
 
+class _TimeoutOnNetworkIdlePage(_FakePage):
+    async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+        del timeout
+        if wait_until == "networkidle":
+            raise TimeoutError("Page.goto: Timeout 60000ms exceeded")
+        self.url = url
+        self._title = "Recovered"
+
+
 class _FakeContext:
     async def new_page(self) -> _FakePage:
         return _FakePage()
 
     async def close(self) -> None:
         return None
+
+
+class _TimeoutOnNetworkIdleContext(_FakeContext):
+    async def new_page(self) -> _TimeoutOnNetworkIdlePage:
+        return _TimeoutOnNetworkIdlePage()
 
 
 class _FakeBrowser:
@@ -66,10 +80,22 @@ class _FakeBrowser:
         return None
 
 
+class _TimeoutOnNetworkIdleBrowser(_FakeBrowser):
+    async def new_context(self, **kwargs: Any) -> _TimeoutOnNetworkIdleContext:
+        del kwargs
+        return _TimeoutOnNetworkIdleContext()
+
+
 class _FakeLauncher:
     async def launch(self, **kwargs: Any) -> _FakeBrowser:
         del kwargs
         return _FakeBrowser()
+
+
+class _TimeoutOnNetworkIdleLauncher(_FakeLauncher):
+    async def launch(self, **kwargs: Any) -> _TimeoutOnNetworkIdleBrowser:
+        del kwargs
+        return _TimeoutOnNetworkIdleBrowser()
 
 
 class _FailingChannelLauncher:
@@ -91,6 +117,12 @@ class _FakePlaywright:
 
     async def stop(self) -> None:
         return None
+
+
+class _TimeoutOnNetworkIdlePlaywright(_FakePlaywright):
+    def __init__(self) -> None:
+        super().__init__()
+        self.chromium = _TimeoutOnNetworkIdleLauncher()
 
 
 class _FakeManager:
@@ -198,6 +230,40 @@ async def test_playwright_tool_open_extract_navigate_info_and_close(monkeypatch:
 
     closed_alias = await bindings["browser_close_session"].handler({}, context)
     assert closed_alias == {"ok": True, "closed": False, "browser_open": False}
+
+
+@pytest.mark.asyncio
+async def test_playwright_open_retries_networkidle_timeout_with_domcontentloaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_playwright = _TimeoutOnNetworkIdlePlaywright()
+    monkeypatch.setattr(
+        playwright_module,
+        "_load_playwright",
+        lambda: (lambda: _FakeManager(fake_playwright)),
+    )
+    config = PlaywrightToolConfig(
+        enabled=True,
+        browser="chromium",
+        allow_http=True,
+        block_private_networks=False,
+    )
+    bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
+    context = ToolContext(owner_id="owner-1")
+
+    opened = await bindings["browser_open"].handler(
+        {
+            "url": "http://example.com",
+            "browser": "chromium",
+            "wait_until": "networkidle",
+            "timeout_seconds": 60,
+        },
+        context,
+    )
+
+    assert opened["ok"] is True
+    assert opened["title"] == "Recovered"
+    assert opened["wait_until_fallback"] == "domcontentloaded"
 
 
 @pytest.mark.asyncio
