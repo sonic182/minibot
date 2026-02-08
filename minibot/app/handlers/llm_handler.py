@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Sequence
 
+import ast
 import json
 
 from minibot.core.channels import ChannelMessage, ChannelResponse
@@ -180,16 +181,32 @@ class LLMMessageHandler:
             should = payload.get("should_answer_to_user")
             if isinstance(answer, str) and isinstance(should, bool):
                 return answer, should
+            result = payload.get("result")
+            if isinstance(result, str):
+                return result, True
+            timestamp = payload.get("timestamp")
+            if isinstance(timestamp, str):
+                return timestamp, True
         if isinstance(payload, str):
+            parsed: Any | None = None
             try:
                 parsed = json.loads(payload)
-                if isinstance(parsed, dict):
-                    answer = parsed.get("answer")
-                    should = parsed.get("should_answer_to_user")
-                    if isinstance(answer, str) and isinstance(should, bool):
-                        return answer, should
             except Exception:
-                pass
+                try:
+                    parsed = ast.literal_eval(payload)
+                except Exception:
+                    parsed = None
+            if isinstance(parsed, dict):
+                answer = parsed.get("answer")
+                should = parsed.get("should_answer_to_user")
+                if isinstance(answer, str) and isinstance(should, bool):
+                    return answer, should
+                result = parsed.get("result")
+                if isinstance(result, str):
+                    return result, True
+                timestamp = parsed.get("timestamp")
+                if isinstance(timestamp, str):
+                    return timestamp, True
             return payload, True
         return str(payload), True
 

@@ -158,6 +158,16 @@ async def test_handler_falls_back_for_plain_text() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handler_extracts_result_from_tool_like_payload_string() -> None:
+    handler, _, _ = _handler("{'ok': True, 'tool': 'current_datetime', 'result': '2026-02-08T13:09:01Z'}")
+
+    response = await handler.handle(_message_event("ping"))
+
+    assert response.text == "2026-02-08T13:09:01Z"
+    assert response.metadata.get("should_reply") is True
+
+
+@pytest.mark.asyncio
 async def test_handler_trims_history_when_limit_is_configured() -> None:
     memory = StubMemory()
     client = StubLLMClient({"answer": "ok", "should_answer_to_user": True})

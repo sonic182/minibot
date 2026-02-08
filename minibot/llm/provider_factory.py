@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 import json
+import re
 
 import logging
 
@@ -79,6 +81,8 @@ class LLMClient:
         tool_map = {binding.tool.name: binding for binding in tool_bindings}
         context = tool_context or ToolContext()
         iterations = 0
+        tool_choice_override: str | dict[str, Any] | None = None
+        tool_intent_retry_attempted = False
         last_tool_messages: list[dict[str, Any]] = []
         recent_tool_names: list[str] = []
         extra_kwargs: dict[str, Any] = {}
@@ -100,6 +104,8 @@ class LLMClient:
                 call_kwargs["temperature"] = self._temperature
             if not self._is_responses_provider:
                 call_kwargs["max_tokens"] = self._max_new_tokens
+            if tool_choice_override is not None:
+                call_kwargs["tool_choice"] = tool_choice_override
             call_kwargs.update(self._openrouter_kwargs())
             call_kwargs.update(extra_kwargs)
 
@@ -108,6 +114,19 @@ class LLMClient:
             if not message:
                 raise RuntimeError("LLM did not return a completion")
             if not message.tool_calls or not tool_map:
+                if (
+                    tool_map
+                    and not message.tool_calls
+                    and not tool_intent_retry_attempted
+                    and self._is_explicit_tool_request(user_message)
+                ):
+                    tool_intent_retry_attempted = True
+                    tool_choice_override = "required"
+                    self._logger.info(
+                        "retrying completion with required tool choice",
+                        extra={"provider": self._provider_name, "model": self._model},
+                    )
+                    continue
                 payload = message.content
                 response_id = self._extract_response_id(response)
                 if response_schema and isinstance(payload, str):
@@ -193,6 +212,9 @@ class LLMClient:
                     },
                 )
             except Exception as exc:
+                error_code = "tool_execution_failed"
+                if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
+                    error_code = "invalid_tool_arguments"
                 self._logger.exception(
                     "tool execution failed",
                     extra={
@@ -203,6 +225,7 @@ class LLMClient:
                 result = {
                     "ok": False,
                     "tool": tool_name,
+                    "error_code": error_code,
                     "error": str(exc),
                 }
             if responses_mode:
@@ -244,7 +267,20 @@ class LLMClient:
             func_name = call.function.get("name")
             arguments = call.function.get("arguments")
             if isinstance(arguments, str):
-                arguments_dict = json.loads(arguments or "{}")
+                arguments_payload = arguments.strip()
+                if not arguments_payload:
+                    arguments_dict = {}
+                else:
+                    try:
+                        arguments_dict = self._decode_tool_arguments(arguments_payload)
+                    except ValueError as exc:
+                        preview = arguments_payload.replace("\n", " ")
+                        if len(preview) > 220:
+                            preview = f"{preview[:220]}..."
+                        raise ValueError(
+                            "Tool call arguments must be a valid JSON object. "
+                            f"Received arguments preview: {preview}"
+                        ) from exc
             else:
                 arguments_dict = dict(arguments or {})
         elif call.name:
@@ -257,6 +293,53 @@ class LLMClient:
         if not isinstance(arguments_dict, dict):
             raise ValueError("Tool call arguments must be an object")
         return func_name, arguments_dict
+
+    @staticmethod
+    def _decode_tool_arguments(arguments_payload: str) -> dict[str, Any]:
+        candidates = [arguments_payload]
+        stripped = arguments_payload.strip()
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            fenced = "\n".join(lines).strip()
+            if fenced:
+                candidates.append(fenced)
+        repaired_candidates: list[str] = []
+        for candidate in candidates:
+            text = candidate.strip()
+            if text.startswith("{"):
+                missing = text.count("{") - text.count("}")
+                if missing > 0:
+                    repaired_candidates.append(text + ("}" * missing))
+        candidates.extend(repaired_candidates)
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                try:
+                    parsed = ast.literal_eval(candidate)
+                except (ValueError, SyntaxError):
+                    continue
+            if isinstance(parsed, dict):
+                return dict(parsed)
+        raise ValueError("Tool call arguments must be valid JSON")
+
+    @staticmethod
+    def _is_explicit_tool_request(user_message: str) -> bool:
+        text = user_message.strip().lower()
+        if not text:
+            return False
+        return bool(
+            re.search(
+                r"\b(use|using|call|execute|run|invoke|do)\b.{0,40}\b(tool|browser|http|datetime|current time)\b",
+                text,
+            )
+            or re.search(r"\bwith\s+tool\b", text)
+            or re.search(r"\busing\s+tool\b", text)
+        )
 
     def _stringify_result(self, result: Any) -> str:
         if isinstance(result, str):

@@ -17,6 +17,7 @@ from minibot.llm.tools.base import ToolBinding, ToolContext
 @dataclass
 class _FakeToolCall:
     id: str
+    type: str = "function"
     function: dict[str, Any] | None = None
     name: str | None = None
     input: dict[str, Any] | None = None
@@ -272,3 +273,109 @@ async def test_generate_includes_openrouter_routing_fields(monkeypatch: pytest.M
     assert call["provider"]["allow_fallbacks"] is True
     assert call["provider"]["data_collection"] == "deny"
     assert call["provider"]["custom_hint"] == "value"
+
+
+def test_parse_tool_call_accepts_python_dict_string() -> None:
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+    call = _FakeToolCall(
+        id="tc-1",
+        function={"name": "current_datetime", "arguments": "{'format': '%Y-%m-%dT%H:%M:%SZ'}"},
+    )
+
+    tool_name, arguments = client._parse_tool_call(call)
+
+    assert tool_name == "current_datetime"
+    assert arguments == {"format": "%Y-%m-%dT%H:%M:%SZ"}
+
+
+def test_parse_tool_call_repairs_unclosed_json_object() -> None:
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+    call = _FakeToolCall(
+        id="tc-1",
+        function={"name": "http_request", "arguments": '{"url": "https://www.ecosbox.com", "method": "GET"'},
+    )
+
+    tool_name, arguments = client._parse_tool_call(call)
+
+    assert tool_name == "http_request"
+    assert arguments == {"url": "https://www.ecosbox.com", "method": "GET"}
+
+
+@pytest.mark.asyncio
+async def test_generate_surfaces_invalid_tool_arguments_for_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _MalformedArgsProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            call = _FakeToolCall(id="tc-1", function={"name": "current_datetime", "arguments": "{invalid"})
+            message = _FakeMessage(content="", tool_calls=[call], original={"role": "assistant", "content": ""})
+            return _FakeResponse(main_response=message, original={"id": "resp-malformed"})
+
+    async def _time_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"timestamp": "unused"}
+
+    tool = Tool(
+        name="current_datetime",
+        description="time",
+        parameters={"type": "object", "properties": {}, "required": []},
+    )
+    binding = ToolBinding(tool=tool, handler=_time_handler)
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openrouter", _MalformedArgsProvider)
+    client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x", max_tool_iterations=2))
+
+    result = await client.generate([], "time", tools=[binding], response_schema={"type": "object"})
+
+    assert isinstance(result.payload, dict)
+    assert "tool-loop safeguard" in result.payload["answer"]
+    assert "current_datetime" in result.payload["answer"]
+    assert result.payload["should_answer_to_user"] is True
+    assert len(client._provider.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_retries_with_required_tool_choice_for_explicit_tool_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from minibot.llm import provider_factory
+
+    class _RetryRequiredProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return _FakeResponse(main_response=_FakeMessage(content="I'll do that now.", tool_calls=None))
+            if len(self.calls) == 2:
+                call = _FakeToolCall(id="tc-1", function={"name": "current_datetime", "arguments": "{}"})
+                return _FakeResponse(
+                    main_response=_FakeMessage(
+                        content="",
+                        tool_calls=[call],
+                        original={"role": "assistant", "content": "", "tool_calls": []},
+                    )
+                )
+            return _FakeResponse(main_response=_FakeMessage(content='{"answer":"done","should_answer_to_user":true}'))
+
+    async def _time_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"timestamp": "2026-02-08T14:00:00Z"}
+
+    tool = Tool(
+        name="current_datetime",
+        description="time",
+        parameters={"type": "object", "properties": {}, "required": []},
+    )
+    binding = ToolBinding(tool=tool, handler=_time_handler)
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openrouter", _RetryRequiredProvider)
+    client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
+
+    result = await client.generate(
+        [],
+        "do execute the tool please",
+        tools=[binding],
+        response_schema={"type": "object"},
+    )
+
+    assert result.payload == {"answer": "done", "should_answer_to_user": True}
+    assert len(client._provider.calls) == 3
+    assert client._provider.calls[1]["tool_choice"] == "required"
