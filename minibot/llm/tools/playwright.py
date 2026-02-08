@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import time
 from typing import Any, Callable
+import unicodedata
 from urllib.parse import urlparse
 
 from llm_async.models import Tool
@@ -22,7 +23,12 @@ _WAIT_UNTIL_VALUES = {"load", "domcontentloaded", "networkidle"}
 _IMAGE_TYPES = {"png", "jpeg"}
 _MAX_GOTO_TIMEOUT_SECONDS = 10
 _DROP_BLOCK_TAGS = ("script", "style", "noscript", "template", "svg", "canvas", "iframe", "object", "embed")
-_DROP_LAYOUT_TAGS = ("nav", "footer", "aside", "form")
+_LOW_SIGNAL_ATTR_PATTERN = re.compile(
+    r"(cookie|consent|banner|ads?|advert|newsletter|subscribe|social|breadcrumb)",
+    re.IGNORECASE,
+)
+_ZERO_WIDTH_TRANSLATION = str.maketrans("", "", "\u200b\u200c\u200d\u2060\ufeff")
+_MAX_LINKS_IN_TEXT_OUTPUT = 30
 
 
 @dataclass
@@ -41,6 +47,7 @@ class _ProcessedSnapshot:
     raw_html: str
     clean_html: str
     clean_text: str
+    links: list[dict[str, str]]
     content_hash: str
     generated_monotonic: float
 
@@ -298,6 +305,8 @@ class PlaywrightTool:
                 result["content_hash"] = snapshot.content_hash
                 if self._config.postprocess_expose_raw:
                     result["raw_html"] = snapshot.raw_html[: self._config.max_text_chars]
+                if snapshot.links:
+                    result["links"] = snapshot.links[:_MAX_LINKS_IN_TEXT_OUTPUT]
             return result
 
     async def _handle_get_text(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
@@ -343,6 +352,8 @@ class PlaywrightTool:
                 result["content_hash"] = snapshot.content_hash
                 result["raw_chars"] = len(snapshot.raw_html)
                 result["clean_chars"] = len(snapshot.clean_text)
+                if snapshot.links:
+                    result["links"] = snapshot.links[:_MAX_LINKS_IN_TEXT_OUTPUT]
             return result
 
     async def _handle_extract(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
@@ -1009,8 +1020,7 @@ class PlaywrightTool:
         return Tool(
             name="browser_close",
             description=(
-                "Close the active browser session for this owner. "
-                "Use only when explicitly requested by the user."
+                "Close the active browser session for this owner. Use only when explicitly requested by the user."
             ),
             parameters={
                 "type": "object",
@@ -1023,10 +1033,7 @@ class PlaywrightTool:
     def _close_quick_schema(self) -> Tool:
         return Tool(
             name="browser_close_session",
-            description=(
-                "Quick alias to close browser session. "
-                "Use only when explicitly requested by the user."
-            ),
+            description=("Quick alias to close browser session. Use only when explicitly requested by the user."),
             parameters={
                 "type": "object",
                 "properties": {},
@@ -1120,29 +1127,72 @@ async def _resolve_ip_addresses(hostname: str) -> list[str]:
 
 
 def _build_processed_snapshot(raw_html: str) -> _ProcessedSnapshot:
-    clean_html = _clean_html_for_llm(raw_html)
+    clean_html, links = _clean_html_for_llm(raw_html)
     clean_text = _extract_text_from_html(clean_html)
     if not clean_text:
         clean_text = _extract_text_from_html(raw_html)
+    clean_text = _normalize_text_for_llm(clean_text)
     content_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()[:16]
     return _ProcessedSnapshot(
         raw_html=raw_html,
         clean_html=clean_html,
         clean_text=clean_text,
+        links=links,
         content_hash=content_hash,
         generated_monotonic=time.monotonic(),
     )
 
 
-def _clean_html_for_llm(raw_html: str) -> str:
+def _clean_html_for_llm(raw_html: str) -> tuple[str, list[dict[str, str]]]:
     if not raw_html:
-        return ""
+        return "", []
+    parser_result = _clean_html_with_selectolax(raw_html)
+    if parser_result is not None:
+        return parser_result
     cleaned = re.sub(r"<!--.*?-->", " ", raw_html, flags=re.IGNORECASE | re.DOTALL)
     cleaned = _drop_wrapped_tags(cleaned, _DROP_BLOCK_TAGS)
-    cleaned = _drop_wrapped_tags(cleaned, _DROP_LAYOUT_TAGS)
     cleaned = _drop_low_signal_blocks(cleaned)
-    cleaned = re.sub(r"[ \t\f\v]+", " ", cleaned)
-    return cleaned.strip()
+    cleaned = re.sub(r"[ \t\f\v]+", " ", cleaned).strip()
+    return cleaned, _extract_links_from_html_fallback(cleaned)
+
+
+def _clean_html_with_selectolax(raw_html: str) -> tuple[str, list[dict[str, str]]] | None:
+    try:
+        from selectolax.parser import HTMLParser
+    except ModuleNotFoundError:
+        return None
+    try:
+        tree = HTMLParser(raw_html)
+    except Exception:
+        return None
+
+    for tag_name in _DROP_BLOCK_TAGS:
+        for node in tree.css(tag_name):
+            node.decompose()
+
+    for node in tree.css("[id], [class]"):
+        attributes = node.attributes or {}
+        attr_blob = f"{attributes.get('id', '')} {attributes.get('class', '')}".strip()
+        if attr_blob and _LOW_SIGNAL_ATTR_PATTERN.search(attr_blob):
+            node.decompose()
+
+    links: list[dict[str, str]] = []
+    seen_hrefs: set[str] = set()
+    for anchor in tree.css("a[href]"):
+        attributes = anchor.attributes or {}
+        raw_href = attributes.get("href", "")
+        if not isinstance(raw_href, str):
+            continue
+        href = html.unescape(raw_href.strip())
+        if not href or href.startswith("javascript:") or href in seen_hrefs:
+            continue
+        seen_hrefs.add(href)
+        anchor_text = _normalize_text_for_llm(anchor.text(separator=" ", strip=True))
+        links.append({"href": href, "text": anchor_text[:160]})
+
+    cleaned_html = tree.html or ""
+    cleaned = re.sub(r"[ \t\f\v]+", " ", cleaned_html).strip()
+    return cleaned, links
 
 
 def _drop_wrapped_tags(content: str, tag_names: tuple[str, ...]) -> str:
@@ -1165,14 +1215,53 @@ def _drop_low_signal_blocks(content: str) -> str:
     return cleaned
 
 
+def _extract_links_from_html_fallback(content: str) -> list[dict[str, str]]:
+    if not content:
+        return []
+    pattern = re.compile(
+        r"<a\b[^>]*href\s*=\s*['\"](?P<href>[^'\"]+)['\"][^>]*>(?P<body>.*?)</a>", re.IGNORECASE | re.DOTALL
+    )
+    links: list[dict[str, str]] = []
+    seen_hrefs: set[str] = set()
+    for match in pattern.finditer(content):
+        href = html.unescape(match.group("href").strip())
+        if not href or href in seen_hrefs or href.startswith("javascript:"):
+            continue
+        seen_hrefs.add(href)
+        body = re.sub(r"<[^>]+>", " ", match.group("body"))
+        text = _normalize_text_for_llm(body)[:160]
+        links.append({"href": href, "text": text})
+    return links
+
+
 def _extract_text_from_html(source_html: str) -> str:
     if not source_html:
         return ""
+    without_layout = re.sub(
+        r"<(?P<tag>nav|footer|aside|form)\b[^>]*>.*?</(?P=tag)\s*>",
+        " ",
+        source_html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     block_tags = "p|div|section|article|li|h1|h2|h3|h4|h5|h6|tr|td|th|br|main"
-    block_split = re.sub(rf"</?(?:{block_tags})\b[^>]*>", "\n", source_html, flags=re.IGNORECASE)
+    block_split = re.sub(rf"</?(?:{block_tags})\b[^>]*>", "\n", without_layout, flags=re.IGNORECASE)
     stripped = re.sub(r"<[^>]+>", " ", block_split)
     unescaped = html.unescape(stripped)
     lines = [re.sub(r"\s+", " ", line).strip() for line in unescaped.splitlines()]
+    lines = [line for line in lines if line]
+    return "\n".join(lines)
+
+
+def _normalize_text_for_llm(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.translate(_ZERO_WIDTH_TRANSLATION)
+    normalized = normalized.replace("\xa0", " ")
+    normalized = unicodedata.normalize("NFKC", normalized)
+    normalized = normalized.replace("•", " | ")
+    normalized = re.sub(r"[ \t\f\v]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    lines = [line.strip() for line in normalized.splitlines()]
     lines = [line for line in lines if line]
     return "\n".join(lines)
 

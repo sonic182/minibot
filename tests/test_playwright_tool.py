@@ -83,7 +83,11 @@ class _NoisyPage(_FakePage):
         return (
             "<html><body>"
             "<nav>Menu links</nav>"
-            "<article><h1>Headline</h1><p>Important body text</p></article>"
+            "<article>"
+            "<h1>Headline</h1>"
+            "<a href='/listing?id=123&amp;ref=srp'>Toyota\u200b RAV 4</a>"
+            "<p>Important&nbsp;body text • gasolina</p>"
+            "</article>"
             "<script>console.log('tracking')</script>"
             "<footer>Footer links</footer>"
             "</body></html>"
@@ -249,7 +253,7 @@ async def test_playwright_tool_open_extract_navigate_info_and_close(monkeypatch:
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
     config = PlaywrightToolConfig(
         enabled=True,
@@ -350,7 +354,7 @@ async def test_playwright_open_retries_networkidle_timeout_with_domcontentloaded
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
     config = PlaywrightToolConfig(
         enabled=True,
@@ -384,7 +388,7 @@ async def test_playwright_open_returns_partial_result_when_navigation_times_out(
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
     config = PlaywrightToolConfig(
         enabled=True,
@@ -417,7 +421,7 @@ async def test_playwright_open_caps_navigation_timeout_to_10_seconds(monkeypatch
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
     config = PlaywrightToolConfig(
         enabled=True,
@@ -449,7 +453,7 @@ async def test_playwright_get_text_and_html_use_postprocessed_snapshot(monkeypat
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
     config = PlaywrightToolConfig(
         enabled=True,
@@ -477,7 +481,6 @@ async def test_playwright_get_text_and_html_use_postprocessed_snapshot(monkeypat
     assert html_result["ok"] is True
     assert html_result["cleaned"] is True
     assert "<script" not in html_result["html"].lower()
-    assert "<nav" not in html_result["html"].lower()
 
     text_result = await bindings["browser_get_text"].handler(
         {"offset": 0, "limit": 5000, "offset_type": "characters"},
@@ -487,8 +490,12 @@ async def test_playwright_get_text_and_html_use_postprocessed_snapshot(monkeypat
     assert text_result["cleaned"] is True
     assert "Headline" in text_result["text"]
     assert "Important body text" in text_result["text"]
+    assert " | gasolina" in text_result["text"]
     assert "tracking" not in text_result["text"]
     assert "Menu links" not in text_result["text"]
+    assert text_result["links"]
+    assert text_result["links"][0]["href"] == "/listing?id=123&ref=srp"
+    assert "\u200b" not in text_result["links"][0]["text"]
     assert isinstance(text_result.get("content_hash"), str)
 
 
@@ -498,7 +505,7 @@ async def test_playwright_tool_enforces_allowed_domains(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
     config = PlaywrightToolConfig(
         enabled=True,
@@ -526,8 +533,9 @@ async def test_playwright_tool_blocks_private_networks(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
+
     async def _fake_resolve(hostname: str) -> list[str]:
         del hostname
         return ["127.0.0.1"]
@@ -555,7 +563,7 @@ async def test_playwright_tool_extract_returns_structured_timeout(monkeypatch: p
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
     config = PlaywrightToolConfig(
         enabled=True,
@@ -589,7 +597,7 @@ async def test_playwright_actions_report_when_session_not_open(monkeypatch: pyte
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
     config = PlaywrightToolConfig(enabled=True, allow_http=True, block_private_networks=False)
     bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
@@ -623,7 +631,7 @@ async def test_playwright_tool_retries_without_channel_on_chromium(monkeypatch: 
     monkeypatch.setattr(
         playwright_module,
         "_load_playwright",
-        lambda: (lambda: _FakeManager(fake_playwright)),
+        lambda: lambda: _FakeManager(fake_playwright),
     )
     config = PlaywrightToolConfig(
         enabled=True,
