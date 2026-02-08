@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from typing import Any, Sequence
 
 import json
-from typing import Any
 
 from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
@@ -33,8 +32,35 @@ class LLMMessageHandler:
     async def handle(self, event: MessageEvent) -> ChannelResponse:
         message = event.message
         session_id = session_id_for(message)
-        await self._memory.append_history(session_id, "user", message.text)
+        model_text, model_user_content = self._build_model_user_input(message)
+        if message.attachments:
+            self._logger.debug(
+                "prepared multimodal message",
+                extra={
+                    "channel": message.channel,
+                    "chat_id": message.chat_id,
+                    "user_id": message.user_id,
+                    "attachment_count": len(message.attachments),
+                    "attachment_types": [
+                        str(attachment.get("type", "unknown")) for attachment in message.attachments
+                    ],
+                    "responses_provider": self._llm_client.is_responses_provider(),
+                },
+            )
+        await self._memory.append_history(session_id, "user", self._build_history_user_entry(message, model_text))
         await self._enforce_history_limit(session_id)
+
+        if message.attachments and not self._llm_client.is_responses_provider():
+            answer = "Media inputs are only supported when `llm.provider` is `openai_responses`."
+            await self._memory.append_history(session_id, "assistant", answer)
+            await self._enforce_history_limit(session_id)
+            chat_id = message.chat_id or message.user_id or 0
+            return ChannelResponse(
+                channel=message.channel,
+                chat_id=chat_id,
+                text=answer,
+                metadata={"should_reply": True},
+            )
 
         history = list(await self._memory.get_history(session_id))
         owner_id = resolve_owner_id(message, self._default_owner_id)
@@ -48,7 +74,8 @@ class LLMMessageHandler:
         try:
             generation = await self._llm_client.generate(
                 history,
-                message.text,
+                model_text,
+                user_content=model_user_content,
                 tools=self._tools,
                 tool_context=tool_context,
                 response_schema=self._response_schema(),
@@ -67,6 +94,43 @@ class LLMMessageHandler:
         return ChannelResponse(
             channel=message.channel, chat_id=chat_id, text=answer, metadata={"should_reply": should_reply}
         )
+
+    def _build_model_user_input(self, message: ChannelMessage) -> tuple[str, str | list[dict[str, Any]] | None]:
+        prompt_text = message.text.strip() if message.text else ""
+        if not message.attachments:
+            return prompt_text, None
+
+        resolved_prompt = prompt_text or "Please analyze the attached media and summarize the key information."
+        parts: list[dict[str, Any]] = [{"type": "input_text", "text": resolved_prompt}]
+        parts.extend(message.attachments)
+        return resolved_prompt, parts
+
+    def _build_history_user_entry(self, message: ChannelMessage, model_text: str) -> str:
+        base_text = message.text.strip() if message.text else ""
+        attachment_summary = self._summarize_attachments_for_memory(message.attachments)
+        if not attachment_summary:
+            return base_text
+        visible_text = base_text or model_text
+        if visible_text:
+            return f"{visible_text}\nAttachments: {attachment_summary}"
+        return f"Attachments: {attachment_summary}"
+
+    def _summarize_attachments_for_memory(self, attachments: Sequence[dict[str, Any]]) -> str:
+        summaries: list[str] = []
+        for attachment in attachments:
+            attachment_type = attachment.get("type")
+            if attachment_type == "input_image":
+                summaries.append("image")
+                continue
+            if attachment_type == "input_file":
+                filename = attachment.get("filename")
+                if isinstance(filename, str) and filename.strip():
+                    summaries.append(f"file:{filename.strip()}")
+                else:
+                    summaries.append("file")
+                continue
+            summaries.append("attachment")
+        return ", ".join(summaries)
 
     def _response_schema(self) -> dict[str, Any]:
         return {

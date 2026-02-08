@@ -10,6 +10,12 @@ allowed_user_ids = []
 require_authorized = false
 mode = "long_polling"
 webhook_url = ""
+media_enabled = true
+max_photo_bytes = 5242880
+max_document_bytes = 10485760
+max_total_media_bytes = 12582912
+max_attachments_per_message = 3
+allowed_document_mime_types = []
 
 [llm]
 provider = "openai"

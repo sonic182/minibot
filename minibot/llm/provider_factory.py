@@ -49,6 +49,7 @@ class LLMClient:
         self,
         history: Sequence[MemoryEntry],
         user_message: str,
+        user_content: str | list[dict[str, Any]] | None = None,
         tools: Sequence[ToolBinding] | None = None,
         tool_context: ToolContext | None = None,
         response_schema: dict[str, Any] | None = None,
@@ -59,7 +60,10 @@ class LLMClient:
             {"role": "system", "content": self._system_prompt},
         ]
         messages.extend({"role": entry.role, "content": entry.content} for entry in history)
-        messages.append({"role": "user", "content": user_message})
+        final_user_content: str | list[dict[str, Any]] = user_message
+        if user_content is not None:
+            final_user_content = user_content
+        messages.append({"role": "user", "content": final_user_content})
 
         if not self._provider.api_key:
             self._logger.warning("LLM provider key missing, falling back to echo", extra={"component": "llm"})

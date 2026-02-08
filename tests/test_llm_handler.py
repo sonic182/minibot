@@ -20,6 +20,7 @@ def _message(**overrides):
         "chat_id": None,
         "message_id": None,
         "text": "hi",
+        "attachments": [],
         "metadata": {},
     }
     base.update(overrides)
@@ -169,3 +170,56 @@ async def test_handler_trims_history_when_limit_is_configured() -> None:
     session_id = session_id_for(event.message)
     assert await memory.count_history(session_id) == 2
     assert memory.trim_calls
+
+
+@pytest.mark.asyncio
+async def test_handler_builds_multimodal_input_for_responses_provider() -> None:
+    memory = StubMemory()
+    client = StubLLMClient({"answer": "done", "should_answer_to_user": True}, is_responses=True)
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+    event = MessageEvent(
+        message=_message(
+            text="what is in this image?",
+            attachments=[
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/jpeg;base64,QUJD",
+                }
+            ],
+            user_id=1,
+            chat_id=1,
+        )
+    )
+
+    response = await handler.handle(event)
+
+    assert response.text == "done"
+    generate_call = client.calls[-1]["kwargs"]
+    user_content = generate_call.get("user_content")
+    assert isinstance(user_content, list)
+    assert user_content[0]["type"] == "input_text"
+    assert user_content[1]["type"] == "input_image"
+    session_id = session_id_for(event.message)
+    stored = [entry.content for entry in memory._store[session_id]]
+    assert any("Attachments: image" in value for value in stored)
+    assert all("base64" not in value for value in stored)
+
+
+@pytest.mark.asyncio
+async def test_handler_rejects_media_for_non_responses_provider() -> None:
+    memory = StubMemory()
+    client = StubLLMClient({"answer": "unused", "should_answer_to_user": True}, is_responses=False)
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+    event = MessageEvent(
+        message=_message(
+            text="",
+            attachments=[{"type": "input_file", "filename": "a.pdf", "file_data": "QUJD"}],
+            user_id=1,
+            chat_id=1,
+        )
+    )
+
+    response = await handler.handle(event)
+
+    assert "openai_responses" in response.text
+    assert not client.calls

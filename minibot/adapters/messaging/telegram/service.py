@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import io
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramBadRequest
@@ -54,13 +56,42 @@ class TelegramService:
             )
             return
 
+        attachments, attachment_errors = await self._build_attachments(message)
+        if attachments:
+            self._logger.info(
+                "received telegram attachments",
+                extra={
+                    "chat_id": message.chat.id,
+                    "user_id": message.from_user.id if message.from_user else None,
+                    "attachment_count": len(attachments),
+                },
+            )
+        if attachment_errors:
+            self._logger.warning(
+                "telegram attachments skipped",
+                extra={
+                    "chat_id": message.chat.id,
+                    "user_id": message.from_user.id if message.from_user else None,
+                    "errors": attachment_errors,
+                },
+            )
+
+        text = message.text or message.caption or ""
+        if not text and not attachments and attachment_errors:
+            await self._bot.send_message(chat_id=message.chat.id, text="I could not process the attachment you sent.")
+            return
+
         channel_message = ChannelMessage(
             channel="telegram",
             user_id=message.from_user.id if message.from_user else None,
             chat_id=message.chat.id,
             message_id=message.message_id,
-            text=message.text or message.caption or "",
-            metadata={"username": getattr(message.from_user, "username", None)},
+            text=text,
+            attachments=attachments,
+            metadata={
+                "username": getattr(message.from_user, "username", None),
+                "attachment_errors": attachment_errors,
+            },
         )
         self._logger.info(
             "received message",
@@ -70,6 +101,105 @@ class TelegramService:
             },
         )
         await self._event_bus.publish(MessageEvent(message=channel_message))
+
+    async def _build_attachments(self, message: TelegramMessage) -> tuple[list[dict[str, Any]], list[str]]:
+        if not self._config.media_enabled:
+            return [], []
+
+        attachments: list[dict[str, Any]] = []
+        errors: list[str] = []
+        total_size = 0
+
+        if message.photo and len(attachments) < self._config.max_attachments_per_message:
+            photo = message.photo[-1]
+            photo_bytes = await self._download_media_bytes(photo)
+            if photo_bytes is None:
+                errors.append("photo_download_failed")
+            elif len(photo_bytes) > self._config.max_photo_bytes:
+                errors.append("photo_too_large")
+            elif total_size + len(photo_bytes) > self._config.max_total_media_bytes:
+                errors.append("total_media_too_large")
+            else:
+                data_url = self._to_data_url(photo_bytes, "image/jpeg")
+                attachments.append({"type": "input_image", "image_url": data_url})
+                total_size += len(photo_bytes)
+                self._logger.debug(
+                    "telegram photo converted to input_image",
+                    extra={
+                        "photo_bytes": len(photo_bytes),
+                    },
+                )
+
+        if message.document and len(attachments) < self._config.max_attachments_per_message:
+            document = message.document
+            mime_type = document.mime_type or "application/octet-stream"
+            if not self._is_allowed_document_mime(mime_type):
+                errors.append("document_mime_not_allowed")
+                return attachments, errors
+
+            document_bytes = await self._download_media_bytes(document)
+            if document_bytes is None:
+                errors.append("document_download_failed")
+            elif len(document_bytes) > self._config.max_document_bytes:
+                errors.append("document_too_large")
+            elif total_size + len(document_bytes) > self._config.max_total_media_bytes:
+                errors.append("total_media_too_large")
+            else:
+                filename = document.file_name or f"document_{document.file_unique_id}"
+                if mime_type.lower().startswith("image/"):
+                    attachments.append(
+                        {
+                            "type": "input_image",
+                            "image_url": self._to_data_url(document_bytes, mime_type),
+                        }
+                    )
+                    self._logger.debug(
+                        "telegram document converted to input_image",
+                        extra={
+                            "document_name": filename,
+                            "mime_type": mime_type,
+                            "document_bytes": len(document_bytes),
+                        },
+                    )
+                else:
+                    attachments.append(
+                        {
+                            "type": "input_file",
+                            "filename": filename,
+                            "file_data": base64.b64encode(document_bytes).decode("ascii"),
+                        }
+                    )
+                    self._logger.debug(
+                        "telegram document converted to input_file",
+                        extra={
+                            "document_name": filename,
+                            "mime_type": mime_type,
+                            "document_bytes": len(document_bytes),
+                        },
+                    )
+                total_size += len(document_bytes)
+
+        return attachments, errors
+
+    async def _download_media_bytes(self, media: Any) -> bytes | None:
+        buffer = io.BytesIO()
+        try:
+            await self._bot.download(media, destination=buffer)
+        except Exception:
+            self._logger.exception("telegram media download failed")
+            return None
+        return buffer.getvalue()
+
+    @staticmethod
+    def _to_data_url(content: bytes, mime_type: str) -> str:
+        encoded = base64.b64encode(content).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+
+    def _is_allowed_document_mime(self, mime_type: str) -> bool:
+        allowed = [entry.strip().lower() for entry in self._config.allowed_document_mime_types if entry.strip()]
+        if not allowed:
+            return True
+        return mime_type.lower() in allowed
 
     async def _publish_outgoing(self) -> None:
         async for event in self._outgoing_subscription:

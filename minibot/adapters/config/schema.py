@@ -20,6 +20,12 @@ class TelegramChannelConfig(BaseModel):
     mode: str = Field(default="long_polling")
     webhook_url: Optional[str] = None
     require_authorized: bool = False
+    media_enabled: bool = True
+    max_photo_bytes: PositiveInt = 5242880
+    max_document_bytes: PositiveInt = 10485760
+    max_total_media_bytes: PositiveInt = 12582912
+    max_attachments_per_message: PositiveInt = 3
+    allowed_document_mime_types: List[str] = Field(default_factory=list)
 
 
 class LLMMConfig(BaseModel):

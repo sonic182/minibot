@@ -11,6 +11,7 @@ class ChannelMessage(BaseModel):
     chat_id: Optional[int]
     message_id: Optional[int]
     text: str
+    attachments: list[Dict[str, Any]] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

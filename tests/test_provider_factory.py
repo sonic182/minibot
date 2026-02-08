@@ -126,3 +126,20 @@ async def test_generate_stops_after_tool_loop_limit(monkeypatch: pytest.MonkeyPa
     assert isinstance(result.payload, dict)
     assert "tool-loop safeguard" in result.payload["answer"]
     assert result.payload["should_answer_to_user"] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_uses_user_content_when_provided(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _FakeProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+
+    multimodal_content = [
+        {"type": "input_text", "text": "describe"},
+        {"type": "input_image", "image_url": "data:image/jpeg;base64,QUJD"},
+    ]
+    await client.generate([], "describe", user_content=multimodal_content)
+
+    call = client._provider.calls[-1]
+    assert call["messages"][-1]["content"] == multimodal_content
