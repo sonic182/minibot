@@ -159,7 +159,7 @@ async def test_build_attachments_generates_file_part() -> None:
     assert len(attachments) == 1
     assert attachments[0]["type"] == "input_file"
     assert attachments[0]["filename"] == "report.pdf"
-    assert attachments[0]["file_data"] == "cGRmLWJ5dGVz"
+    assert attachments[0]["file_data"].startswith("data:application/pdf;base64,")
 
 
 @pytest.mark.asyncio

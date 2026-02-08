@@ -166,7 +166,7 @@ class TelegramService:
                         {
                             "type": "input_file",
                             "filename": filename,
-                            "file_data": base64.b64encode(document_bytes).decode("ascii"),
+                            "file_data": self._to_data_url(document_bytes, mime_type),
                         }
                     )
                     self._logger.debug(
@@ -175,6 +175,7 @@ class TelegramService:
                             "document_name": filename,
                             "mime_type": mime_type,
                             "document_bytes": len(document_bytes),
+                            "file_data_prefix": f"data:{mime_type};base64,",
                         },
                     )
                 total_size += len(document_bytes)
