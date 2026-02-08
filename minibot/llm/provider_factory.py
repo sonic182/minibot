@@ -48,6 +48,7 @@ class LLMClient:
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
         self._openrouter_models = list(getattr(getattr(config, "openrouter", None), "models", []) or [])
         self._openrouter_provider = self._build_openrouter_provider_payload(config)
+        self._openrouter_plugins = list(getattr(getattr(config, "openrouter", None), "plugins", []) or [])
         self._is_responses_provider = isinstance(self._provider, OpenAIResponsesProvider)
         self._logger = logging.getLogger("minibot.llm")
 
@@ -181,6 +182,16 @@ class LLMClient:
 
     def model_name(self) -> str:
         return self._model
+
+    def supports_media_inputs(self) -> bool:
+        return self._provider_name in {"openai_responses", "openai", "openrouter"}
+
+    def media_input_mode(self) -> str:
+        if self._provider_name == "openai_responses":
+            return "responses"
+        if self._provider_name in {"openai", "openrouter"}:
+            return "chat_completions"
+        return "none"
 
     @staticmethod
     def _extract_response_id(response: Any) -> str | None:
@@ -422,6 +433,8 @@ class LLMClient:
             kwargs["models"] = self._openrouter_models
         if self._openrouter_provider:
             kwargs["provider"] = self._openrouter_provider
+        if self._openrouter_plugins:
+            kwargs["plugins"] = self._openrouter_plugins
         return kwargs
 
     @staticmethod

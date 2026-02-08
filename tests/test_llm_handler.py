@@ -78,11 +78,18 @@ class StubMemory:
 
 
 class StubLLMClient:
-    def __init__(self, payload: Any, response_id: str | None = None, is_responses: bool = False) -> None:
+    def __init__(
+        self,
+        payload: Any,
+        response_id: str | None = None,
+        is_responses: bool = False,
+        provider: str = "openai",
+    ) -> None:
         self.payload = payload
         self.response_id = response_id
         self.calls: list[dict[str, Any]] = []
         self._is_responses = is_responses
+        self._provider = provider
 
     async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
         self.calls.append({"args": args, "kwargs": kwargs})
@@ -91,15 +98,26 @@ class StubLLMClient:
     def is_responses_provider(self) -> bool:
         return self._is_responses
 
+    def supports_media_inputs(self) -> bool:
+        return self._provider in {"openai_responses", "openai", "openrouter"}
+
+    def media_input_mode(self) -> str:
+        if self._provider == "openai_responses":
+            return "responses"
+        if self._provider in {"openai", "openrouter"}:
+            return "chat_completions"
+        return "none"
+
 
 def _handler(
     llm_payload: Any,
     *,
     response_id: str | None = None,
     responses_provider: bool = False,
+    provider: str = "openai",
 ) -> tuple[LLMMessageHandler, StubLLMClient, StubMemory]:
     memory = StubMemory()
-    client = StubLLMClient(llm_payload, response_id=response_id, is_responses=responses_provider)
+    client = StubLLMClient(llm_payload, response_id=response_id, is_responses=responses_provider, provider=provider)
     handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
     return handler, client, memory
 
@@ -185,7 +203,11 @@ async def test_handler_trims_history_when_limit_is_configured() -> None:
 @pytest.mark.asyncio
 async def test_handler_builds_multimodal_input_for_responses_provider() -> None:
     memory = StubMemory()
-    client = StubLLMClient({"answer": "done", "should_answer_to_user": True}, is_responses=True)
+    client = StubLLMClient(
+        {"answer": "done", "should_answer_to_user": True},
+        is_responses=True,
+        provider="openai_responses",
+    )
     handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
     event = MessageEvent(
         message=_message(
@@ -218,7 +240,11 @@ async def test_handler_builds_multimodal_input_for_responses_provider() -> None:
 @pytest.mark.asyncio
 async def test_handler_rejects_media_for_non_responses_provider() -> None:
     memory = StubMemory()
-    client = StubLLMClient({"answer": "unused", "should_answer_to_user": True}, is_responses=False)
+    client = StubLLMClient(
+        {"answer": "unused", "should_answer_to_user": True},
+        is_responses=False,
+        provider="claude",
+    )
     handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
     event = MessageEvent(
         message=_message(
@@ -231,5 +257,50 @@ async def test_handler_rejects_media_for_non_responses_provider() -> None:
 
     response = await handler.handle(event)
 
-    assert "openai_responses" in response.text
+    assert "openrouter" in response.text
     assert not client.calls
+
+
+@pytest.mark.asyncio
+async def test_handler_builds_multimodal_input_for_openrouter_chat_completions() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(
+        {"answer": "done", "should_answer_to_user": True},
+        is_responses=False,
+        provider="openrouter",
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+    event = MessageEvent(
+        message=_message(
+            text="summarize",
+            attachments=[
+                {"type": "input_image", "image_url": "data:image/jpeg;base64,QUJD"},
+                {
+                    "type": "input_file",
+                    "filename": "doc.pdf",
+                    "file_data": "data:application/pdf;base64,QUJD",
+                },
+            ],
+            user_id=1,
+            chat_id=1,
+        )
+    )
+
+    response = await handler.handle(event)
+
+    assert response.text == "done"
+    generate_call = client.calls[-1]["kwargs"]
+    user_content = generate_call.get("user_content")
+    assert isinstance(user_content, list)
+    assert user_content[0] == {"type": "text", "text": "summarize"}
+    assert user_content[1] == {
+        "type": "image_url",
+        "image_url": {"url": "data:image/jpeg;base64,QUJD"},
+    }
+    assert user_content[2] == {
+        "type": "file",
+        "file": {
+            "filename": "doc.pdf",
+            "file_data": "data:application/pdf;base64,QUJD",
+        },
+    }

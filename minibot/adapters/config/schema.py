@@ -48,6 +48,7 @@ class OpenRouterProviderRoutingConfig(BaseModel):
 class OpenRouterLLMConfig(BaseModel):
     models: List[str] = Field(default_factory=list)
     provider: OpenRouterProviderRoutingConfig | None = None
+    plugins: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class LLMMConfig(BaseModel):

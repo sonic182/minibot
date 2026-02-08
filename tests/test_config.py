@@ -16,6 +16,7 @@ api_key = "secret"
 
 [llm.openrouter]
 models = ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
+plugins = [{ id = "file-parser", pdf = { engine = "pdf-text" } }]
 
 [llm.openrouter.provider]
 order = ["anthropic", "openai"]
@@ -32,6 +33,7 @@ bot_token = "token"
     assert settings.runtime.log_level == "DEBUG"
     assert settings.llm.api_key == "secret"
     assert settings.llm.openrouter.models == ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
+    assert settings.llm.openrouter.plugins == [{"id": "file-parser", "pdf": {"engine": "pdf-text"}}]
     assert settings.llm.openrouter.provider is not None
     assert settings.llm.openrouter.provider.order == ["anthropic", "openai"]
     assert settings.llm.openrouter.provider.provider_extra["custom_hint"] == "value"

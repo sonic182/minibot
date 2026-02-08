@@ -256,6 +256,7 @@ async def test_generate_includes_openrouter_routing_fields(monkeypatch: pytest.M
             model="openrouter/auto",
             openrouter={
                 "models": ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"],
+                "plugins": [{"id": "file-parser", "pdf": {"engine": "pdf-text"}}],
                 "provider": {
                     "order": ["anthropic", "openai"],
                     "allow_fallbacks": True,
@@ -274,6 +275,23 @@ async def test_generate_includes_openrouter_routing_fields(monkeypatch: pytest.M
     assert call["provider"]["allow_fallbacks"] is True
     assert call["provider"]["data_collection"] == "deny"
     assert call["provider"]["custom_hint"] == "value"
+    assert call["plugins"] == [{"id": "file-parser", "pdf": {"engine": "pdf-text"}}]
+
+
+def test_media_support_modes() -> None:
+    openrouter_client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
+    openai_client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+    responses_client = LLMClient(LLMMConfig(provider="openai_responses", api_key="secret", model="x"))
+    claude_client = LLMClient(LLMMConfig(provider="claude", api_key="secret", model="x"))
+
+    assert openrouter_client.supports_media_inputs() is True
+    assert openrouter_client.media_input_mode() == "chat_completions"
+    assert openai_client.supports_media_inputs() is True
+    assert openai_client.media_input_mode() == "chat_completions"
+    assert responses_client.supports_media_inputs() is True
+    assert responses_client.media_input_mode() == "responses"
+    assert claude_client.supports_media_inputs() is False
+    assert claude_client.media_input_mode() == "none"
 
 
 def test_parse_tool_call_accepts_python_dict_string() -> None:

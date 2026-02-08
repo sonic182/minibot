@@ -38,6 +38,8 @@ reasoning_effort = "medium"
 [llm.openrouter]
 # Optional model pool for fallback routing.
 # models = ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
+# Optional OpenRouter plugins (for example PDF parsing engine).
+# plugins = [{ id = "file-parser", pdf = { engine = "pdf-text" } }]
 
 [llm.openrouter.provider]
 # order = ["anthropic", "openai"]
