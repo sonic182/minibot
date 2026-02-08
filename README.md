@@ -26,6 +26,32 @@ MiniBot follows a lightweight hexagonal layout described in detail in `ARCHITECT
 Tests under `tests/` mirror this structure so every layer has a corresponding suite. This “mini hex” keeps the domain
 pure while letting adapters evolve independently.
 
+Incoming Message Flow
+---------------------
+
+```mermaid
+flowchart TD
+    subgraph TCHAN[Telegram channel]
+        TG[Telegram Update]
+        AD[Telegram Adapter]
+        SEND[Telegram sendMessage]
+    end
+
+    TG --> AD
+    AD --> EV[EventBus MessageEvent]
+    EV --> DP[Dispatcher]
+    DP --> HD[LLMMessageHandler]
+    HD --> MEM[(Memory Backend)]
+    HD --> LLM[LLM Client + Tools]
+    LLM --> HD
+    HD --> RESP[ChannelResponse]
+    RESP --> DEC{should_reply?}
+    DEC -- yes --> OUT[EventBus OutboundEvent]
+    OUT --> AD
+    AD --> SEND[Telegram sendMessage]
+    DEC -- no --> SKIP[No outbound message]
+```
+
 Quickstart
 ----------
 
