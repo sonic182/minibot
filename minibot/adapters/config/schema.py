@@ -2,9 +2,30 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt
+from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter
+
+
+_BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
+
+
+def _coerce_byte_size(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("byte size must be a positive integer or size string")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        raise ValueError("byte size numeric values must be whole numbers")
+    try:
+        return int(_BYTE_SIZE_ADAPTER.validate_python(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid byte size value") from exc
+
+
+ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
 
 
 class RuntimeConfig(BaseModel):
@@ -21,9 +42,9 @@ class TelegramChannelConfig(BaseModel):
     webhook_url: Optional[str] = None
     require_authorized: bool = False
     media_enabled: bool = True
-    max_photo_bytes: PositiveInt = 5242880
-    max_document_bytes: PositiveInt = 10485760
-    max_total_media_bytes: PositiveInt = 12582912
+    max_photo_bytes: ByteSizeValue = 5242880
+    max_document_bytes: ByteSizeValue = 10485760
+    max_total_media_bytes: ByteSizeValue = 12582912
     max_attachments_per_message: PositiveInt = 3
     allowed_document_mime_types: List[str] = Field(default_factory=list)
 
@@ -82,7 +103,7 @@ class KeyValueMemoryConfig(BaseModel):
 class HTTPClientToolConfig(BaseModel):
     enabled: bool = False
     timeout_seconds: PositiveInt = 10
-    max_bytes: PositiveInt = 16384
+    max_bytes: ByteSizeValue = 16384
     response_processing_mode: Literal["none", "auto"] = "auto"
     max_chars: PositiveInt | None = None
     normalize_whitespace: bool = True
@@ -129,8 +150,8 @@ class PythonExecToolConfig(BaseModel):
     sandbox_mode: Literal["none", "basic", "rlimit", "cgroup", "jail"] = "basic"
     default_timeout_seconds: PositiveInt = 8
     max_timeout_seconds: PositiveInt = 20
-    max_output_bytes: PositiveInt = 64000
-    max_code_bytes: PositiveInt = 32000
+    max_output_bytes: ByteSizeValue = 64000
+    max_code_bytes: ByteSizeValue = 32000
     pass_parent_env: bool = False
     env_allowlist: List[str] = Field(default_factory=lambda: ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"])
     rlimit: PythonExecRLimitConfig = PythonExecRLimitConfig()
@@ -168,7 +189,7 @@ class PlaywrightToolConfig(BaseModel):
     navigation_timeout_seconds: PositiveInt = 20
     action_timeout_seconds: PositiveInt = 10
     max_text_chars: PositiveInt = 6000
-    max_screenshot_bytes: PositiveInt = 2000000
+    max_screenshot_bytes: ByteSizeValue = 2000000
     postprocess_outputs: bool = True
     postprocess_expose_raw: bool = False
     postprocess_snapshot_ttl_seconds: PositiveInt = 30

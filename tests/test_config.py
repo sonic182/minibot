@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from minibot.adapters.config.loader import load_settings
 
 
@@ -38,3 +40,59 @@ bot_token = "token"
     assert settings.llm.openrouter.provider.order == ["anthropic", "openai"]
     assert settings.llm.openrouter.provider.provider_extra["custom_hint"] == "value"
     assert settings.channels["telegram"].bot_token == "token"
+
+
+def test_load_settings_accepts_human_readable_byte_sizes(tmp_path: Path) -> None:
+    config_file = tmp_path / "bot.toml"
+    config_file.write_text(
+        """
+[llm]
+provider = "openai"
+api_key = "secret"
+
+[channels.telegram]
+bot_token = "token"
+max_photo_bytes = "5MB"
+max_document_bytes = "10MB"
+max_total_media_bytes = "12MB"
+
+[tools.http_client]
+enabled = true
+max_bytes = "16KB"
+
+[tools.playwright]
+enabled = true
+max_screenshot_bytes = "2MB"
+
+[tools.python_exec]
+max_output_bytes = "64KB"
+max_code_bytes = "32KB"
+"""
+    )
+
+    settings = load_settings(config_file)
+    assert settings.channels["telegram"].max_photo_bytes == 5_000_000
+    assert settings.channels["telegram"].max_document_bytes == 10_000_000
+    assert settings.channels["telegram"].max_total_media_bytes == 12_000_000
+    assert settings.tools.http_client.max_bytes == 16_000
+    assert settings.tools.playwright.max_screenshot_bytes == 2_000_000
+    assert settings.tools.python_exec.max_output_bytes == 64_000
+    assert settings.tools.python_exec.max_code_bytes == 32_000
+
+
+def test_load_settings_rejects_invalid_byte_size(tmp_path: Path) -> None:
+    config_file = tmp_path / "bot.toml"
+    config_file.write_text(
+        """
+[llm]
+provider = "openai"
+api_key = "secret"
+
+[channels.telegram]
+bot_token = "token"
+max_photo_bytes = "nope"
+"""
+    )
+
+    with pytest.raises(ValueError):
+        load_settings(config_file)

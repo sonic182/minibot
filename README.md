@@ -57,6 +57,8 @@ Configuration Reference
 
 Use `config.example.toml` as the source of truth—copy it to `config.toml` and update secrets before launching. Key sections:
 
+- Byte-size fields accept raw integers or quoted size strings; SI units are preferred in examples (for example `"16KB"`, `"5MB"`, `"2GB"`). IEC units are also accepted (for example `"16KiB"`, `"5MiB"`).
+
 - `[runtime]`: global flags such as log level and environment.
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
 - `[llm]`: configures the chosen [llm-async] provider (provider id, API key, model, optional temperature/token/reasoning params, `max_tool_iterations`, system prompt, etc.). Request params are only sent when present in `config.toml` (omit keys like `temperature`, `max_new_tokens`, or `reasoning_effort` to avoid sending them). For OpenRouter, optional `llm.openrouter.models` lets you provide a fallback model pool, `llm.openrouter.provider` lets you send routing controls (`order`, `allow_fallbacks`, `only`, `ignore`, `sort`, throughput/latency preferences, `max_price`, and `provider_extra` for future keys), and `llm.openrouter.plugins` lets you pass request plugins (for example `file-parser` PDF engine selection).
@@ -199,7 +201,7 @@ allowed_domains = ["example.com", "docs.example.com"]
 navigation_timeout_seconds = 20
 action_timeout_seconds = 10
 max_text_chars = 6000
-max_screenshot_bytes = 2000000
+max_screenshot_bytes = "2MB"
 session_ttl_seconds = 300
 
 # Avoid weaker launch flags in production
