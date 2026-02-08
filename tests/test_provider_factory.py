@@ -392,7 +392,7 @@ async def test_generate_surfaces_invalid_tool_arguments_for_retry(monkeypatch: p
 
 
 @pytest.mark.asyncio
-async def test_generate_retries_with_required_tool_choice_for_explicit_tool_request(
+async def test_generate_does_not_force_tool_choice_for_explicit_tool_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from minibot.llm import provider_factory
@@ -400,17 +400,6 @@ async def test_generate_retries_with_required_tool_choice_for_explicit_tool_requ
     class _RetryRequiredProvider(_FakeProvider):
         async def acomplete(self, **kwargs: Any) -> _FakeResponse:
             self.calls.append(kwargs)
-            if len(self.calls) == 1:
-                return _FakeResponse(main_response=_FakeMessage(content="I'll do that now.", tool_calls=None))
-            if len(self.calls) == 2:
-                call = _FakeToolCall(id="tc-1", function={"name": "current_datetime", "arguments": "{}"})
-                return _FakeResponse(
-                    main_response=_FakeMessage(
-                        content="",
-                        tool_calls=[call],
-                        original={"role": "assistant", "content": "", "tool_calls": []},
-                    )
-                )
             return _FakeResponse(main_response=_FakeMessage(content='{"answer":"done","should_answer_to_user":true}'))
 
     async def _time_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
@@ -434,8 +423,7 @@ async def test_generate_retries_with_required_tool_choice_for_explicit_tool_requ
     )
 
     assert result.payload == {"answer": "done", "should_answer_to_user": True}
-    assert len(client._provider.calls) == 3
-    assert client._provider.calls[1]["tool_choice"] == "required"
+    assert len(client._provider.calls) == 1
 
 
 @pytest.mark.asyncio

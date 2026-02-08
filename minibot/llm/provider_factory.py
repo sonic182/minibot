@@ -4,7 +4,6 @@ import ast
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 import json
-import re
 
 import logging
 import yaml
@@ -85,8 +84,6 @@ class LLMClient:
         tool_map = {binding.tool.name: binding for binding in tool_bindings}
         context = tool_context or ToolContext()
         iterations = 0
-        tool_choice_override: str | dict[str, Any] | None = None
-        tool_intent_retry_attempted = False
         last_tool_messages: list[dict[str, Any]] = []
         recent_tool_names: list[str] = []
         last_iteration_signature: str | None = None
@@ -110,8 +107,6 @@ class LLMClient:
                 call_kwargs["temperature"] = self._temperature
             if not self._is_responses_provider:
                 call_kwargs["max_tokens"] = self._max_new_tokens
-            if tool_choice_override is not None:
-                call_kwargs["tool_choice"] = tool_choice_override
             call_kwargs.update(self._openrouter_kwargs())
             call_kwargs.update(extra_kwargs)
 
@@ -121,19 +116,6 @@ class LLMClient:
                 raise RuntimeError("LLM did not return a completion")
             if not message.tool_calls or not tool_map:
                 payload = message.content
-                if (
-                    tool_map
-                    and not message.tool_calls
-                    and not tool_intent_retry_attempted
-                    and self._is_explicit_tool_request(user_message)
-                ):
-                    tool_intent_retry_attempted = True
-                    tool_choice_override = "required"
-                    self._logger.info(
-                        "retrying completion with required tool choice",
-                        extra={"provider": self._provider_name, "model": self._model},
-                    )
-                    continue
                 response_id = self._extract_response_id(response)
                 if response_schema and isinstance(payload, str):
                     try:
@@ -359,20 +341,6 @@ class LLMClient:
             if isinstance(parsed, dict):
                 return dict(parsed)
         raise ValueError("Tool call arguments must be valid JSON")
-
-    @staticmethod
-    def _is_explicit_tool_request(user_message: str) -> bool:
-        text = user_message.strip().lower()
-        if not text:
-            return False
-        return bool(
-            re.search(
-                r"\b(use|using|call|execute|run|invoke|do)\b.{0,40}\b(tool|browser|http|datetime|current time)\b",
-                text,
-            )
-            or re.search(r"\bwith\s+tool\b", text)
-            or re.search(r"\busing\s+tool\b", text)
-        )
 
     def _stringify_result(self, result: Any) -> str:
         if isinstance(result, str):
