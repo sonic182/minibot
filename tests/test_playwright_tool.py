@@ -312,10 +312,9 @@ async def test_playwright_tool_open_extract_navigate_info_and_close(monkeypatch:
     bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
     context = ToolContext(owner_id="owner-1")
 
-    opened = await bindings["browser_open"].handler(
+    opened = await bindings["browser_navigate"].handler(
         {
             "url": "http://example.com",
-            "browser": "firefox",
             "wait_until": None,
             "timeout_seconds": None,
         },
@@ -325,7 +324,7 @@ async def test_playwright_tool_open_extract_navigate_info_and_close(monkeypatch:
     assert opened["browser"] == "firefox"
     assert opened["title"] == "Example Domain"
 
-    extracted = await bindings["browser_extract"].handler(
+    extracted = await bindings["browser_query_selector"].handler(
         {"selector": "h1", "timeout_seconds": None, "max_chars": None},
         context,
     )
@@ -339,34 +338,36 @@ async def test_playwright_tool_open_extract_navigate_info_and_close(monkeypatch:
     assert waited["ok"] is True
     assert waited["state"] == "visible"
 
-    html_chars = await bindings["browser_get_html"].handler(
-        {"offset": 0, "limit": 12, "offset_type": "characters"},
+    data_raw_chars = await bindings["browser_get_data"].handler(
+        {"offset": 0, "limit": 12, "offset_type": "characters", "type": "raw_html"},
         context,
     )
-    assert html_chars["ok"] is True
-    assert html_chars["offset_type"] == "characters"
-    assert html_chars["has_more"] is True
+    assert data_raw_chars["ok"] is True
+    assert data_raw_chars["offset_type"] == "characters"
+    assert data_raw_chars["type"] == "raw_html"
+    assert data_raw_chars["has_more"] is True
 
-    html_lines = await bindings["browser_get_html"].handler(
-        {"offset": 1, "limit": 2, "offset_type": "lines"},
+    data_raw_lines = await bindings["browser_get_data"].handler(
+        {"offset": 1, "limit": 2, "offset_type": "lines", "type": "raw_html"},
         context,
     )
-    assert html_lines["ok"] is True
-    assert html_lines["offset_type"] == "lines"
+    assert data_raw_lines["ok"] is True
+    assert data_raw_lines["offset_type"] == "lines"
 
-    text_chars = await bindings["browser_get_text"].handler(
-        {"offset": 0, "limit": 5, "offset_type": "characters"},
+    data_markdown_chars = await bindings["browser_get_data"].handler(
+        {"offset": 0, "limit": 40, "offset_type": "characters", "type": "markdown"},
         context,
     )
-    assert text_chars["ok"] is True
-    assert text_chars["text"] == "Line1"
+    assert data_markdown_chars["ok"] is True
+    assert data_markdown_chars["type"] == "markdown"
+    assert "Line1" in data_markdown_chars["data"]
 
-    text_lines = await bindings["browser_get_text"].handler(
-        {"offset": 1, "limit": 2, "offset_type": "lines"},
+    data_markdown_lines = await bindings["browser_get_data"].handler(
+        {"offset": 1, "limit": 2, "offset_type": "lines", "type": "markdown"},
         context,
     )
-    assert text_lines["ok"] is True
-    assert text_lines["text"] == "Line2\nLine3"
+    assert data_markdown_lines["ok"] is True
+    assert data_markdown_lines["type"] == "markdown"
 
     navigated = await bindings["browser_navigate"].handler(
         {
@@ -389,9 +390,6 @@ async def test_playwright_tool_open_extract_navigate_info_and_close(monkeypatch:
     closed = await bindings["browser_close"].handler({}, context)
     assert closed == {"ok": True, "closed": True, "browser_open": False}
 
-    closed_alias = await bindings["browser_close_session"].handler({}, context)
-    assert closed_alias == {"ok": True, "closed": False, "browser_open": False}
-
 
 @pytest.mark.asyncio
 async def test_playwright_open_retries_networkidle_timeout_with_domcontentloaded(
@@ -412,10 +410,9 @@ async def test_playwright_open_retries_networkidle_timeout_with_domcontentloaded
     bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
     context = ToolContext(owner_id="owner-1")
 
-    opened = await bindings["browser_open"].handler(
+    opened = await bindings["browser_navigate"].handler(
         {
             "url": "http://example.com",
-            "browser": "chromium",
             "wait_until": "networkidle",
             "timeout_seconds": 60,
         },
@@ -446,10 +443,9 @@ async def test_playwright_open_returns_partial_result_when_navigation_times_out(
     bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
     context = ToolContext(owner_id="owner-1")
 
-    opened = await bindings["browser_open"].handler(
+    opened = await bindings["browser_navigate"].handler(
         {
             "url": "http://example.com",
-            "browser": "chromium",
             "wait_until": "domcontentloaded",
             "timeout_seconds": 60,
         },
@@ -479,10 +475,9 @@ async def test_playwright_open_caps_navigation_timeout_to_30_seconds(monkeypatch
     bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
     context = ToolContext(owner_id="owner-1")
 
-    opened = await bindings["browser_open"].handler(
+    opened = await bindings["browser_navigate"].handler(
         {
             "url": "http://example.com",
-            "browser": "chromium",
             "wait_until": "domcontentloaded",
             "timeout_seconds": 120,
         },
@@ -515,10 +510,9 @@ async def test_playwright_open_recovers_from_closed_target_by_recreating_session
     bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
     context = ToolContext(owner_id="owner-1")
 
-    opened = await bindings["browser_open"].handler(
+    opened = await bindings["browser_navigate"].handler(
         {
             "url": "http://example.com",
-            "browser": "chromium",
             "wait_until": "domcontentloaded",
             "timeout_seconds": 30,
         },
@@ -548,10 +542,9 @@ async def test_playwright_get_text_recovers_from_closed_target_session(monkeypat
     bindings = {binding.tool.name: binding for binding in tool.bindings()}
     context = ToolContext(owner_id="owner-1")
 
-    opened = await bindings["browser_open"].handler(
+    opened = await bindings["browser_navigate"].handler(
         {
             "url": "http://example.com",
-            "browser": "chromium",
             "wait_until": "domcontentloaded",
             "timeout_seconds": 30,
         },
@@ -562,17 +555,17 @@ async def test_playwright_get_text_recovers_from_closed_target_session(monkeypat
     tool._sessions["owner-1"].page = _ClosedTargetPage()
     tool._sessions["owner-1"].processed_snapshot = None
 
-    text_result = await bindings["browser_get_text"].handler(
-        {"offset": 0, "limit": 1000, "offset_type": "characters"},
+    data_result = await bindings["browser_get_data"].handler(
+        {"offset": 0, "limit": 1000, "offset_type": "characters", "type": "markdown"},
         context,
     )
-    assert text_result["ok"] is True
-    assert text_result["cleaned"] is True
-    assert "Line1" in text_result["text"]
+    assert data_result["ok"] is True
+    assert data_result["cleaned"] is True
+    assert "Line1" in data_result["data"]
 
 
 @pytest.mark.asyncio
-async def test_playwright_get_text_and_html_use_postprocessed_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_playwright_get_data_uses_postprocessed_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_playwright = _NoisyPlaywright()
     monkeypatch.setattr(
         playwright_module,
@@ -588,41 +581,43 @@ async def test_playwright_get_text_and_html_use_postprocessed_snapshot(monkeypat
     bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
     context = ToolContext(owner_id="owner-1")
 
-    await bindings["browser_open"].handler(
+    await bindings["browser_navigate"].handler(
         {
             "url": "http://example.com",
-            "browser": "chromium",
             "wait_until": None,
             "timeout_seconds": None,
         },
         context,
     )
 
-    html_result = await bindings["browser_get_html"].handler(
-        {"offset": 0, "limit": 5000, "offset_type": "characters"},
+    data_result = await bindings["browser_get_data"].handler(
+        {"offset": 0, "limit": None, "offset_type": None, "type": None},
         context,
     )
-    assert html_result["ok"] is True
-    assert html_result["cleaned"] is True
-    assert "<script" not in html_result["html"].lower()
+    assert data_result["ok"] is True
+    assert data_result["type"] == "markdown"
+    assert data_result["limit"] == 12000
+    assert data_result["cleaned"] is True
+    assert "<script" not in data_result["data"].lower()
+    assert "[Toyota RAV 4](/listing?id=123&ref=srp)" in data_result["data"]
 
-    text_result = await bindings["browser_get_text"].handler(
-        {"offset": 0, "limit": 5000, "offset_type": "characters"},
+    raw_result = await bindings["browser_get_data"].handler(
+        {"offset": 0, "limit": 5000, "offset_type": "characters", "type": "raw_html"},
         context,
     )
-    assert text_result["ok"] is True
-    assert text_result["cleaned"] is True
-    assert text_result["text_format"] == "markdown"
-    assert "Headline" in text_result["text"]
-    assert "Important body text" in text_result["text"]
-    assert " | gasolina" in text_result["text"]
-    assert "[Toyota RAV 4](/listing?id=123&ref=srp)" in text_result["text"]
-    assert "tracking" not in text_result["text"]
-    assert "Menu links" not in text_result["text"]
-    assert text_result["links"]
-    assert text_result["links"][0]["href"] == "/listing?id=123&ref=srp"
-    assert "\u200b" not in text_result["links"][0]["text"]
-    assert isinstance(text_result.get("content_hash"), str)
+    assert raw_result["ok"] is True
+    assert raw_result["type"] == "raw_html"
+    assert "<script" in raw_result["data"].lower()
+
+    assert "Headline" in data_result["data"]
+    assert "Important body text" in data_result["data"]
+    assert " | gasolina" in data_result["data"]
+    assert "tracking" not in data_result["data"]
+    assert "Menu links" not in data_result["data"]
+    assert data_result["links"]
+    assert data_result["links"][0]["href"] == "/listing?id=123&ref=srp"
+    assert "\u200b" not in data_result["links"][0]["text"]
+    assert isinstance(data_result.get("content_hash"), str)
 
 
 @pytest.mark.asyncio
@@ -642,10 +637,9 @@ async def test_playwright_tool_enforces_allowed_domains(monkeypatch: pytest.Monk
     context = ToolContext(owner_id="owner-1")
 
     with pytest.raises(ValueError, match="allowed_domains"):
-        await bindings["browser_open"].handler(
+        await bindings["browser_navigate"].handler(
             {
                 "url": "https://evil.test",
-                "browser": None,
                 "wait_until": None,
                 "timeout_seconds": None,
             },
@@ -672,10 +666,9 @@ async def test_playwright_tool_blocks_private_networks(monkeypatch: pytest.Monke
     context = ToolContext(owner_id="owner-1")
 
     with pytest.raises(ValueError, match="private or local"):
-        await bindings["browser_open"].handler(
+        await bindings["browser_navigate"].handler(
             {
                 "url": "http://localhost:8080",
-                "browser": None,
                 "wait_until": None,
                 "timeout_seconds": None,
             },
@@ -699,16 +692,15 @@ async def test_playwright_tool_extract_returns_structured_timeout(monkeypatch: p
     bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
     context = ToolContext(owner_id="owner-1")
 
-    await bindings["browser_open"].handler(
+    await bindings["browser_navigate"].handler(
         {
             "url": "http://example.com",
-            "browser": "chromium",
             "wait_until": None,
             "timeout_seconds": None,
         },
         context,
     )
-    result = await bindings["browser_extract"].handler(
+    result = await bindings["browser_query_selector"].handler(
         {"selector": "#phrase", "timeout_seconds": None, "max_chars": None},
         context,
     )
@@ -731,12 +723,10 @@ async def test_playwright_actions_report_when_session_not_open(monkeypatch: pyte
 
     for name, payload in [
         ("browser_info", {}),
-        ("browser_navigate", {"url": "http://example.com", "wait_until": None, "timeout_seconds": None}),
-        ("browser_get_html", {"offset": 0, "limit": 100, "offset_type": "characters"}),
-        ("browser_get_text", {"offset": 0, "limit": 100, "offset_type": "characters"}),
+        ("browser_get_data", {"offset": 0, "limit": 100, "offset_type": "characters", "type": "raw_html"}),
         ("browser_wait_for", {"selector": "h1", "state": None, "timeout_seconds": None}),
         ("browser_click", {"selector": "button", "timeout_seconds": None}),
-        ("browser_extract", {"selector": "h1", "timeout_seconds": None, "max_chars": None}),
+        ("browser_query_selector", {"selector": "h1", "timeout_seconds": None, "max_chars": None}),
     ]:
         result = await bindings[name].handler(payload, context)
         assert result["ok"] is False
@@ -745,8 +735,34 @@ async def test_playwright_actions_report_when_session_not_open(monkeypatch: pyte
     closed = await bindings["browser_close"].handler({}, context)
     assert closed == {"ok": True, "closed": False, "browser_open": False}
 
-    closed_alias = await bindings["browser_close_session"].handler({}, context)
-    assert closed_alias == {"ok": True, "closed": False, "browser_open": False}
+
+@pytest.mark.asyncio
+async def test_playwright_get_data_reopens_after_close_with_last_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_playwright = _FakePlaywright()
+    monkeypatch.setattr(
+        playwright_module,
+        "_load_playwright",
+        lambda: lambda: _FakeManager(fake_playwright),
+    )
+    config = PlaywrightToolConfig(enabled=True, allow_http=True, block_private_networks=False)
+    bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
+    context = ToolContext(owner_id="owner-1")
+
+    navigated = await bindings["browser_navigate"].handler(
+        {"url": "http://example.com", "wait_until": None, "timeout_seconds": None},
+        context,
+    )
+    assert navigated["ok"] is True
+
+    closed = await bindings["browser_close"].handler({}, context)
+    assert closed == {"ok": True, "closed": True, "browser_open": False}
+
+    data = await bindings["browser_get_data"].handler(
+        {"offset": 0, "limit": 100, "offset_type": "characters", "type": "markdown"},
+        context,
+    )
+    assert data["ok"] is True
+    assert data["url"] == "http://example.com"
 
 
 @pytest.mark.asyncio
@@ -769,10 +785,9 @@ async def test_playwright_tool_retries_without_channel_on_chromium(monkeypatch: 
     bindings = {binding.tool.name: binding for binding in PlaywrightTool(config).bindings()}
     context = ToolContext(owner_id="owner-1")
 
-    opened = await bindings["browser_open"].handler(
+    opened = await bindings["browser_navigate"].handler(
         {
             "url": "http://example.com",
-            "browser": "chromium",
             "wait_until": None,
             "timeout_seconds": None,
         },

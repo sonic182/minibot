@@ -141,16 +141,13 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
     assert {"kv_save", "kv_get", "kv_search"}.issubset(names)
     assert "http_request" in names
     assert {
-        "browser_open",
         "browser_navigate",
         "browser_info",
-        "browser_get_html",
-        "browser_get_text",
+        "browser_get_data",
         "browser_wait_for",
         "browser_click",
-        "browser_extract",
+        "browser_query_selector",
         "browser_close",
-        "browser_close_session",
     }.issubset(names)
     assert {
         "schedule_prompt",

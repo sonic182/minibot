@@ -71,94 +71,19 @@ class PlaywrightTool:
         self._config = config
         self._logger = logging.getLogger("minibot.playwright")
         self._sessions: dict[str, _BrowserSession] = {}
+        self._last_url_by_owner: dict[str, str] = {}
         self._owner_locks: dict[str, asyncio.Lock] = {}
 
     def bindings(self) -> list[ToolBinding]:
         return [
-            ToolBinding(tool=self._open_schema(), handler=self._handle_open),
             ToolBinding(tool=self._navigate_schema(), handler=self._handle_navigate),
             ToolBinding(tool=self._info_schema(), handler=self._handle_info),
-            ToolBinding(tool=self._get_html_schema(), handler=self._handle_get_html),
-            ToolBinding(tool=self._get_text_schema(), handler=self._handle_get_text),
+            ToolBinding(tool=self._get_data_schema(), handler=self._handle_get_data),
             ToolBinding(tool=self._wait_for_schema(), handler=self._handle_wait_for),
             ToolBinding(tool=self._click_schema(), handler=self._handle_click),
-            ToolBinding(tool=self._extract_schema(), handler=self._handle_extract),
+            ToolBinding(tool=self._query_selector_schema(), handler=self._handle_query_selector),
             ToolBinding(tool=self._close_schema(), handler=self._handle_close),
-            ToolBinding(tool=self._close_quick_schema(), handler=self._handle_close),
         ]
-
-    async def _handle_open(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        owner_id = _require_owner(context)
-        await self._cleanup_expired_sessions()
-        async with self._owner_lock(owner_id):
-            requested_browser = self._coerce_browser(payload.get("browser"))
-            url = self._coerce_url(payload.get("url"))
-            wait_until = self._coerce_wait_until(payload.get("wait_until"))
-            timeout_seconds = self._coerce_timeout(
-                payload.get("timeout_seconds"),
-                default=self._config.navigation_timeout_seconds,
-                field="timeout_seconds",
-            )
-            timeout_seconds = min(timeout_seconds, _MAX_GOTO_TIMEOUT_SECONDS)
-            await self._validate_url(url)
-
-            existing = self._sessions.get(owner_id)
-            if existing is None:
-                existing = await self._create_session(requested_browser)
-                self._sessions[owner_id] = existing
-            elif existing.browser_name != requested_browser:
-                await self._close_session(existing)
-                existing = await self._create_session(requested_browser)
-                self._sessions[owner_id] = existing
-
-            for attempt in range(2):
-                try:
-                    goto_result = await self._goto_with_timeout_fallback(
-                        existing.page,
-                        url=url,
-                        wait_until=wait_until,
-                        timeout_seconds=timeout_seconds,
-                    )
-                    if not goto_result["ok"]:
-                        error_text = str(goto_result.get("error") or "")
-                        if attempt == 0 and _looks_like_target_closed_error(error_text):
-                            existing = await self._recreate_session(existing, requested_browser)
-                            continue
-                        if goto_result.get("timed_out"):
-                            if self._config.postprocess_outputs:
-                                await self._refresh_processed_snapshot(existing)
-                            title = await existing.page.title()
-                            existing.last_url = existing.page.url
-                            existing.last_used_monotonic = time.monotonic()
-                            return {
-                                "ok": True,
-                                "url": existing.page.url,
-                                "title": title,
-                                "browser": existing.browser_name,
-                                "navigation_timed_out": True,
-                                "error": goto_result.get("error"),
-                            }
-                        return goto_result
-                    if self._config.postprocess_outputs:
-                        await self._refresh_processed_snapshot(existing)
-                    title = await existing.page.title()
-                    existing.last_url = existing.page.url
-                    existing.last_used_monotonic = time.monotonic()
-                    result = {
-                        "ok": True,
-                        "url": existing.page.url,
-                        "title": title,
-                        "browser": existing.browser_name,
-                    }
-                    if goto_result.get("wait_until_fallback"):
-                        result["wait_until_fallback"] = goto_result["wait_until_fallback"]
-                    return result
-                except Exception as exc:  # noqa: BLE001
-                    if attempt == 0 and _is_target_closed_error(exc):
-                        existing = await self._recreate_session(existing, requested_browser)
-                        continue
-                    raise
-            raise RuntimeError("browser_open failed after session recovery")
 
     async def _handle_click(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         owner_id = _require_owner(context)
@@ -172,7 +97,10 @@ class PlaywrightTool:
             )
             session = self._sessions.get(owner_id)
             if session is None:
-                return _browser_not_open_result("browser_click")
+                session, error = await self._ensure_session_for_action(owner_id, action="browser_click")
+                if error is not None:
+                    return error
+                assert session is not None
             try:
                 await session.page.click(selector, timeout=timeout_seconds * 1000)
             except Exception as exc:  # noqa: BLE001
@@ -203,7 +131,8 @@ class PlaywrightTool:
             await self._validate_url(url)
             session = self._sessions.get(owner_id)
             if session is None:
-                return _browser_not_open_result("browser_navigate")
+                session = await self._create_session(self._config.browser)
+                self._sessions[owner_id] = session
             for attempt in range(2):
                 try:
                     goto_result = await self._goto_with_timeout_fallback(
@@ -222,6 +151,8 @@ class PlaywrightTool:
                                 await self._refresh_processed_snapshot(session)
                             title = await session.page.title()
                             session.last_url = session.page.url
+                            if session.last_url:
+                                self._last_url_by_owner[owner_id] = session.last_url
                             session.last_used_monotonic = time.monotonic()
                             return {
                                 "ok": True,
@@ -236,6 +167,8 @@ class PlaywrightTool:
                         await self._refresh_processed_snapshot(session)
                     title = await session.page.title()
                     session.last_url = session.page.url
+                    if session.last_url:
+                        self._last_url_by_owner[owner_id] = session.last_url
                     session.last_used_monotonic = time.monotonic()
                     result = {
                         "ok": True,
@@ -260,7 +193,10 @@ class PlaywrightTool:
         async with self._owner_lock(owner_id):
             session = self._sessions.get(owner_id)
             if session is None:
-                return _browser_not_open_result("browser_info")
+                session, error = await self._ensure_session_for_action(owner_id, action="browser_info")
+                if error is not None:
+                    return error
+                assert session is not None
             try:
                 title = await session.page.title()
             except Exception as exc:  # noqa: BLE001
@@ -296,6 +232,8 @@ class PlaywrightTool:
                 replacement.last_url = replacement.page.url
         if owner_id_to_replace is not None:
             self._sessions[owner_id_to_replace] = replacement
+            if replacement.last_url:
+                self._last_url_by_owner[owner_id_to_replace] = replacement.last_url
         return replacement
 
     async def _handle_wait_for(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
@@ -311,7 +249,10 @@ class PlaywrightTool:
             state = self._coerce_wait_for_state(payload.get("state"))
             session = self._sessions.get(owner_id)
             if session is None:
-                return _browser_not_open_result("browser_wait_for")
+                session, error = await self._ensure_session_for_action(owner_id, action="browser_wait_for")
+                if error is not None:
+                    return error
+                assert session is not None
             try:
                 await session.page.wait_for_selector(selector, state=state, timeout=timeout_seconds * 1000)
             except Exception as exc:  # noqa: BLE001
@@ -351,18 +292,30 @@ class PlaywrightTool:
                 "url": session.page.url,
             }
 
-    async def _handle_get_html(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+    async def _handle_get_data(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         owner_id = _require_owner(context)
         await self._cleanup_expired_sessions()
         async with self._owner_lock(owner_id):
-            limit = self._coerce_limit(payload.get("limit"))
+            limit = self._coerce_limit(payload.get("limit"), default_limit=12000)
             offset = self._coerce_offset(payload.get("offset"))
             offset_type = self._coerce_offset_type(payload.get("offset_type"))
+            data_type = self._coerce_data_type(payload.get("type"), fallback=payload.get("format"))
             session = self._sessions.get(owner_id)
             if session is None:
-                return _browser_not_open_result("browser_get_html")
+                session, error = await self._ensure_session_for_action(owner_id, action="browser_get_data")
+                if error is not None:
+                    return error
+                assert session is not None
             snapshot: _ProcessedSnapshot | None = None
-            if self._config.postprocess_outputs:
+            if data_type == "raw_html":
+                try:
+                    data = await session.page.content()
+                except Exception as exc:  # noqa: BLE001
+                    if not _is_target_closed_error(exc):
+                        raise
+                    session = await self._recreate_session(session, session.browser_name)
+                    data = await session.page.content()
+            elif self._config.postprocess_outputs:
                 try:
                     snapshot = await self._get_processed_snapshot(session)
                 except Exception as exc:  # noqa: BLE001
@@ -370,17 +323,22 @@ class PlaywrightTool:
                         raise
                     session = await self._recreate_session(session, session.browser_name)
                     snapshot = await self._get_processed_snapshot(session)
-                html = snapshot.clean_html
+                data = snapshot.clean_markdown
             else:
                 try:
-                    html = await session.page.content()
+                    raw_html = await session.page.content()
                 except Exception as exc:  # noqa: BLE001
                     if not _is_target_closed_error(exc):
                         raise
                     session = await self._recreate_session(session, session.browser_name)
-                    html = await session.page.content()
-            chunk, total_units, next_offset, has_more = _slice_html(
-                html,
+                    raw_html = await session.page.content()
+                markdown = _convert_html_to_markdown_for_llm(raw_html)
+                if markdown:
+                    data = _normalize_markdown_for_llm(markdown)
+                else:
+                    data = _normalize_text_for_llm(_extract_text_from_html(raw_html))
+            chunk, total_units, next_offset, has_more = _slice_content(
+                data,
                 offset=offset,
                 limit=limit,
                 offset_type=offset_type,
@@ -388,17 +346,19 @@ class PlaywrightTool:
             session.last_used_monotonic = time.monotonic()
             result = {
                 "ok": True,
+                "type": data_type,
                 "offset_type": offset_type,
                 "offset": offset,
                 "limit": limit,
                 "total_units": total_units,
                 "next_offset": next_offset,
                 "has_more": has_more,
-                "html": chunk,
+                "data": chunk,
                 "url": session.page.url,
             }
             if snapshot is not None:
                 result["cleaned"] = True
+                result["data_format"] = "markdown"
                 result["content_hash"] = snapshot.content_hash
                 if self._config.postprocess_expose_raw:
                     result["raw_html"] = snapshot.raw_html[: self._config.max_text_chars]
@@ -406,70 +366,7 @@ class PlaywrightTool:
                     result["links"] = snapshot.links[:_MAX_LINKS_IN_TEXT_OUTPUT]
             return result
 
-    async def _handle_get_text(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        owner_id = _require_owner(context)
-        await self._cleanup_expired_sessions()
-        async with self._owner_lock(owner_id):
-            limit = self._coerce_limit(payload.get("limit"))
-            offset = self._coerce_offset(payload.get("offset"))
-            offset_type = self._coerce_offset_type(payload.get("offset_type"))
-            session = self._sessions.get(owner_id)
-            if session is None:
-                return _browser_not_open_result("browser_get_text")
-            snapshot: _ProcessedSnapshot | None = None
-            if self._config.postprocess_outputs:
-                try:
-                    snapshot = await self._get_processed_snapshot(session)
-                except Exception as exc:  # noqa: BLE001
-                    if not _is_target_closed_error(exc):
-                        raise
-                    session = await self._recreate_session(session, session.browser_name)
-                    snapshot = await self._get_processed_snapshot(session)
-                text = snapshot.clean_markdown
-            else:
-                try:
-                    raw_text = await session.page.text_content(
-                        "body",
-                        timeout=self._config.action_timeout_seconds * 1000,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    if not _is_target_closed_error(exc):
-                        raise
-                    session = await self._recreate_session(session, session.browser_name)
-                    raw_text = await session.page.text_content(
-                        "body",
-                        timeout=self._config.action_timeout_seconds * 1000,
-                    )
-                text = (raw_text or "").strip()
-            chunk, total_units, next_offset, has_more = _slice_content(
-                text,
-                offset=offset,
-                limit=limit,
-                offset_type=offset_type,
-            )
-            session.last_used_monotonic = time.monotonic()
-            result = {
-                "ok": True,
-                "offset_type": offset_type,
-                "offset": offset,
-                "limit": limit,
-                "total_units": total_units,
-                "next_offset": next_offset,
-                "has_more": has_more,
-                "text": chunk,
-                "url": session.page.url,
-            }
-            if snapshot is not None:
-                result["cleaned"] = True
-                result["text_format"] = "markdown"
-                result["content_hash"] = snapshot.content_hash
-                result["raw_chars"] = len(snapshot.raw_html)
-                result["clean_chars"] = len(snapshot.clean_markdown)
-                if snapshot.links:
-                    result["links"] = snapshot.links[:_MAX_LINKS_IN_TEXT_OUTPUT]
-            return result
-
-    async def _handle_extract(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+    async def _handle_query_selector(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         owner_id = _require_owner(context)
         await self._cleanup_expired_sessions()
         async with self._owner_lock(owner_id):
@@ -486,7 +383,10 @@ class PlaywrightTool:
             )
             session = self._sessions.get(owner_id)
             if session is None:
-                return _browser_not_open_result("browser_extract")
+                session, error = await self._ensure_session_for_action(owner_id, action="browser_query_selector")
+                if error is not None:
+                    return error
+                assert session is not None
             try:
                 text = await session.page.text_content(selector, timeout=timeout_seconds * 1000)
             except Exception as exc:  # noqa: BLE001
@@ -568,8 +468,46 @@ class PlaywrightTool:
             session = self._sessions.pop(owner_id, None)
             if session is None:
                 return {"ok": True, "closed": False, "browser_open": False}
+            if session.last_url:
+                self._last_url_by_owner[owner_id] = session.last_url
             await self._close_session(session)
             return {"ok": True, "closed": True, "browser_open": False}
+
+    async def _ensure_session_for_action(
+        self,
+        owner_id: str,
+        *,
+        action: str,
+    ) -> tuple[_BrowserSession | None, dict[str, Any] | None]:
+        session = self._sessions.get(owner_id)
+        if session is not None:
+            return session, None
+        last_url = self._last_url_by_owner.get(owner_id)
+        if not last_url:
+            return None, _browser_not_open_result(action)
+        session = await self._create_session(self._config.browser)
+        self._sessions[owner_id] = session
+        goto_result = await self._goto_with_timeout_fallback(
+            session.page,
+            url=last_url,
+            wait_until="domcontentloaded",
+            timeout_seconds=min(self._config.navigation_timeout_seconds, _MAX_GOTO_TIMEOUT_SECONDS),
+        )
+        if not goto_result.get("ok") and not goto_result.get("timed_out"):
+            await self._close_session(session)
+            self._sessions.pop(owner_id, None)
+            return None, {
+                "ok": False,
+                "action": action,
+                "browser_open": False,
+                "error": str(goto_result.get("error") or "failed to restore browser session"),
+            }
+        session.last_url = session.page.url or last_url
+        if session.last_url:
+            self._last_url_by_owner[owner_id] = session.last_url
+        if self._config.postprocess_outputs:
+            await self._refresh_processed_snapshot(session)
+        return session, None
 
     async def _create_session(self, browser_name: str) -> _BrowserSession:
         playwright_factory = _load_playwright()
@@ -707,7 +645,7 @@ class PlaywrightTool:
     def _require_session(self, owner_id: str) -> _BrowserSession:
         session = self._sessions.get(owner_id)
         if session is None:
-            raise ValueError("browser session not started; call browser_open first")
+            raise ValueError("browser session not started; call browser_navigate first")
         return session
 
     async def _cleanup_expired_sessions(self) -> None:
@@ -722,6 +660,8 @@ class PlaywrightTool:
                 session = self._sessions.pop(owner_id, None)
                 if session is None:
                     continue
+                if session.last_url:
+                    self._last_url_by_owner[owner_id] = session.last_url
                 await self._close_session(session)
 
     async def _close_session(self, session: _BrowserSession) -> None:
@@ -825,8 +765,23 @@ class PlaywrightTool:
             raise ValueError("offset_type must be one of characters or lines")
         return normalized
 
-    def _coerce_limit(self, value: Any) -> int:
-        default_limit = 4000
+    def _coerce_data_type(self, value: Any, *, fallback: Any = None) -> str:
+        if value is None:
+            value = fallback
+        if value is None:
+            return "markdown" if self._config.postprocess_outputs else "raw_html"
+        if not isinstance(value, str):
+            raise ValueError("type must be a string")
+        normalized = value.strip().lower()
+        if not normalized:
+            return "markdown" if self._config.postprocess_outputs else "raw_html"
+        if normalized in {"raw", "raw_html", "html"}:
+            return "raw_html"
+        if normalized == "markdown":
+            return "markdown"
+        raise ValueError("type must be one of markdown or raw_html")
+
+    def _coerce_limit(self, value: Any, *, default_limit: int = 4000) -> int:
         max_limit = 50000
         if value is None:
             return default_limit
@@ -911,36 +866,6 @@ class PlaywrightTool:
             raise ValueError("quality must be between 1 and 100")
         return quality
 
-    def _open_schema(self) -> Tool:
-        return Tool(
-            name="browser_open",
-            description=(
-                "Open a URL in a persistent browser session for this owner. "
-                "Creates the session if needed and returns current page URL/title."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "Absolute URL to open."},
-                    "browser": {
-                        "type": ["string", "null"],
-                        "description": "Optional browser engine override: chromium, firefox, or webkit.",
-                    },
-                    "wait_until": {
-                        "type": ["string", "null"],
-                        "description": "Navigation readiness: load, domcontentloaded, or networkidle.",
-                    },
-                    "timeout_seconds": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "description": "Optional navigation timeout in seconds.",
-                    },
-                },
-                "required": ["url", "browser", "wait_until", "timeout_seconds"],
-                "additionalProperties": False,
-            },
-        )
-
     def _click_schema(self) -> Tool:
         return Tool(
             name="browser_click",
@@ -1024,13 +949,13 @@ class PlaywrightTool:
             },
         )
 
-    def _get_html_schema(self) -> Tool:
+    def _get_data_schema(self) -> Tool:
         return Tool(
-            name="browser_get_html",
+            name="browser_get_data",
             description=(
-                "Return a chunk of the current page HTML using offset+limit pagination. "
-                "When postprocess_outputs is enabled, this returns cleaned HTML from the Python snapshot. "
-                "Use offset_type='characters' by default for minified pages."
+                "Return paginated page data from the current browser session. "
+                "Supports type=markdown|raw_html. With postprocess_outputs enabled, default type is markdown. "
+                "Use offset_type='characters' by default for minified pages. Default limit is 12000."
             ),
             parameters={
                 "type": "object",
@@ -1038,7 +963,7 @@ class PlaywrightTool:
                     "limit": {
                         "type": ["integer", "null"],
                         "minimum": 1,
-                        "description": "Chunk size. Prefer characters for minified pages.",
+                        "description": "Chunk size (default 12000). Prefer characters for minified pages.",
                     },
                     "offset": {
                         "type": ["integer", "null"],
@@ -1049,47 +974,19 @@ class PlaywrightTool:
                         "type": ["string", "null"],
                         "description": "Pagination units: characters or lines (default characters).",
                     },
-                },
-                "required": ["limit", "offset", "offset_type"],
-                "additionalProperties": False,
-            },
-        )
-
-    def _get_text_schema(self) -> Tool:
-        return Tool(
-            name="browser_get_text",
-            description=(
-                "Return a chunk of visible body text from the current page using offset+limit pagination. "
-                "When postprocess_outputs is enabled, text is generated as compact Markdown from Python "
-                "post-processed HTML snapshots. "
-                "Use offset_type='characters' by default for minified pages."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "description": "Chunk size. Prefer characters for minified pages.",
-                    },
-                    "offset": {
-                        "type": ["integer", "null"],
-                        "minimum": 0,
-                        "description": "Start offset in selected unit type.",
-                    },
-                    "offset_type": {
+                    "type": {
                         "type": ["string", "null"],
-                        "description": "Pagination units: characters or lines (default characters).",
+                        "description": "Output type: markdown (post-processed) or raw_html.",
                     },
                 },
-                "required": ["limit", "offset", "offset_type"],
+                "required": ["limit", "offset", "offset_type", "type"],
                 "additionalProperties": False,
             },
         )
 
-    def _extract_schema(self) -> Tool:
+    def _query_selector_schema(self) -> Tool:
         return Tool(
-            name="browser_extract",
+            name="browser_query_selector",
             description="Extract text content from a CSS selector in the current page.",
             parameters={
                 "type": "object",
@@ -1159,18 +1056,6 @@ class PlaywrightTool:
             },
         )
 
-    def _close_quick_schema(self) -> Tool:
-        return Tool(
-            name="browser_close_session",
-            description=("Quick alias to close browser session. Use only when explicitly requested by the user."),
-            parameters={
-                "type": "object",
-                "properties": {},
-                "required": [],
-                "additionalProperties": False,
-            },
-        )
-
 
 def _require_owner(context: ToolContext) -> str:
     if not context.owner_id:
@@ -1206,7 +1091,7 @@ def _browser_not_open_result(action: str) -> dict[str, Any]:
         "ok": False,
         "browser_open": False,
         "action": action,
-        "error": "browser session not started; call browser_open first",
+        "error": "browser session not started; call browser_navigate first with a URL",
     }
 
 
