@@ -18,15 +18,15 @@ Reference `ARCHITECTURE.md` for full design context; each stage below narrows th
 - [x] Document tool usage patterns and cover repository/tool tests.
 - [x] Add optional HTTP client tool (aiosonic-based) with config toggles, logging, and tests.
 
-## Stage 2 – Scheduler & File-Based Task Store
-- [ ] Implement domain/job models, scheduler facade, and asyncio scheduler adapter persisting jobs via the file-backed task storage (`flock` guarded).
-- [ ] Introduce task service and strategy abstraction for delayed/recurrent tasks, plus CRUD commands exposed through the bot.
-- [ ] Extend event bus consumers/producers for job completion + task lifecycle events.
-- [ ] Allow task/job completion events to optionally skip channel responses when no user notification is required.
-- [ ] Expand tests to cover scheduler timing, persistence crash recovery, and task CRUD flows.
+## Stage 2 – Scheduled Prompts on SQLite
+- [x] Implement domain/job models, scheduler facade, and asyncio scheduler adapter with SQLAlchemy-backed SQLite persistence for scheduled prompts.
+- [x] Introduce scheduled prompt service for delayed/recurrent jobs, plus bot tools for schedule/list/cancel/delete flows.
+- [x] Route scheduled prompt dispatch through the event bus as `MessageEvent` for normal handler processing.
+- [ ] Add explicit scheduled-prompt notification policy (for example `notify_user=false`) so runs can update state/tools without outbound channel replies.
+- [ ] Expand tests to cover persistence crash recovery and notification-suppression flows.
 
 ## Stage 3 – Advanced Persistence & Additional Channels
-- [ ] Add SQLite task store adapter (via SQLAlchemy) and optional Redis/queue integrations; support migrations/alembic.
+- [ ] Generalize scheduled-prompt persistence into broader task execution storage and optional Redis/queue integrations; support migrations/alembic.
 - [ ] Implement additional messaging ports (e.g., Slack) reusing the channel abstraction and event bus.
 - [ ] Provide HTTP/WebSocket control plane + optional dashboard for monitoring tasks, jobs, and channel metrics.
 - [ ] Broaden test matrix with integration tests (e.g., using testcontainers) and contract tests per channel adapter.

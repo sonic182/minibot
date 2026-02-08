@@ -1,7 +1,10 @@
+# Runtime mode and verbosity.
 [runtime]
+# Production note: use "INFO" (or "WARNING") here and set `environment = "production"`.
 log_level = "DEBUG"
 environment = "development"
 
+# Telegram adapter settings.
 [channels.telegram]
 enabled = true
 bot_token = ""
@@ -17,22 +20,25 @@ max_total_media_bytes = 12582912
 max_attachments_per_message = 3
 allowed_document_mime_types = []
 
+# LLM provider and generation settings.
 [llm]
-provider = "openai"
+provider = "openai_responses"
 api_key = ""
-model = "gpt-4o-mini"
+model = "gpt-5-mini"
 temperature = 0.2
-send_temperature = true
+send_temperature = false                                # gpt-5-mini doens't allow it
 max_new_tokens = 512
 max_tool_iterations = 15
 system_prompt = "You are Minibot, a helpful assistant."
 reasoning_effort = "medium"
 
+# Conversation memory persistence.
 [memory]
 backend = "sqlite"
 sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
 max_history_messages = 200
 
+# Scheduled prompt storage and polling.
 [scheduler.prompts]
 enabled = true
 sqlite_url = "sqlite+aiosqlite:///./data/scheduled_prompts.db"
@@ -44,6 +50,7 @@ min_recurrence_interval_seconds = 60
 pool_size = 5
 echo = false
 
+# Optional key/value memory tool.
 [tools.kv_memory]
 enabled = false
 sqlite_url = "sqlite+aiosqlite:///./data/kv_memory.db"
@@ -53,6 +60,7 @@ default_limit = 20
 max_limit = 100
 default_owner_id = "primary"
 
+# Optional HTTP fetch tool.
 [tools.http_client]
 enabled = false
 timeout_seconds = 10
@@ -61,12 +69,14 @@ response_processing_mode = "auto"
 max_chars = 6000
 normalize_whitespace = true
 
+# Built-in calculator tool.
 [tools.calculator]
 enabled = true
 default_scale = 28
 max_expression_length = 200
 max_exponent_abs = 1000
 
+# Python code execution tool.
 [tools.python_exec]
 enabled = true
 backend = "host"
@@ -80,6 +90,7 @@ max_code_bytes = 32000
 pass_parent_env = false
 env_allowlist = ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"]
 
+# RLIMIT sandbox parameters.
 [tools.python_exec.rlimit]
 enabled = false
 cpu_seconds = 2
@@ -88,18 +99,23 @@ fsize_mb = 16
 nproc = 64
 nofile = 256
 
+# Cgroup sandbox parameters.
 [tools.python_exec.cgroup]
 enabled = false
 driver = "systemd"
 cpu_quota_percent = 100
 memory_max_mb = 256
 
+# External jail wrapper settings.
 [tools.python_exec.jail]
 enabled = false
 command_prefix = []
 
+# Structured logging output.
 [logging]
 structured = true
 logfmt_enabled = true
+# Production note: set to "INFO" to reduce verbosity.
+log_level = "DEBUG"
 kv_separator = "="
 record_separator = " "

@@ -18,9 +18,9 @@ MiniBot follows a lightweight hexagonal layout described in detail in `ARCHITECT
 
 - `core/` – Domain entities and protocols (channel DTOs, memory contracts, future job models).
 - `app/` – Application services such as the daemon, dispatcher, handlers, and event bus that orchestrate domain + adapters.
-- `adapters/` – Infrastructure edges (config, messaging, logging, memory, scheduler, LLM providers) wired through the
+- `adapters/` – Infrastructure edges (config, messaging, logging, memory, scheduler persistence) wired through the
   DI container.
-- `llm/` – Thin wrappers around `llm-async` providers plus `llm/tools/`, which defines the tool schemas and handlers that expose bot capabilities (KV memory, future scheduler hooks) to the model.
+- `llm/` – Thin wrappers around `llm-async` providers plus `llm/tools/`, which defines tool schemas/handlers that expose bot capabilities (KV memory, scheduler controls, utilities) to the model.
 - `shared/` – Cross-cutting utilities.
 
 Tests under `tests/` mirror this structure so every layer has a corresponding suite. This “mini hex” keeps the domain
@@ -70,9 +70,10 @@ Tools are defined under `minibot/llm/tools/`. Each tool binding exposes a schema
 
 - `chat_memory` (system tool, always enabled): manages transcript memory for the current chat/session with `chat_memory_info` (message count) and `chat_memory_trim` (keep latest N, remove older). This only affects chat history, not KV memory.
 - `calculate_expression` (system tool, enabled by default): safely evaluates arithmetic expressions with Decimal precision and support for `+`, `-`, `*`, `/`, `%`, `**`, parentheses, and unary signs.
+- `current_datetime` (system tool, enabled by default): returns the current UTC datetime with an optional `strftime` format override.
 - `python_execute` (system tool, enabled by default): executes Python code on host backend with configurable interpreter (`python_path` or `venv_path`) and best-effort sandbox controls (default `basic`).
 - `python_environment_info` (system tool, enabled by default): reports the runtime that `python_execute` uses and can list installed packages (with optional prefix filtering and limit) so the model can pick available libraries before execution.
-- Telegram inbound media (`photo` / `document`) is supported for multimodal prompts when `llm.provider = "openai_responses"`. Images are sent as data URLs (`input_image.image_url`) and documents as base64 payloads (`input_file.file_data`).
+- Telegram inbound media (`photo` / `document`) is supported for multimodal prompts when `llm.provider = "openai_responses"`. Images are sent as data URLs (`input_image.image_url`) and documents are sent as `input_file.file_data` payloads.
 - `kv_memory`: persists short notes and supports save/get/search operations without asking the LLM for `owner_id` (the server injects it).
 - `http_client`: builds on `aiosonic` so the bot can fetch HTTP/HTTPS resources with strict method/timeout/output guards plus optional content-type-aware response processing; configure via `[tools.http_client]`.
 - `schedule_prompt`: creates one-shot jobs (`run_at`/`delay_seconds`) and interval recurrence (`recurrence_type="interval"` + `recurrence_interval_seconds`). Missed intervals are skipped on wake-up; the next future run is scheduled to avoid backlog bursts. Minimum interval is controlled by `scheduler.prompts.min_recurrence_interval_seconds` (default `60`).
