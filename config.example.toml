@@ -121,7 +121,9 @@ extra_http_headers = { Accept-Language = "en-US,en;q=0.9", Sec-Ch-Ua = '"Chromiu
 navigation_timeout_seconds = 20
 action_timeout_seconds = 10
 max_text_chars = 6000
-max_screenshot_bytes = "2MB"
+# Screenshot output is currently disabled in tool responses.
+# Kept here only for forward compatibility; currently not used.
+# max_screenshot_bytes = "2MB"
 postprocess_outputs = true
 postprocess_expose_raw = false
 postprocess_snapshot_ttl_seconds = 30

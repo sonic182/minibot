@@ -166,93 +166,41 @@ flowchart TD
     DEC -- no --> SKIP[No outbound message]
 ```
 
-Playwright Tool Setup (Chromium Minimal)
-----------------------------------------
+Playwright (optional)
+---------------------
 
-If you enable `[tools.playwright]` and only need Chromium, this is the minimal install path per OS.
+Use Playwright when you want browser navigation and extraction tools (`browser_*`).
 
-First install project dependencies with the Playwright extra:
+Setup:
 
 1. `poetry install --extras playwright`
+2. `poetry run playwright install chromium`
+3. Linux only: `poetry run playwright install-deps chromium`
 
-Linux (Debian/Ubuntu):
+Quick local config:
 
-1. `poetry run playwright install chromium`
-2. `poetry run playwright install-deps chromium`
+```toml
+[tools.playwright]
+enabled = true
+```
 
-macOS:
-
-1. `poetry run playwright install chromium`
-
-Windows (PowerShell):
-
-1. `poetry run playwright install chromium`
-
-Notes:
-
-- `playwright install-deps ...` is Linux-only; macOS/Windows ship required system libraries differently.
-- If you need all engines, replace `chromium` with `chromium firefox webkit`.
-- On minimal Linux images, missing libraries (for example `libnss3.so`) means deps were not installed; run `playwright install-deps chromium`.
-- If you install Debian's system Chromium with `apt install chromium`, set `launch_channel = ""` and optionally `chromium_executable_path = "/usr/bin/chromium"`.
-
-Docker image setup (during build, recommended):
-
-1. `poetry install --extras playwright --no-ansi --no-root`
-2. `python -m playwright install chromium`
-3. `python -m playwright install-deps chromium`
-
-Playwright Secure Minimal Config
---------------------------------
-
-If you only need basic browsing/extraction and want the safest practical baseline, use this in `config.toml`:
+Safer production baseline:
 
 ```toml
 [tools.playwright]
 enabled = true
 browser = "chromium"
 headless = true
-launch_channel = ""
-chromium_executable_path = "/usr/bin/chromium"
-
-# Network hardening
 allow_http = false
 block_private_networks = true
 allowed_domains = ["example.com", "docs.example.com"]
-
-# Keep conservative output/resource limits
-navigation_timeout_seconds = 20
-action_timeout_seconds = 10
-max_text_chars = 6000
-max_screenshot_bytes = "2MB"
-session_ttl_seconds = 300
-
-# Avoid weaker launch flags in production
-launch_args = [
-  "--disable-blink-features=AutomationControlled",
-  "--disable-dev-shm-usage",
-  "--disable-extensions",
-  "--lang=en-US,en",
-  "--disable-notifications",
-]
 ```
 
-Security notes for Playwright:
+Notes:
 
 - Prefer `headless = true` on servers.
-- Keep `allowed_domains` non-empty whenever possible.
-- Keep `allow_http = false` unless a target only supports plain HTTP.
-- Keep `block_private_networks = true` to reduce SSRF risk to localhost/internal services.
-- Avoid `--no-sandbox` in production unless your runtime environment requires it.
-
-Playwright Minimal Config (quick local use)
-------------------------------------------
-
-If you want the shortest possible enablement for local debugging/testing:
-
-```toml
-[tools.playwright]
-enabled = true
-```
+- Keep `allowed_domains` non-empty when possible.
+- If you use Debian system Chromium, set `launch_channel = ""` and optionally `chromium_executable_path = "/usr/bin/chromium"`.
 
 Tooling
 -------
