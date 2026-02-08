@@ -47,8 +47,8 @@ async def test_chat_memory_info_and_trim() -> None:
     tools = _tool_map(memory)
     context = ToolContext(channel="telegram", chat_id=100, user_id=1)
 
-    info_binding = tools["chat_memory_info"]
-    trim_binding = tools["chat_memory_trim"]
+    info_binding = tools["chat_history_info"]
+    trim_binding = tools["chat_history_trim"]
     session_id = session_id_from_parts("telegram", 100, 1)
 
     await memory.append_history(session_id, "user", "one")
@@ -68,4 +68,4 @@ async def test_chat_memory_tool_requires_channel_context() -> None:
     memory = StubMemory()
     tools = _tool_map(memory)
     with pytest.raises(ValueError):
-        await tools["chat_memory_info"].handler({}, ToolContext())
+        await tools["chat_history_info"].handler({}, ToolContext())

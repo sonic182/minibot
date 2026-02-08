@@ -26,6 +26,8 @@ LLM_PROVIDERS = {
     "openai_responses": OpenAIResponsesProvider,
 }
 
+_MAX_REPEATED_TOOL_ITERATIONS = 3
+
 
 @dataclass
 class LLMGeneration:
@@ -88,6 +90,8 @@ class LLMClient:
         continue_loop_retry_attempted = False
         last_tool_messages: list[dict[str, Any]] = []
         recent_tool_names: list[str] = []
+        last_iteration_signature: str | None = None
+        repeated_iteration_count = 0
         extra_kwargs: dict[str, Any] = {}
         if prompt_cache_key and self._is_responses_provider:
             extra_kwargs["prompt_cache_key"] = prompt_cache_key
@@ -155,8 +159,25 @@ class LLMClient:
                 context,
                 responses_mode=self._is_responses_provider,
             )
+            iteration_signature = self._tool_iteration_signature(message.tool_calls, tool_messages)
+            if iteration_signature and iteration_signature == last_iteration_signature:
+                repeated_iteration_count += 1
+            else:
+                repeated_iteration_count = 1
+            last_iteration_signature = iteration_signature
             last_tool_messages = tool_messages
             recent_tool_names.extend(self._tool_name_from_call(call) for call in message.tool_calls)
+            if repeated_iteration_count >= _MAX_REPEATED_TOOL_ITERATIONS:
+                self._logger.warning(
+                    "tool loop repeated identical outputs; returning fallback",
+                    extra={
+                        "tool_names": recent_tool_names[-10:],
+                        "repeated_count": repeated_iteration_count,
+                    },
+                )
+                response_id = self._extract_response_id(response)
+                payload = self._tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
+                return LLMGeneration(payload, response_id)
             if self._is_responses_provider:
                 response_id = self._extract_response_id(response)
                 if response_id:
@@ -501,3 +522,25 @@ class LLMClient:
         if isinstance(output, str):
             return output[:400]
         return self._stringify_result(output)[:400]
+
+    def _tool_iteration_signature(
+        self,
+        tool_calls: Sequence[ToolCall],
+        tool_messages: Sequence[dict[str, Any]],
+    ) -> str:
+        parts: list[str] = []
+        for index, call in enumerate(tool_calls):
+            name = self._tool_name_from_call(call)
+            output = ""
+            if index < len(tool_messages):
+                message = tool_messages[index]
+                if isinstance(message, dict):
+                    output_value = message.get("output")
+                    if output_value is None:
+                        output_value = message.get("content")
+                    if isinstance(output_value, str):
+                        output = output_value[:240]
+                    else:
+                        output = self._stringify_result(output_value)[:240]
+            parts.append(f"{name}:{output}")
+        return "|".join(parts)

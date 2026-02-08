@@ -234,7 +234,7 @@ Tools are defined under `minibot/llm/tools/`. Each tool binding exposes a schema
 
 - Structured tool outputs are serialized to YAML before being sent back through the LLM tool channel, reducing noisy JSON escaping and improving readability.
 
-- `chat_memory` (system tool, always enabled): manages transcript memory for the current chat/session with `chat_memory_info` (message count) and `chat_memory_trim` (keep latest N, remove older). This only affects chat history, not KV memory.
+- `chat_history` (system tool, always enabled): manages transcript history for the current chat/session. `chat_history_info` is read-only (count/status) and should be used only for explicit history-status requests. `chat_history_trim` is destructive (permanently deletes older history, keeping latest N; `keep_latest=0` clears all) and should be used only when the user explicitly asks to clear/reset/forget/trim chat history. This affects chat transcript history only, not `kv_memory` entries.
 - `calculate_expression` (system tool, enabled by default): safely evaluates arithmetic expressions with Decimal precision and support for `+`, `-`, `*`, `/`, `%`, `**`, parentheses, and unary signs.
 - `current_datetime` (system tool, enabled by default): returns the current UTC datetime with an optional `strftime` format override.
 - `python_execute` (system tool, enabled by default): executes arbitrary Python code on the host backend with configurable interpreter (`python_path` or `venv_path`) and optional isolation modes, including external jail wrapping (`sandbox_mode = "jail"` with `tools.python_exec.jail.command_prefix`, e.g. Firejail).

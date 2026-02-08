@@ -109,8 +109,8 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
     tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None)
     names = {binding.tool.name for binding in tools}
 
-    assert "chat_memory_info" in names
-    assert "chat_memory_trim" in names
+    assert "chat_history_info" in names
+    assert "chat_history_trim" in names
     assert "current_datetime" in names
     assert "calculate_expression" in names
     assert "python_execute" in names

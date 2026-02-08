@@ -20,8 +20,14 @@ class ChatMemoryTool:
 
     def _info_schema(self) -> Tool:
         return Tool(
-            name="chat_memory_info",
-            description="Return how many chat-history messages are stored for the current conversation.",
+            name="chat_history_info",
+            description=(
+                "Read-only conversation-history diagnostic for the current conversation. "
+                "Returns history message count and configured max-history cap only. "
+                "Use only when the user asks about chat history size/status. "
+                "Also use when deciding whether a history trim is needed. "
+                "Do not call for normal answering."
+            ),
             parameters={
                 "type": "object",
                 "properties": {},
@@ -32,15 +38,23 @@ class ChatMemoryTool:
 
     def _trim_schema(self) -> Tool:
         return Tool(
-            name="chat_memory_trim",
-            description="Trim chat-history messages for the current conversation, keeping only the latest N.",
+            name="chat_history_trim",
+            description=(
+                "Destructive conversation-history operation for the current conversation. "
+                "Permanently deletes older history entries and keeps only the latest N. "
+                "Use only when the user explicitly asks to clear/reset/forget/trim chat history. "
+                "Do not call during normal reasoning."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "keep_latest": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "How many latest messages to keep in chat history.",
+                        "description": (
+                            "How many latest messages to keep. "
+                            "0 means clear all messages for this conversation."
+                        ),
                     }
                 },
                 "required": ["keep_latest"],

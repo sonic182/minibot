@@ -132,6 +132,34 @@ async def test_generate_stops_after_tool_loop_limit(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_generate_stops_when_tool_outputs_repeat_identically(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _LoopProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            call = _FakeToolCall(id="tc-loop", function={"name": "noop", "arguments": "{}"})
+            message = _FakeMessage(content="", tool_calls=[call], original={"role": "assistant", "content": ""})
+            return _FakeResponse(main_response=message, original={"id": "resp-loop"})
+
+    async def _noop_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"ok": True, "value": "constant"}
+
+    tool = Tool(name="noop", description="noop", parameters={"type": "object", "properties": {}, "required": []})
+    binding = ToolBinding(tool=tool, handler=_noop_handler)
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _LoopProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x", max_tool_iterations=10))
+
+    result = await client.generate([], "hello", tools=[binding], response_schema={"type": "object"})
+
+    assert isinstance(result.payload, dict)
+    assert "tool-loop safeguard" in result.payload["answer"]
+    assert result.payload["should_answer_to_user"] is True
+    assert len(client._provider.calls) == 3
+
+
+@pytest.mark.asyncio
 async def test_generate_sanitizes_assistant_message_before_tool_followup(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm import provider_factory
 

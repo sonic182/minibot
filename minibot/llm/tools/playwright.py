@@ -1008,7 +1008,10 @@ class PlaywrightTool:
     def _close_schema(self) -> Tool:
         return Tool(
             name="browser_close",
-            description="Close the active browser session for this owner.",
+            description=(
+                "Close the active browser session for this owner. "
+                "Use only when explicitly requested by the user."
+            ),
             parameters={
                 "type": "object",
                 "properties": {},
@@ -1020,7 +1023,10 @@ class PlaywrightTool:
     def _close_quick_schema(self) -> Tool:
         return Tool(
             name="browser_close_session",
-            description="Quick alias to close the active browser session for this owner.",
+            description=(
+                "Quick alias to close browser session. "
+                "Use only when explicitly requested by the user."
+            ),
             parameters={
                 "type": "object",
                 "properties": {},
