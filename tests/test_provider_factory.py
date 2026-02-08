@@ -224,7 +224,7 @@ async def test_generate_uses_user_content_when_provided(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_generate_skips_reasoning_effort_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_generate_omits_reasoning_effort_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm import provider_factory
 
     class _FakeResponsesProvider(_FakeProvider):
@@ -237,7 +237,6 @@ async def test_generate_skips_reasoning_effort_when_disabled(monkeypatch: pytest
             provider="openai_responses",
             api_key="secret",
             model="gpt-4.1-mini",
-            send_reasoning_effort=False,
         )
     )
 
@@ -261,7 +260,6 @@ async def test_generate_includes_reasoning_effort_when_enabled(monkeypatch: pyte
             provider="openai_responses",
             api_key="secret",
             model="gpt-5-mini",
-            send_reasoning_effort=True,
             reasoning_effort="medium",
         )
     )

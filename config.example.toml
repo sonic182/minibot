@@ -25,13 +25,13 @@ allowed_document_mime_types = []
 provider = "openai_responses"
 api_key = ""
 model = "gpt-5-mini"
-temperature = 0.2
-send_temperature = false                                # gpt-5-mini doesn't allow it
-send_reasoning_effort = true
-max_new_tokens = 512
 max_tool_iterations = 15
 system_prompt = "You are Minibot, a helpful assistant."
-reasoning_effort = "medium"
+
+# Optional request params. Omit keys to avoid sending them.
+# temperature = 0.2
+# max_new_tokens = 512
+# reasoning_effort = "medium"
 
 # Optional OpenRouter-specific routing configuration.
 # Applied only when `llm.provider = "openrouter"`.

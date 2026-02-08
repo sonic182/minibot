@@ -55,13 +55,11 @@ class LLMMConfig(BaseModel):
     provider: str = "openai"
     api_key: str = ""
     model: str = "gpt-4o-mini"
-    temperature: float = 0.4
-    send_temperature: bool = True
-    send_reasoning_effort: bool = True
-    max_new_tokens: PositiveInt = 512
+    temperature: float | None = None
+    max_new_tokens: PositiveInt | None = None
     max_tool_iterations: PositiveInt = 15
     system_prompt: str = "You are Minibot, a helpful assistant."
-    reasoning_effort: str = "medium"
+    reasoning_effort: str | None = None
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
 
 
