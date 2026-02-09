@@ -1,6 +1,8 @@
 MiniBot 🤖
 =======
 
+[![PyPI version](https://img.shields.io/pypi/v/minibot)](https://pypi.org/project/minibot/0.0.1/)
+
 Your personal AI assistant for Telegram - self-hosted, auditable, and intentionally opinionated.
 
 Overview
@@ -12,13 +14,22 @@ who want reliable automation and chat assistance without a giant platform footpr
 The project is intentionally opinionated: Telegram-first, SQLite-first, async-first. You get a focused,
 production-practical bot with clear boundaries, predictable behavior, and enough tools to be useful daily.
 
-Quickstart
-----------
+Quickstart (Docker)
+-------------------
+
+1. `cp config.example.toml config.toml`
+2. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
+3. `mkdir -p logs`
+4. `docker compose up --build -d`
+5. `docker compose logs -f minibot`
+
+Quickstart (Poetry)
+-------------------
 
 1. `poetry install`
 2. `cp config.example.toml config.toml`
 3. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
-4. `poetry run python -m minibot.app.daemon`
+4. `poetry run minibot`
 
 Up & Running with Telegram
 ---------------------------
@@ -28,7 +39,7 @@ Up & Running with Telegram
    * set `channels.telegram.bot_token`
    * populate `allowed_chat_ids` or `allowed_user_ids` with your ID numbers
    * configure the LLM provider section (`provider`, `api_key`, `model`)
-3. Run `poetry run python -m minibot.app.daemon` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
+3. Run `poetry run minibot` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
 4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
 
 Top features
@@ -176,6 +187,9 @@ Setup:
 1. `poetry install --extras playwright`
 2. `poetry run playwright install chromium`
 3. Linux only: `poetry run playwright install-deps chromium`
+
+`playwright` extra installs all browser-tool runtime deps: `playwright`, `selectolax`, and `markdownify`.
+If you install packages manually, install all three.
 
 Quick local config:
 
