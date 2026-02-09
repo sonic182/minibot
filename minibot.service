@@ -1,0 +1,17 @@
+[Unit]
+Description=Minibot daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=myuser
+Group=myuser
+WorkingDirectory=/home/myuser/minibot
+ExecStart=/home/myuser/minibot/venv/bin/minibot
+Restart=on-failure
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

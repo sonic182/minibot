@@ -14,8 +14,17 @@ who want reliable automation and chat assistance without a giant platform footpr
 The project is intentionally opinionated: Telegram-first, SQLite-first, async-first. You get a focused,
 production-practical bot with clear boundaries, predictable behavior, and enough tools to be useful daily.
 
-Quickstart
-----------
+Quickstart (Docker)
+-------------------
+
+1. `cp config.example.toml config.toml`
+2. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
+3. `mkdir -p logs`
+4. `docker compose up --build -d`
+5. `docker compose logs -f minibot`
+
+Quickstart (Poetry)
+-------------------
 
 1. `poetry install`
 2. `cp config.example.toml config.toml`
