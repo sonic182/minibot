@@ -34,9 +34,7 @@ class TelegramService:
 
     async def start(self) -> None:
         self._logger.info("starting telegram polling")
-        self._poll_task = asyncio.create_task(
-            self._dp.start_polling(self._bot, handle_signals=False)
-        )
+        self._poll_task = asyncio.create_task(self._dp.start_polling(self._bot, handle_signals=False))
         self._outgoing_task = asyncio.create_task(self._publish_outgoing())
 
     async def _handle_message(self, message: TelegramMessage) -> None:
@@ -49,10 +47,7 @@ class TelegramService:
             )
             await self._bot.send_message(
                 chat_id=chat_id,
-                text=(
-                    "User not recognized. Access denied. "
-                    f"chat_id={chat_id} user_id={user_id}"
-                ),
+                text=(f"User not recognized. Access denied. chat_id={chat_id} user_id={user_id}"),
             )
             return
 

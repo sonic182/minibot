@@ -8,7 +8,7 @@ import pytest_asyncio
 from minibot.adapters.config.schema import KeyValueMemoryConfig
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.llm.tools.base import ToolContext
-from minibot.llm.tools.kv import build_kv_tools
+from minibot.llm.tools.user_memory import build_kv_tools
 
 
 @pytest_asyncio.fixture()
@@ -33,10 +33,10 @@ async def _invoke(binding, payload, owner: str | None = "team-alpha"):
 
 
 @pytest.mark.asyncio
-async def test_kv_tools_save_get_search(kv_memory: SQLAlchemyKeyValueMemory) -> None:
+async def test_user_memory_tools_save_get_search(kv_memory: SQLAlchemyKeyValueMemory) -> None:
     tools = _tool_map(kv_memory)
     save_result = await _invoke(
-        tools["kv_save"],
+        tools["user_memory_save"],
         {
             "title": "Credentials",
             "data": "API Key",
@@ -45,16 +45,16 @@ async def test_kv_tools_save_get_search(kv_memory: SQLAlchemyKeyValueMemory) -> 
     )
     assert save_result["owner_id"] == "team-alpha"
 
-    get_result = await _invoke(tools["kv_get"], {"entry_id": save_result["id"]})
+    get_result = await _invoke(tools["user_memory_get"], {"entry_id": save_result["id"]})
     assert get_result["data"] == "API Key"
 
-    search_result = await _invoke(tools["kv_search"], {"query": "api", "limit": 5})
+    search_result = await _invoke(tools["user_memory_search"], {"query": "api", "limit": 5})
     assert search_result["total"] == 1
     assert search_result["entries"][0]["title"] == "Credentials"
 
 
 @pytest.mark.asyncio
-async def test_kv_save_requires_owner(kv_memory: SQLAlchemyKeyValueMemory) -> None:
+async def test_user_memory_save_requires_owner(kv_memory: SQLAlchemyKeyValueMemory) -> None:
     tools = _tool_map(kv_memory)
     with pytest.raises(ValueError):
-        await tools["kv_save"].handler({"title": "Doc", "data": "text"}, ToolContext(owner_id=None))
+        await tools["user_memory_save"].handler({"title": "Doc", "data": "text"}, ToolContext(owner_id=None))

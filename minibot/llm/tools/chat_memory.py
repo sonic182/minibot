@@ -52,8 +52,7 @@ class ChatMemoryTool:
                         "type": "integer",
                         "minimum": 0,
                         "description": (
-                            "How many latest messages to keep. "
-                            "0 means clear all messages for this conversation."
+                            "How many latest messages to keep. 0 means clear all messages for this conversation."
                         ),
                     }
                 },

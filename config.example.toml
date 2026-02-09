@@ -10,7 +10,7 @@ enabled = true
 bot_token = ""
 allowed_chat_ids = []
 allowed_user_ids = []
-require_authorized = false
+require_authorized = true
 mode = "long_polling"
 webhook_url = ""
 media_enabled = true
@@ -25,6 +25,7 @@ allowed_document_mime_types = []
 [llm]
 provider = "openai_responses"
 api_key = ""
+base_url = ""
 model = "gpt-5-mini"
 max_tool_iterations = 15
 system_prompt = "You are Minibot, a helpful assistant."

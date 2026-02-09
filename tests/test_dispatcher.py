@@ -53,7 +53,9 @@ async def test_dispatcher_publishes_outbound_reply(monkeypatch: pytest.MonkeyPat
             del args, kwargs
 
         async def handle(self, event: MessageEvent) -> ChannelResponse:
-            return ChannelResponse(channel="telegram", chat_id=1, text=f"ok:{event.message.text}", metadata={"should_reply": True})
+            return ChannelResponse(
+                channel="telegram", chat_id=1, text=f"ok:{event.message.text}", metadata={"should_reply": True}
+            )
 
     monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
     monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])

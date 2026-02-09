@@ -40,7 +40,7 @@ class TelegramChannelConfig(BaseModel):
     allowed_user_ids: List[int] = Field(default_factory=list)
     mode: str = Field(default="long_polling")
     webhook_url: Optional[str] = None
-    require_authorized: bool = False
+    require_authorized: bool = True
     media_enabled: bool = True
     max_photo_bytes: ByteSizeValue = 5242880
     max_document_bytes: ByteSizeValue = 10485760
@@ -75,6 +75,7 @@ class OpenRouterLLMConfig(BaseModel):
 class LLMMConfig(BaseModel):
     provider: str = "openai"
     api_key: str = ""
+    base_url: str | None = None
     model: str = "gpt-4o-mini"
     temperature: float | None = None
     max_new_tokens: PositiveInt | None = None

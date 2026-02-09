@@ -50,7 +50,10 @@ class LLMClient:
     def __init__(self, config: LLMMConfig) -> None:
         configured_provider = config.provider.lower()
         provider_cls = LLM_PROVIDERS.get(configured_provider, OpenAIProvider)
-        self._provider = provider_cls(api_key=config.api_key)
+        provider_kwargs: dict[str, Any] = {"api_key": config.api_key}
+        if config.base_url:
+            provider_kwargs["base_url"] = config.base_url
+        self._provider = provider_cls(**provider_kwargs)
         self._provider_name = configured_provider if configured_provider in LLM_PROVIDERS else "openai"
         self._model = config.model
         self._temperature = config.temperature

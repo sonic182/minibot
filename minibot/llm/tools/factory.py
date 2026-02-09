@@ -10,7 +10,7 @@ from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.http_client import HTTPClientTool
-from minibot.llm.tools.kv import build_kv_tools
+from minibot.llm.tools.user_memory import build_kv_tools
 from minibot.llm.tools.playwright import PlaywrightTool
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.scheduler import SchedulePromptTool

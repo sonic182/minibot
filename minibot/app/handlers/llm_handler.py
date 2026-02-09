@@ -79,9 +79,7 @@ class LLMMessageHandler:
                     "chat_id": message.chat_id,
                     "user_id": message.user_id,
                     "attachment_count": len(message.attachments),
-                    "attachment_types": [
-                        str(attachment.get("type", "unknown")) for attachment in message.attachments
-                    ],
+                    "attachment_types": [str(attachment.get("type", "unknown")) for attachment in message.attachments],
                     "responses_provider": self._llm_client.is_responses_provider(),
                     "media_input_mode": self._media_input_mode(),
                 },

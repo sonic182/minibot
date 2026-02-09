@@ -20,8 +20,14 @@ def build_kv_tools(memory: KeyValueMemory) -> list[ToolBinding]:
 
 def _save_tool() -> Tool:
     return Tool(
-        name="kv_save",
-        description="Persist a snippet of text with metadata for later retrieval.",
+        name="user_memory_save",
+        description=(
+            "Save important information about the current user for long-term memory. "
+            "Use this to remember user preferences, personal facts, context, goals, "
+            "or any other information that should persist across different conversations. "
+            "Examples: job title, interests, important dates, contact preferences, project details. "
+            "Do NOT use this for storing conversation messages - use chat_history tools for conversation management."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -48,8 +54,12 @@ def _save_tool() -> Tool:
 
 def _get_tool() -> Tool:
     return Tool(
-        name="kv_get",
-        description="Fetch a single entry by id or title.",
+        name="user_memory_get",
+        description=(
+            "Retrieve a specific saved user memory entry by its unique ID or title. "
+            "Use this when you need to recall particular information you previously saved about the user. "
+            "This accesses long-term user memory, not conversation history."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -64,8 +74,12 @@ def _get_tool() -> Tool:
 
 def _search_tool() -> Tool:
     return Tool(
-        name="kv_search",
-        description="Search entries by fuzzy text with pagination.",
+        name="user_memory_search",
+        description=(
+            "Search through all saved user memory entries using flexible text matching. "
+            "Use this to find relevant information about the user without knowing the exact entry ID or title. "
+            "This searches long-term user memory, not conversation history."
+        ),
         parameters={
             "type": "object",
             "properties": {
