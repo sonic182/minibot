@@ -1,6 +1,8 @@
 MiniBot 🤖
 =======
 
+[![PyPI version](https://img.shields.io/pypi/v/minibot)](https://pypi.org/project/minibot/0.0.1/)
+
 Your personal AI assistant for Telegram - self-hosted, auditable, and intentionally opinionated.
 
 Overview
