@@ -177,6 +177,9 @@ Setup:
 2. `poetry run playwright install chromium`
 3. Linux only: `poetry run playwright install-deps chromium`
 
+`playwright` extra installs all browser-tool runtime deps: `playwright`, `selectolax`, and `markdownify`.
+If you install packages manually, install all three.
+
 Quick local config:
 
 ```toml

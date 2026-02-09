@@ -346,14 +346,12 @@ def test_parse_tool_call_repairs_unclosed_json_object() -> None:
     assert arguments == {"url": "https://www.ecosbox.com", "method": "GET"}
 
 
-def test_stringify_result_prefers_yaml_for_structured_payloads() -> None:
+def test_stringify_result_serializes_structured_payloads_as_json() -> None:
     client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
 
     rendered = client._stringify_result({"ok": True, "items": ["a", "b"]})
 
-    assert "ok: true" in rendered
-    assert "items:" in rendered
-    assert "- a" in rendered
+    assert rendered == '{"ok": true, "items": ["a", "b"]}'
 
 
 @pytest.mark.asyncio

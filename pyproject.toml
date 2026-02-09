@@ -1,10 +1,24 @@
 [tool.poetry]
 name = "minibot"
 version = "0.0.1"
-description = ""
+description = "Self-hosted Telegram-first AI assistant with async tooling, memory, and scheduling."
 authors = ["sonic182 <johander1822@gmail.com>"]
 license = "MIT"
 readme = "README.md"
+homepage = "https://github.com/sonic182/minibot"
+repository = "https://github.com/sonic182/minibot"
+documentation = "https://github.com/sonic182/minibot#readme"
+keywords = ["telegram", "assistant", "llm", "bot", "automation", "self-hosted"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Communications :: Chat",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
 packages = [
   { include = "minibot" }
 ]
@@ -20,12 +34,13 @@ sqlalchemy = {extras = ["asyncio"], version = "^2.0.46"}
 aiosqlite = "^0.22.1"
 logfmter = "^0.0.11"
 playwright = {version = "^1.56.0", optional = true}
-pyyaml = "^6.0.3"
-selectolax = "^0.4.6"
-markdownify = "^1.2.2"
+selectolax = {version = "^0.4.6", optional = true}
+markdownify = {version = "^1.2.2", optional = true}
+
 
 [tool.poetry.extras]
-playwright = ["playwright"]
+playwright = ["playwright", "selectolax", "markdownify"]
+
 
 
 [tool.poetry.group.dev.dependencies]

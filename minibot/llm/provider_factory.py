@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
 import json
+from typing import Any, Mapping, Sequence
 
 import logging
-import yaml
 
 from llm_async.models.tool_call import ToolCall
 from llm_async.providers import ClaudeProvider, GoogleProvider, OpenAIProvider, OpenRouterProvider
@@ -359,16 +358,7 @@ class LLMClient:
         if isinstance(result, str):
             return result
         if isinstance(result, (list, dict)):
-            try:
-                return yaml.safe_dump(
-                    result,
-                    sort_keys=False,
-                    allow_unicode=False,
-                    default_flow_style=False,
-                    width=1000,
-                )
-            except Exception:
-                return json.dumps(result, default=str)
+            return json.dumps(result, ensure_ascii=True, default=str)
         return str(result)
 
     @staticmethod
