@@ -83,7 +83,9 @@ async def _graceful_shutdown(services: list, logger: logging.Logger):
             loop.remove_signal_handler(sig)
 
 
-if __name__ == "__main__":
-    import asyncio
-
+def main() -> None:
     asyncio.run(run())
+
+
+if __name__ == "__main__":
+    main()

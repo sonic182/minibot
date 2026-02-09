@@ -50,6 +50,9 @@ pytest-cov = "^7.0.0"
 ruff = "^0.15.0"
 pyright = "^1.1.408"
 
+[tool.poetry.scripts]
+minibot = "minibot.app.daemon:main"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

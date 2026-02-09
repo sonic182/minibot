@@ -19,5 +19,6 @@ COPY pyproject.toml poetry.lock* ./
 RUN poetry install --no-ansi --no-root
 
 COPY . .
+RUN poetry install --no-ansi --only-root
 
-CMD ["python", "-m", "minibot.app.daemon"]
+CMD ["minibot"]

@@ -18,7 +18,7 @@ Quickstart
 1. `poetry install`
 2. `cp config.example.toml config.toml`
 3. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
-4. `poetry run python -m minibot.app.daemon`
+4. `poetry run minibot`
 
 Up & Running with Telegram
 ---------------------------
@@ -28,7 +28,7 @@ Up & Running with Telegram
    * set `channels.telegram.bot_token`
    * populate `allowed_chat_ids` or `allowed_user_ids` with your ID numbers
    * configure the LLM provider section (`provider`, `api_key`, `model`)
-3. Run `poetry run python -m minibot.app.daemon` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
+3. Run `poetry run minibot` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
 4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
 
 Top features
