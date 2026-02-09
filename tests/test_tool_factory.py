@@ -15,6 +15,8 @@ from minibot.adapters.config.schema import (
     TimeToolConfig,
     ToolsConfig,
 )
+from minibot.app.event_bus import EventBus
+from minibot.core.files import FileReadResponse, StoredFileRecord
 from minibot.llm.tools.factory import build_enabled_tools
 
 
@@ -69,6 +71,47 @@ class _PromptSchedulerStub:
     async def delete_prompt(self, **kwargs: Any):
         del kwargs
         return {"job": None, "deleted": False, "stopped_before_delete": False, "reason": "not_found"}
+
+
+class _FileStorageStub:
+    async def write_text(self, **kwargs: Any) -> StoredFileRecord:
+        del kwargs
+        return StoredFileRecord(
+            id="file-1",
+            relative_path="notes.txt",
+            mime_type="text/plain",
+            size_bytes=10,
+            created_at="2026-01-01T00:00:00Z",
+        )
+
+    async def list_files(self, **kwargs: Any) -> list[StoredFileRecord]:
+        del kwargs
+        return []
+
+    async def read_file(self, **kwargs: Any) -> FileReadResponse:
+        del kwargs
+        return FileReadResponse(
+            path="notes.txt",
+            mode="lines",
+            offset=0,
+            limit=10,
+            content="",
+            bytes_read=0,
+            has_more=False,
+        )
+
+    def resolve_absolute_path(self, path: str):
+        return path
+
+    def describe_file(self, **kwargs: Any) -> StoredFileRecord:
+        del kwargs
+        return StoredFileRecord(
+            id="file-1",
+            relative_path="notes.txt",
+            mime_type="text/plain",
+            size_bytes=10,
+            created_at="2026-01-01T00:00:00Z",
+        )
 
 
 def _settings(
@@ -135,6 +178,8 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         memory=_MemoryStub(),
         kv_memory=cast(Any, _KVStub()),
         prompt_scheduler=cast(Any, _PromptSchedulerStub()),
+        event_bus=EventBus(),
+        file_storage=cast(Any, _FileStorageStub()),
     )
     names = {binding.tool.name for binding in tools}
 
@@ -155,6 +200,7 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         "delete_scheduled_prompt",
         "list_scheduled_prompts",
     }.issubset(names)
+    assert {"file_write", "file_list", "file_read", "send_file_in_channel"}.issubset(names)
     assert "current_datetime" not in names
     assert "calculate_expression" not in names
     assert "python_execute" not in names

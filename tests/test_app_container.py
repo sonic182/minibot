@@ -16,6 +16,7 @@ def _reset_container(module) -> None:
     module.AppContainer._llm_client = None
     module.AppContainer._prompt_store = None
     module.AppContainer._prompt_service = None
+    module.AppContainer._file_storage = None
 
 
 def test_app_container_getters_fail_when_not_configured() -> None:
@@ -76,6 +77,7 @@ async def test_app_container_configures_and_initializes_backends(monkeypatch: py
     monkeypatch.setattr(app_container, "SQLAlchemyScheduledPromptStore", _Store)
     monkeypatch.setattr(app_container, "ScheduledPromptService", _PromptService)
     monkeypatch.setattr(app_container, "LLMClient", lambda *_: object())
+    monkeypatch.setattr(app_container, "LocalFileStorage", _SyncBackend)
 
     app_container.AppContainer.configure()
     await app_container.AppContainer.initialize_storage()
@@ -86,6 +88,7 @@ async def test_app_container_configures_and_initializes_backends(monkeypatch: py
     assert app_container.AppContainer.get_memory_backend().initialized is True
     assert app_container.AppContainer.get_kv_memory_backend() is not None
     assert app_container.AppContainer.get_scheduled_prompt_service() is not None
+    assert app_container.AppContainer.get_file_storage() is not None
 
     sync_backend = _SyncBackend()
     await app_container.AppContainer._initialize_backend(sync_backend)

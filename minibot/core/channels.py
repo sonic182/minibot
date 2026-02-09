@@ -20,3 +20,13 @@ class ChannelResponse(BaseModel):
     chat_id: int
     text: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ChannelMediaResponse(BaseModel):
+    channel: str
+    chat_id: int
+    media_type: str
+    file_path: str
+    caption: str | None = None
+    filename: str | None = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)

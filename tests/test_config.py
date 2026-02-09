@@ -67,6 +67,10 @@ max_screenshot_bytes = "2MB"
 [tools.python_exec]
 max_output_bytes = "64KB"
 max_code_bytes = "32KB"
+
+[tools.file_storage]
+max_write_bytes = "64KB"
+max_read_bytes = "128KB"
 """
     )
 
@@ -78,6 +82,8 @@ max_code_bytes = "32KB"
     assert settings.tools.playwright.max_screenshot_bytes == 2_000_000
     assert settings.tools.python_exec.max_output_bytes == 64_000
     assert settings.tools.python_exec.max_code_bytes == 32_000
+    assert settings.tools.file_storage.max_write_bytes == 64_000
+    assert settings.tools.file_storage.max_read_bytes == 128_000
 
 
 def test_load_settings_rejects_invalid_byte_size(tmp_path: Path) -> None:

@@ -63,6 +63,7 @@ async def test_dispatcher_publishes_outbound_reply(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_file_storage", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
 
     bus = EventBus()
@@ -101,6 +102,7 @@ async def test_dispatcher_skips_outbound_when_handler_marks_silent(monkeypatch: 
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_file_storage", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
 
     bus = EventBus()

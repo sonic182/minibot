@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, cast
 import logging
 
 import pytest
 
+from minibot.app.event_bus import EventBus
 from minibot.adapters.config.schema import TelegramChannelConfig
 from minibot.adapters.messaging.telegram.service import TelegramService
+from minibot.core.channels import ChannelMediaResponse
+from minibot.core.events import OutboundMediaEvent
 
 
 @dataclass
@@ -44,6 +48,18 @@ class _MediaMessage:
     from_user: _User | None
     photo: list[_Photo] | None = None
     document: _Document | None = None
+
+
+class _BotStub:
+    def __init__(self) -> None:
+        self.photos: list[dict[str, Any]] = []
+        self.documents: list[dict[str, Any]] = []
+
+    async def send_photo(self, *, chat_id: int, photo: Any, caption: str | None = None) -> None:
+        self.photos.append({"chat_id": chat_id, "photo": photo, "caption": caption})
+
+    async def send_document(self, *, chat_id: int, document: Any, caption: str | None = None) -> None:
+        self.documents.append({"chat_id": chat_id, "document": document, "caption": caption})
 
 
 def _service(config: TelegramChannelConfig) -> TelegramService:
@@ -183,3 +199,38 @@ async def test_build_attachments_converts_image_document_to_input_image() -> Non
     assert len(attachments) == 1
     assert attachments[0]["type"] == "input_image"
     assert attachments[0]["image_url"].startswith("data:image/jpeg;base64,")
+
+
+@pytest.mark.asyncio
+async def test_publish_outgoing_sends_media_events(tmp_path) -> None:
+    bus = EventBus()
+    service = TelegramService.__new__(TelegramService)
+    service._config = TelegramChannelConfig(bot_token="token")
+    service._logger = logging.getLogger("test.telegram")
+    service._outgoing_subscription = bus.subscribe()
+    service._bot = _BotStub()
+
+    outgoing_task = asyncio.create_task(service._publish_outgoing())
+    file_path = tmp_path / "report.txt"
+    file_path.write_text("hello", encoding="utf-8")
+
+    await bus.publish(
+        OutboundMediaEvent(
+            response=ChannelMediaResponse(
+                channel="telegram",
+                chat_id=10,
+                media_type="document",
+                file_path=str(file_path),
+                caption="report",
+            )
+        )
+    )
+    await asyncio.sleep(0.05)
+    await service._outgoing_subscription.close()
+    outgoing_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await outgoing_task
+
+    assert len(service._bot.documents) == 1
+    assert service._bot.documents[0]["chat_id"] == 10
+    assert service._bot.documents[0]["caption"] == "report"

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from minibot.adapters.config.schema import Settings
+from minibot.app.event_bus import EventBus
+from minibot.core.files import FileStorage
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.calculator import CalculatorTool
+from minibot.llm.tools.channel_file_sender import ChannelFileSenderTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
+from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.user_memory import build_kv_tools
 from minibot.llm.tools.playwright import PlaywrightTool
@@ -25,6 +27,8 @@ def build_enabled_tools(
     memory: MemoryBackend,
     kv_memory: KeyValueMemory | None,
     prompt_scheduler: ScheduledPromptService | None = None,
+    event_bus: EventBus | None = None,
+    file_storage: FileStorage | None = None,
 ) -> list[ToolBinding]:
     tools: list[ToolBinding] = []
     chat_memory_tool = ChatMemoryTool(memory, max_history_messages=settings.memory.max_history_messages)
@@ -56,4 +60,10 @@ def build_enabled_tools(
             min_recurrence_interval_seconds=settings.scheduler.prompts.min_recurrence_interval_seconds,
         )
         tools.extend(schedule_tool.bindings())
+    if settings.tools.file_storage.enabled and file_storage is not None:
+        file_storage_tool = FileStorageTool(file_storage)
+        tools.extend(file_storage_tool.bindings())
+        if event_bus is not None:
+            channel_sender_tool = ChannelFileSenderTool(event_bus, file_storage)
+            tools.extend(channel_sender_tool.bindings())
     return tools

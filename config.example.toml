@@ -183,6 +183,14 @@ memory_max_mb = 256
 enabled = false
 command_prefix = []
 
+# Managed file workspace tools.
+[tools.file_storage]
+enabled = true
+root_dir = "./data/files"
+max_write_bytes = "64KB"
+max_read_bytes = "128KB"
+max_read_lines = 500
+
 # Structured logging output.
 [logging]
 structured = true

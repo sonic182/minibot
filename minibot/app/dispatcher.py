@@ -19,7 +19,14 @@ class Dispatcher:
         settings = AppContainer.get_settings()
         prompt_service = AppContainer.get_scheduled_prompt_service()
         memory_backend = AppContainer.get_memory_backend()
-        tools = build_enabled_tools(settings, memory_backend, AppContainer.get_kv_memory_backend(), prompt_service)
+        tools = build_enabled_tools(
+            settings,
+            memory_backend,
+            AppContainer.get_kv_memory_backend(),
+            prompt_service,
+            event_bus=self._event_bus,
+            file_storage=AppContainer.get_file_storage(),
+        )
         self._handler = LLMMessageHandler(
             memory=memory_backend,
             llm_client=AppContainer.get_llm_client(),

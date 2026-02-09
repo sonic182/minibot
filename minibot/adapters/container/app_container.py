@@ -5,8 +5,10 @@ import inspect
 from pathlib import Path
 from typing import Optional
 
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app.event_bus import EventBus
 from minibot.app.scheduler_service import ScheduledPromptService
+from minibot.core.files import FileStorage
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.llm.provider_factory import LLMClient
 from minibot.adapters.config.loader import load_settings
@@ -26,6 +28,7 @@ class AppContainer:
     _llm_client: Optional[LLMClient] = None
     _prompt_store: Optional[SQLAlchemyScheduledPromptStore] = None
     _prompt_service: Optional[ScheduledPromptService] = None
+    _file_storage: Optional[FileStorage] = None
 
     @classmethod
     def configure(cls, config_path: Path | None = None) -> None:
@@ -39,6 +42,10 @@ class AppContainer:
         else:
             cls._kv_memory_backend = None
         cls._llm_client = LLMClient(cls._settings.llm)
+        if cls._settings.tools.file_storage.enabled:
+            cls._file_storage = LocalFileStorage(cls._settings.tools.file_storage)
+        else:
+            cls._file_storage = None
         prompts_config = cls._settings.scheduler.prompts
         if prompts_config.enabled:
             cls._prompt_store = SQLAlchemyScheduledPromptStore(prompts_config)
@@ -88,6 +95,10 @@ class AppContainer:
     @classmethod
     def get_scheduled_prompt_service(cls) -> ScheduledPromptService | None:
         return cls._prompt_service
+
+    @classmethod
+    def get_file_storage(cls) -> FileStorage | None:
+        return cls._file_storage
 
     @classmethod
     def get_telegram_config(cls) -> TelegramChannelConfig:

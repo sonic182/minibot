@@ -10,10 +10,11 @@ from typing import Any, Optional
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message as TelegramMessage
+from aiogram.types.input_file import FSInputFile
 
 from minibot.app.event_bus import EventBus
-from minibot.core.channels import ChannelMessage
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.channels import ChannelMediaResponse, ChannelMessage
+from minibot.core.events import MessageEvent, OutboundEvent, OutboundMediaEvent
 from minibot.adapters.config.schema import TelegramChannelConfig
 
 
@@ -225,6 +226,26 @@ class TelegramService:
                             },
                         )
                         break
+            if isinstance(event, OutboundMediaEvent) and event.response.channel == "telegram":
+                await self._send_media(event.response)
+
+    async def _send_media(self, response: ChannelMediaResponse) -> None:
+        self._logger.info(
+            "sending media response",
+            extra={
+                "chat_id": response.chat_id,
+                "media_type": response.media_type,
+                "file_path": response.file_path,
+            },
+        )
+        input_file = FSInputFile(path=response.file_path, filename=response.filename)
+        if response.media_type == "photo":
+            await self._bot.send_photo(chat_id=response.chat_id, photo=input_file, caption=response.caption)
+            return
+        if response.media_type == "document":
+            await self._bot.send_document(chat_id=response.chat_id, document=input_file, caption=response.caption)
+            return
+        raise ValueError("unsupported telegram media_type")
 
     async def stop(self) -> None:
         if self._poll_task:

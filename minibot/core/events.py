@@ -5,7 +5,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from minibot.core.channels import ChannelMessage, ChannelResponse
+from minibot.core.channels import ChannelMediaResponse, ChannelMessage, ChannelResponse
 
 
 class BaseEvent(BaseModel):
@@ -21,6 +21,11 @@ class MessageEvent(BaseEvent):
 class OutboundEvent(BaseEvent):
     event_type: Literal["outbound"] = "outbound"
     response: ChannelResponse
+
+
+class OutboundMediaEvent(BaseEvent):
+    event_type: Literal["outbound_media"] = "outbound_media"
+    response: ChannelMediaResponse
 
 
 class SystemEvent(BaseEvent):
