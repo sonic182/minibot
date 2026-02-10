@@ -141,16 +141,55 @@ Example `jail` command prefix (set in `config.toml`):
 ```toml
 [tools.python_exec.jail]
 enabled = true
-command_prefix = ["firejail", "--private=/srv/minibot-sandbox", "--net=none", "--quiet"]
+command_prefix = [
+  "firejail",
+  "--private=/srv/minibot-sandbox",
+  "--quiet",
+  # "--net=none", # add this to restrict network access from jailed processes
+]
 ```
 
-For artifact export with jail mode, add a shared path configuration under `[tools.python_exec]` and allow it in your Firejail rules:
+Minimal Firejail + artifact export example (single-user host):
+
+1. Create shared directory:
+
+```bash
+mkdir -p /home/myuser/mybot/data/files/jail-shared
+chmod 700 /home/myuser/mybot/data/files/jail-shared
+```
+
+2. Configure Python exec + shared artifact path:
 
 ```toml
 [tools.python_exec]
+sandbox_mode = "jail"
 artifacts_allow_in_jail = true
-artifacts_jail_shared_dir = "/srv/minibot-data/files/jail-shared"
+artifacts_jail_shared_dir = "/home/myuser/mybot/data/files/jail-shared"
 ```
+
+3. Configure Firejail wrapper:
+
+```toml
+[tools.python_exec.jail]
+enabled = true
+command_prefix = [
+  "firejail",
+  "--quiet",
+  "--noprofile",
+  # "--net=none", # add this to restrict network access from jailed processes
+  "--caps.drop=all",
+  "--seccomp",
+  "--whitelist=/home/myuser/mybot/data/files/jail-shared",
+  "--read-write=/home/myuser/mybot/data/files/jail-shared",
+  "--whitelist=/home/myuser/mybot/tools_venv",
+]
+```
+
+Notes:
+
+- Keep `artifacts_jail_shared_dir` and Firejail whitelist/read-write paths exactly identical.
+- Ensure `tools.python_exec.python_path` (or `venv_path`) points to an interpreter visible inside Firejail.
+- `--noprofile` avoids host distro defaults that may block home directory executables.
 
 Note: ensure the wrapper binary (e.g. `firejail`) is available in your runtime image or host. The Dockerfile in this repo installs `firejail` by default for convenience; review its flags carefully before use.
 
