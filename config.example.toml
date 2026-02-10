@@ -168,6 +168,16 @@ default_timeout_seconds = 8
 max_timeout_seconds = 20
 max_output_bytes = "64KB"
 max_code_bytes = "32KB"
+artifacts_enabled = true
+artifacts_default_subdir = "generated"
+artifacts_allowed_extensions = [".png", ".jpg", ".jpeg", ".pdf", ".csv", ".txt", ".json", ".svg"]
+artifacts_max_files = 5
+artifacts_max_file_bytes = "5MB"
+artifacts_max_total_bytes = "20MB"
+# For safety, artifact export is blocked in sandbox_mode = "jail" unless explicitly enabled below.
+artifacts_allow_in_jail = false
+# Required when artifacts_allow_in_jail = true. Must be a host path accessible by both Firejail process and bot.
+artifacts_jail_shared_dir = ""
 pass_parent_env = false
 env_allowlist = ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"]
 

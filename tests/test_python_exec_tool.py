@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any, cast
+
 import pytest
 
 from minibot.adapters.config.schema import PythonExecToolConfig
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.python_exec import HostPythonExecTool
 
@@ -11,12 +15,20 @@ def _binding_map(config: PythonExecToolConfig):
     return {binding.tool.name: binding for binding in HostPythonExecTool(config).bindings()}
 
 
+def _binding_map_with_storage(config: PythonExecToolConfig, root: Path):
+    storage = LocalFileStorage(root_dir=str(root), max_write_bytes=1_000_000)
+    return {binding.tool.name: binding for binding in HostPythonExecTool(config, storage=storage).bindings()}
+
+
 @pytest.mark.asyncio
 async def test_python_exec_runs_code_on_host() -> None:
     binding = _binding_map(PythonExecToolConfig())["python_execute"]
-    result = await binding.handler(
-        {"code": "print(8 + 9)", "stdin": None, "timeout_seconds": None},
-        ToolContext(),
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"code": "print(8 + 9)", "stdin": None, "timeout_seconds": None},
+            ToolContext(),
+        ),
     )
     assert result["ok"] is True
     assert result["exit_code"] == 0
@@ -28,9 +40,12 @@ async def test_python_exec_runs_code_on_host() -> None:
 @pytest.mark.asyncio
 async def test_python_exec_honors_timeout() -> None:
     binding = _binding_map(PythonExecToolConfig(default_timeout_seconds=1, max_timeout_seconds=1))["python_execute"]
-    result = await binding.handler(
-        {"code": "import time\ntime.sleep(2)", "stdin": None, "timeout_seconds": None},
-        ToolContext(),
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"code": "import time\ntime.sleep(2)", "stdin": None, "timeout_seconds": None},
+            ToolContext(),
+        ),
     )
     assert result["ok"] is False
     assert result["timed_out"] is True
@@ -39,9 +54,12 @@ async def test_python_exec_honors_timeout() -> None:
 @pytest.mark.asyncio
 async def test_python_exec_rejects_code_size_over_limit() -> None:
     binding = _binding_map(PythonExecToolConfig(max_code_bytes=10))["python_execute"]
-    result = await binding.handler(
-        {"code": "print('this is too long')", "stdin": None, "timeout_seconds": None},
-        ToolContext(),
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"code": "print('this is too long')", "stdin": None, "timeout_seconds": None},
+            ToolContext(),
+        ),
     )
     assert result["ok"] is False
     assert "code size exceeds limit" in result["error"]
@@ -50,13 +68,16 @@ async def test_python_exec_rejects_code_size_over_limit() -> None:
 @pytest.mark.asyncio
 async def test_python_exec_uses_stdin() -> None:
     binding = _binding_map(PythonExecToolConfig())["python_execute"]
-    result = await binding.handler(
-        {
-            "code": "import sys\nprint(sys.stdin.read().strip().upper())",
-            "stdin": "hello",
-            "timeout_seconds": None,
-        },
-        ToolContext(),
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {
+                "code": "import sys\nprint(sys.stdin.read().strip().upper())",
+                "stdin": "hello",
+                "timeout_seconds": None,
+            },
+            ToolContext(),
+        ),
     )
     assert result["ok"] is True
     assert result["stdout"].strip() == "HELLO"
@@ -65,9 +86,12 @@ async def test_python_exec_uses_stdin() -> None:
 @pytest.mark.asyncio
 async def test_python_environment_info_returns_runtime_and_packages() -> None:
     binding = _binding_map(PythonExecToolConfig())["python_environment_info"]
-    result = await binding.handler(
-        {"include_packages": True, "limit": 5, "name_prefix": None},
-        ToolContext(),
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"include_packages": True, "limit": 5, "name_prefix": None},
+            ToolContext(),
+        ),
     )
     assert result["ok"] is True
     assert isinstance(result["runtime_executable"], str)
@@ -79,11 +103,59 @@ async def test_python_environment_info_returns_runtime_and_packages() -> None:
 @pytest.mark.asyncio
 async def test_python_environment_info_supports_prefix_filter() -> None:
     binding = _binding_map(PythonExecToolConfig())["python_environment_info"]
-    result = await binding.handler(
-        {"include_packages": True, "limit": 20, "name_prefix": "pytest"},
-        ToolContext(),
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"include_packages": True, "limit": 20, "name_prefix": "pytest"},
+            ToolContext(),
+        ),
     )
     assert result["ok"] is True
     assert result["name_prefix"] == "pytest"
     for package in result["packages"]:
         assert package.lower().startswith("pytest")
+
+
+@pytest.mark.asyncio
+async def test_python_exec_saves_artifacts_to_managed_files(tmp_path: Path) -> None:
+    binding = _binding_map_with_storage(PythonExecToolConfig(), tmp_path)["python_execute"]
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {
+                "code": "from pathlib import Path\nPath('plot.png').write_bytes(b'fakepng')\nprint('done')",
+                "stdin": None,
+                "timeout_seconds": None,
+                "save_artifacts": True,
+                "artifact_globs": ["*.png"],
+                "artifact_subdir": "generated",
+                "max_artifacts": 1,
+            },
+            ToolContext(),
+        ),
+    )
+    assert result["ok"] is True
+    assert len(result["artifacts_saved"]) == 1
+    saved_path = result["artifacts_saved"][0]["path"]
+    assert saved_path.startswith("generated/")
+    assert (tmp_path / saved_path).exists()
+
+
+@pytest.mark.asyncio
+async def test_python_exec_blocks_artifact_export_in_jail_by_default(tmp_path: Path) -> None:
+    config = PythonExecToolConfig(sandbox_mode="jail", artifacts_allow_in_jail=False)
+    binding = _binding_map_with_storage(config, tmp_path)["python_execute"]
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {
+                "code": "from pathlib import Path\nPath('plot.png').write_bytes(b'fakepng')",
+                "stdin": None,
+                "timeout_seconds": None,
+                "save_artifacts": True,
+            },
+            ToolContext(),
+        ),
+    )
+    assert result["ok"] is False
+    assert result["error_code"] == "artifacts_not_supported_in_jail"

@@ -29,6 +29,7 @@ def build_enabled_tools(
     event_bus: EventBus | None = None,
 ) -> list[ToolBinding]:
     tools: list[ToolBinding] = []
+    managed_storage: LocalFileStorage | None = None
     chat_memory_tool = ChatMemoryTool(memory, max_history_messages=settings.memory.max_history_messages)
     tools.extend(chat_memory_tool.bindings())
     if settings.tools.kv_memory.enabled and kv_memory is not None:
@@ -46,14 +47,19 @@ def build_enabled_tools(
             max_exponent_abs=settings.tools.calculator.max_exponent_abs,
         )
         tools.extend(calculator_tool.bindings())
+    if settings.tools.file_storage.enabled:
+        managed_storage = LocalFileStorage(
+            root_dir=settings.tools.file_storage.root_dir,
+            max_write_bytes=settings.tools.file_storage.max_write_bytes,
+        )
     if settings.tools.python_exec.enabled:
-        python_exec_tool = HostPythonExecTool(settings.tools.python_exec)
+        python_exec_tool = HostPythonExecTool(settings.tools.python_exec, storage=managed_storage)
         tools.extend(python_exec_tool.bindings())
     if settings.tools.playwright.enabled:
         playwright_tool = PlaywrightTool(settings.tools.playwright)
         tools.extend(playwright_tool.bindings())
     if settings.tools.file_storage.enabled:
-        file_storage = LocalFileStorage(
+        file_storage = managed_storage or LocalFileStorage(
             root_dir=settings.tools.file_storage.root_dir,
             max_write_bytes=settings.tools.file_storage.max_write_bytes,
         )

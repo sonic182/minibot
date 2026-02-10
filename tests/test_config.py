@@ -67,6 +67,8 @@ max_screenshot_bytes = "2MB"
 [tools.python_exec]
 max_output_bytes = "64KB"
 max_code_bytes = "32KB"
+artifacts_max_file_bytes = "5MB"
+artifacts_max_total_bytes = "20MB"
 
 [tools.file_storage]
 enabled = true
@@ -86,6 +88,8 @@ incoming_temp_subdir = "uploads/temp"
     assert settings.tools.playwright.max_screenshot_bytes == 2_000_000
     assert settings.tools.python_exec.max_output_bytes == 64_000
     assert settings.tools.python_exec.max_code_bytes == 32_000
+    assert settings.tools.python_exec.artifacts_max_file_bytes == 5_000_000
+    assert settings.tools.python_exec.artifacts_max_total_bytes == 20_000_000
     assert settings.tools.file_storage.enabled is True
     assert settings.tools.file_storage.root_dir == "./data/files"
     assert settings.tools.file_storage.max_write_bytes == 80_000
