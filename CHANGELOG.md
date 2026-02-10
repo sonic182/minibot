@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Python execution artifact flow: `python_execute` can now generate files and persist them into managed storage for later delivery.
+
+### Changed
+
+- Channel delivery flow now supports receiving Python-generated files in Telegram through managed file events (`send_file`/`OutboundFileEvent`).
+
 ## [0.0.2] - 2026-02-10
 
 ### Added
