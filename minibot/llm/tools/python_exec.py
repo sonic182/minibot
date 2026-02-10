@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 import os
 from pathlib import Path
 import shutil
@@ -15,12 +16,14 @@ from typing import Any
 from llm_async.models import Tool
 
 from minibot.adapters.config.schema import PythonExecToolConfig
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
 class HostPythonExecTool:
-    def __init__(self, config: PythonExecToolConfig) -> None:
+    def __init__(self, config: PythonExecToolConfig, storage: LocalFileStorage | None = None) -> None:
         self._config = config
+        self._storage = storage
         self._logger = logging.getLogger("minibot.python_exec")
 
     def bindings(self) -> list[ToolBinding]:
@@ -51,6 +54,24 @@ class HostPythonExecTool:
                         "type": ["integer", "null"],
                         "minimum": 1,
                         "description": "Optional timeout for this execution.",
+                    },
+                    "save_artifacts": {
+                        "type": ["boolean", "null"],
+                        "description": "When true, save generated files into managed files storage.",
+                    },
+                    "artifact_globs": {
+                        "type": ["array", "null"],
+                        "items": {"type": "string"},
+                        "description": "Optional glob patterns to select generated files (for example ['*.png']).",
+                    },
+                    "artifact_subdir": {
+                        "type": ["string", "null"],
+                        "description": "Destination subdirectory under managed files root.",
+                    },
+                    "max_artifacts": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Optional per-run cap for exported artifact count.",
                     },
                 },
                 "required": ["code", "stdin", "timeout_seconds"],
@@ -112,6 +133,61 @@ class HostPythonExecTool:
             return {"ok": False, "error": "stdin must be a string or null"}
 
         timeout_seconds = self._coerce_timeout(payload.get("timeout_seconds"))
+        try:
+            artifact_options = self._coerce_artifact_options(payload)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error_code": "invalid_artifact_options",
+                "error": str(exc),
+                "timed_out": False,
+            }
+        if artifact_options["enabled"] and not self._config.artifacts_enabled:
+            return {
+                "ok": False,
+                "error_code": "artifacts_disabled",
+                "error": "artifact export is disabled by tools.python_exec.artifacts_enabled",
+                "timed_out": False,
+            }
+        if artifact_options["enabled"] and self._storage is None:
+            return {
+                "ok": False,
+                "error_code": "file_storage_unavailable",
+                "error": "artifact export requires tools.file_storage.enabled = true",
+                "timed_out": False,
+            }
+        if (
+            artifact_options["enabled"]
+            and self._config.sandbox_mode == "jail"
+            and not self._config.artifacts_allow_in_jail
+        ):
+            return {
+                "ok": False,
+                "error_code": "artifacts_not_supported_in_jail",
+                "error": (
+                    "artifact export is blocked in sandbox_mode='jail'. "
+                    "Set tools.python_exec.artifacts_allow_in_jail=true and configure artifacts_jail_shared_dir"
+                ),
+                "timed_out": False,
+            }
+        if artifact_options["enabled"] and self._config.sandbox_mode == "jail":
+            shared_dir = (self._config.artifacts_jail_shared_dir or "").strip()
+            if not shared_dir:
+                return {
+                    "ok": False,
+                    "error_code": "artifact_export_unreachable",
+                    "error": "tools.python_exec.artifacts_jail_shared_dir must be configured for jail artifact export",
+                    "timed_out": False,
+                }
+            try:
+                self._resolve_jail_shared_dir()
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "error_code": "artifact_export_unreachable",
+                    "error": str(exc),
+                    "timed_out": False,
+                }
         executable = self._resolve_python_executable()
         self._logger.debug(
             "python exec runtime resolved",
@@ -119,6 +195,7 @@ class HostPythonExecTool:
                 "python_executable": executable,
                 "timeout_seconds": timeout_seconds,
                 "code_bytes": code_size,
+                "save_artifacts": artifact_options["enabled"],
             },
         )
         started = time.perf_counter()
@@ -129,6 +206,7 @@ class HostPythonExecTool:
                 stdin=stdin,
                 timeout_seconds=timeout_seconds,
                 executable=executable,
+                artifact_options=artifact_options,
             )
         except Exception as exc:
             self._logger.exception("python exec failed before process start", exc_info=exc)
@@ -184,6 +262,12 @@ class HostPythonExecTool:
                 stdin=None,
                 timeout_seconds=timeout_seconds,
                 executable=executable,
+                artifact_options={
+                    "enabled": False,
+                    "patterns": [],
+                    "subdir": self._config.artifacts_default_subdir,
+                    "max_artifacts": self._config.artifacts_max_files,
+                },
             )
         except Exception as exc:
             self._logger.exception("python env info failed before process start", exc_info=exc)
@@ -291,6 +375,65 @@ class HostPythonExecTool:
         stripped = value.strip()
         return stripped or None
 
+    def _coerce_artifact_options(self, payload: dict[str, Any]) -> dict[str, Any]:
+        save_raw = payload.get("save_artifacts")
+        save_artifacts = False if save_raw is None else self._coerce_optional_bool(save_raw, default=False)
+        patterns = self._coerce_artifact_globs(payload.get("artifact_globs"))
+        subdir = self._coerce_artifact_subdir(payload.get("artifact_subdir"))
+        max_artifacts = self._coerce_max_artifacts(payload.get("max_artifacts"))
+        return {
+            "enabled": save_artifacts,
+            "patterns": patterns,
+            "subdir": subdir,
+            "max_artifacts": max_artifacts,
+        }
+
+    @staticmethod
+    def _coerce_artifact_globs(value: Any) -> list[str]:
+        if value is None:
+            return ["*.png", "*.jpg", "*.jpeg", "*.pdf", "*.csv", "*.txt", "*.json", "*.svg"]
+        if not isinstance(value, list):
+            raise ValueError("artifact_globs must be an array of strings")
+        parsed: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("artifact_globs must contain only strings")
+            stripped = item.strip()
+            if stripped:
+                parsed.append(stripped)
+        if not parsed:
+            raise ValueError("artifact_globs cannot be empty when provided")
+        return parsed
+
+    def _coerce_artifact_subdir(self, value: Any) -> str:
+        if value is None:
+            return self._config.artifacts_default_subdir.strip() or "generated"
+        if not isinstance(value, str):
+            raise ValueError("artifact_subdir must be a string")
+        cleaned = value.strip().replace("\\", "/").strip("/")
+        if not cleaned:
+            return self._config.artifacts_default_subdir.strip() or "generated"
+        return cleaned
+
+    def _coerce_max_artifacts(self, value: Any) -> int:
+        config_max = self._config.artifacts_max_files
+        if value is None:
+            return config_max
+        if isinstance(value, bool):
+            raise ValueError("max_artifacts must be an integer")
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return config_max
+            parsed = int(stripped)
+        else:
+            raise ValueError("max_artifacts must be an integer")
+        if parsed < 1:
+            raise ValueError("max_artifacts must be >= 1")
+        return min(parsed, config_max)
+
     def _resolve_python_executable(self) -> str:
         explicit_path = (self._config.python_path or "").strip()
         if explicit_path:
@@ -356,9 +499,26 @@ class HostPythonExecTool:
             "print(json.dumps(result, ensure_ascii=True))\n"
         )
 
-    async def _execute(self, code: str, stdin: str | None, timeout_seconds: int, executable: str) -> dict[str, Any]:
-        with tempfile.TemporaryDirectory(prefix="minibot_pyexec_") as tmp_dir:
-            mode = self._config.sandbox_mode
+    async def _execute(
+        self,
+        code: str,
+        stdin: str | None,
+        timeout_seconds: int,
+        executable: str,
+        artifact_options: dict[str, Any],
+    ) -> dict[str, Any]:
+        mode = self._config.sandbox_mode
+        run_dir: Path
+        cleanup_path: Path | None = None
+        if mode == "jail" and artifact_options["enabled"]:
+            shared_root = self._resolve_jail_shared_dir()
+            run_dir = Path(tempfile.mkdtemp(prefix="minibot_pyexec_", dir=str(shared_root))).resolve()
+            cleanup_path = run_dir
+        else:
+            run_dir = Path(tempfile.mkdtemp(prefix="minibot_pyexec_")).resolve()
+            cleanup_path = run_dir
+
+        try:
             command = [executable, "-u", "-B", "-I", "-c", code]
             sandbox_applied = mode
             preexec_fn = None
@@ -376,14 +536,14 @@ class HostPythonExecTool:
                     "sandbox_requested": mode,
                     "sandbox_applied": sandbox_applied,
                     "command_argv0": command[0] if command else "",
-                    "cwd": tmp_dir,
+                    "cwd": str(run_dir),
                     "timeout_seconds": timeout_seconds,
                 },
             )
 
             process = await asyncio.create_subprocess_exec(
                 *command,
-                cwd=tmp_dir,
+                cwd=str(run_dir),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -413,6 +573,10 @@ class HostPythonExecTool:
                 stdout_data, stderr_data = await process.communicate()
 
             stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
+            artifacts_saved: list[dict[str, Any]] = []
+            artifacts_skipped: list[dict[str, Any]] = []
+            if artifact_options["enabled"]:
+                artifacts_saved, artifacts_skipped = self._collect_artifacts(run_dir, artifact_options)
 
             self._logger.debug(
                 "python exec process ended",
@@ -424,6 +588,7 @@ class HostPythonExecTool:
                     "stderr_preview": stderr_data[:300].decode("utf-8", errors="replace"),
                     "truncated": truncated,
                     "sandbox_mode": sandbox_applied,
+                    "artifacts_saved": len(artifacts_saved),
                 },
             )
 
@@ -435,7 +600,107 @@ class HostPythonExecTool:
                 "timed_out": timed_out,
                 "truncated": truncated,
                 "sandbox_mode": sandbox_applied,
+                "artifacts_saved": artifacts_saved,
+                "artifacts_skipped": artifacts_skipped,
             }
+        finally:
+            if cleanup_path is not None:
+                shutil.rmtree(cleanup_path, ignore_errors=True)
+
+    def _resolve_jail_shared_dir(self) -> Path:
+        shared_dir = (self._config.artifacts_jail_shared_dir or "").strip()
+        if not shared_dir:
+            raise ValueError("artifacts_jail_shared_dir is required when exporting artifacts in jail mode")
+        root = Path(shared_dir).resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        if not root.is_dir():
+            raise ValueError("artifacts_jail_shared_dir must be a directory")
+        return root
+
+    def _collect_artifacts(
+        self, run_dir: Path, artifact_options: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if self._storage is None:
+            return [], [{"name": "*", "reason": "file_storage_unavailable"}]
+
+        patterns = artifact_options["patterns"]
+        subdir = artifact_options["subdir"]
+        max_artifacts = int(artifact_options["max_artifacts"])
+        allowed_ext = {ext.lower() for ext in self._config.artifacts_allowed_extensions}
+        max_file_bytes = int(self._config.artifacts_max_file_bytes)
+        max_total_bytes = int(self._config.artifacts_max_total_bytes)
+
+        candidates: list[Path] = []
+        seen: set[str] = set()
+        for pattern in patterns:
+            for file_path in sorted(run_dir.rglob(pattern)):
+                if not file_path.is_file():
+                    continue
+                key = str(file_path.resolve())
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(file_path)
+
+        saved: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        total_saved_bytes = 0
+
+        for source_path in candidates:
+            rel_name = str(source_path.relative_to(run_dir)).replace("\\", "/")
+            if len(saved) >= max_artifacts:
+                skipped.append({"name": rel_name, "reason": "max_artifacts_reached"})
+                continue
+
+            suffix = source_path.suffix.lower()
+            if allowed_ext and suffix not in allowed_ext:
+                skipped.append({"name": rel_name, "reason": "extension_not_allowed"})
+                continue
+
+            size_bytes = int(source_path.stat().st_size)
+            if size_bytes > max_file_bytes:
+                skipped.append({"name": rel_name, "reason": "file_too_large"})
+                continue
+            if total_saved_bytes + size_bytes > max_total_bytes:
+                skipped.append({"name": rel_name, "reason": "total_size_limit"})
+                continue
+
+            destination_rel = self._allocate_artifact_destination(subdir=subdir, filename=source_path.name)
+            destination_abs = self._storage.resolve_file(destination_rel)
+            destination_abs.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, destination_abs)
+
+            mime_type, _ = mimetypes.guess_type(str(destination_abs), strict=False)
+            saved.append(
+                {
+                    "path": destination_rel,
+                    "name": destination_abs.name,
+                    "size_bytes": size_bytes,
+                    "mime": mime_type or "application/octet-stream",
+                }
+            )
+            total_saved_bytes += size_bytes
+
+        return saved, skipped
+
+    def _allocate_artifact_destination(self, subdir: str, filename: str) -> str:
+        safe_subdir = subdir.replace("\\", "/").strip("/")
+        candidate = f"{safe_subdir}/{filename}" if safe_subdir else filename
+        target = self._storage.resolve_file(candidate) if self._storage is not None else Path(candidate)
+        if not target.exists():
+            return candidate
+
+        stem = Path(filename).stem or "artifact"
+        suffix = Path(filename).suffix
+        for index in range(1, 1000):
+            variant_name = f"{stem}-{index}{suffix}"
+            variant_rel = f"{safe_subdir}/{variant_name}" if safe_subdir else variant_name
+            variant_target = (
+                self._storage.resolve_file(variant_rel) if self._storage is not None else Path(variant_rel)
+            )
+            if not variant_target.exists():
+                return variant_rel
+        raise ValueError("unable to allocate artifact destination path")
 
     def _wrap_jail(self, command: list[str]) -> tuple[list[str], str]:
         jail_cfg = self._config.jail

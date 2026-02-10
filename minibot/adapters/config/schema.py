@@ -153,6 +153,16 @@ class PythonExecToolConfig(BaseModel):
     max_timeout_seconds: PositiveInt = 20
     max_output_bytes: ByteSizeValue = 64000
     max_code_bytes: ByteSizeValue = 32000
+    artifacts_enabled: bool = True
+    artifacts_default_subdir: str = "generated"
+    artifacts_allowed_extensions: List[str] = Field(
+        default_factory=lambda: [".png", ".jpg", ".jpeg", ".pdf", ".csv", ".txt", ".json", ".svg"]
+    )
+    artifacts_max_files: PositiveInt = 5
+    artifacts_max_file_bytes: ByteSizeValue = 5000000
+    artifacts_max_total_bytes: ByteSizeValue = 20000000
+    artifacts_allow_in_jail: bool = False
+    artifacts_jail_shared_dir: str | None = None
     pass_parent_env: bool = False
     env_allowlist: List[str] = Field(default_factory=lambda: ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"])
     rlimit: PythonExecRLimitConfig = PythonExecRLimitConfig()
