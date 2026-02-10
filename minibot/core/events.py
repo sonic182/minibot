@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from uuid import uuid4
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from minibot.core.channels import ChannelMessage, ChannelResponse
+from minibot.core.channels import ChannelFileResponse, ChannelMessage, ChannelResponse
 
 
 class BaseEvent(BaseModel):
@@ -14,15 +14,20 @@ class BaseEvent(BaseModel):
 
 
 class MessageEvent(BaseEvent):
-    event_type: Literal["message"] = "message"
+    event_type: str = "message"
     message: ChannelMessage
 
 
 class OutboundEvent(BaseEvent):
-    event_type: Literal["outbound"] = "outbound"
+    event_type: str = "outbound"
     response: ChannelResponse
 
 
+class OutboundFileEvent(BaseEvent):
+    event_type: str = "outbound_file"
+    response: ChannelFileResponse
+
+
 class SystemEvent(BaseEvent):
-    event_type: Literal["system"] = "system"
+    event_type: str = "system"
     payload: Optional[dict] = None

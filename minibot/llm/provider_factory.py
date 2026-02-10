@@ -13,6 +13,7 @@ from llm_async.providers.openai_responses import OpenAIResponsesProvider
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
+from minibot.core.agent_runtime import ToolResult
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
@@ -43,6 +44,20 @@ _SENSITIVE_ARGUMENT_KEY_PARTS = (
 class LLMGeneration:
     payload: Any
     response_id: str | None = None
+
+
+@dataclass
+class LLMCompletionStep:
+    message: Any
+    response_id: str | None
+
+
+@dataclass
+class ToolExecutionRecord:
+    tool_name: str
+    call_id: str
+    message_payload: dict[str, Any]
+    result: ToolResult
 
 
 class LLMClient:
@@ -182,11 +197,131 @@ class LLMClient:
     def is_responses_provider(self) -> bool:
         return self._is_responses_provider
 
+    async def complete_once(
+        self,
+        messages: Sequence[dict[str, Any]],
+        tools: Sequence[ToolBinding] | None = None,
+        response_schema: dict[str, Any] | None = None,
+        prompt_cache_key: str | None = None,
+        previous_response_id: str | None = None,
+    ) -> LLMCompletionStep:
+        tool_specs = [binding.tool for binding in (tools or [])] or None
+        call_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": list(messages),
+            "tools": tool_specs,
+            "response_schema": response_schema,
+        }
+        if self._temperature is not None:
+            call_kwargs["temperature"] = self._temperature
+        if not self._is_responses_provider and self._max_new_tokens is not None:
+            call_kwargs["max_tokens"] = self._max_new_tokens
+        call_kwargs.update(self._openrouter_kwargs())
+        if prompt_cache_key and self._is_responses_provider:
+            call_kwargs["prompt_cache_key"] = prompt_cache_key
+        if previous_response_id and self._is_responses_provider:
+            call_kwargs["previous_response_id"] = previous_response_id
+        if self._is_responses_provider and self._reasoning_effort:
+            call_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
+
+        response = await self._provider.acomplete(**call_kwargs)
+        message = response.main_response
+        if not message:
+            raise RuntimeError("LLM did not return a completion")
+        return LLMCompletionStep(message=message, response_id=self._extract_response_id(response))
+
+    async def execute_tool_calls_for_runtime(
+        self,
+        tool_calls: Sequence[ToolCall],
+        tools: Sequence[ToolBinding],
+        context: ToolContext,
+        responses_mode: bool = False,
+    ) -> list[ToolExecutionRecord]:
+        tool_map = {binding.tool.name: binding for binding in tools}
+        records: list[ToolExecutionRecord] = []
+        for call in tool_calls:
+            call_id = call.id
+            if responses_mode and isinstance(call.input, dict):
+                input_call_id = call.input.get("call_id")
+                if isinstance(input_call_id, str) and input_call_id:
+                    call_id = input_call_id
+            tool_name = self._tool_name_from_call(call)
+            try:
+                tool_name, arguments = self._parse_tool_call(call)
+                binding = tool_map.get(tool_name)
+                if not binding:
+                    raise ValueError(f"tool {tool_name} is not registered")
+                self._logger.info(
+                    "executing tool",
+                    extra={
+                        "tool": tool_name,
+                        "owner_id": context.owner_id,
+                        "argument_keys": sorted(arguments.keys()),
+                        "arguments": self._sanitize_tool_arguments_for_log(arguments),
+                    },
+                )
+                raw_result = await binding.handler(arguments, context)
+                result = self._normalize_tool_result(raw_result)
+                self._logger.info(
+                    "tool execution completed",
+                    extra={
+                        "tool": tool_name,
+                        "owner_id": context.owner_id,
+                    },
+                )
+            except Exception as exc:
+                error_code = "tool_execution_failed"
+                if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
+                    error_code = "invalid_tool_arguments"
+                self._logger.exception(
+                    "tool execution failed",
+                    extra={
+                        "tool": tool_name,
+                        "owner_id": context.owner_id,
+                    },
+                )
+                result = ToolResult(
+                    content={
+                        "ok": False,
+                        "tool": tool_name,
+                        "error_code": error_code,
+                        "error": str(exc),
+                    }
+                )
+            if responses_mode:
+                payload = {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": self._stringify_result(result.content),
+                }
+            else:
+                payload = {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": tool_name,
+                    "content": self._stringify_result(result.content),
+                }
+            records.append(
+                ToolExecutionRecord(
+                    tool_name=tool_name,
+                    call_id=call_id,
+                    message_payload=payload,
+                    result=result,
+                )
+            )
+        return records
+
     def provider_name(self) -> str:
         return self._provider_name
 
     def model_name(self) -> str:
         return self._model
+
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
+    def max_tool_iterations(self) -> int:
+        return self._max_tool_iterations
 
     def supports_media_inputs(self) -> bool:
         return self._provider_name in {"openai_responses", "openai", "openrouter"}
@@ -214,71 +349,19 @@ class LLMClient:
         context: ToolContext,
         responses_mode: bool = False,
     ) -> list[dict[str, Any]]:
-        messages: list[dict[str, Any]] = []
-        for call in tool_calls:
-            tool_name = self._tool_name_from_call(call)
-            try:
-                tool_name, arguments = self._parse_tool_call(call)
-                binding = tool_map.get(tool_name)
-                if not binding:
-                    raise ValueError(f"tool {tool_name} is not registered")
-                self._logger.info(
-                    "executing tool",
-                    extra={
-                        "tool": tool_name,
-                        "owner_id": context.owner_id,
-                        "argument_keys": sorted(arguments.keys()),
-                        "arguments": self._sanitize_tool_arguments_for_log(arguments),
-                    },
-                )
-                result = await binding.handler(arguments, context)
-                self._logger.info(
-                    "tool execution completed",
-                    extra={
-                        "tool": tool_name,
-                        "owner_id": context.owner_id,
-                    },
-                )
-            except Exception as exc:
-                error_code = "tool_execution_failed"
-                if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
-                    error_code = "invalid_tool_arguments"
-                self._logger.exception(
-                    "tool execution failed",
-                    extra={
-                        "tool": tool_name,
-                        "owner_id": context.owner_id,
-                    },
-                )
-                result = {
-                    "ok": False,
-                    "tool": tool_name,
-                    "error_code": error_code,
-                    "error": str(exc),
-                }
-            if responses_mode:
-                call_id = call.id
-                if isinstance(call.input, dict):
-                    input_call_id = call.input.get("call_id")
-                    if isinstance(input_call_id, str) and input_call_id:
-                        call_id = input_call_id
-                messages.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": call_id,
-                        "output": self._stringify_result(result),
-                    }
-                )
-            else:
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "name": tool_name,
-                        "content": self._stringify_result(result),
-                    }
-                )
-        return messages
+        records = await self.execute_tool_calls_for_runtime(
+            tool_calls,
+            list(tool_map.values()),
+            context,
+            responses_mode=responses_mode,
+        )
+        return [record.message_payload for record in records]
+
+    @staticmethod
+    def _normalize_tool_result(result: Any) -> ToolResult:
+        if isinstance(result, ToolResult):
+            return result
+        return ToolResult(content=result)
 
     @staticmethod
     def _tool_name_from_call(call: ToolCall) -> str:

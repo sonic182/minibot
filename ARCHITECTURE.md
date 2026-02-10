@@ -24,6 +24,7 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 ├── docker-compose.yml
 ├── minibot/
 │   ├── app/
+│   │   ├── agent_runtime.py
 │   │   ├── daemon.py
 │   │   ├── dispatcher.py
 │   │   ├── event_bus.py
@@ -75,7 +76,7 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 2. Telegram adapter receives inbound updates and maps them into `ChannelMessage` payloads.
 3. Adapter publishes `MessageEvent` into `app.event_bus.EventBus`.
 4. `app.dispatcher.Dispatcher` consumes `MessageEvent` and invokes `LLMMessageHandler`.
-5. Handler loads conversation history, executes tool-capable generation through `LLMClient`, and returns `ChannelResponse`.
+5. Handler loads conversation history, executes directive-aware tool-capable generation through `app.agent_runtime.AgentRuntime`, and returns `ChannelResponse`.
 6. Dispatcher publishes `OutboundEvent` unless `metadata.should_reply` is false.
 7. Telegram adapter consumes outbound responses and sends text to Telegram (with chunking for long messages).
 
@@ -97,6 +98,11 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
   - enforces provider constraints for multimodal support,
   - stores transcript history safely (attachment summaries only, not raw blobs),
   - parses structured model output (`answer`, `should_answer_to_user`).
+- `app/agent_runtime.py`:
+  - owns directive-loop execution (`provider step -> tool calls -> tool output append -> directive apply -> next step`),
+  - maintains runtime `AgentState` (`messages`, `meta`),
+  - renders managed-file directive parts into provider multimodal payloads,
+  - enforces loop limits (`max_steps`, `max_tool_calls`, timeout) and directive trust policy.
 - `app/scheduler_service.py`: scheduled prompt orchestration (`schedule`, `list`, `cancel`, `delete`, polling loop, retry/recurrence handling, event publishing).
 
 ## Infrastructure Adapters
@@ -110,6 +116,8 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
   - `adapters/logging/setup.py` configures structured logfmt-friendly logging.
 - Messaging:
   - `adapters/messaging/telegram/service.py` handles Telegram authorization, inbound text/media extraction, outbound message sending, and long-message chunking.
+- Files:
+  - `adapters/files/local_storage.py` handles managed workspace path-safe list/write/read operations.
 - Memory:
   - `adapters/memory/sqlalchemy.py` persists chat history.
   - `adapters/memory/kv_sqlalchemy.py` persists KV tool memory.
@@ -126,6 +134,7 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
   - HTTP client,
   - KV memory,
   - Python execution,
+  - file tools (`list_files`, `create_file`, `send_file`, `self_insert_artifact`),
   - scheduler controls (`schedule_prompt`, `cancel_scheduled_prompt`, `list_scheduled_prompts`, `delete_scheduled_prompt`),
   - time helpers.
 
@@ -189,3 +198,5 @@ Natural extension points already in place:
 - add alternative persistence adapters behind existing protocols,
 - add richer control-plane interfaces (HTTP/WebSocket) without rewriting core dispatch flow,
 - evolve scheduled prompts into broader task orchestration while preserving event bus contracts.
+│   │   ├── files/
+│   │   │   └── local_storage.py

@@ -4,6 +4,7 @@ from typing import Any, cast
 
 from minibot.adapters.config.schema import (
     CalculatorToolConfig,
+    FileStorageToolConfig,
     HTTPClientToolConfig,
     KeyValueMemoryConfig,
     LLMMConfig,
@@ -71,6 +72,14 @@ class _PromptSchedulerStub:
         return {"job": None, "deleted": False, "stopped_before_delete": False, "reason": "not_found"}
 
 
+class _EventBusStub:
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    async def publish(self, event: Any) -> None:
+        self.events.append(event)
+
+
 def _settings(
     *,
     kv_enabled: bool,
@@ -80,6 +89,7 @@ def _settings(
     python_exec_enabled: bool,
     prompts_enabled: bool,
     playwright_enabled: bool,
+    file_storage_enabled: bool,
 ) -> Settings:
     return Settings(
         llm=LLMMConfig(api_key="secret"),
@@ -90,6 +100,7 @@ def _settings(
             calculator=CalculatorToolConfig(enabled=calculator_enabled),
             python_exec=PythonExecToolConfig(enabled=python_exec_enabled),
             playwright=PlaywrightToolConfig(enabled=playwright_enabled),
+            file_storage=FileStorageToolConfig(enabled=file_storage_enabled),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
     )
@@ -104,9 +115,10 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
         python_exec_enabled=True,
         prompts_enabled=True,
         playwright_enabled=False,
+        file_storage_enabled=False,
     )
 
-    tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None)
+    tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
     names = {binding.tool.name for binding in tools}
 
     assert "chat_history_info" in names
@@ -128,13 +140,16 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         python_exec_enabled=False,
         prompts_enabled=True,
         playwright_enabled=True,
+        file_storage_enabled=True,
     )
 
+    event_bus = _EventBusStub()
     tools = build_enabled_tools(
         settings,
         memory=_MemoryStub(),
         kv_memory=cast(Any, _KVStub()),
         prompt_scheduler=cast(Any, _PromptSchedulerStub()),
+        event_bus=cast(Any, event_bus),
     )
     names = {binding.tool.name for binding in tools}
 
@@ -154,6 +169,15 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         "cancel_scheduled_prompt",
         "delete_scheduled_prompt",
         "list_scheduled_prompts",
+    }.issubset(names)
+    assert {
+        "list_files",
+        "file_info",
+        "create_file",
+        "move_file",
+        "delete_file",
+        "send_file",
+        "self_insert_artifact",
     }.issubset(names)
     assert "current_datetime" not in names
     assert "calculate_expression" not in names

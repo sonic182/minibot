@@ -26,6 +26,8 @@ async def run() -> None:
         enabled_tools.append("python_exec")
     if settings.tools.playwright.enabled:
         enabled_tools.append("playwright")
+    if settings.tools.file_storage.enabled:
+        enabled_tools.append("file_storage")
     if settings.scheduler.prompts.enabled:
         enabled_tools.append("scheduler")
     logger.info(
@@ -39,7 +41,7 @@ async def run() -> None:
     telegram_config = AppContainer.get_telegram_config()
     telegram_service = None
     if telegram_config.enabled and telegram_config.bot_token:
-        telegram_service = TelegramService(telegram_config, event_bus)
+        telegram_service = TelegramService(telegram_config, event_bus, settings.tools.file_storage)
 
     services: list[Any] = [dispatcher]
     if telegram_service is not None:

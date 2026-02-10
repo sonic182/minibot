@@ -52,6 +52,7 @@ Top features
 - 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
 - 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
 - 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, and optional Python execution.
+- 🗂️ Managed file workspace tools: `list_files`, `create_file`, `send_file`, and `self_insert_artifact` (directive-based artifact insertion).
 - 🌐 Optional browser automation with Playwright (`browser_navigate`, `browser_info`, `browser_get_data`, `browser_wait_for`, `browser_click`, `browser_query_selector`, `browser_close`).
 - ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
 - 📊 Structured logfmt logs, request correlation IDs, and a focused test suite (`pytest` + `pytest-asyncio`).
@@ -80,6 +81,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[tools.playwright]`: enables browser automation with Playwright. Configure `browser` (`chromium`, `firefox`, `webkit`), Chromium `launch_channel` (for example `chrome`) and optional `chromium_executable_path`, launch args, browser fingerprint/context defaults (UA, viewport, locale, timezone, geolocation, headers), output caps, session TTL, and egress restrictions (`allowed_domains`, `allow_http`, `block_private_networks`). Browser outputs can be post-processed in Python before reaching the LLM (`postprocess_outputs`, enabled by default), with optional raw snapshot exposure (`postprocess_expose_raw`) and a snapshot cache TTL (`postprocess_snapshot_ttl_seconds`). Post-processed text is emitted as compact Markdown with links preserved.
 - `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
 - `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, and optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`).
+- `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
 Every section has comments + defaults in `config.example.toml`—read that file for hints.
@@ -227,6 +229,8 @@ Tools live under `minibot/llm/tools/` and are exposed to [llm-async] with server
 - 🌐 `http_client`: guarded HTTP/HTTPS fetches via [aiosonic].
 - ⏰ `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`: one-time and recurring reminder scheduling.
 - 🐍 `python_execute` + `python_environment_info`: optional host Python execution and runtime/package inspection.
+- 🗂️ `list_files`, `create_file`, `send_file`: managed workspace file listing/writing/sending.
+- 🧩 `self_insert_artifact`: injects a managed file (`tools.file_storage.root_dir` relative path) into runtime directives so the model can analyze it as multimodal context in-loop.
 - 🧭 `browser_*` (optional): Playwright navigation and extraction with domain/network guardrails.
 - 🖼️ Telegram media inputs (`photo`/`document`) are supported on `openai_responses`, `openai`, and `openrouter`.
 

@@ -42,12 +42,16 @@ class _ToolSettings:
     class _Playwright:
         enabled = False
 
+    class _FileStorage:
+        enabled = False
+
     kv_memory = _KV()
     http_client = _HTTP()
     time = _Time()
     calculator = _Calculator()
     python_exec = _PythonExec()
     playwright = _Playwright()
+    file_storage = _FileStorage()
 
 
 class _SchedulerSettings:
@@ -116,8 +120,8 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
             await dispatcher_probe.stop()
 
     class _FakeTelegram:
-        def __init__(self, config, event_bus) -> None:
-            del config, event_bus
+        def __init__(self, config, event_bus, file_storage_config) -> None:
+            del config, event_bus, file_storage_config
 
         async def start(self) -> None:
             await telegram_probe.start()

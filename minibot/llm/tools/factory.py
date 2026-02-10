@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.config.schema import Settings
 from minibot.core.memory import KeyValueMemory, MemoryBackend
+from minibot.app.event_bus import EventBus
 from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
+from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.user_memory import build_kv_tools
 from minibot.llm.tools.playwright import PlaywrightTool
@@ -25,6 +26,7 @@ def build_enabled_tools(
     memory: MemoryBackend,
     kv_memory: KeyValueMemory | None,
     prompt_scheduler: ScheduledPromptService | None = None,
+    event_bus: EventBus | None = None,
 ) -> list[ToolBinding]:
     tools: list[ToolBinding] = []
     chat_memory_tool = ChatMemoryTool(memory, max_history_messages=settings.memory.max_history_messages)
@@ -50,6 +52,16 @@ def build_enabled_tools(
     if settings.tools.playwright.enabled:
         playwright_tool = PlaywrightTool(settings.tools.playwright)
         tools.extend(playwright_tool.bindings())
+    if settings.tools.file_storage.enabled:
+        file_storage = LocalFileStorage(
+            root_dir=settings.tools.file_storage.root_dir,
+            max_write_bytes=settings.tools.file_storage.max_write_bytes,
+        )
+        file_storage_tool = FileStorageTool(
+            storage=file_storage,
+            event_bus=event_bus,
+        )
+        tools.extend(file_storage_tool.bindings())
     if settings.scheduler.prompts.enabled and prompt_scheduler is not None:
         schedule_tool = SchedulePromptTool(
             prompt_scheduler,
