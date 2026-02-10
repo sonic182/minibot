@@ -15,6 +15,16 @@ class ChannelMessage(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class IncomingFileRef(BaseModel):
+    path: str
+    filename: str
+    mime: str
+    size_bytes: int
+    source: str
+    message_id: int | None = None
+    caption: str | None = None
+
+
 class ChannelResponse(BaseModel):
     channel: str
     chat_id: int

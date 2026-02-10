@@ -32,6 +32,8 @@ class FileStorageTool:
         return [
             ToolBinding(tool=self._list_files_schema(), handler=self._list_files),
             ToolBinding(tool=self._create_file_schema(), handler=self._create_file),
+            ToolBinding(tool=self._move_file_schema(), handler=self._move_file),
+            ToolBinding(tool=self._delete_file_schema(), handler=self._delete_file),
             ToolBinding(tool=self._send_file_schema(), handler=self._send_file),
             ToolBinding(tool=self._self_insert_artifact_schema(), handler=self._self_insert_artifact),
         ]
@@ -92,6 +94,48 @@ class FileStorageTool:
                         "type": ["string", "null"],
                         "description": "Optional caption sent with the file.",
                     },
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _move_file_schema(self) -> Tool:
+        return Tool(
+            name="move_file",
+            description="Move or rename a managed file to another managed path.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source_path": {
+                        "type": "string",
+                        "description": "Existing relative file path under managed root.",
+                    },
+                    "destination_path": {
+                        "type": "string",
+                        "description": "Target relative file path under managed root.",
+                    },
+                    "overwrite": {
+                        "type": ["boolean", "null"],
+                        "description": "Set true to replace an existing destination file.",
+                    },
+                },
+                "required": ["source_path", "destination_path"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _delete_file_schema(self) -> Tool:
+        return Tool(
+            name="delete_file",
+            description="Delete a managed file from disk.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Existing relative file path under managed root.",
+                    }
                 },
                 "required": ["path"],
                 "additionalProperties": False,
@@ -190,6 +234,31 @@ class FileStorageTool:
             "chat_id": context.chat_id,
             "channel": context.channel,
             "sent": True,
+        }
+
+    async def _move_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        source_path = self._require_str(payload, "source_path")
+        destination_path = self._require_str(payload, "destination_path")
+        overwrite = bool(payload.get("overwrite") or False)
+        result = self._storage.move_file(
+            source_path=source_path,
+            destination_path=destination_path,
+            overwrite=overwrite,
+        )
+        return {
+            "ok": True,
+            "source_path": result["source_path"],
+            "destination_path": result["destination_path"],
+            "overwrite": overwrite,
+        }
+
+    async def _delete_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        path = self._require_str(payload, "path")
+        result = self._storage.delete_file(path)
+        return {
+            "ok": True,
+            "path": result["path"],
+            "deleted": True,
         }
 
     async def _self_insert_artifact(self, payload: dict[str, Any], _: ToolContext) -> ToolResult:

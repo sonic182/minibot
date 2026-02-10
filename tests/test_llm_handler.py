@@ -304,3 +304,70 @@ async def test_handler_builds_multimodal_input_for_openrouter_chat_completions()
             "file_data": "data:application/pdf;base64,QUJD",
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_handler_builds_text_notice_for_incoming_managed_files() -> None:
+    handler, stub_client, _ = _handler({"answer": "ok", "should_answer_to_user": True})
+    event = MessageEvent(
+        message=_message(
+            text="what is this about?",
+            metadata={
+                "incoming_files": [
+                    {
+                        "path": "uploads/temp/friends.jpg",
+                        "filename": "friends.jpg",
+                        "mime": "image/jpeg",
+                        "size_bytes": 594643,
+                        "source": "photo",
+                        "message_id": 12,
+                        "caption": "",
+                    }
+                ]
+            },
+            user_id=1,
+            chat_id=1,
+        )
+    )
+
+    await handler.handle(event)
+
+    call_args = stub_client.calls[-1]["args"]
+    assert isinstance(call_args[1], str)
+    assert "Incoming managed files:" in call_args[1]
+    assert "uploads/temp/friends.jpg" in call_args[1]
+    assert "content inspection" in call_args[1]
+    assert stub_client.calls[-1]["kwargs"].get("user_content") is None
+
+
+@pytest.mark.asyncio
+async def test_handler_guides_move_for_save_intent_with_incoming_files() -> None:
+    handler, stub_client, _ = _handler({"answer": "ok", "should_answer_to_user": True})
+    event = MessageEvent(
+        message=_message(
+            text="save this",
+            metadata={
+                "incoming_files": [
+                    {
+                        "path": "uploads/temp/photo_1.jpg",
+                        "filename": "photo_1.jpg",
+                        "mime": "image/jpeg",
+                        "size_bytes": 100,
+                        "source": "photo",
+                        "message_id": 1,
+                        "caption": "",
+                    }
+                ]
+            },
+            user_id=1,
+            chat_id=1,
+        )
+    )
+
+    await handler.handle(event)
+
+    call_args = stub_client.calls[-1]["args"]
+    assert isinstance(call_args[1], str)
+    assert "Intent looks like file management" in call_args[1]
+    assert "Do NOT call self_insert_artifact" in call_args[1]
+    assert "destination_path=uploads/photo_1.jpg" in call_args[1]

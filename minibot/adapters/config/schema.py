@@ -216,6 +216,7 @@ class FileStorageToolConfig(BaseModel):
     max_write_bytes: ByteSizeValue = 64000
     save_incoming_uploads: bool = False
     uploads_subdir: str = "uploads"
+    incoming_temp_subdir: str = "uploads/temp"
 
 
 class ToolsConfig(BaseModel):

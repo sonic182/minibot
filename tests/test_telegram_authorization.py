@@ -8,6 +8,7 @@ import logging
 import pytest
 
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.core.channels import ChannelFileResponse
 from minibot.core.events import OutboundFileEvent
 from minibot.adapters.messaging.telegram.service import TelegramService
@@ -54,6 +55,10 @@ def _service(config: TelegramChannelConfig) -> TelegramService:
     service._config = config
     service._file_storage_config = FileStorageToolConfig()
     service._managed_root_dir = Path(service._file_storage_config.root_dir).resolve()
+    service._local_storage = LocalFileStorage(
+        root_dir=service._file_storage_config.root_dir,
+        max_write_bytes=service._file_storage_config.max_write_bytes,
+    )
     service._logger = logging.getLogger("test.telegram")
     return service
 
@@ -125,28 +130,51 @@ def test_chunk_text_returns_single_chunk_for_short_message() -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_attachments_generates_image_part() -> None:
+async def test_collect_incoming_files_saves_photo_to_temp_dir(tmp_path: Path) -> None:
     config = TelegramChannelConfig(bot_token="token")
     service = _service(config)
+    service._file_storage_config = FileStorageToolConfig(
+        enabled=True,
+        root_dir=str(tmp_path),
+        incoming_temp_subdir="uploads/temp",
+    )
+    service._managed_root_dir = Path(str(tmp_path)).resolve()
+    service._local_storage = LocalFileStorage(
+        root_dir=str(tmp_path),
+        max_write_bytes=service._file_storage_config.max_write_bytes,
+    )
 
     async def _download(_media):
         return b"abc"
 
     service._download_media_bytes = _download  # type: ignore[attr-defined]
     message = _MediaMessage(chat=_Chat(1), from_user=_User(2), photo=[_Photo(file_unique_id="p1")])
+    message.message_id = 7  # type: ignore[attr-defined]
+    message.caption = "caption"  # type: ignore[attr-defined]
 
-    attachments, errors = await service._build_attachments(message)  # type: ignore[arg-type]
+    incoming_files, errors = await service._collect_incoming_files(message)  # type: ignore[arg-type]
 
     assert not errors
-    assert len(attachments) == 1
-    assert attachments[0]["type"] == "input_image"
-    assert attachments[0]["image_url"].startswith("data:image/jpeg;base64,")
+    assert len(incoming_files) == 1
+    assert incoming_files[0].path.startswith("uploads/temp/photo_")
+    assert incoming_files[0].mime == "image/jpeg"
+    assert incoming_files[0].caption == "caption"
 
 
 @pytest.mark.asyncio
-async def test_build_attachments_generates_file_part() -> None:
+async def test_collect_incoming_files_saves_document_to_temp_dir(tmp_path: Path) -> None:
     config = TelegramChannelConfig(bot_token="token")
     service = _service(config)
+    service._file_storage_config = FileStorageToolConfig(
+        enabled=True,
+        root_dir=str(tmp_path),
+        incoming_temp_subdir="uploads/temp",
+    )
+    service._managed_root_dir = Path(str(tmp_path)).resolve()
+    service._local_storage = LocalFileStorage(
+        root_dir=str(tmp_path),
+        max_write_bytes=service._file_storage_config.max_write_bytes,
+    )
 
     async def _download(_media):
         return b"pdf-bytes"
@@ -157,20 +185,32 @@ async def test_build_attachments_generates_file_part() -> None:
         from_user=_User(2),
         document=_Document(file_unique_id="d1", file_name="report.pdf", mime_type="application/pdf"),
     )
+    message.message_id = 8  # type: ignore[attr-defined]
 
-    attachments, errors = await service._build_attachments(message)  # type: ignore[arg-type]
+    incoming_files, errors = await service._collect_incoming_files(message)  # type: ignore[arg-type]
 
     assert not errors
-    assert len(attachments) == 1
-    assert attachments[0]["type"] == "input_file"
-    assert attachments[0]["filename"] == "report.pdf"
-    assert attachments[0]["file_data"].startswith("data:application/pdf;base64,")
+    assert len(incoming_files) == 1
+    assert incoming_files[0].path == "uploads/temp/report.pdf"
+    assert incoming_files[0].filename == "report.pdf"
+    assert incoming_files[0].mime == "application/pdf"
 
 
 @pytest.mark.asyncio
-async def test_build_attachments_converts_image_document_to_input_image() -> None:
+async def test_collect_incoming_files_rejects_document_mime_not_allowed(tmp_path: Path) -> None:
     config = TelegramChannelConfig(bot_token="token")
     service = _service(config)
+    service._file_storage_config = FileStorageToolConfig(
+        enabled=True,
+        root_dir=str(tmp_path),
+        incoming_temp_subdir="uploads/temp",
+    )
+    service._managed_root_dir = Path(str(tmp_path)).resolve()
+    service._local_storage = LocalFileStorage(
+        root_dir=str(tmp_path),
+        max_write_bytes=service._file_storage_config.max_write_bytes,
+    )
+    service._config.allowed_document_mime_types = ["application/pdf"]
 
     async def _download(_media):
         return b"img-bytes"
@@ -181,13 +221,12 @@ async def test_build_attachments_converts_image_document_to_input_image() -> Non
         from_user=_User(2),
         document=_Document(file_unique_id="d2", file_name="photo.jpg", mime_type="image/jpeg"),
     )
+    message.message_id = 9  # type: ignore[attr-defined]
 
-    attachments, errors = await service._build_attachments(message)  # type: ignore[arg-type]
+    incoming_files, errors = await service._collect_incoming_files(message)  # type: ignore[arg-type]
 
-    assert not errors
-    assert len(attachments) == 1
-    assert attachments[0]["type"] == "input_image"
-    assert attachments[0]["image_url"].startswith("data:image/jpeg;base64,")
+    assert not incoming_files
+    assert errors == ["document_mime_not_allowed"]
 
 
 @pytest.mark.asyncio
@@ -218,16 +257,22 @@ async def test_send_file_response_uses_send_document(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_persist_incoming_uploads_saves_document_when_enabled(tmp_path: Path) -> None:
+async def test_collect_incoming_files_keeps_unique_name_on_collision(tmp_path: Path) -> None:
     config = TelegramChannelConfig(bot_token="token")
     service = _service(config)
     service._file_storage_config = FileStorageToolConfig(
         enabled=True,
         root_dir=str(tmp_path),
-        save_incoming_uploads=True,
-        uploads_subdir="uploads",
+        incoming_temp_subdir="uploads/temp",
     )
     service._managed_root_dir = Path(str(tmp_path)).resolve()
+    service._local_storage = LocalFileStorage(
+        root_dir=str(tmp_path),
+        max_write_bytes=service._file_storage_config.max_write_bytes,
+    )
+    target = tmp_path / "uploads" / "temp" / "report.pdf"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"existing")
 
     async def _download(_media):
         return b"pdf-bytes"
@@ -240,9 +285,9 @@ async def test_persist_incoming_uploads_saves_document_when_enabled(tmp_path: Pa
     )
     message.message_id = 8  # type: ignore[attr-defined]
 
-    await service._persist_incoming_uploads(message)  # type: ignore[arg-type]
+    incoming_files, errors = await service._collect_incoming_files(message)  # type: ignore[arg-type]
 
-    files = list((tmp_path / "uploads").iterdir())
-    assert len(files) == 1
-    assert files[0].name == "report.pdf"
-    assert files[0].read_bytes() == b"pdf-bytes"
+    assert not errors
+    assert len(incoming_files) == 1
+    assert incoming_files[0].filename != "report.pdf"
+    assert incoming_files[0].path.startswith("uploads/temp/document_")

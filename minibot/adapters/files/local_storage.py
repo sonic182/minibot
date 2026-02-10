@@ -52,6 +52,30 @@ class LocalFileStorage:
         upload_dir = self.resolve_dir(uploads_subdir, create=True)
         return upload_dir
 
+    def move_file(self, source_path: str, destination_path: str, overwrite: bool = False) -> dict[str, str | bool]:
+        source = self.resolve_existing_file(source_path)
+        destination = self.resolve_file(destination_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            if destination.is_dir():
+                raise ValueError("destination path is a directory")
+            if not overwrite:
+                raise ValueError("destination already exists; set overwrite=true to replace it")
+        source.replace(destination)
+        return {
+            "source_path": self._relative_to_root(source),
+            "destination_path": self._relative_to_root(destination),
+            "overwrite": overwrite,
+        }
+
+    def delete_file(self, path: str) -> dict[str, str | bool]:
+        target = self.resolve_existing_file(path)
+        target.unlink()
+        return {
+            "path": self._relative_to_root(target),
+            "deleted": True,
+        }
+
     def resolve_existing_file(self, path: str) -> Path:
         candidate = self.resolve_file(path)
         if not candidate.exists():

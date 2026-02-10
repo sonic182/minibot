@@ -9,7 +9,7 @@ import json
 
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole, RuntimeLimits
-from minibot.core.channels import ChannelMessage, ChannelResponse
+from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
@@ -192,6 +192,9 @@ class LLMMessageHandler:
 
     def _build_model_user_input(self, message: ChannelMessage) -> tuple[str, str | list[dict[str, Any]] | None]:
         prompt_text = message.text.strip() if message.text else ""
+        incoming_files = self._incoming_files_from_metadata(message.metadata)
+        if incoming_files and not message.attachments:
+            return self._build_incoming_files_text(prompt_text, incoming_files), None
         if not message.attachments:
             return prompt_text, None
 
@@ -221,7 +224,10 @@ class LLMMessageHandler:
             system_prompt = (
                 f"{system_prompt}\n"
                 "When you need to inspect a local workspace file (image/document), call self_insert_artifact first "
-                "to inject it into conversation context before answering file contents."
+                "to inject it into conversation context before answering file contents. "
+                "For file-management requests (save, move, delete, send, list), do not call self_insert_artifact; "
+                "use file-management tools instead. If the user only uploaded files and gave no clear instruction, "
+                "ask a clarifying question."
             )
         messages: list[AgentMessage] = [
             AgentMessage(role="system", content=[MessagePart(type="text", text=system_prompt)])
@@ -285,12 +291,16 @@ class LLMMessageHandler:
     def _build_history_user_entry(self, message: ChannelMessage, model_text: str) -> str:
         base_text = message.text.strip() if message.text else ""
         attachment_summary = self._summarize_attachments_for_memory(message.attachments)
-        if not attachment_summary:
+        incoming_files = self._incoming_files_from_metadata(message.metadata)
+        incoming_file_summary = self._summarize_incoming_files_for_memory(incoming_files)
+        if not attachment_summary and not incoming_file_summary:
             return base_text
         visible_text = base_text or model_text
+        parts = [item for item in [attachment_summary, incoming_file_summary] if item]
+        summary = ", ".join(parts)
         if visible_text:
-            return f"{visible_text}\nAttachments: {attachment_summary}"
-        return f"Attachments: {attachment_summary}"
+            return f"{visible_text}\nAttachments: {summary}"
+        return f"Attachments: {summary}"
 
     def _summarize_attachments_for_memory(self, attachments: Sequence[dict[str, Any]]) -> str:
         summaries: list[str] = []
@@ -308,6 +318,108 @@ class LLMMessageHandler:
                 continue
             summaries.append("attachment")
         return ", ".join(summaries)
+
+    @staticmethod
+    def _incoming_files_from_metadata(metadata: dict[str, Any] | None) -> list[IncomingFileRef]:
+        if not isinstance(metadata, dict):
+            return []
+        raw = metadata.get("incoming_files")
+        if not isinstance(raw, list):
+            return []
+        parsed: list[IncomingFileRef] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                parsed.append(IncomingFileRef.model_validate(item))
+            except Exception:
+                continue
+        return parsed
+
+    def _build_incoming_files_text(self, prompt_text: str, incoming_files: Sequence[IncomingFileRef]) -> str:
+        intent = self._infer_incoming_file_intent(prompt_text)
+        lines = [
+            "Incoming managed files:",
+            *[
+                (
+                    f"- {item.filename} (path={item.path}, mime={item.mime}, size={item.size_bytes} bytes"
+                    f", source={item.source}, caption={item.caption or ''})"
+                )
+                for item in incoming_files
+            ],
+        ]
+        first_path = incoming_files[0].path if incoming_files else ""
+        suggested_destination = self._suggest_persist_destination(first_path)
+        if intent == "management":
+            lines.append(
+                "Intent looks like file management. Prefer move_file/delete_file/send_file/list_files. "
+                "Do NOT call self_insert_artifact unless user explicitly asks to inspect content."
+            )
+            if suggested_destination:
+                lines.append(
+                    "If user asked to save, move_file "
+                    f"source_path={first_path} destination_path={suggested_destination}."
+                )
+        elif intent == "analysis":
+            lines.append(
+                "Intent looks like content inspection. Use self_insert_artifact if needed to analyze file contents."
+            )
+        else:
+            lines.append("If intent is unclear, ask a clarifying question before acting.")
+        if prompt_text:
+            return f"{prompt_text}\n\n" + "\n".join(lines)
+        return (
+            "The user uploaded file(s) but did not include a clear instruction.\n"
+            + "\n".join(lines)
+            + "\nAsk the user what to do, unless the intent is already obvious."
+        )
+
+    @staticmethod
+    def _infer_incoming_file_intent(prompt_text: str) -> str:
+        normalized = prompt_text.lower().strip()
+        if not normalized:
+            return "unknown"
+        management_keywords = {
+            "save",
+            "store",
+            "keep",
+            "move",
+            "rename",
+            "delete",
+            "remove",
+            "send",
+            "forward",
+            "list",
+        }
+        analysis_keywords = {
+            "analyze",
+            "analysis",
+            "describe",
+            "read",
+            "what is",
+            "summarize",
+            "extract",
+            "inspect",
+            "about",
+        }
+        if any(keyword in normalized for keyword in management_keywords):
+            return "management"
+        if any(keyword in normalized for keyword in analysis_keywords):
+            return "analysis"
+        return "unknown"
+
+    @staticmethod
+    def _suggest_persist_destination(path: str) -> str | None:
+        marker = "uploads/temp/"
+        if path.startswith(marker):
+            return f"uploads/{path[len(marker):]}"
+        return None
+
+    @staticmethod
+    def _summarize_incoming_files_for_memory(incoming_files: Sequence[IncomingFileRef]) -> str:
+        if not incoming_files:
+            return ""
+        return ", ".join([f"file:{item.filename}" for item in incoming_files])
 
     def _response_schema(self) -> dict[str, Any]:
         return {

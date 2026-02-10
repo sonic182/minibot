@@ -148,6 +148,7 @@ root_dir = "./data/files"
 max_write_bytes = "64KB"
 save_incoming_uploads = false
 uploads_subdir = "uploads"
+incoming_temp_subdir = "uploads/temp"
 
 # Built-in calculator tool.
 [tools.calculator]

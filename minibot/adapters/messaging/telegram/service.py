@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import io
 import logging
@@ -14,8 +13,9 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, Message as TelegramMessage
 
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app.event_bus import EventBus
-from minibot.core.channels import ChannelMessage
+from minibot.core.channels import ChannelMessage, IncomingFileRef
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
 
 
@@ -31,6 +31,10 @@ class TelegramService:
         self._config = config
         self._file_storage_config = file_storage_config or FileStorageToolConfig()
         self._managed_root_dir = Path(self._file_storage_config.root_dir).resolve()
+        self._local_storage = LocalFileStorage(
+            root_dir=self._file_storage_config.root_dir,
+            max_write_bytes=self._file_storage_config.max_write_bytes,
+        )
         self._event_bus = event_bus
         self._logger = logging.getLogger("minibot.telegram")
         self._bot = Bot(token=config.bot_token)
@@ -60,30 +64,28 @@ class TelegramService:
             )
             return
 
-        await self._persist_incoming_uploads(message)
-
-        attachments, attachment_errors = await self._build_attachments(message)
-        if attachments:
+        incoming_files, incoming_errors = await self._collect_incoming_files(message)
+        if incoming_files:
             self._logger.info(
-                "received telegram attachments",
+                "received telegram managed incoming files",
                 extra={
                     "chat_id": message.chat.id,
                     "user_id": message.from_user.id if message.from_user else None,
-                    "attachment_count": len(attachments),
+                    "file_count": len(incoming_files),
                 },
             )
-        if attachment_errors:
+        if incoming_errors:
             self._logger.warning(
-                "telegram attachments skipped",
+                "telegram incoming media skipped",
                 extra={
                     "chat_id": message.chat.id,
                     "user_id": message.from_user.id if message.from_user else None,
-                    "errors": attachment_errors,
+                    "errors": incoming_errors,
                 },
             )
 
         text = message.text or message.caption or ""
-        if not text and not attachments and attachment_errors:
+        if not text and not incoming_files and incoming_errors:
             await self._bot.send_message(chat_id=message.chat.id, text="I could not process the attachment you sent.")
             return
 
@@ -93,10 +95,11 @@ class TelegramService:
             chat_id=message.chat.id,
             message_id=message.message_id,
             text=text,
-            attachments=attachments,
+            attachments=[],
             metadata={
                 "username": getattr(message.from_user, "username", None),
-                "attachment_errors": attachment_errors,
+                "incoming_files": [entry.model_dump() for entry in incoming_files],
+                "incoming_media_errors": incoming_errors,
             },
         )
         self._logger.info(
@@ -108,15 +111,18 @@ class TelegramService:
         )
         await self._event_bus.publish(MessageEvent(message=channel_message))
 
-    async def _build_attachments(self, message: TelegramMessage) -> tuple[list[dict[str, Any]], list[str]]:
+    async def _collect_incoming_files(self, message: TelegramMessage) -> tuple[list[IncomingFileRef], list[str]]:
         if not self._config.media_enabled:
             return [], []
+        if not self._file_storage_config.enabled:
+            return [], ["file_storage_disabled"]
 
-        attachments: list[dict[str, Any]] = []
+        files: list[IncomingFileRef] = []
         errors: list[str] = []
         total_size = 0
+        temp_dir = self._local_storage.resolve_dir(self._file_storage_config.incoming_temp_subdir, create=True)
 
-        if message.photo and len(attachments) < self._config.max_attachments_per_message:
+        if message.photo and len(files) < self._config.max_attachments_per_message:
             photo = message.photo[-1]
             photo_bytes = await self._download_media_bytes(photo)
             if photo_bytes is None:
@@ -126,23 +132,33 @@ class TelegramService:
             elif total_size + len(photo_bytes) > self._config.max_total_media_bytes:
                 errors.append("total_media_too_large")
             else:
-                data_url = self._to_data_url(photo_bytes, "image/jpeg")
-                attachments.append({"type": "input_image", "image_url": data_url})
-                total_size += len(photo_bytes)
-                self._logger.debug(
-                    "telegram photo converted to input_image",
-                    extra={
-                        "photo_bytes": len(photo_bytes),
-                    },
+                photo_name = self._upload_filename(
+                    prefix="photo",
+                    message_id=message.message_id,
+                    chat_id=message.chat.id,
+                    suffix=".jpg",
                 )
+                saved = await self._save_uploaded_bytes(temp_dir / photo_name, photo_bytes)
+                if saved is not None:
+                    total_size += len(photo_bytes)
+                    files.append(
+                        IncomingFileRef(
+                            path=self._relative_to_root(saved),
+                            filename=saved.name,
+                            mime="image/jpeg",
+                            size_bytes=len(photo_bytes),
+                            source="photo",
+                            message_id=message.message_id,
+                            caption=getattr(message, "caption", None),
+                        )
+                    )
 
-        if message.document and len(attachments) < self._config.max_attachments_per_message:
+        if message.document and len(files) < self._config.max_attachments_per_message:
             document = message.document
             mime_type = document.mime_type or "application/octet-stream"
             if not self._is_allowed_document_mime(mime_type):
                 errors.append("document_mime_not_allowed")
-                return attachments, errors
-
+                return files, errors
             document_bytes = await self._download_media_bytes(document)
             if document_bytes is None:
                 errors.append("document_download_failed")
@@ -151,42 +167,31 @@ class TelegramService:
             elif total_size + len(document_bytes) > self._config.max_total_media_bytes:
                 errors.append("total_media_too_large")
             else:
-                filename = document.file_name or f"document_{document.file_unique_id}"
-                if mime_type.lower().startswith("image/"):
-                    attachments.append(
-                        {
-                            "type": "input_image",
-                            "image_url": self._to_data_url(document_bytes, mime_type),
-                        }
+                base_name = Path(document.file_name or f"document_{document.file_unique_id}.bin").name
+                candidate = temp_dir / base_name
+                if candidate.exists():
+                    candidate = temp_dir / self._upload_filename(
+                        prefix="document",
+                        message_id=message.message_id,
+                        chat_id=message.chat.id,
+                        suffix=candidate.suffix or ".bin",
                     )
-                    self._logger.debug(
-                        "telegram document converted to input_image",
-                        extra={
-                            "document_name": filename,
-                            "mime_type": mime_type,
-                            "document_bytes": len(document_bytes),
-                        },
+                saved = await self._save_uploaded_bytes(candidate, document_bytes)
+                if saved is not None:
+                    total_size += len(document_bytes)
+                    files.append(
+                        IncomingFileRef(
+                            path=self._relative_to_root(saved),
+                            filename=saved.name,
+                            mime=mime_type,
+                            size_bytes=len(document_bytes),
+                            source="document",
+                            message_id=message.message_id,
+                            caption=getattr(message, "caption", None),
+                        )
                     )
-                else:
-                    attachments.append(
-                        {
-                            "type": "input_file",
-                            "filename": filename,
-                            "file_data": self._to_data_url(document_bytes, mime_type),
-                        }
-                    )
-                    self._logger.debug(
-                        "telegram document converted to input_file",
-                        extra={
-                            "document_name": filename,
-                            "mime_type": mime_type,
-                            "document_bytes": len(document_bytes),
-                            "file_data_prefix": f"data:{mime_type};base64,",
-                        },
-                    )
-                total_size += len(document_bytes)
 
-        return attachments, errors
+        return files, errors
 
     async def _download_media_bytes(self, media: Any) -> bytes | None:
         buffer = io.BytesIO()
@@ -196,11 +201,6 @@ class TelegramService:
             self._logger.exception("telegram media download failed")
             return None
         return buffer.getvalue()
-
-    @staticmethod
-    def _to_data_url(content: bytes, mime_type: str) -> str:
-        encoded = base64.b64encode(content).decode("ascii")
-        return f"data:{mime_type};base64,{encoded}"
 
     def _is_allowed_document_mime(self, mime_type: str) -> bool:
         allowed = [entry.strip().lower() for entry in self._config.allowed_document_mime_types if entry.strip()]
@@ -260,59 +260,17 @@ class TelegramService:
                 extra={"chat_id": event.response.chat_id, "file_path": str(file_path)},
             )
 
-    async def _persist_incoming_uploads(self, message: TelegramMessage) -> None:
-        if not self._file_storage_config.enabled or not self._file_storage_config.save_incoming_uploads:
-            return
-
-        upload_dir = (self._managed_root_dir / self._file_storage_config.uploads_subdir).resolve()
-        if not upload_dir.is_relative_to(self._managed_root_dir):
-            self._logger.warning(
-                "invalid uploads directory configuration",
-                extra={"uploads_subdir": self._file_storage_config.uploads_subdir},
-            )
-            return
-        upload_dir.mkdir(parents=True, exist_ok=True)
-
-        if message.photo:
-            photo = message.photo[-1]
-            photo_bytes = await self._download_media_bytes(photo)
-            if photo_bytes is not None:
-                photo_name = self._upload_filename(
-                    prefix="photo",
-                    message_id=message.message_id,
-                    chat_id=message.chat.id,
-                    suffix=".jpg",
-                )
-                await self._save_uploaded_bytes(upload_dir / photo_name, photo_bytes)
-
-        if message.document:
-            document = message.document
-            document_bytes = await self._download_media_bytes(document)
-            if document_bytes is not None:
-                filename = document.file_name or self._upload_filename(
-                    prefix="document",
-                    message_id=message.message_id,
-                    chat_id=message.chat.id,
-                    suffix=".bin",
-                )
-                safe_name = Path(filename).name
-                target = upload_dir / safe_name
-                if target.exists():
-                    target = upload_dir / self._upload_filename(
-                        prefix="document",
-                        message_id=message.message_id,
-                        chat_id=message.chat.id,
-                        suffix=target.suffix or ".bin",
-                    )
-                await self._save_uploaded_bytes(target, document_bytes)
-
-    async def _save_uploaded_bytes(self, path: Path, payload: bytes) -> None:
+    async def _save_uploaded_bytes(self, path: Path, payload: bytes) -> Path | None:
         try:
             path.write_bytes(payload)
         except Exception:
             self._logger.exception("failed to persist inbound telegram file", extra={"path": str(path)})
-            return
+            return None
         self._logger.info("saved inbound telegram file", extra={"path": str(path), "bytes": len(payload)})
+        return path
+
+    def _relative_to_root(self, path: Path) -> str:
+        return str(path.relative_to(self._managed_root_dir)).replace("\\", "/")
 
     @staticmethod
     def _upload_filename(prefix: str, message_id: int, chat_id: int, suffix: str) -> str:

@@ -74,6 +74,7 @@ root_dir = "./data/files"
 max_write_bytes = "80KB"
 save_incoming_uploads = true
 uploads_subdir = "uploads"
+incoming_temp_subdir = "uploads/temp"
 """
     )
 
@@ -90,6 +91,7 @@ uploads_subdir = "uploads"
     assert settings.tools.file_storage.max_write_bytes == 80_000
     assert settings.tools.file_storage.save_incoming_uploads is True
     assert settings.tools.file_storage.uploads_subdir == "uploads"
+    assert settings.tools.file_storage.incoming_temp_subdir == "uploads/temp"
 
 
 def test_load_settings_rejects_invalid_byte_size(tmp_path: Path) -> None:
