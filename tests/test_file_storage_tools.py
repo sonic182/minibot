@@ -53,6 +53,20 @@ def test_local_storage_moves_and_deletes_files(tmp_path: Path) -> None:
     assert not (tmp_path / "archive" / "report.txt").exists()
 
 
+def test_local_storage_file_info_returns_basic_metadata(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    storage.create_text_file(path="docs/report.txt", content="hello", overwrite=False)
+
+    info = storage.file_info("docs/report.txt")
+
+    assert info["path"] == "docs/report.txt"
+    assert info["name"] == "report.txt"
+    assert info["extension"] == ".txt"
+    assert info["size_bytes"] == 5
+    assert info["mime"] == "text/plain"
+    assert info["is_image"] is False
+
+
 @pytest.mark.asyncio
 async def test_send_file_publishes_outbound_file_event(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
@@ -99,6 +113,25 @@ async def test_move_and_delete_tools_manage_files(tmp_path: Path) -> None:
     assert moved["destination_path"] == "archive/report.txt"
     assert deleted["ok"] is True
     assert deleted["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_file_info_tool_returns_metadata(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    storage.create_text_file(path="docs/a.txt", content="abc", overwrite=False)
+    tool = FileStorageTool(storage=storage)
+    info_binding = next(binding for binding in tool.bindings() if binding.tool.name == "file_info")
+
+    result = await info_binding.handler(
+        {"path": "docs/a.txt"},
+        ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
+    )
+
+    assert isinstance(result, dict)
+    assert result["ok"] is True
+    assert result["path"] == "docs/a.txt"
+    assert result["extension"] == ".txt"
+    assert result["size_bytes"] == 3
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Managed workspace file tooling behind `tools.file_storage` (`list_files`, `create_file`, `move_file`, `delete_file`, `send_file`, `self_insert_artifact`).
+- Managed workspace file tooling behind `tools.file_storage` (`list_files`, `file_info`, `create_file`, `move_file`, `delete_file`, `send_file`, `self_insert_artifact`).
 - New local file storage adapter with path-safety checks, write-size limits, and metadata-aware file listing.
 - Agent runtime loop (`AgentRuntime`) with directive support, runtime limits, and managed-file rendering for multimodal providers.
 - Channel models/events for file responses (`ChannelFileResponse`, `OutboundFileEvent`) and incoming media references (`IncomingFileRef`).

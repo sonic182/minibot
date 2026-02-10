@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import mimetypes
 from pathlib import Path
 
 
@@ -74,6 +75,21 @@ class LocalFileStorage:
         return {
             "path": self._relative_to_root(target),
             "deleted": True,
+        }
+
+    def file_info(self, path: str) -> dict[str, str | int | bool]:
+        target = self.resolve_existing_file(path)
+        stat = target.stat()
+        extension = target.suffix.lower()
+        mime_type, _ = mimetypes.guess_type(str(target), strict=False)
+        return {
+            "path": self._relative_to_root(target),
+            "name": target.name,
+            "extension": extension,
+            "mime": mime_type or "application/octet-stream",
+            "size_bytes": int(stat.st_size),
+            "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "is_image": (mime_type or "").startswith("image/"),
         }
 
     def resolve_existing_file(self, path: str) -> Path:

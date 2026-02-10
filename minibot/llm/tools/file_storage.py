@@ -31,6 +31,7 @@ class FileStorageTool:
     def bindings(self) -> list[ToolBinding]:
         return [
             ToolBinding(tool=self._list_files_schema(), handler=self._list_files),
+            ToolBinding(tool=self._file_info_schema(), handler=self._file_info),
             ToolBinding(tool=self._create_file_schema(), handler=self._create_file),
             ToolBinding(tool=self._move_file_schema(), handler=self._move_file),
             ToolBinding(tool=self._delete_file_schema(), handler=self._delete_file),
@@ -75,6 +76,23 @@ class FileStorageTool:
                     },
                 },
                 "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _file_info_schema(self) -> Tool:
+        return Tool(
+            name="file_info",
+            description="Get basic metadata for a managed file.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative file path under managed root.",
+                    }
+                },
+                "required": ["path"],
                 "additionalProperties": False,
             },
         )
@@ -204,6 +222,14 @@ class FileStorageTool:
             "path": result["path"],
             "bytes_written": result["bytes_written"],
             "overwrite": overwrite,
+        }
+
+    async def _file_info(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        path = self._require_str(payload, "path")
+        info = self._storage.file_info(path)
+        return {
+            "ok": True,
+            **info,
         }
 
     async def _send_file(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
