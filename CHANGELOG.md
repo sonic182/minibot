@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-02-10
+
 ### Added
 
 - Managed workspace file tooling behind `tools.file_storage` (`list_files`, `file_info`, `create_file`, `move_file`, `delete_file`, `send_file`, `self_insert_artifact`).
@@ -31,5 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.0.2..HEAD
+[0.0.2]: https://github.com/sonic182/minibot/compare/0.0.1..0.0.2
 [0.0.1]: https://github.com/sonic182/minibot/releases/tag/v0.0.1
