@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 import logging
 
 import pytest
 
-from minibot.adapters.config.schema import TelegramChannelConfig
+from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
+from minibot.core.channels import ChannelFileResponse
+from minibot.core.events import OutboundFileEvent
 from minibot.adapters.messaging.telegram.service import TelegramService
 
 
@@ -49,6 +52,8 @@ class _MediaMessage:
 def _service(config: TelegramChannelConfig) -> TelegramService:
     service = TelegramService.__new__(TelegramService)
     service._config = config
+    service._file_storage_config = FileStorageToolConfig()
+    service._managed_root_dir = Path(service._file_storage_config.root_dir).resolve()
     service._logger = logging.getLogger("test.telegram")
     return service
 
@@ -183,3 +188,61 @@ async def test_build_attachments_converts_image_document_to_input_image() -> Non
     assert len(attachments) == 1
     assert attachments[0]["type"] == "input_image"
     assert attachments[0]["image_url"].startswith("data:image/jpeg;base64,")
+
+
+@pytest.mark.asyncio
+async def test_send_file_response_uses_send_document(tmp_path: Path) -> None:
+    config = TelegramChannelConfig(bot_token="token")
+    service = _service(config)
+    target = tmp_path / "report.txt"
+    target.write_text("hello", encoding="utf-8")
+
+    class _BotStub:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def send_document(self, chat_id: int, document: Any, caption: str | None = None) -> None:
+            self.calls.append({"chat_id": chat_id, "document": document, "caption": caption})
+
+    bot = _BotStub()
+    service._bot = bot  # type: ignore[attr-defined]
+
+    event = OutboundFileEvent(
+        response=ChannelFileResponse(channel="telegram", chat_id=1, file_path=str(target), caption="latest")
+    )
+    await service._send_file_response(event)
+
+    assert len(bot.calls) == 1
+    assert bot.calls[0]["chat_id"] == 1
+    assert bot.calls[0]["caption"] == "latest"
+
+
+@pytest.mark.asyncio
+async def test_persist_incoming_uploads_saves_document_when_enabled(tmp_path: Path) -> None:
+    config = TelegramChannelConfig(bot_token="token")
+    service = _service(config)
+    service._file_storage_config = FileStorageToolConfig(
+        enabled=True,
+        root_dir=str(tmp_path),
+        save_incoming_uploads=True,
+        uploads_subdir="uploads",
+    )
+    service._managed_root_dir = Path(str(tmp_path)).resolve()
+
+    async def _download(_media):
+        return b"pdf-bytes"
+
+    service._download_media_bytes = _download  # type: ignore[attr-defined]
+    message = _MediaMessage(
+        chat=_Chat(3),
+        from_user=_User(2),
+        document=_Document(file_unique_id="d1", file_name="report.pdf", mime_type="application/pdf"),
+    )
+    message.message_id = 8  # type: ignore[attr-defined]
+
+    await service._persist_incoming_uploads(message)  # type: ignore[arg-type]
+
+    files = list((tmp_path / "uploads").iterdir())
+    assert len(files) == 1
+    assert files[0].name == "report.pdf"
+    assert files[0].read_bytes() == b"pdf-bytes"

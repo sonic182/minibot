@@ -141,6 +141,14 @@ launch_args = [
   "--disable-notifications",
 ]
 
+# Managed file workspace tools.
+[tools.file_storage]
+enabled = false
+root_dir = "./data/files"
+max_write_bytes = "64KB"
+save_incoming_uploads = false
+uploads_subdir = "uploads"
+
 # Built-in calculator tool.
 [tools.calculator]
 enabled = true

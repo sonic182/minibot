@@ -210,6 +210,14 @@ class PlaywrightToolConfig(BaseModel):
     )
 
 
+class FileStorageToolConfig(BaseModel):
+    enabled: bool = False
+    root_dir: str = "./data/files"
+    max_write_bytes: ByteSizeValue = 64000
+    save_incoming_uploads: bool = False
+    uploads_subdir: str = "uploads"
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
@@ -217,6 +225,7 @@ class ToolsConfig(BaseModel):
     calculator: CalculatorToolConfig = CalculatorToolConfig()
     python_exec: PythonExecToolConfig = PythonExecToolConfig()
     playwright: PlaywrightToolConfig = PlaywrightToolConfig()
+    file_storage: FileStorageToolConfig = FileStorageToolConfig()
 
 
 class ScheduledPromptsConfig(BaseModel):

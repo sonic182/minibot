@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+class LocalFileStorage:
+    def __init__(self, root_dir: str, max_write_bytes: int) -> None:
+        self._root = Path(root_dir).resolve()
+        self._root.mkdir(parents=True, exist_ok=True)
+        self._max_write_bytes = max_write_bytes
+
+    @property
+    def root_dir(self) -> Path:
+        return self._root
+
+    def list_files(self, folder: str | None = None) -> list[dict[str, str | int | bool]]:
+        target = self.resolve_dir(folder)
+        entries: list[dict[str, str | int | bool]] = []
+        for item in sorted(target.iterdir(), key=lambda path: path.name.lower()):
+            stat = item.stat()
+            entries.append(
+                {
+                    "name": item.name,
+                    "path": self._relative_to_root(item),
+                    "is_dir": item.is_dir(),
+                    "size_bytes": int(stat.st_size),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                }
+            )
+        return entries
+
+    def create_text_file(self, path: str, content: str, overwrite: bool = False) -> dict[str, str | int]:
+        if not isinstance(content, str):
+            raise ValueError("content must be a string")
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > self._max_write_bytes:
+            raise ValueError(f"content exceeds max_write_bytes ({self._max_write_bytes})")
+
+        target = self.resolve_file(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and not overwrite:
+            raise ValueError("file already exists; set overwrite=true to replace it")
+
+        target.write_text(content, encoding="utf-8")
+        return {
+            "path": self._relative_to_root(target),
+            "bytes_written": len(content_bytes),
+        }
+
+    def ensure_upload_dir(self, uploads_subdir: str) -> Path:
+        upload_dir = self.resolve_dir(uploads_subdir, create=True)
+        return upload_dir
+
+    def resolve_existing_file(self, path: str) -> Path:
+        candidate = self.resolve_file(path)
+        if not candidate.exists():
+            raise ValueError("file does not exist")
+        if not candidate.is_file():
+            raise ValueError("path is not a file")
+        return candidate
+
+    def resolve_dir(self, folder: str | None, create: bool = False) -> Path:
+        relative_folder = (folder or ".").strip()
+        if not relative_folder:
+            relative_folder = "."
+        target = self._resolve_within_root(relative_folder)
+        if create:
+            target.mkdir(parents=True, exist_ok=True)
+        if not target.exists() or not target.is_dir():
+            raise ValueError("folder does not exist")
+        return target
+
+    def resolve_file(self, path: str) -> Path:
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("path must be a non-empty string")
+        return self._resolve_within_root(path)
+
+    def _resolve_within_root(self, relative_path: str) -> Path:
+        candidate_path = Path(relative_path)
+        if candidate_path.is_absolute():
+            raise ValueError("path must be relative to managed root")
+        resolved = (self._root / candidate_path).resolve()
+        if not resolved.is_relative_to(self._root):
+            raise ValueError("path escapes managed root")
+        return resolved
+
+    def _relative_to_root(self, path: Path) -> str:
+        return str(path.relative_to(self._root)).replace("\\", "/")

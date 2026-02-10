@@ -5,23 +5,32 @@ import base64
 import contextlib
 import io
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import Message as TelegramMessage
+from aiogram.types import FSInputFile, Message as TelegramMessage
 
+from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage
-from minibot.core.events import MessageEvent, OutboundEvent
-from minibot.adapters.config.schema import TelegramChannelConfig
+from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
 
 
 class TelegramService:
     _MAX_MESSAGE_LENGTH = 4000
 
-    def __init__(self, config: TelegramChannelConfig, event_bus: EventBus) -> None:
+    def __init__(
+        self,
+        config: TelegramChannelConfig,
+        event_bus: EventBus,
+        file_storage_config: FileStorageToolConfig | None = None,
+    ) -> None:
         self._config = config
+        self._file_storage_config = file_storage_config or FileStorageToolConfig()
+        self._managed_root_dir = Path(self._file_storage_config.root_dir).resolve()
         self._event_bus = event_bus
         self._logger = logging.getLogger("minibot.telegram")
         self._bot = Bot(token=config.bot_token)
@@ -50,6 +59,8 @@ class TelegramService:
                 text=(f"User not recognized. Access denied. chat_id={chat_id} user_id={user_id}"),
             )
             return
+
+        await self._persist_incoming_uploads(message)
 
         attachments, attachment_errors = await self._build_attachments(message)
         if attachments:
@@ -225,6 +236,88 @@ class TelegramService:
                             },
                         )
                         break
+            if isinstance(event, OutboundFileEvent) and event.response.channel == "telegram":
+                await self._send_file_response(event)
+
+    async def _send_file_response(self, event: OutboundFileEvent) -> None:
+        file_path = Path(event.response.file_path)
+        if not file_path.exists() or not file_path.is_file():
+            self._logger.warning(
+                "outbound telegram file not found",
+                extra={"chat_id": event.response.chat_id, "file_path": str(file_path)},
+            )
+            return
+        try:
+            await self._bot.send_document(
+                chat_id=event.response.chat_id,
+                document=FSInputFile(path=str(file_path)),
+                caption=event.response.caption,
+            )
+        except TelegramBadRequest as exc:
+            self._logger.exception(
+                "failed to send telegram file",
+                exc_info=exc,
+                extra={"chat_id": event.response.chat_id, "file_path": str(file_path)},
+            )
+
+    async def _persist_incoming_uploads(self, message: TelegramMessage) -> None:
+        if not self._file_storage_config.enabled or not self._file_storage_config.save_incoming_uploads:
+            return
+
+        upload_dir = (self._managed_root_dir / self._file_storage_config.uploads_subdir).resolve()
+        if not upload_dir.is_relative_to(self._managed_root_dir):
+            self._logger.warning(
+                "invalid uploads directory configuration",
+                extra={"uploads_subdir": self._file_storage_config.uploads_subdir},
+            )
+            return
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        if message.photo:
+            photo = message.photo[-1]
+            photo_bytes = await self._download_media_bytes(photo)
+            if photo_bytes is not None:
+                photo_name = self._upload_filename(
+                    prefix="photo",
+                    message_id=message.message_id,
+                    chat_id=message.chat.id,
+                    suffix=".jpg",
+                )
+                await self._save_uploaded_bytes(upload_dir / photo_name, photo_bytes)
+
+        if message.document:
+            document = message.document
+            document_bytes = await self._download_media_bytes(document)
+            if document_bytes is not None:
+                filename = document.file_name or self._upload_filename(
+                    prefix="document",
+                    message_id=message.message_id,
+                    chat_id=message.chat.id,
+                    suffix=".bin",
+                )
+                safe_name = Path(filename).name
+                target = upload_dir / safe_name
+                if target.exists():
+                    target = upload_dir / self._upload_filename(
+                        prefix="document",
+                        message_id=message.message_id,
+                        chat_id=message.chat.id,
+                        suffix=target.suffix or ".bin",
+                    )
+                await self._save_uploaded_bytes(target, document_bytes)
+
+    async def _save_uploaded_bytes(self, path: Path, payload: bytes) -> None:
+        try:
+            path.write_bytes(payload)
+        except Exception:
+            self._logger.exception("failed to persist inbound telegram file", extra={"path": str(path)})
+            return
+        self._logger.info("saved inbound telegram file", extra={"path": str(path), "bytes": len(payload)})
+
+    @staticmethod
+    def _upload_filename(prefix: str, message_id: int, chat_id: int, suffix: str) -> str:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return f"{prefix}_{chat_id}_{message_id}_{timestamp}{suffix}"
 
     async def stop(self) -> None:
         if self._poll_task:
