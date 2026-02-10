@@ -57,6 +57,14 @@ Top features
 - ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
 - 📊 Structured logfmt logs, request correlation IDs, and a focused test suite (`pytest` + `pytest-asyncio`).
 
+Demo
+----
+
+Example: generate images with the `python_execute` tool and receive them in the Telegram channel.
+
+![Generate image with python_execute (1)](demo_pics/gen_image_with_python_1.jpeg)
+![Generate image with python_execute (2)](demo_pics/gen_image_with_python_2.jpeg)
+
 Why self-host
 -------------
 
