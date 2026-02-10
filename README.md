@@ -86,6 +86,12 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 
 Every section has comments + defaults in `config.example.toml`—read that file for hints.
 
+Suggested model presets
+-----------------------
+
+- `openai_responses`: `gpt-5-mini` with `reasoning_effort = "medium"` is a solid default for a practical quality/cost balance.
+- `openrouter`: `x-ai/grok-4.1-fast` with medium reasoning effort is a comparable quality/cost balance default.
+
 Scheduler Guide
 ---------------
 
