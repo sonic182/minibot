@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.core.agent_runtime import AppendMessageDirective, ToolResult
 from minibot.core.events import OutboundFileEvent
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.file_storage import FileStorageTool
@@ -44,7 +45,7 @@ async def test_send_file_publishes_outbound_file_event(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     storage.create_text_file(path="docs/report.txt", content="ok", overwrite=False)
     event_bus = _EventBusStub()
-    tool = FileStorageTool(storage=storage, event_bus=event_bus)
+    tool = FileStorageTool(storage=storage, event_bus=cast(Any, event_bus))
     send_binding = next(binding for binding in tool.bindings() if binding.tool.name == "send_file")
 
     result = await send_binding.handler(
@@ -52,6 +53,7 @@ async def test_send_file_publishes_outbound_file_event(tmp_path: Path) -> None:
         ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
     )
 
+    assert isinstance(result, dict)
     assert result["ok"] is True
     assert len(event_bus.events) == 1
     outbound = event_bus.events[0]
@@ -59,3 +61,76 @@ async def test_send_file_publishes_outbound_file_event(tmp_path: Path) -> None:
     assert outbound.response.chat_id == 99
     assert outbound.response.caption == "latest"
     assert Path(outbound.response.file_path).name == "report.txt"
+
+
+@pytest.mark.asyncio
+async def test_self_insert_artifact_returns_directives(tmp_path: Path) -> None:
+    root = tmp_path / "files"
+    storage = LocalFileStorage(root_dir=str(root), max_write_bytes=1000)
+    source = root / "uploads" / "sample.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("hello", encoding="utf-8")
+    tool = FileStorageTool(storage=storage)
+    binding = next(binding for binding in tool.bindings() if binding.tool.name == "self_insert_artifact")
+
+    result = await binding.handler(
+        {
+            "path": "uploads/sample.txt",
+            "as": "file",
+            "role": "user",
+            "text": "Review this file",
+        },
+        ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
+    )
+
+    assert isinstance(result, ToolResult)
+    assert result.content["status"] == "ok"
+    assert result.content["path"] == "uploads/sample.txt"
+    assert len(result.directives) == 1
+    assert isinstance(result.directives[0], AppendMessageDirective)
+
+
+@pytest.mark.asyncio
+async def test_self_insert_artifact_rejects_non_image_for_image_mode(tmp_path: Path) -> None:
+    root = tmp_path / "files"
+    storage = LocalFileStorage(root_dir=str(root), max_write_bytes=1000)
+    source = root / "uploads" / "sample.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("hello", encoding="utf-8")
+    tool = FileStorageTool(storage=storage)
+    binding = next(binding for binding in tool.bindings() if binding.tool.name == "self_insert_artifact")
+
+    result = await binding.handler(
+        {
+            "path": "uploads/sample.txt",
+            "as": "image",
+        },
+        ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
+    )
+
+    assert isinstance(result, ToolResult)
+    assert result.content["status"] == "error"
+    assert result.content["code"] == "unsupported_mime"
+
+
+@pytest.mark.asyncio
+async def test_self_insert_artifact_rejects_absolute_paths(tmp_path: Path) -> None:
+    root = tmp_path / "files"
+    storage = LocalFileStorage(root_dir=str(root), max_write_bytes=1000)
+    source = root / "uploads" / "sample.jpg"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"123")
+    tool = FileStorageTool(storage=storage)
+    binding = next(binding for binding in tool.bindings() if binding.tool.name == "self_insert_artifact")
+
+    result = await binding.handler(
+        {
+            "path": str(source),
+            "as": "image",
+        },
+        ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
+    )
+
+    assert isinstance(result, ToolResult)
+    assert result.content["status"] == "error"
+    assert result.content["code"] == "invalid_path"

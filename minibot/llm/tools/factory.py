@@ -57,7 +57,10 @@ def build_enabled_tools(
             root_dir=settings.tools.file_storage.root_dir,
             max_write_bytes=settings.tools.file_storage.max_write_bytes,
         )
-        file_storage_tool = FileStorageTool(storage=file_storage, event_bus=event_bus)
+        file_storage_tool = FileStorageTool(
+            storage=file_storage,
+            event_bus=event_bus,
+        )
         tools.extend(file_storage_tool.bindings())
     if settings.scheduler.prompts.enabled and prompt_scheduler is not None:
         schedule_tool = SchedulePromptTool(

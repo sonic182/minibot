@@ -170,7 +170,7 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         "delete_scheduled_prompt",
         "list_scheduled_prompts",
     }.issubset(names)
-    assert {"list_files", "create_file", "send_file"}.issubset(names)
+    assert {"list_files", "create_file", "send_file", "self_insert_artifact"}.issubset(names)
     assert "current_datetime" not in names
     assert "calculate_expression" not in names
     assert "python_execute" not in names

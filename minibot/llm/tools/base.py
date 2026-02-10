@@ -5,6 +5,8 @@ from typing import Any, Awaitable, Callable
 
 from llm_async.models import Tool
 
+from minibot.core.agent_runtime import ToolResult
+
 ToolPayload = dict[str, Any]
 
 
@@ -16,7 +18,7 @@ class ToolContext:
     user_id: int | None = None
 
 
-ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[Any]]
+ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[ToolResult | Any]]
 
 
 @dataclass(frozen=True)

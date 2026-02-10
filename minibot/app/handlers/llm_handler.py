@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Sequence
+from typing import cast
 
 import ast
 import json
 
+from minibot.app.agent_runtime import AgentRuntime
+from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole, RuntimeLimits
 from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
@@ -28,7 +31,45 @@ class LLMMessageHandler:
         self._tools = list(tools or [])
         self._default_owner_id = default_owner_id
         self._max_history_messages = max_history_messages
+        max_tool_iterations_getter = getattr(self._llm_client, "max_tool_iterations", None)
+        max_tool_iterations = 8
+        if callable(max_tool_iterations_getter):
+            maybe_value = max_tool_iterations_getter()
+            if isinstance(maybe_value, int) and maybe_value > 0:
+                max_tool_iterations = maybe_value
+        runtime_limits = RuntimeLimits(
+            max_steps=max_tool_iterations,
+            max_tool_calls=max(12, max_tool_iterations * 2),
+        )
+        managed_files_root = self._managed_files_root_from_tools()
+        if self._supports_agent_runtime():
+            self._runtime = AgentRuntime(
+                llm_client=self._llm_client,
+                tools=self._tools,
+                limits=runtime_limits,
+                allowed_append_message_tools=["self_insert_artifact"],
+                allow_system_inserts=False,
+                managed_files_root=managed_files_root,
+            )
+        else:
+            self._runtime = None
         self._logger = logging.getLogger("minibot.handler")
+
+    def _supports_agent_runtime(self) -> bool:
+        return callable(getattr(self._llm_client, "complete_once", None)) and callable(
+            getattr(self._llm_client, "execute_tool_calls_for_runtime", None)
+        )
+
+    def _managed_files_root_from_tools(self) -> str | None:
+        for binding in self._tools:
+            if binding.tool.name != "self_insert_artifact":
+                continue
+            owner = getattr(binding.handler, "__self__", None)
+            storage = getattr(owner, "_storage", None)
+            root = getattr(storage, "root_dir", None)
+            if root is not None:
+                return str(root)
+        return None
 
     def _llm_provider_name(self) -> str | None:
         provider_getter = getattr(self._llm_client, "provider_name", None)
@@ -109,17 +150,31 @@ class LLMMessageHandler:
         )
         prompt_cache_key = _prompt_cache_key(message)
         try:
-            generation = await self._llm_client.generate(
-                history,
-                model_text,
-                user_content=model_user_content,
-                tools=self._tools,
-                tool_context=tool_context,
-                response_schema=self._response_schema(),
-                prompt_cache_key=prompt_cache_key,
-                previous_response_id=None,
-            )
-            answer, should_reply = self._extract_answer(generation.payload)
+            if self._runtime is None:
+                generation = await self._llm_client.generate(
+                    history,
+                    model_text,
+                    user_content=model_user_content,
+                    tools=self._tools,
+                    tool_context=tool_context,
+                    response_schema=self._response_schema(),
+                    prompt_cache_key=prompt_cache_key,
+                    previous_response_id=None,
+                )
+                answer, should_reply = self._extract_answer(generation.payload)
+            else:
+                state = self._build_agent_state(
+                    history=history,
+                    user_text=model_text,
+                    user_content=model_user_content,
+                )
+                generation = await self._runtime.run(
+                    state=state,
+                    tool_context=tool_context,
+                    response_schema=self._response_schema(),
+                    prompt_cache_key=prompt_cache_key,
+                )
+                answer, should_reply = self._extract_answer(generation.payload)
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
             answer = "Sorry, I couldn't answer right now."
@@ -149,6 +204,53 @@ class LLMMessageHandler:
             parts.append({"type": "input_text", "text": resolved_prompt})
         parts.extend(self._transform_attachments_for_mode(message.attachments, mode))
         return resolved_prompt, parts
+
+    def _build_agent_state(
+        self,
+        history: Sequence[Any],
+        user_text: str,
+        user_content: str | list[dict[str, Any]] | None,
+    ) -> AgentState:
+        system_prompt_getter = getattr(self._llm_client, "system_prompt", None)
+        system_prompt = "You are Minibot, a helpful assistant."
+        if callable(system_prompt_getter):
+            maybe_prompt = system_prompt_getter()
+            if isinstance(maybe_prompt, str) and maybe_prompt:
+                system_prompt = maybe_prompt
+        if any(binding.tool.name == "self_insert_artifact" for binding in self._tools):
+            system_prompt = (
+                f"{system_prompt}\n"
+                "When you need to inspect a local workspace file (image/document), call self_insert_artifact first "
+                "to inject it into conversation context before answering file contents."
+            )
+        messages: list[AgentMessage] = [
+            AgentMessage(role="system", content=[MessagePart(type="text", text=system_prompt)])
+        ]
+        for entry in history:
+            role = str(getattr(entry, "role", "user"))
+            if role not in {"system", "user", "assistant", "tool"}:
+                continue
+            content = getattr(entry, "content", "")
+            messages.append(
+                AgentMessage(
+                    role=cast(MessageRole, role),
+                    content=[MessagePart(type="text", text=str(content))],
+                )
+            )
+
+        if user_content is None:
+            messages.append(AgentMessage(role="user", content=[MessagePart(type="text", text=user_text)]))
+        elif isinstance(user_content, str):
+            messages.append(AgentMessage(role="user", content=[MessagePart(type="text", text=user_content)]))
+        else:
+            messages.append(
+                AgentMessage(
+                    role="user",
+                    content=[MessagePart(type="text", text=user_text)],
+                    raw_content=user_content,
+                )
+            )
+        return AgentState(messages=messages)
 
     def _transform_attachments_for_mode(
         self,
