@@ -32,6 +32,7 @@ class Dispatcher:
             tools=tools,
             default_owner_id=settings.tools.kv_memory.default_owner_id,
             max_history_messages=settings.memory.max_history_messages,
+            agent_timeout_seconds=settings.runtime.agent_timeout_seconds,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
         self._task: Optional[asyncio.Task[None]] = None

@@ -6,10 +6,12 @@ import json
 from typing import Any, Mapping, Sequence
 
 import logging
+import aiosonic
 
 from llm_async.models.tool_call import ToolCall
 from llm_async.providers import ClaudeProvider, GoogleProvider, OpenAIProvider, OpenRouterProvider
 from llm_async.providers.openai_responses import OpenAIResponsesProvider
+from llm_async.utils.retry import RetryConfig
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
@@ -64,7 +66,24 @@ class LLMClient:
     def __init__(self, config: LLMMConfig) -> None:
         configured_provider = config.provider.lower()
         provider_cls = LLM_PROVIDERS.get(configured_provider, OpenAIProvider)
-        provider_kwargs: dict[str, Any] = {"api_key": config.api_key}
+        timeouts = aiosonic.Timeouts(
+            sock_connect=float(config.sock_connect_timeout_seconds),
+            sock_read=float(config.sock_read_timeout_seconds),
+            request_timeout=float(config.request_timeout_seconds),
+        )
+        connector = aiosonic.TCPConnector(timeouts=timeouts)
+        retry_config = RetryConfig(
+            max_attempts=config.retry_attempts + 1,
+            base_delay=float(config.retry_delay_seconds),
+            max_delay=float(config.retry_delay_seconds),
+            backoff_factor=1.0,
+            jitter=False,
+        )
+        provider_kwargs: dict[str, Any] = {
+            "api_key": config.api_key,
+            "retry_config": retry_config,
+            "client_kwargs": {"connector": connector},
+        }
         if config.base_url:
             provider_kwargs["base_url"] = config.base_url
         self._provider = provider_cls(**provider_kwargs)

@@ -39,8 +39,19 @@ class _FakeResponse:
 
 
 class _FakeProvider:
-    def __init__(self, api_key: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "",
+        retry_config: Any = None,
+        client_kwargs: dict[str, Any] | None = None,
+        http2: bool = False,
+    ) -> None:
         self.api_key = api_key
+        self.base_url = base_url
+        self.retry_config = retry_config
+        self.client_kwargs = client_kwargs or {}
+        self.http2 = http2
         self.calls: list[dict[str, Any]] = []
 
     async def acomplete(self, **kwargs: Any) -> _FakeResponse:
@@ -318,6 +329,38 @@ def test_media_support_modes() -> None:
     assert responses_client.media_input_mode() == "responses"
     assert claude_client.supports_media_inputs() is False
     assert claude_client.media_input_mode() == "none"
+
+
+def test_provider_uses_configured_transport_timeouts_and_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _FakeProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai",
+            api_key="secret",
+            model="x",
+            request_timeout_seconds=55,
+            sock_connect_timeout_seconds=12,
+            sock_read_timeout_seconds=47,
+            retry_attempts=3,
+            retry_delay_seconds=2.0,
+        )
+    )
+
+    provider = client._provider
+    connector = provider.client_kwargs.get("connector")
+
+    assert connector is not None
+    assert connector.timeouts.request_timeout == 55.0
+    assert connector.timeouts.sock_connect == 12.0
+    assert connector.timeouts.sock_read == 47.0
+    assert provider.retry_config is not None
+    assert provider.retry_config.max_attempts == 4
+    assert provider.retry_config.base_delay == 2.0
+    assert provider.retry_config.max_delay == 2.0
+    assert provider.retry_config.backoff_factor == 1.0
+    assert provider.retry_config.jitter is False
 
 
 def test_parse_tool_call_accepts_python_dict_string() -> None:

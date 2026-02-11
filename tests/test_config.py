@@ -11,10 +11,16 @@ def test_load_settings_from_file(tmp_path: Path) -> None:
         """
 [runtime]
 log_level = "DEBUG"
+agent_timeout_seconds = 180
 
 [llm]
 provider = "openai"
 api_key = "secret"
+request_timeout_seconds = 50
+sock_connect_timeout_seconds = 12
+sock_read_timeout_seconds = 50
+retry_attempts = 4
+retry_delay_seconds = 2.0
 
 [llm.openrouter]
 models = ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
@@ -33,7 +39,13 @@ bot_token = "token"
 
     settings = load_settings(config_file)
     assert settings.runtime.log_level == "DEBUG"
+    assert settings.runtime.agent_timeout_seconds == 180
     assert settings.llm.api_key == "secret"
+    assert settings.llm.request_timeout_seconds == 50
+    assert settings.llm.sock_connect_timeout_seconds == 12
+    assert settings.llm.sock_read_timeout_seconds == 50
+    assert settings.llm.retry_attempts == 4
+    assert settings.llm.retry_delay_seconds == 2.0
     assert settings.llm.openrouter.models == ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
     assert settings.llm.openrouter.plugins == [{"id": "file-parser", "pdf": {"engine": "pdf-text"}}]
     assert settings.llm.openrouter.provider is not None

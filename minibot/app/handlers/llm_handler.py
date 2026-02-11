@@ -25,6 +25,7 @@ class LLMMessageHandler:
         tools: Sequence[ToolBinding] | None = None,
         default_owner_id: str | None = None,
         max_history_messages: int | None = None,
+        agent_timeout_seconds: int = 120,
     ) -> None:
         self._memory = memory
         self._llm_client = llm_client
@@ -40,6 +41,7 @@ class LLMMessageHandler:
         runtime_limits = RuntimeLimits(
             max_steps=max_tool_iterations,
             max_tool_calls=max(12, max_tool_iterations * 2),
+            timeout_seconds=max(120, int(agent_timeout_seconds)),
         )
         managed_files_root = self._managed_files_root_from_tools()
         if self._supports_agent_runtime():
@@ -177,7 +179,7 @@ class LLMMessageHandler:
                 answer, should_reply = self._extract_answer(generation.payload)
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
-            answer = "Sorry, I couldn't answer right now."
+            answer = self._format_runtime_error_message(exc)
             should_reply = True
         await self._memory.append_history(session_id, "assistant", answer)
         await self._enforce_history_limit(session_id)
@@ -471,6 +473,17 @@ class LLMMessageHandler:
                     return timestamp, True
             return payload, True
         return str(payload), True
+
+    def _format_runtime_error_message(self, exc: Exception) -> str:
+        if not self._logger.isEnabledFor(logging.DEBUG):
+            return "Sorry, I couldn't answer right now."
+        error_name = type(exc).__name__
+        detail = str(exc).strip().replace("\n", " ")
+        if detail:
+            if len(detail) > 200:
+                detail = f"{detail[:200]}..."
+            return f"LLM error ({error_name}): {detail}"
+        return f"LLM error ({error_name})."
 
 
 def resolve_owner_id(message: ChannelMessage, default_owner_id: str | None) -> str:

@@ -21,8 +21,12 @@ class _FakeSettings:
     class _Memory:
         max_history_messages = None
 
+    class _Runtime:
+        agent_timeout_seconds = 120
+
     tools = _Tools()
     memory = _Memory()
+    runtime = _Runtime()
 
 
 def _message_event(text: str) -> MessageEvent:

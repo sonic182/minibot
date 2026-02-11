@@ -31,6 +31,7 @@ ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
 class RuntimeConfig(BaseModel):
     log_level: str = "INFO"
     environment: str = "development"
+    agent_timeout_seconds: int = Field(default=120, ge=120)
 
 
 class TelegramChannelConfig(BaseModel):
@@ -80,6 +81,11 @@ class LLMMConfig(BaseModel):
     temperature: float | None = None
     max_new_tokens: PositiveInt | None = None
     max_tool_iterations: PositiveInt = 15
+    request_timeout_seconds: int = Field(default=45, ge=45)
+    sock_connect_timeout_seconds: PositiveInt = 10
+    sock_read_timeout_seconds: PositiveInt = 45
+    retry_attempts: PositiveInt = 3
+    retry_delay_seconds: float = Field(default=2.0, gt=0)
     system_prompt: str = "You are Minibot, a helpful assistant."
     reasoning_effort: str | None = None
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()

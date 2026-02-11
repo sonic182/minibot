@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 from typing import Any, cast
 
 import pytest
@@ -107,6 +108,12 @@ class StubLLMClient:
         if self._provider in {"openai", "openrouter"}:
             return "chat_completions"
         return "none"
+
+
+class FailingLLMClient(StubLLMClient):
+    async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+        _ = args, kwargs
+        raise TimeoutError("request timed out")
 
 
 def _handler(
@@ -371,3 +378,36 @@ async def test_handler_guides_move_for_save_intent_with_incoming_files() -> None
     assert "Intent looks like file management" in call_args[1]
     assert "Do NOT call self_insert_artifact" in call_args[1]
     assert "destination_path=uploads/photo_1.jpg" in call_args[1]
+
+
+@pytest.mark.asyncio
+async def test_handler_returns_generic_error_when_not_in_debug_mode() -> None:
+    memory = StubMemory()
+    client = FailingLLMClient(payload=None)
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+    logger = logging.getLogger("minibot.handler")
+    original_level = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        response = await handler.handle(_message_event("ping"))
+    finally:
+        logger.setLevel(original_level)
+
+    assert response.text == "Sorry, I couldn't answer right now."
+
+
+@pytest.mark.asyncio
+async def test_handler_returns_error_details_in_debug_mode() -> None:
+    memory = StubMemory()
+    client = FailingLLMClient(payload=None)
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+    logger = logging.getLogger("minibot.handler")
+    original_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    try:
+        response = await handler.handle(_message_event("ping"))
+    finally:
+        logger.setLevel(original_level)
+
+    assert "LLM error (TimeoutError)" in response.text
+    assert "request timed out" in response.text
