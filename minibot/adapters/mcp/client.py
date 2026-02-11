@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import suppress
 from concurrent.futures import Future
 from dataclasses import dataclass
 from threading import Thread
@@ -53,8 +54,9 @@ class MCPClient:
         self._http_session_id: str | None = None
         self._http_client_class = aiosonic.HTTPClient
         self._stdio_process: asyncio.subprocess.Process | None = None
-        self._stdio_lock = asyncio.Lock()
-        self._stdio_start_lock = asyncio.Lock()
+        self._stdio_loop: asyncio.AbstractEventLoop | None = None
+        self._stdio_lock: asyncio.Lock | None = None
+        self._stdio_start_lock: asyncio.Lock | None = None
 
     async def list_tools(self) -> list[MCPToolDefinition]:
         await self._initialize()
@@ -89,7 +91,6 @@ class MCPClient:
             return
         if self._transport == "stdio":
             await self._ensure_stdio_process()
-            await self._send_stdio_notification("notifications/initialized", params={})
             self._initialized = True
             return
         await self._request(
@@ -119,7 +120,8 @@ class MCPClient:
         assert process.stdin is not None
         assert process.stdout is not None
         request_id = payload["id"]
-        async with self._stdio_lock:
+        stdio_lock, _ = self._ensure_stdio_runtime()
+        async with stdio_lock:
             process.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
             await process.stdin.drain()
             while True:
@@ -134,10 +136,11 @@ class MCPClient:
                 return parsed
 
     async def _ensure_stdio_process(self) -> asyncio.subprocess.Process:
+        _, stdio_start_lock = self._ensure_stdio_runtime()
         process = self._stdio_process
         if process is not None and process.returncode is None:
             return process
-        async with self._stdio_start_lock:
+        async with stdio_start_lock:
             process = self._stdio_process
             if process is not None and process.returncode is None:
                 return process
@@ -167,15 +170,19 @@ class MCPClient:
             )
             if "error" in response:
                 raise RuntimeError(f"mcp server error: {response['error']}")
+            await self._send_stdio_notification("notifications/initialized", params={}, process=process)
             return process
 
-    async def _send_stdio_notification(self, method: str, params: dict[str, Any]) -> None:
-        process = await self._ensure_stdio_process()
-        assert process.stdin is not None
-        async with self._stdio_lock:
+    async def _send_stdio_notification(
+        self, method: str, params: dict[str, Any], *, process: asyncio.subprocess.Process | None = None
+    ) -> None:
+        active_process = process or await self._ensure_stdio_process()
+        assert active_process.stdin is not None
+        stdio_lock, _ = self._ensure_stdio_runtime()
+        async with stdio_lock:
             notification = {"jsonrpc": "2.0", "method": method, "params": params}
-            process.stdin.write((json.dumps(notification, separators=(",", ":")) + "\n").encode("utf-8"))
-            await process.stdin.drain()
+            active_process.stdin.write((json.dumps(notification, separators=(",", ":")) + "\n").encode("utf-8"))
+            await active_process.stdin.drain()
 
     async def _request_stdio_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
         process = self._stdio_process
@@ -184,7 +191,8 @@ class MCPClient:
         assert process.stdin is not None
         assert process.stdout is not None
         request_id = payload["id"]
-        async with self._stdio_lock:
+        stdio_lock, _ = self._ensure_stdio_runtime()
+        async with stdio_lock:
             process.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
             await process.stdin.drain()
             while True:
@@ -194,6 +202,20 @@ class MCPClient:
                 parsed = json.loads(line.decode("utf-8"))
                 if parsed.get("id") == request_id:
                     return parsed
+
+    def _ensure_stdio_runtime(self) -> tuple[asyncio.Lock, asyncio.Lock]:
+        current_loop = asyncio.get_running_loop()
+        if self._stdio_loop is current_loop and self._stdio_lock is not None and self._stdio_start_lock is not None:
+            return self._stdio_lock, self._stdio_start_lock
+        process = self._stdio_process
+        if process is not None and process.returncode is None:
+            with suppress(ProcessLookupError):
+                process.kill()
+        self._stdio_process = None
+        self._stdio_loop = current_loop
+        self._stdio_lock = asyncio.Lock()
+        self._stdio_start_lock = asyncio.Lock()
+        return self._stdio_lock, self._stdio_start_lock
 
     async def _read_stdio_stderr(self, process: asyncio.subprocess.Process) -> str:
         if process.stderr is None:
