@@ -36,10 +36,13 @@ logfmter = "^0.0.11"
 playwright = {version = "^1.56.0", optional = true}
 selectolax = {version = "^0.4.6", optional = true}
 markdownify = {version = "^1.2.2", optional = true}
+mcp = {version = "^1.0.0", optional = true}
+uvicorn = {version = "^0.35.0", optional = true}
 
 
 [tool.poetry.extras]
 playwright = ["playwright", "selectolax", "markdownify"]
+mcp = ["mcp", "uvicorn"]
 
 
 
