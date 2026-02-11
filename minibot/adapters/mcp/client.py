@@ -6,8 +6,8 @@ import logging
 from contextlib import suppress
 from concurrent.futures import Future
 from dataclasses import dataclass
-from threading import Thread
-from typing import Any, Literal
+from threading import Event, Lock, Thread
+from typing import Any, Callable, Coroutine, Literal
 
 import aiosonic
 
@@ -57,6 +57,7 @@ class MCPClient:
         self._stdio_loop: asyncio.AbstractEventLoop | None = None
         self._stdio_lock: asyncio.Lock | None = None
         self._stdio_start_lock: asyncio.Lock | None = None
+        self._blocking_runner = _BlockingLoopRunner()
 
     async def list_tools(self) -> list[MCPToolDefinition]:
         await self._initialize()
@@ -254,35 +255,49 @@ class MCPClient:
         return headers
 
     def list_tools_blocking(self) -> list[MCPToolDefinition]:
-        return _run_coroutine_blocking(self.list_tools())
+        return self._blocking_runner.run(self.list_tools)
 
     def call_tool_blocking(self, tool_name: str, payload: dict[str, Any]) -> MCPToolCallResult:
-        return _run_coroutine_blocking(self.call_tool(tool_name, payload))
+        return self._blocking_runner.run(lambda: self.call_tool(tool_name, payload))
 
 
-def _run_coroutine_blocking(coro: Any) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
+class _BlockingLoopRunner:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._ready = Event()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: Thread | None = None
 
-    future: Future[Any] = Future()
-
-    def _runner() -> None:
-        loop = asyncio.new_event_loop()
+    def run(self, coro_factory: Callable[[], Coroutine[Any, Any, Any]]) -> Any:
         try:
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(coro)
-            future.set_result(result)
-        except Exception as exc:  # noqa: BLE001
-            future.set_exception(exc)
-        finally:
-            loop.close()
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro_factory())
 
-    thread = Thread(target=_runner, daemon=True)
-    thread.start()
-    thread.join()
-    return future.result()
+        loop = self._ensure_loop()
+        future: Future[Any] = asyncio.run_coroutine_threadsafe(coro_factory(), loop)
+        return future.result()
+
+    def _ensure_loop(self) -> asyncio.AbstractEventLoop:
+        with self._lock:
+            if self._loop is not None and self._thread is not None and self._thread.is_alive():
+                return self._loop
+            self._ready.clear()
+
+            def _runner() -> None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                self._loop = loop
+                self._ready.set()
+                loop.run_forever()
+
+            self._thread = Thread(target=_runner, daemon=True)
+            self._thread.start()
+
+        self._ready.wait()
+        if self._loop is None:
+            raise RuntimeError("failed to start blocking loop runner")
+        return self._loop
 
 
 def _parse_jsonrpc_payload(raw_payload: str) -> dict[str, Any]:

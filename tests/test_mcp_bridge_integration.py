@@ -112,6 +112,26 @@ def test_mcp_bridge_stdio_discovery_and_call(stdio_server_args: list[str]) -> No
     assert parsed["value"] == 3
 
 
+def test_mcp_bridge_stdio_process_persists_across_blocking_calls(stdio_server_args: list[str]) -> None:
+    client = MCPClient(
+        server_name="dice_cli",
+        transport="stdio",
+        timeout_seconds=5,
+        command=stdio_server_args[0],
+        args=stdio_server_args[1:],
+    )
+    bridge = MCPToolBridge(server_name="dice_cli", client=client)
+    bindings = {binding.tool.name: binding for binding in bridge.build_bindings()}
+
+    counter_binding = bindings["mcp_dice_cli__counter"]
+
+    first = asyncio.run(counter_binding.handler({}, ToolContext(owner_id="tester")))
+    second = asyncio.run(counter_binding.handler({}, ToolContext(owner_id="tester")))
+
+    assert json.loads(first.content["result"])["count"] == 1
+    assert json.loads(second.content["result"])["count"] == 2
+
+
 def test_mcp_bridge_http_discovery_and_call(http_server_url: str) -> None:
     client = MCPClient(server_name="dice_http", transport="http", timeout_seconds=5, url=http_server_url)
     bridge = MCPToolBridge(server_name="dice_http", client=client)
