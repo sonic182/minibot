@@ -23,11 +23,8 @@ jobs:
       - name: Install Poetry
         run: pip install poetry
 
-      - name: Regenerate lockfile
-        run: poetry lock
-
       - name: Install dependencies
-        run: poetry install --all-extras
+        run: poetry install --extras playwright
 
       - name: Run tests
         run: poetry run pytest
