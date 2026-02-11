@@ -54,6 +54,7 @@ class AgentRuntime:
         tool_calls_count = 0
         step = 0
         previous_response_id: str | None = None
+        responses_followup_messages: list[dict[str, Any]] | None = None
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
@@ -69,13 +70,22 @@ class AgentRuntime:
                         state=state,
                     )
 
+                call_messages = self._render_messages(state)
+                if (
+                    self._llm_client.is_responses_provider()
+                    and previous_response_id is not None
+                    and responses_followup_messages is not None
+                ):
+                    call_messages = responses_followup_messages
+
                 completion = await self._llm_client.complete_once(
-                    messages=self._render_messages(state),
+                    messages=call_messages,
                     tools=self._tools,
                     response_schema=response_schema,
                     prompt_cache_key=prompt_cache_key,
                     previous_response_id=previous_response_id,
                 )
+                responses_followup_messages = None
                 self._logger.debug(
                     "agent runtime provider step completed",
                     extra={
@@ -128,6 +138,7 @@ class AgentRuntime:
                     tool_context,
                     responses_mode=self._llm_client.is_responses_provider(),
                 )
+                applied_directive_messages: list[AgentMessage] = []
                 for execution in executions:
                     self._logger.debug(
                         "agent runtime tool execution result",
@@ -145,10 +156,19 @@ class AgentRuntime:
                             content=[MessagePart(type="json", value=execution.result.content)],
                         )
                     )
-                    self._apply_directives(state, execution.tool_name, execution.result.directives)
+                    applied_directive_messages.extend(
+                        self._apply_directives(state, execution.tool_name, execution.result.directives)
+                    )
+                if self._llm_client.is_responses_provider():
+                    responses_followup_messages = [execution.message_payload for execution in executions]
+                    if applied_directive_messages:
+                        responses_followup_messages.extend(
+                            self._render_messages(AgentState(messages=applied_directive_messages))
+                        )
                 step += 1
 
-    def _apply_directives(self, state: AgentState, tool_name: str, directives: Sequence[Any]) -> None:
+    def _apply_directives(self, state: AgentState, tool_name: str, directives: Sequence[Any]) -> list[AgentMessage]:
+        appended: list[AgentMessage] = []
         for directive in directives:
             if isinstance(directive, AppendMessageDirective):
                 if tool_name not in self._allowed_append_message_tools:
@@ -181,6 +201,8 @@ class AgentRuntime:
                         "parts_count": len(stamped_message.content),
                     },
                 )
+                appended.append(stamped_message)
+        return appended
 
     @staticmethod
     def _from_provider_assistant_message(message: Any) -> AgentMessage:
