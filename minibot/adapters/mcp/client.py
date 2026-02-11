@@ -52,6 +52,9 @@ class MCPClient:
         self._initialized = False
         self._http_session_id: str | None = None
         self._http_client_class = aiosonic.HTTPClient
+        self._stdio_process: asyncio.subprocess.Process | None = None
+        self._stdio_lock = asyncio.Lock()
+        self._stdio_start_lock = asyncio.Lock()
 
     async def list_tools(self) -> list[MCPToolDefinition]:
         await self._initialize()
@@ -85,6 +88,8 @@ class MCPClient:
         if self._initialized:
             return
         if self._transport == "stdio":
+            await self._ensure_stdio_process()
+            await self._send_stdio_notification("notifications/initialized", params={})
             self._initialized = True
             return
         await self._request(
@@ -110,55 +115,91 @@ class MCPClient:
         return await self._request_http(payload)
 
     async def _request_stdio(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if not self._command:
-            raise ValueError("mcp stdio command is required")
-        process = await asyncio.create_subprocess_exec(
-            self._command,
-            *self._args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=self._env,
-            cwd=self._cwd,
-        )
+        process = await self._ensure_stdio_process()
         assert process.stdin is not None
         assert process.stdout is not None
-        initialize_payload = {
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "minibot", "version": "0.0.3"},
-            },
-        }
-        initialized_notification = {
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-            "params": {},
-        }
-        for message in (initialize_payload, initialized_notification, payload):
-            process.stdin.write((json.dumps(message, separators=(",", ":")) + "\n").encode("utf-8"))
-        await process.stdin.drain()
-        process.stdin.close()
         request_id = payload["id"]
-        while True:
-            line = await asyncio.wait_for(process.stdout.readline(), timeout=self._timeout_seconds)
-            if not line:
-                _, stderr_data = await process.communicate()
-                stderr_text = stderr_data.decode("utf-8", errors="ignore")
-                raise RuntimeError(f"empty mcp stdio response: {stderr_text}")
-            parsed = json.loads(line.decode("utf-8"))
-            if parsed.get("id") != request_id:
-                continue
-            _, stderr_data = await process.communicate()
-            if process.returncode not in {0, None}:
-                stderr_text = stderr_data.decode("utf-8", errors="ignore")
-                raise RuntimeError(f"mcp stdio process failed: {stderr_text}")
-            if "error" in parsed:
-                raise RuntimeError(f"mcp server error: {parsed['error']}")
-            return parsed
+        async with self._stdio_lock:
+            process.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
+            await process.stdin.drain()
+            while True:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=self._timeout_seconds)
+                if not line:
+                    raise RuntimeError(f"empty mcp stdio response: {await self._read_stdio_stderr(process)}")
+                parsed = json.loads(line.decode("utf-8"))
+                if parsed.get("id") != request_id:
+                    continue
+                if "error" in parsed:
+                    raise RuntimeError(f"mcp server error: {parsed['error']}")
+                return parsed
+
+    async def _ensure_stdio_process(self) -> asyncio.subprocess.Process:
+        process = self._stdio_process
+        if process is not None and process.returncode is None:
+            return process
+        async with self._stdio_start_lock:
+            process = self._stdio_process
+            if process is not None and process.returncode is None:
+                return process
+            if not self._command:
+                raise ValueError("mcp stdio command is required")
+            process = await asyncio.create_subprocess_exec(
+                self._command,
+                *self._args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self._env,
+                cwd=self._cwd,
+            )
+            self._stdio_process = process
+            response = await self._request_stdio_raw(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 0,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "minibot", "version": "0.0.3"},
+                    },
+                }
+            )
+            if "error" in response:
+                raise RuntimeError(f"mcp server error: {response['error']}")
+            return process
+
+    async def _send_stdio_notification(self, method: str, params: dict[str, Any]) -> None:
+        process = await self._ensure_stdio_process()
+        assert process.stdin is not None
+        async with self._stdio_lock:
+            notification = {"jsonrpc": "2.0", "method": method, "params": params}
+            process.stdin.write((json.dumps(notification, separators=(",", ":")) + "\n").encode("utf-8"))
+            await process.stdin.drain()
+
+    async def _request_stdio_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
+        process = self._stdio_process
+        if process is None:
+            raise RuntimeError("mcp stdio process is not started")
+        assert process.stdin is not None
+        assert process.stdout is not None
+        request_id = payload["id"]
+        async with self._stdio_lock:
+            process.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
+            await process.stdin.drain()
+            while True:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=self._timeout_seconds)
+                if not line:
+                    raise RuntimeError(f"empty mcp stdio response: {await self._read_stdio_stderr(process)}")
+                parsed = json.loads(line.decode("utf-8"))
+                if parsed.get("id") == request_id:
+                    return parsed
+
+    async def _read_stdio_stderr(self, process: asyncio.subprocess.Process) -> str:
+        if process.stderr is None:
+            return ""
+        stderr_data = await process.stderr.read()
+        return stderr_data.decode("utf-8", errors="ignore")
 
     async def _request_http(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._url:
