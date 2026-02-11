@@ -216,3 +216,27 @@ logfmt_enabled = true
 log_level = "DEBUG"
 kv_separator = "="
 record_separator = " "
+
+# Optional Model Context Protocol bridge.
+[tools.mcp]
+enabled = false
+name_prefix = "mcp"
+timeout_seconds = 10
+
+# [[tools.mcp.servers]]
+# name = "dice_cli"
+# transport = "stdio"
+# command = "python"
+# args = ["tests/fixtures/mcp/stdio_dice_server.py"]
+# env = {}
+# cwd = "."
+# enabled_tools = []
+# disabled_tools = []
+
+# [[tools.mcp.servers]]
+# name = "dice_http"
+# transport = "http"
+# url = "http://127.0.0.1:8765/mcp"
+# headers = {}
+# enabled_tools = []
+# disabled_tools = []

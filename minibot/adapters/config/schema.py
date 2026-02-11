@@ -226,6 +226,26 @@ class PlaywrightToolConfig(BaseModel):
     )
 
 
+class MCPServerConfig(BaseModel):
+    name: str
+    transport: Literal["stdio", "http"] = "stdio"
+    command: str | None = None
+    args: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
+    cwd: str | None = None
+    url: str | None = None
+    headers: Dict[str, str] = Field(default_factory=dict)
+    enabled_tools: List[str] = Field(default_factory=list)
+    disabled_tools: List[str] = Field(default_factory=list)
+
+
+class MCPToolConfig(BaseModel):
+    enabled: bool = False
+    name_prefix: str = "mcp"
+    timeout_seconds: PositiveInt = 10
+    servers: List[MCPServerConfig] = Field(default_factory=list)
+
+
 class FileStorageToolConfig(BaseModel):
     enabled: bool = False
     root_dir: str = "./data/files"
@@ -243,6 +263,7 @@ class ToolsConfig(BaseModel):
     python_exec: PythonExecToolConfig = PythonExecToolConfig()
     playwright: PlaywrightToolConfig = PlaywrightToolConfig()
     file_storage: FileStorageToolConfig = FileStorageToolConfig()
+    mcp: MCPToolConfig = MCPToolConfig()
 
 
 class ScheduledPromptsConfig(BaseModel):
