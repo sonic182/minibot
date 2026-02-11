@@ -73,7 +73,14 @@ def http_server_url() -> str:
         stderr=subprocess.PIPE,
         env=os.environ.copy(),
     )
-    time.sleep(0.2)
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if process.poll() is not None:
+            break
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                break
+        time.sleep(0.1)
     try:
         yield f"http://127.0.0.1:{port}/mcp"
     finally:
