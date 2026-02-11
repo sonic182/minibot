@@ -12,6 +12,8 @@ from typing import cast
 
 import pytest
 
+pytest.importorskip("mcp")
+
 from minibot.adapters.config.schema import (
     CalculatorToolConfig,
     FileStorageToolConfig,
@@ -61,6 +63,7 @@ def stdio_server_args() -> list[str]:
 
 @pytest.fixture
 def http_server_url() -> str:
+    pytest.importorskip("uvicorn")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         port = cast(int, sock.getsockname()[1])
