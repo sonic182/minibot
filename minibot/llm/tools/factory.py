@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.adapters.mcp.client import MCPClient
 from minibot.adapters.config.schema import Settings
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.app.event_bus import EventBus
@@ -11,6 +13,7 @@ from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.http_client import HTTPClientTool
+from minibot.llm.tools.mcp_bridge import MCPToolBridge
 from minibot.llm.tools.user_memory import build_kv_tools
 from minibot.llm.tools.playwright import PlaywrightTool
 from minibot.llm.tools.python_exec import HostPythonExecTool
@@ -74,4 +77,29 @@ def build_enabled_tools(
             min_recurrence_interval_seconds=settings.scheduler.prompts.min_recurrence_interval_seconds,
         )
         tools.extend(schedule_tool.bindings())
+    if settings.tools.mcp.enabled:
+        logger = logging.getLogger("minibot.tools.factory")
+        for server in settings.tools.mcp.servers:
+            client = MCPClient(
+                server_name=server.name,
+                transport=server.transport,
+                timeout_seconds=settings.tools.mcp.timeout_seconds,
+                command=server.command,
+                args=server.args,
+                env=server.env or None,
+                cwd=server.cwd,
+                url=server.url,
+                headers=server.headers,
+            )
+            bridge = MCPToolBridge(
+                server_name=server.name,
+                client=client,
+                name_prefix=settings.tools.mcp.name_prefix,
+                enabled_tools=server.enabled_tools,
+                disabled_tools=server.disabled_tools,
+            )
+            try:
+                tools.extend(bridge.build_bindings())
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
     return tools
