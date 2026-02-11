@@ -74,7 +74,15 @@ class HostPythonExecTool:
                         "description": "Optional per-run cap for exported artifact count.",
                     },
                 },
-                "required": ["code", "stdin", "timeout_seconds"],
+                "required": [
+                    "code",
+                    "stdin",
+                    "timeout_seconds",
+                    "save_artifacts",
+                    "artifact_globs",
+                    "artifact_subdir",
+                    "max_artifacts",
+                ],
                 "additionalProperties": False,
             },
         )

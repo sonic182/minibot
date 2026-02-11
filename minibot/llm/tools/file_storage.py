@@ -51,6 +51,7 @@ class FileStorageTool:
                         "description": "Optional folder relative to the managed root. Defaults to root.",
                     }
                 },
+                "required": ["folder"],
                 "additionalProperties": False,
             },
         )
@@ -75,7 +76,7 @@ class FileStorageTool:
                         "description": "Set true to replace existing files.",
                     },
                 },
-                "required": ["path", "content"],
+                "required": ["path", "content", "overwrite"],
                 "additionalProperties": False,
             },
         )
@@ -113,7 +114,7 @@ class FileStorageTool:
                         "description": "Optional caption sent with the file.",
                     },
                 },
-                "required": ["path"],
+                "required": ["path", "caption"],
                 "additionalProperties": False,
             },
         )
@@ -138,7 +139,7 @@ class FileStorageTool:
                         "description": "Set true to replace an existing destination file.",
                     },
                 },
-                "required": ["source_path", "destination_path"],
+                "required": ["source_path", "destination_path", "overwrite"],
                 "additionalProperties": False,
             },
         )
@@ -197,7 +198,7 @@ class FileStorageTool:
                         "description": "Optional display filename for file mode.",
                     },
                 },
-                "required": ["path", "as"],
+                "required": ["path", "as", "role", "text", "mime", "filename"],
                 "additionalProperties": False,
             },
         )
