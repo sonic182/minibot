@@ -8,7 +8,8 @@ from typing import Optional
 from minibot.adapters.container import AppContainer
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.channels import ChannelResponse, RenderableResponse
+from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 from minibot.llm.tools.factory import build_enabled_tools
 
 
@@ -45,6 +46,9 @@ class Dispatcher:
             if isinstance(event, MessageEvent):
                 self._logger.info("processing message event", extra={"event_id": event.event_id})
                 await self._handle_message(event)
+            if isinstance(event, OutboundFormatRepairEvent):
+                self._logger.info("processing outbound format repair event", extra={"event_id": event.event_id})
+                await self._handle_format_repair(event)
 
     async def _handle_message(self, event: MessageEvent) -> None:
         try:
@@ -77,6 +81,48 @@ class Dispatcher:
             await self._event_bus.publish(OutboundEvent(response=response))
         except Exception as exc:
             self._logger.exception("failed to handle message", exc_info=exc)
+
+    async def _handle_format_repair(self, event: OutboundFormatRepairEvent) -> None:
+        try:
+            repaired = await self._handler.repair_format_response(
+                response=event.response,
+                parse_error=event.parse_error,
+                channel=event.channel,
+                chat_id=event.chat_id,
+                user_id=event.user_id,
+                attempt=event.attempt,
+            )
+            should_reply = repaired.metadata.get("should_reply", True)
+            self._logger.debug(
+                "format repair handler response",
+                extra={
+                    "event_id": event.event_id,
+                    "chat_id": repaired.chat_id,
+                    "text": repaired.text,
+                    "should_reply": should_reply,
+                    "attempt": event.attempt,
+                },
+            )
+            if not should_reply:
+                return
+            await self._event_bus.publish(OutboundEvent(response=repaired))
+        except Exception as exc:
+            self._logger.exception("failed to handle format repair", exc_info=exc)
+            fallback_text = event.response.render.text if event.response.render is not None else event.response.text
+            fallback_metadata = dict(event.response.metadata)
+            fallback_metadata["format_repair_failed"] = True
+            fallback_metadata["format_repair_error"] = str(exc)
+            fallback_response = ChannelResponse(
+                channel=event.channel,
+                chat_id=event.chat_id,
+                text=fallback_text,
+                render=RenderableResponse(kind="text", text=fallback_text),
+                metadata=fallback_metadata,
+            )
+            try:
+                await self._event_bus.publish(OutboundEvent(response=fallback_response))
+            except Exception as publish_exc:
+                self._logger.exception("failed to publish format repair fallback", exc_info=publish_exc)
 
     async def stop(self) -> None:
         await self._subscription.close()

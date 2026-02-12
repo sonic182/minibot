@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ChannelMessage(BaseModel):
@@ -25,10 +25,19 @@ class IncomingFileRef(BaseModel):
     caption: str | None = None
 
 
+class RenderableResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: Literal["text", "html", "markdown_v2"] = "text"
+    text: str = Field(validation_alias=AliasChoices("content", "text"), serialization_alias="content")
+    meta: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ChannelResponse(BaseModel):
     channel: str
     chat_id: int
     text: str
+    render: RenderableResponse | None = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

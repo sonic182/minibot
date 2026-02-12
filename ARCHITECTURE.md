@@ -20,6 +20,9 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 ├── README.md
 ├── TODO.md
 ├── config.example.toml
+├── prompts/
+│   └── channels/
+│       └── telegram.md
 ├── Dockerfile
 ├── docker-compose.yml
 ├── minibot/
@@ -68,6 +71,7 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 │   │       ├── scheduler.py
 │   │       └── time.py
 │   └── shared/
+│       ├── prompt_loader.py
 │       └── utils.py
 └── tests/
     └── ... (mirrors runtime modules)
@@ -79,7 +83,7 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 2. Telegram adapter receives inbound updates and maps them into `ChannelMessage` payloads.
 3. Adapter publishes `MessageEvent` into `app.event_bus.EventBus`.
 4. `app.dispatcher.Dispatcher` consumes `MessageEvent` and invokes `LLMMessageHandler`.
-5. Handler loads conversation history, executes directive-aware tool-capable generation through `app.agent_runtime.AgentRuntime`, and returns `ChannelResponse`.
+5. Handler loads conversation history, composes an effective system prompt (`llm.system_prompt` + optional channel prompt from `llm.prompts_dir/channels/<channel>.md`), executes directive-aware tool-capable generation through `app.agent_runtime.AgentRuntime`, and returns `ChannelResponse`.
 6. Dispatcher publishes `OutboundEvent` unless `metadata.should_reply` is false.
 7. Telegram adapter consumes outbound responses and sends text to Telegram (with chunking for long messages).
 
@@ -98,6 +102,7 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
 - `app/dispatcher.py`: main event consumer; invokes handler pipeline and controls reply suppression through metadata.
 - `app/handlers/llm_handler.py`:
   - assembles model input from text plus attachments,
+  - composes per-channel system prompt by loading prompt fragments from `shared/prompt_loader.py`,
   - enforces provider constraints for multimodal support,
   - stores transcript history safely (attachment summaries only, not raw blobs),
   - parses structured model output (`answer`, `should_answer_to_user`).
@@ -197,6 +202,7 @@ Main sections:
 - `[runtime]`
 - `[channels.telegram]` (auth allowlists, mode, media limits)
 - `[llm]`
+  - `llm.prompts_dir` points to channel prompt packs (default `./prompts`)
 - `[memory]`
 - `[scheduler.prompts]`
 - `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `time`, `mcp`)

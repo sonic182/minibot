@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import mimetypes
 from pathlib import Path
+import shutil
+from typing import Literal
 
 
 class LocalFileStorage:
@@ -25,6 +27,43 @@ class LocalFileStorage:
                     "name": item.name,
                     "path": self._relative_to_root(item),
                     "is_dir": item.is_dir(),
+                    "size_bytes": int(stat.st_size),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                }
+            )
+        return entries
+
+    def glob_files(
+        self,
+        pattern: str,
+        folder: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, str | int | bool]]:
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError("pattern must be a non-empty string")
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be >= 1")
+
+        target = self.resolve_dir(folder)
+        matches: list[Path] = []
+        try:
+            for candidate in target.rglob(pattern.strip()):
+                if not candidate.is_file():
+                    continue
+                matches.append(candidate)
+                if limit is not None and len(matches) >= limit:
+                    break
+        except ValueError as exc:
+            raise ValueError("invalid glob pattern") from exc
+
+        entries: list[dict[str, str | int | bool]] = []
+        for item in sorted(matches, key=lambda path: self._relative_to_root(path).lower()):
+            stat = item.stat()
+            entries.append(
+                {
+                    "name": item.name,
+                    "path": self._relative_to_root(item),
+                    "is_dir": False,
                     "size_bytes": int(stat.st_size),
                     "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
                 }
@@ -69,12 +108,69 @@ class LocalFileStorage:
             "overwrite": overwrite,
         }
 
-    def delete_file(self, path: str) -> dict[str, str | bool]:
-        target = self.resolve_existing_file(path)
-        target.unlink()
+    def delete_file(
+        self,
+        path: str,
+        *,
+        recursive: bool = False,
+        target: Literal["any", "file", "folder"] = "any",
+    ) -> dict[str, str | bool | int]:
+        candidate = self.resolve_file(path)
+        relative_path = self._relative_to_root(candidate)
+        if not candidate.exists():
+            return {
+                "path": relative_path,
+                "deleted": False,
+                "deleted_count": 0,
+                "target_type": target,
+            }
+
+        if candidate.is_file():
+            if target == "folder":
+                return {
+                    "path": relative_path,
+                    "deleted": False,
+                    "deleted_count": 0,
+                    "target_type": "file",
+                }
+            candidate.unlink()
+            return {
+                "path": relative_path,
+                "deleted": True,
+                "deleted_count": 1,
+                "target_type": "file",
+            }
+
+        if not candidate.is_dir():
+            raise ValueError("path is not a file or folder")
+        if target == "file":
+            return {
+                "path": relative_path,
+                "deleted": False,
+                "deleted_count": 0,
+                "target_type": "folder",
+            }
+
+        if recursive:
+            file_count = sum(1 for item in candidate.rglob("*") if item.is_file())
+            dir_count = sum(1 for item in candidate.rglob("*") if item.is_dir())
+            shutil.rmtree(candidate)
+            return {
+                "path": relative_path,
+                "deleted": True,
+                "deleted_count": file_count + dir_count + 1,
+                "target_type": "folder",
+            }
+
+        try:
+            candidate.rmdir()
+        except OSError as exc:
+            raise ValueError("folder is not empty; set recursive=true to delete recursively") from exc
         return {
-            "path": self._relative_to_root(target),
+            "path": relative_path,
             "deleted": True,
+            "deleted_count": 1,
+            "target_type": "folder",
         }
 
     def file_info(self, path: str) -> dict[str, str | int | bool]:

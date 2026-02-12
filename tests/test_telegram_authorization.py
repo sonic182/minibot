@@ -9,7 +9,7 @@ import pytest
 
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
-from minibot.core.channels import ChannelFileResponse
+from minibot.core.channels import ChannelFileResponse, ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundFileEvent
 from minibot.adapters.messaging.telegram.service import TelegramService
 
@@ -291,3 +291,54 @@ async def test_collect_incoming_files_keeps_unique_name_on_collision(tmp_path: P
     assert len(incoming_files) == 1
     assert incoming_files[0].filename != "report.pdf"
     assert incoming_files[0].path.startswith("uploads/temp/document_")
+
+
+@pytest.mark.asyncio
+async def test_send_parse_mode_chunks_sets_markdown_mode() -> None:
+    config = TelegramChannelConfig(bot_token="token")
+    service = _service(config)
+
+    class _BotStub:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def send_message(self, **kwargs: Any) -> None:
+            self.calls.append(kwargs)
+
+    bot = _BotStub()
+    service._bot = bot  # type: ignore[attr-defined]
+
+    success, parse_error = await service._send_parse_mode_chunks(
+        chat_id=1,
+        render=RenderableResponse(kind="markdown_v2", text="*bold*"),
+    )
+
+    assert success is True
+    assert parse_error is None
+    assert len(bot.calls) == 1
+    assert bot.calls[0]["parse_mode"].value == "MarkdownV2"
+
+
+@pytest.mark.asyncio
+async def test_send_text_response_falls_back_to_plain_on_render_failure() -> None:
+    config = TelegramChannelConfig(bot_token="token")
+    service = _service(config)
+    response = ChannelResponse(
+        channel="telegram",
+        chat_id=1,
+        text="<b>hello</b>",
+        render=RenderableResponse(kind="html", text="<b>hello</b>"),
+    )
+
+    calls: list[str] = []
+
+    async def _send_render_chunks(chat_id: int, render: RenderableResponse) -> tuple[bool, str | None]:
+        _ = chat_id
+        calls.append(render.kind)
+        return (render.kind == "text", None)
+
+    service._send_render_chunks = _send_render_chunks  # type: ignore[attr-defined]
+
+    await service._send_text_response(response)
+
+    assert calls == ["html", "text"]

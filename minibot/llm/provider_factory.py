@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 import json
+import re
 from typing import Any, Mapping, Sequence
 
 import logging
@@ -17,6 +18,7 @@ from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
 from minibot.core.agent_runtime import ToolResult
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.shared.json_schema import to_openai_strict_schema
 
 
 LLM_PROVIDERS = {
@@ -39,6 +41,10 @@ _SENSITIVE_ARGUMENT_KEY_PARTS = (
     "passwd",
     "authorization",
     "cookie",
+)
+_OPENAI_STRICT_MODEL_PATTERNS = (
+    re.compile(r"^openai(?:/.*)?"),
+    re.compile(r"^gpt-.*"),
 )
 
 
@@ -93,6 +99,7 @@ class LLMClient:
         self._max_new_tokens = config.max_new_tokens
         self._max_tool_iterations = config.max_tool_iterations
         self._system_prompt = getattr(config, "system_prompt", "You are Minibot, a helpful assistant.")
+        self._prompts_dir = getattr(config, "prompts_dir", "./prompts")
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
         self._openrouter_models = list(getattr(getattr(config, "openrouter", None), "models", []) or [])
         self._openrouter_provider = self._build_openrouter_provider_payload(config)
@@ -110,9 +117,11 @@ class LLMClient:
         response_schema: dict[str, Any] | None = None,
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
+        system_prompt_override: str | None = None,
     ) -> LLMGeneration:
+        system_prompt = system_prompt_override or self._system_prompt
         messages = [
-            {"role": "system", "content": self._system_prompt},
+            {"role": "system", "content": system_prompt},
         ]
         messages.extend({"role": entry.role, "content": entry.content} for entry in history)
         final_user_content: str | list[dict[str, Any]] = user_message
@@ -135,6 +144,9 @@ class LLMClient:
         last_iteration_signature: str | None = None
         repeated_iteration_count = 0
         extra_kwargs: dict[str, Any] = {}
+        strict_response_schema = response_schema
+        if isinstance(response_schema, dict) and self._should_apply_openai_strict_schema(self._model):
+            strict_response_schema = to_openai_strict_schema(response_schema)
         if prompt_cache_key and self._is_responses_provider:
             extra_kwargs["prompt_cache_key"] = prompt_cache_key
         if previous_response_id and self._is_responses_provider:
@@ -147,12 +159,13 @@ class LLMClient:
                 "model": self._model,
                 "messages": conversation,
                 "tools": tool_specs,
-                "response_schema": response_schema,
+                "response_schema": strict_response_schema,
             }
             if self._temperature is not None:
                 call_kwargs["temperature"] = self._temperature
-            if not self._is_responses_provider and self._max_new_tokens is not None:
-                call_kwargs["max_tokens"] = self._max_new_tokens
+            resolved_max_tokens = self._resolved_max_tokens()
+            if resolved_max_tokens is not None:
+                call_kwargs["max_tokens"] = resolved_max_tokens
             call_kwargs.update(self._openrouter_kwargs())
             call_kwargs.update(extra_kwargs)
 
@@ -165,7 +178,7 @@ class LLMClient:
                 response_id = self._extract_response_id(response)
                 if response_schema and isinstance(payload, str):
                     try:
-                        parsed = json.loads(payload)
+                        parsed = self._parse_structured_payload(payload)
                         return LLMGeneration(parsed, response_id)
                     except Exception:
                         self._logger.warning("failed to parse structured response; falling back to text")
@@ -225,16 +238,20 @@ class LLMClient:
         previous_response_id: str | None = None,
     ) -> LLMCompletionStep:
         tool_specs = [binding.tool for binding in (tools or [])] or None
+        strict_response_schema = response_schema
+        if isinstance(response_schema, dict) and self._should_apply_openai_strict_schema(self._model):
+            strict_response_schema = to_openai_strict_schema(response_schema)
         call_kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": list(messages),
             "tools": tool_specs,
-            "response_schema": response_schema,
+            "response_schema": strict_response_schema,
         }
         if self._temperature is not None:
             call_kwargs["temperature"] = self._temperature
-        if not self._is_responses_provider and self._max_new_tokens is not None:
-            call_kwargs["max_tokens"] = self._max_new_tokens
+        resolved_max_tokens = self._resolved_max_tokens()
+        if resolved_max_tokens is not None:
+            call_kwargs["max_tokens"] = resolved_max_tokens
         call_kwargs.update(self._openrouter_kwargs())
         if prompt_cache_key and self._is_responses_provider:
             call_kwargs["prompt_cache_key"] = prompt_cache_key
@@ -270,10 +287,11 @@ class LLMClient:
                 binding = tool_map.get(tool_name)
                 if not binding:
                     raise ValueError(f"tool {tool_name} is not registered")
-                self._logger.info(
+                self._logger.debug(
                     "executing tool",
                     extra={
                         "tool": tool_name,
+                        "call_id": call_id,
                         "owner_id": context.owner_id,
                         "argument_keys": sorted(arguments.keys()),
                         "arguments": self._sanitize_tool_arguments_for_log(arguments),
@@ -281,10 +299,11 @@ class LLMClient:
                 )
                 raw_result = await binding.handler(arguments, context)
                 result = self._normalize_tool_result(raw_result)
-                self._logger.info(
+                self._logger.debug(
                     "tool execution completed",
                     extra={
                         "tool": tool_name,
+                        "call_id": call_id,
                         "owner_id": context.owner_id,
                     },
                 )
@@ -338,6 +357,9 @@ class LLMClient:
 
     def system_prompt(self) -> str:
         return self._system_prompt
+
+    def prompts_dir(self) -> str:
+        return self._prompts_dir
 
     def max_tool_iterations(self) -> int:
         return self._max_tool_iterations
@@ -512,6 +534,12 @@ class LLMClient:
         return any(part in normalized for part in _SENSITIVE_ARGUMENT_KEY_PARTS)
 
     @staticmethod
+    def _should_apply_openai_strict_schema(model_name: str | None) -> bool:
+        if not isinstance(model_name, str) or not model_name:
+            return False
+        return any(pattern.match(model_name) for pattern in _OPENAI_STRICT_MODEL_PATTERNS)
+
+    @staticmethod
     def _build_openrouter_provider_payload(config: LLMMConfig) -> dict[str, Any]:
         provider_cfg = getattr(getattr(config, "openrouter", None), "provider", None)
         if provider_cfg is None:
@@ -550,6 +578,17 @@ class LLMClient:
         if self._openrouter_plugins:
             kwargs["plugins"] = self._openrouter_plugins
         return kwargs
+
+    def _resolved_max_tokens(self) -> int | None:
+        if self._is_responses_provider:
+            return None
+        if self._provider_name == "openrouter":
+            if self._max_new_tokens is None:
+                return 4096
+            return min(self._max_new_tokens, 32768)
+        if self._max_new_tokens is not None:
+            return self._max_new_tokens
+        return None
 
     @staticmethod
     def _assistant_message_for_followup(message: Any) -> dict[str, Any]:
@@ -627,3 +666,14 @@ class LLMClient:
                         output = self._stringify_result(output_value)[:240]
             parts.append(f"{name}:{output}")
         return "|".join(parts)
+
+    @staticmethod
+    def _parse_structured_payload(payload: str) -> Any:
+        try:
+            return json.loads(payload)
+        except Exception:
+            stripped = payload.strip()
+            stripped = re.sub(r"^```json\s*", "", stripped, flags=re.IGNORECASE)
+            stripped = re.sub(r"^```\s*", "", stripped)
+            stripped = re.sub(r"\s*```$", "", stripped)
+            return json.loads(stripped)

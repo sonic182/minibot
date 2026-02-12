@@ -4,7 +4,7 @@ import logging
 import mimetypes
 from pathlib import Path
 from typing import Any
-from typing import cast
+from typing import Literal, cast
 
 from llm_async.models import Tool
 
@@ -31,6 +31,7 @@ class FileStorageTool:
     def bindings(self) -> list[ToolBinding]:
         return [
             ToolBinding(tool=self._list_files_schema(), handler=self._list_files),
+            ToolBinding(tool=self._glob_files_schema(), handler=self._glob_files),
             ToolBinding(tool=self._file_info_schema(), handler=self._file_info),
             ToolBinding(tool=self._create_file_schema(), handler=self._create_file),
             ToolBinding(tool=self._move_file_schema(), handler=self._move_file),
@@ -77,6 +78,32 @@ class FileStorageTool:
                     },
                 },
                 "required": ["path", "content", "overwrite"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _glob_files_schema(self) -> Tool:
+        return Tool(
+            name="glob_files",
+            description="List files matching a glob pattern under the managed file root.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob pattern (for example **/*.md or uploads/**/*.png).",
+                    },
+                    "folder": {
+                        "type": ["string", "null"],
+                        "description": "Optional folder relative to managed root to scope search.",
+                    },
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Maximum number of matches to return. Defaults to all matches.",
+                    },
+                },
+                "required": ["pattern", "folder", "limit"],
                 "additionalProperties": False,
             },
         )
@@ -147,16 +174,25 @@ class FileStorageTool:
     def _delete_file_schema(self) -> Tool:
         return Tool(
             name="delete_file",
-            description="Delete a managed file from disk.",
+            description="Delete a managed file or folder from disk.",
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Existing relative file path under managed root.",
-                    }
+                        "description": "Relative path under managed root.",
+                    },
+                    "target": {
+                        "type": ["string", "null"],
+                        "enum": ["any", "file", "folder", None],
+                        "description": "Target kind filter. Use folder to only delete folders.",
+                    },
+                    "recursive": {
+                        "type": ["boolean", "null"],
+                        "description": "Set true to delete non-empty folders recursively.",
+                    },
                 },
-                "required": ["path"],
+                "required": ["path", "target", "recursive"],
                 "additionalProperties": False,
             },
         )
@@ -209,6 +245,20 @@ class FileStorageTool:
         return {
             "root_dir": str(self._storage.root_dir),
             "folder": folder or ".",
+            "entries": entries,
+            "count": len(entries),
+        }
+
+    async def _glob_files(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        pattern = self._require_str(payload, "pattern")
+        folder = self._optional_str(payload.get("folder"))
+        limit = self._optional_int(payload.get("limit"))
+        entries = self._storage.glob_files(pattern=pattern, folder=folder, limit=limit)
+        return {
+            "root_dir": str(self._storage.root_dir),
+            "folder": folder or ".",
+            "pattern": pattern,
+            "limit": limit,
             "entries": entries,
             "count": len(entries),
         }
@@ -281,11 +331,29 @@ class FileStorageTool:
 
     async def _delete_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         path = self._require_str(payload, "path")
-        result = self._storage.delete_file(path)
+        target = (self._optional_str(payload.get("target")) or "any").lower()
+        if target not in {"any", "file", "folder"}:
+            raise ValueError("target must be one of: any, file, folder")
+        recursive = bool(payload.get("recursive") or False)
+        resolved_target = cast(Literal["any", "file", "folder"], target)
+        result = self._storage.delete_file(path, recursive=recursive, target=resolved_target)
+        deleted_count = int(result.get("deleted_count", 0))
+        resolved_path = str(result["path"])
+        target_type = str(result.get("target_type") or "path")
+        message = (
+            f"Deleted {target_type} successfully: {resolved_path}"
+            if deleted_count > 0
+            else f"No file or folder found to delete: {resolved_path}"
+        )
         return {
             "ok": True,
             "path": result["path"],
-            "deleted": True,
+            "deleted": bool(result.get("deleted", False)),
+            "deleted_count": deleted_count,
+            "target": target,
+            "recursive": recursive,
+            "target_type": target_type,
+            "message": message,
         }
 
     async def _self_insert_artifact(self, payload: dict[str, Any], _: ToolContext) -> ToolResult:
@@ -414,3 +482,13 @@ class FileStorageTool:
             raise ValueError("Expected string value")
         stripped = value.strip()
         return stripped or None
+
+    @staticmethod
+    def _optional_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("Expected integer value")
+        if value < 1:
+            raise ValueError("Expected integer value >= 1")
+        return value

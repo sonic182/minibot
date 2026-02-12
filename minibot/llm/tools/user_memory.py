@@ -15,6 +15,7 @@ def build_kv_tools(memory: KeyValueMemory) -> list[ToolBinding]:
         ToolBinding(tool=_save_tool(), handler=lambda payload, ctx: _save_entry(memory, payload, ctx)),
         ToolBinding(tool=_get_tool(), handler=lambda payload, ctx: _get_entry(memory, payload, ctx)),
         ToolBinding(tool=_search_tool(), handler=lambda payload, ctx: _search_entries(memory, payload, ctx)),
+        ToolBinding(tool=_delete_tool(), handler=lambda payload, ctx: _delete_entry(memory, payload, ctx)),
     ]
 
 
@@ -59,6 +60,25 @@ def _get_tool() -> Tool:
             "Retrieve a specific saved user memory entry by its unique ID or title. "
             "Use this when you need to recall particular information you previously saved about the user. "
             "This accesses long-term user memory, not conversation history."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "entry_id": {"type": ["string", "null"]},
+                "title": {"type": ["string", "null"]},
+            },
+            "required": ["entry_id", "title"],
+            "additionalProperties": False,
+        },
+    )
+
+
+def _delete_tool() -> Tool:
+    return Tool(
+        name="user_memory_delete",
+        description=(
+            "Delete a specific saved user memory entry by unique ID or title. "
+            "Use this when stored long-term user information is outdated or should be removed."
         ),
         parameters={
             "type": "object",
@@ -150,6 +170,25 @@ async def _search_entries(
         "limit": result.limit,
         "offset": result.offset,
         "entries": [_entry_payload(entry) for entry in result.entries],
+    }
+
+
+async def _delete_entry(
+    memory: KeyValueMemory,
+    payload: dict[str, Any],
+    context: ToolContext,
+) -> dict[str, Any]:
+    owner_id = _owner_from_context(context)
+    entry_id = _optional_str(payload.get("entry_id"))
+    title = _optional_str(payload.get("title"))
+    if not entry_id and not title:
+        raise ValueError("entry_id or title is required")
+    deleted = await memory.delete_entry(owner_id=owner_id, entry_id=entry_id, title=title)
+    return {
+        "owner_id": owner_id,
+        "deleted": deleted,
+        "entry_id": entry_id,
+        "title": title,
     }
 
 
