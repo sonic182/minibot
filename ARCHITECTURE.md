@@ -44,6 +44,8 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 │   │   │   └── app_container.py
 │   │   ├── logging/
 │   │   │   └── setup.py
+│   │   ├── mcp/
+│   │   │   └── client.py
 │   │   ├── memory/
 │   │   │   ├── sqlalchemy.py
 │   │   │   └── kv_sqlalchemy.py
@@ -61,6 +63,7 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 │   │       ├── chat_memory.py
 │   │       ├── http_client.py
 │   │       ├── kv.py
+│   │       ├── mcp_bridge.py
 │   │       ├── python_exec.py
 │   │       ├── scheduler.py
 │   │       └── time.py
@@ -118,6 +121,8 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
   - `adapters/messaging/telegram/service.py` handles Telegram authorization, inbound text/media extraction, outbound message sending, and long-message chunking.
 - Files:
   - `adapters/files/local_storage.py` handles managed workspace path-safe list/write/read operations.
+- MCP:
+  - `adapters/mcp/client.py` provides MCP JSON-RPC clients over stdio and HTTP (including HTTP session header reuse).
 - Memory:
   - `adapters/memory/sqlalchemy.py` persists chat history.
   - `adapters/memory/kv_sqlalchemy.py` persists KV tool memory.
@@ -137,6 +142,26 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
   - file tools (`list_files`, `create_file`, `send_file`, `self_insert_artifact`),
   - scheduler controls (`schedule_prompt`, `cancel_scheduled_prompt`, `list_scheduled_prompts`, `delete_scheduled_prompt`),
   - time helpers.
+
+## MCP Tool Bridge Flow
+
+When MCP is enabled, tool registration and invocation follow this flow:
+
+1. `llm/tools/factory.py` checks `settings.tools.mcp.enabled` and iterates configured `tools.mcp.servers`.
+2. For each server, `MCPClient.list_tools_blocking()` performs discovery via JSON-RPC `tools/list` using either stdio or HTTP transport.
+3. `MCPToolBridge.build_bindings()` filters discovered tools (`enabled_tools`/`disabled_tools`) and creates local LLM tool bindings.
+4. Generated tool names follow `<name_prefix>_<server_name>__<remote_tool_name>` to keep each server namespace explicit.
+5. On tool invocation, bridge handlers map local names back to remote tool names and call `MCPClient.call_tool_blocking(...)`.
+6. Tool results are normalized before returning to runtime (content arrays are flattened into text when needed).
+
+Transport details:
+
+- Stdio transport keeps a subprocess per server, serializes I/O with asyncio locks, and performs initialize/initialized handshake.
+- HTTP transport sends JSON-RPC requests to `url` and reuses `mcp-session-id` when provided by the server response headers.
+
+Security boundary:
+
+- MCP tools expose external capabilities. Use per-server `enabled_tools`/`disabled_tools` to enforce least privilege.
 
 ## Scheduler Model (Current)
 
@@ -174,7 +199,7 @@ Main sections:
 - `[llm]`
 - `[memory]`
 - `[scheduler.prompts]`
-- `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `time`)
+- `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `time`, `mcp`)
 - `[logging]`
 
 ## Testing Strategy

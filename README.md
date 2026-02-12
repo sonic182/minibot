@@ -51,7 +51,7 @@ Top features
 - 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
 - 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
 - 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
-- 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, and optional Python execution.
+- 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, optional Python execution, and MCP server bridges.
 - 🗂️ Managed file workspace tools: `list_files`, `create_file`, `send_file`, and `self_insert_artifact` (directive-based artifact insertion).
 - 🌐 Optional browser automation with Playwright (`browser_navigate`, `browser_info`, `browser_get_data`, `browser_wait_for`, `browser_click`, `browser_query_selector`, `browser_close`).
 - ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
@@ -90,9 +90,67 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
 - `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`), and optional artifact export controls (`artifacts_*`) to persist generated files into managed storage for later `send_file`.
 - `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
+- `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
 Every section has comments + defaults in `config.example.toml`—read that file for hints.
+
+MCP Bridge Guide
+----------------
+
+MiniBot can discover and expose remote MCP tools as local tool bindings at startup. For each configured server,
+MiniBot calls `tools/list`, builds local tool schemas dynamically, and exposes tool names in this format:
+
+- `<name_prefix>_<server_name>__<remote_tool_name>`
+
+For example, with `name_prefix = "mcp"`, `server_name = "dice_cli"`, and remote tool `roll_dice`,
+the local tool name becomes `mcp_dice_cli__roll_dice`.
+
+Enable the bridge in `config.toml`:
+
+```toml
+[tools.mcp]
+enabled = true
+name_prefix = "mcp"
+timeout_seconds = 10
+```
+
+Add one or more server entries.
+
+Stdio transport example:
+
+```toml
+[[tools.mcp.servers]]
+name = "dice_cli"
+transport = "stdio"
+command = "python"
+args = ["tests/fixtures/mcp/stdio_dice_server.py"]
+env = {}
+cwd = "."
+enabled_tools = []
+disabled_tools = []
+```
+
+HTTP transport example:
+
+```toml
+[[tools.mcp.servers]]
+name = "dice_http"
+transport = "http"
+url = "http://127.0.0.1:8765/mcp"
+headers = {}
+enabled_tools = []
+disabled_tools = []
+```
+
+Tool filtering behavior:
+
+- `enabled_tools`: if empty, all discovered tools are allowed; if set, only listed remote tool names are exposed.
+- `disabled_tools`: always excluded, even if also present in `enabled_tools`.
+
+Troubleshooting:
+
+- If discovery fails for a server, startup logs include `failed to load mcp tools` with the server name.
 
 Suggested model presets
 -----------------------
