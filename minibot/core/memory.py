@@ -61,6 +61,13 @@ class KeyValueMemory(Protocol):
         title: str | None = None,
     ) -> KeyValueEntry | None: ...
 
+    async def delete_entry(
+        self,
+        owner_id: str,
+        entry_id: str | None = None,
+        title: str | None = None,
+    ) -> bool: ...
+
     async def search_entries(
         self,
         owner_id: str,

@@ -53,6 +53,10 @@ class _KVStub:
         del kwargs
         return None
 
+    async def delete_entry(self, **kwargs: Any):
+        del kwargs
+        return False
+
 
 class _PromptSchedulerStub:
     async def schedule_prompt(self, **kwargs: Any):
@@ -153,7 +157,7 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
     )
     names = {binding.tool.name for binding in tools}
 
-    assert {"user_memory_save", "user_memory_get", "user_memory_search"}.issubset(names)
+    assert {"user_memory_save", "user_memory_get", "user_memory_search", "user_memory_delete"}.issubset(names)
     assert "http_request" in names
     assert {
         "browser_navigate",

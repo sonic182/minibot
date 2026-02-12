@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Index, String, Text, func, or_, select
+from sqlalchemy import JSON, DateTime, Index, String, Text, delete, func, or_, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine import Connection, URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
@@ -64,10 +66,13 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             bind=self._engine,
             expire_on_commit=False,
         )
+        self._fts_enabled = False
 
     async def initialize(self) -> None:
         async with self._engine.begin() as connection:
             await connection.run_sync(self._create_schema)
+            if self._database_url.drivername.startswith("sqlite"):
+                self._fts_enabled = await self._initialize_fts(connection)
 
     @staticmethod
     def _create_schema(sync_connection: Connection) -> None:
@@ -151,6 +156,33 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             entry = result.scalars().first()
             return self._to_entry(entry) if entry else None
 
+    async def delete_entry(
+        self,
+        owner_id: str,
+        entry_id: str | None = None,
+        title: str | None = None,
+    ) -> bool:
+        if not owner_id:
+            raise ValueError("owner_id is required")
+        if not entry_id and not title:
+            raise ValueError("entry_id or title is required")
+
+        async with self._session_factory() as session:
+            stmt = delete(KVEntry).where(KVEntry.owner_id == owner_id)
+            if entry_id:
+                stmt = stmt.where(KVEntry.id == entry_id)
+            elif title is not None:
+                normalized = title.strip()
+                if not normalized:
+                    raise ValueError("title cannot be empty")
+                stmt = stmt.where(func.lower(KVEntry.title) == normalized.lower())
+            else:
+                raise ValueError("title is required when entry_id is not provided")
+
+            result = await session.execute(stmt)
+            await session.commit()
+            return int(result.rowcount or 0) > 0
+
     async def search_entries(
         self,
         owner_id: str,
@@ -178,16 +210,29 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
         resolved_limit = self._resolve_limit(limit)
         resolved_offset = max(offset or 0, 0)
         filters = [KVEntry.owner_id == owner_id]
-        if query:
-            normalized = f"%{query.strip().lower()}%"
-            filters.append(
-                or_(
-                    func.lower(KVEntry.title).like(normalized),
-                    func.lower(KVEntry.data).like(normalized),
-                )
-            )
+        normalized_query = query.strip() if query else ""
 
         async with self._session_factory() as session:
+            if normalized_query and self._fts_enabled:
+                fts_result = await self._query_entries_fts(
+                    session,
+                    owner_id=owner_id,
+                    query=normalized_query,
+                    limit=resolved_limit,
+                    offset=resolved_offset,
+                )
+                if fts_result is not None:
+                    return fts_result
+
+            if normalized_query:
+                normalized = f"%{normalized_query.lower()}%"
+                filters.append(
+                    or_(
+                        func.lower(KVEntry.title).like(normalized),
+                        func.lower(KVEntry.data).like(normalized),
+                    )
+                )
+
             count_stmt = select(func.count()).select_from(KVEntry).where(*filters)
             total_result = await session.execute(count_stmt)
             total = total_result.scalar_one()
@@ -207,6 +252,125 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
                 limit=resolved_limit,
                 offset=resolved_offset,
             )
+
+    async def _initialize_fts(self, connection: Any) -> bool:
+        try:
+            await connection.execute(
+                text(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS kv_memory_fts USING "
+                    "fts5(title, data, content='kv_memory', content_rowid='rowid')"
+                )
+            )
+            await connection.execute(
+                text(
+                    "CREATE TRIGGER IF NOT EXISTS kv_memory_ai AFTER INSERT ON kv_memory BEGIN "
+                    "INSERT INTO kv_memory_fts(rowid, title, data) VALUES (new.rowid, new.title, new.data); "
+                    "END"
+                )
+            )
+            await connection.execute(
+                text(
+                    "CREATE TRIGGER IF NOT EXISTS kv_memory_ad AFTER DELETE ON kv_memory BEGIN "
+                    "INSERT INTO kv_memory_fts(kv_memory_fts, rowid, title, data) "
+                    "VALUES('delete', old.rowid, old.title, old.data); END"
+                )
+            )
+            await connection.execute(
+                text(
+                    "CREATE TRIGGER IF NOT EXISTS kv_memory_au AFTER UPDATE ON kv_memory BEGIN "
+                    "INSERT INTO kv_memory_fts(kv_memory_fts, rowid, title, data) "
+                    "VALUES('delete', old.rowid, old.title, old.data); "
+                    "INSERT INTO kv_memory_fts(rowid, title, data) VALUES (new.rowid, new.title, new.data); "
+                    "END"
+                )
+            )
+            await connection.execute(text("INSERT INTO kv_memory_fts(kv_memory_fts) VALUES('rebuild')"))
+        except SQLAlchemyError:
+            return False
+        return True
+
+    async def _query_entries_fts(
+        self,
+        session: AsyncSession,
+        owner_id: str,
+        query: str,
+        limit: int,
+        offset: int,
+    ) -> KeyValueSearchResult | None:
+        match_query = self._to_fts_match_query(query)
+        if not match_query:
+            return None
+
+        count_sql = text(
+            "SELECT COUNT(*) AS total "
+            "FROM kv_memory_fts f JOIN kv_memory k ON k.rowid = f.rowid "
+            "WHERE k.owner_id = :owner_id AND kv_memory_fts MATCH :match_query"
+        )
+        query_sql = text(
+            "SELECT k.id, k.owner_id, k.title, k.data, k.metadata, k.source, k.created_at, k.updated_at, k.expires_at "
+            "FROM kv_memory_fts f "
+            "JOIN kv_memory k ON k.rowid = f.rowid "
+            "WHERE k.owner_id = :owner_id AND kv_memory_fts MATCH :match_query "
+            "ORDER BY bm25(kv_memory_fts) ASC, k.updated_at DESC "
+            "LIMIT :limit OFFSET :offset"
+        )
+        try:
+            total_result = await session.execute(count_sql, {"owner_id": owner_id, "match_query": match_query})
+            total = int(total_result.scalar_one() or 0)
+            result = await session.execute(
+                query_sql,
+                {
+                    "owner_id": owner_id,
+                    "match_query": match_query,
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
+        except SQLAlchemyError:
+            self._fts_enabled = False
+            return None
+
+        entries = [
+            KeyValueEntry(
+                id=row.id,
+                owner_id=row.owner_id,
+                title=row.title,
+                data=row.data,
+                metadata=self._coerce_metadata(row.metadata),
+                source=row.source,
+                created_at=self._coerce_datetime(row.created_at),
+                updated_at=self._coerce_datetime(row.updated_at),
+                expires_at=self._coerce_datetime(row.expires_at),
+            )
+            for row in result.mappings().all()
+        ]
+        return KeyValueSearchResult(entries=entries, total=total, limit=limit, offset=offset)
+
+    def _coerce_datetime(self, value: Any) -> datetime | None:
+        if value is None or isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        return None
+
+    def _coerce_metadata(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        return {}
+
+    def _to_fts_match_query(self, query: str) -> str:
+        tokens = [token for token in query.split() if token]
+        if not tokens:
+            return ""
+        normalized_tokens = [token.replace('"', "").replace("'", "") for token in tokens]
+        return " AND ".join(f"{token}*" for token in normalized_tokens if token)
 
     def _resolve_limit(self, limit: int | None) -> int:
         requested = limit or self._config.default_limit

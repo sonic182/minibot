@@ -57,3 +57,31 @@ async def test_kv_memory_update_and_search(kv_memory: SQLAlchemyKeyValueMemory) 
 
     empty = await kv_memory.search_entries(owner_id="tenant", query="missing")
     assert empty.total == 0
+
+
+@pytest.mark.asyncio
+async def test_kv_memory_delete_entry(kv_memory: SQLAlchemyKeyValueMemory) -> None:
+    entry = await kv_memory.save_entry(owner_id="tenant", title="Temporary", data="Keep")
+
+    deleted = await kv_memory.delete_entry(owner_id="tenant", entry_id=entry.id)
+    assert deleted is True
+
+    missing = await kv_memory.get_entry(owner_id="tenant", entry_id=entry.id)
+    assert missing is None
+
+
+@pytest.mark.asyncio
+async def test_kv_memory_delete_by_title_and_missing(kv_memory: SQLAlchemyKeyValueMemory) -> None:
+    await kv_memory.save_entry(owner_id="tenant", title="Archive", data="Entry")
+
+    deleted = await kv_memory.delete_entry(owner_id="tenant", title="archive")
+    assert deleted is True
+
+    deleted_missing = await kv_memory.delete_entry(owner_id="tenant", title="archive")
+    assert deleted_missing is False
+
+
+@pytest.mark.asyncio
+async def test_kv_memory_delete_requires_selector(kv_memory: SQLAlchemyKeyValueMemory) -> None:
+    with pytest.raises(ValueError):
+        await kv_memory.delete_entry(owner_id="tenant")

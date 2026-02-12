@@ -52,9 +52,22 @@ async def test_user_memory_tools_save_get_search(kv_memory: SQLAlchemyKeyValueMe
     assert search_result["total"] == 1
     assert search_result["entries"][0]["title"] == "Credentials"
 
+    delete_result = await _invoke(tools["user_memory_delete"], {"entry_id": save_result["id"]})
+    assert delete_result["deleted"] is True
+
+    after_delete = await _invoke(tools["user_memory_get"], {"entry_id": save_result["id"]})
+    assert after_delete["message"] == "Entry not found"
+
 
 @pytest.mark.asyncio
 async def test_user_memory_save_requires_owner(kv_memory: SQLAlchemyKeyValueMemory) -> None:
     tools = _tool_map(kv_memory)
     with pytest.raises(ValueError):
         await tools["user_memory_save"].handler({"title": "Doc", "data": "text"}, ToolContext(owner_id=None))
+
+
+@pytest.mark.asyncio
+async def test_user_memory_delete_requires_selector(kv_memory: SQLAlchemyKeyValueMemory) -> None:
+    tools = _tool_map(kv_memory)
+    with pytest.raises(ValueError):
+        await tools["user_memory_delete"].handler({}, ToolContext(owner_id="team-alpha"))
