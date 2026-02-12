@@ -4,7 +4,7 @@
 **NEVER execute git "write" commands**: Do NOT use `git commit`, `git push`, `git add`, or any git write commands. Only edit files directly via the Edit/Write tools; the user handles commits.
 
 ## Build / Run / Lint
-- **Install dependencies**: `poetry install`
+- **Install dependencies**: `poetry install --all-extras` (always include extras so test dependencies are available)
 - **Run daemon**: `poetry run python -m minibot.app.daemon` (or `python main.py` for quick checks)
 - **Lint**: `poetry run ruff check --fix minibot tests` (or `poetry run ruff check .` to scan everything); `flake8` is not configured here.
 - **Format**: `poetry run ruff format .`

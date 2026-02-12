@@ -35,6 +35,7 @@ sock_read_timeout_seconds = 45
 retry_attempts = 3
 retry_delay_seconds = 2.0
 system_prompt = "You are Minibot, a helpful assistant."
+prompts_dir = "./prompts"
 
 # Optional request params. Omit keys to avoid sending them.
 # temperature = 0.2

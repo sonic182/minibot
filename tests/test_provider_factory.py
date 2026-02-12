@@ -96,6 +96,131 @@ async def test_generate_parses_structured_json_payload(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
+async def test_generate_parses_structured_json_from_fenced_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _FencedStructuredProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            return _FakeResponse(
+                main_response=_FakeMessage(
+                    content='```json\n{"answer":"done","should_answer_to_user":true}\n```',
+                    tool_calls=None,
+                ),
+                original={"id": "resp-fenced"},
+            )
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _FencedStructuredProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+
+    result = await client.generate([], "hello", response_schema={"type": "object"})
+
+    assert result.payload == {"answer": "done", "should_answer_to_user": True}
+    assert result.response_id == "resp-fenced"
+
+
+@pytest.mark.asyncio
+async def test_generate_uses_system_prompt_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _FakeProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+
+    await client.generate([], "hello", system_prompt_override="Override prompt")
+
+    call = client._provider.calls[-1]
+    assert call["messages"][0]["role"] == "system"
+    assert call["messages"][0]["content"] == "Override prompt"
+
+
+@pytest.mark.asyncio
+async def test_generate_normalizes_response_schema_for_openai_strict(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _FakeProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="gpt-5-mini"))
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "answer": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "url": {"type": "string"},
+                },
+                "required": ["text"],
+            },
+            "ok": {"type": "boolean"},
+        },
+        "required": ["answer"],
+    }
+    await client.generate([], "hello", response_schema=schema)
+
+    sent_schema = client._provider.calls[-1]["response_schema"]
+    assert sent_schema["required"] == ["answer", "ok"]
+    assert sent_schema["additionalProperties"] is False
+    assert sent_schema["properties"]["ok"]["type"] == ["boolean", "null"]
+    nested = sent_schema["properties"]["answer"]
+    assert nested["required"] == ["text", "url"]
+    assert nested["additionalProperties"] is False
+    assert nested["properties"]["url"]["type"] == ["string", "null"]
+
+
+@pytest.mark.asyncio
+async def test_generate_keeps_schema_unchanged_for_non_openai_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _FakeProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="claude-3-5-sonnet"))
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "answer": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "url": {"type": "string"},
+                },
+                "required": ["text"],
+            }
+        },
+        "required": ["answer"],
+    }
+    await client.generate([], "hello", response_schema=schema)
+
+    sent_schema = client._provider.calls[-1]["response_schema"]
+    assert sent_schema == schema
+
+
+@pytest.mark.asyncio
+async def test_openrouter_defaults_max_tokens_when_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openrouter", _FakeProvider)
+    client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
+
+    await client.complete_once(messages=[{"role": "user", "content": "hi"}], tools=None)
+
+    call = client._provider.calls[-1]
+    assert call["max_tokens"] == 4096
+
+
+@pytest.mark.asyncio
+async def test_openrouter_clamps_max_tokens_to_provider_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openrouter", _FakeProvider)
+    client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x", max_new_tokens=65536))
+
+    await client.complete_once(messages=[{"role": "user", "content": "hi"}], tools=None)
+
+    call = client._provider.calls[-1]
+    assert call["max_tokens"] == 32768
+
+
+@pytest.mark.asyncio
 async def test_execute_tool_calls_handles_missing_tool(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm import provider_factory
 

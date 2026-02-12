@@ -28,6 +28,16 @@ class OutboundFileEvent(BaseEvent):
     response: ChannelFileResponse
 
 
+class OutboundFormatRepairEvent(BaseEvent):
+    event_type: str = "outbound_format_repair"
+    response: ChannelResponse
+    parse_error: str
+    attempt: int = 1
+    chat_id: int
+    channel: str
+    user_id: int | None = None
+
+
 class SystemEvent(BaseEvent):
     event_type: str = "system"
     payload: Optional[dict] = None

@@ -48,6 +48,8 @@ class TelegramChannelConfig(BaseModel):
     max_total_media_bytes: ByteSizeValue = 12582912
     max_attachments_per_message: PositiveInt = 3
     allowed_document_mime_types: List[str] = Field(default_factory=list)
+    format_repair_enabled: bool = True
+    format_repair_max_attempts: PositiveInt = 1
 
 
 class OpenRouterProviderRoutingConfig(BaseModel):
@@ -87,6 +89,7 @@ class LLMMConfig(BaseModel):
     retry_attempts: PositiveInt = 3
     retry_delay_seconds: float = Field(default=2.0, gt=0)
     system_prompt: str = "You are Minibot, a helpful assistant."
+    prompts_dir: str = "./prompts"
     reasoning_effort: str | None = None
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
 

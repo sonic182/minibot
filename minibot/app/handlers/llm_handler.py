@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 from typing import cast
 
 import ast
@@ -9,11 +9,12 @@ import json
 
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole, RuntimeLimits
-from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef
+from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
-from minibot.shared.utils import session_id_for
+from minibot.shared.prompt_loader import load_channel_prompt, load_policy_prompts
+from minibot.shared.utils import session_id_for, session_id_from_parts
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
@@ -32,6 +33,7 @@ class LLMMessageHandler:
         self._tools = list(tools or [])
         self._default_owner_id = default_owner_id
         self._max_history_messages = max_history_messages
+        self._prompts_dir = self._llm_prompts_dir()
         max_tool_iterations_getter = getattr(self._llm_client, "max_tool_iterations", None)
         max_tool_iterations = 8
         if callable(max_tool_iterations_getter):
@@ -110,6 +112,48 @@ class LLMMessageHandler:
                 return mode
         return "responses" if self._llm_client.is_responses_provider() else "none"
 
+    def _llm_prompts_dir(self) -> str:
+        prompts_dir_getter = getattr(self._llm_client, "prompts_dir", None)
+        if callable(prompts_dir_getter):
+            value = prompts_dir_getter()
+            if isinstance(value, str) and value:
+                return value
+        return "./prompts"
+
+    def _compose_system_prompt(self, channel: str | None) -> str:
+        system_prompt_getter = getattr(self._llm_client, "system_prompt", None)
+        base_prompt = "You are Minibot, a helpful assistant."
+        if callable(system_prompt_getter):
+            maybe_prompt = system_prompt_getter()
+            if isinstance(maybe_prompt, str) and maybe_prompt:
+                base_prompt = maybe_prompt
+
+        fragments = [base_prompt]
+        fragments.extend(load_policy_prompts(self._prompts_dir))
+        channel_prompt = load_channel_prompt(self._prompts_dir, channel)
+        if channel_prompt:
+            fragments.append(channel_prompt)
+        self._logger.debug(
+            "composed system prompt",
+            extra={
+                "channel": channel,
+                "prompts_dir": self._prompts_dir,
+                "channel_prompt_loaded": bool(channel_prompt),
+                "fragment_count": len(fragments),
+                "prompt_preview_25": "\n\n".join(fragments)[:25],
+            },
+        )
+
+        if any(binding.tool.name == "self_insert_artifact" for binding in self._tools):
+            fragments.append(
+                "When you need to inspect a local workspace file (image/document), call self_insert_artifact first "
+                "to inject it into conversation context before answering file contents. "
+                "For file-management requests (save, move, delete, send, list), do not call self_insert_artifact; "
+                "use file-management tools instead. If the user only uploaded files and gave no clear instruction, "
+                "ask a clarifying question."
+            )
+        return "\n\n".join(fragments)
+
     async def handle(self, event: MessageEvent) -> ChannelResponse:
         message = event.message
         session_id = session_id_for(message)
@@ -139,6 +183,7 @@ class LLMMessageHandler:
                 channel=message.channel,
                 chat_id=chat_id,
                 text=answer,
+                render=self._plain_render(answer),
                 metadata=self._response_metadata(True),
             )
 
@@ -151,6 +196,9 @@ class LLMMessageHandler:
             user_id=message.user_id,
         )
         prompt_cache_key = _prompt_cache_key(message)
+        system_prompt = self._compose_system_prompt(message.channel)
+        tool_required_intent = self._is_tool_required_intent(message.text)
+        tool_messages_count: int | None = None
         try:
             if self._runtime is None:
                 generation = await self._llm_client.generate(
@@ -162,13 +210,15 @@ class LLMMessageHandler:
                     response_schema=self._response_schema(),
                     prompt_cache_key=prompt_cache_key,
                     previous_response_id=None,
+                    system_prompt_override=system_prompt,
                 )
-                answer, should_reply = self._extract_answer(generation.payload)
+                render, should_reply = self._extract_answer(generation.payload)
             else:
                 state = self._build_agent_state(
                     history=history,
                     user_text=model_text,
                     user_content=model_user_content,
+                    system_prompt=system_prompt,
                 )
                 generation = await self._runtime.run(
                     state=state,
@@ -176,11 +226,78 @@ class LLMMessageHandler:
                     response_schema=self._response_schema(),
                     prompt_cache_key=prompt_cache_key,
                 )
-                answer, should_reply = self._extract_answer(generation.payload)
+                tool_messages_count = self._count_tool_messages_in_state(generation.state)
+                if tool_required_intent and tool_messages_count == 0:
+                    self._logger.debug(
+                        "tool-required request returned without tool calls; retrying with stricter instruction",
+                        extra={"chat_id": message.chat_id, "channel": message.channel},
+                    )
+                    retry_system_prompt = (
+                        f"{system_prompt}\n\n"
+                        "Tool policy reminder: this request requires using tools before final answer. "
+                        "Call the relevant tool now, then provide the final answer from tool output. "
+                        "Do not answer with intent statements like 'I will check'."
+                    )
+                    retry_state = self._build_agent_state(
+                        history=history,
+                        user_text=model_text,
+                        user_content=model_user_content,
+                        system_prompt=retry_system_prompt,
+                    )
+                    generation = await self._runtime.run(
+                        state=retry_state,
+                        tool_context=tool_context,
+                        response_schema=self._response_schema(),
+                        prompt_cache_key=prompt_cache_key,
+                    )
+                    tool_messages_count = self._count_tool_messages_in_state(generation.state)
+                    self._logger.debug(
+                        "tool-required retry completed",
+                        extra={
+                            "chat_id": message.chat_id,
+                            "channel": message.channel,
+                            "tool_messages": tool_messages_count,
+                        },
+                    )
+                render, should_reply = self._extract_answer(generation.payload)
+
+            if tool_required_intent and tool_messages_count == 0:
+                if self._looks_like_tool_placeholder(render.text):
+                    self._logger.warning(
+                        "tool-required request still unresolved after retries; returning explicit failure message",
+                        extra={
+                            "chat_id": message.chat_id,
+                            "channel": message.channel,
+                            "no_tool_call": True,
+                            "tool_exception_available": False,
+                            "reason": "model_returned_final_without_tool_calls",
+                            "user_text": message.text,
+                        },
+                    )
+                    render = self._plain_render(
+                        "I could not complete that with tools in this attempt. Please try again, or ask me to "
+                        "run a specific tool like chat_history_info."
+                    )
+                if not should_reply:
+                    self._logger.debug(
+                        "overriding should_reply=false for tool-required request without tool outputs",
+                        extra={"chat_id": message.chat_id, "channel": message.channel},
+                    )
+                    should_reply = True
+
+            self._logger.debug(
+                "structured output parsed",
+                extra={
+                    "kind": render.kind,
+                    "content_length": len(render.text),
+                    "should_reply": should_reply,
+                },
+            )
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
-            answer = self._format_runtime_error_message(exc)
+            render = self._plain_render(self._format_runtime_error_message(exc))
             should_reply = True
+        answer = render.text
         await self._memory.append_history(session_id, "assistant", answer)
         await self._enforce_history_limit(session_id)
 
@@ -189,7 +306,83 @@ class LLMMessageHandler:
             channel=message.channel,
             chat_id=chat_id,
             text=answer,
+            render=render,
             metadata=self._response_metadata(should_reply),
+        )
+
+    async def repair_format_response(
+        self,
+        *,
+        response: ChannelResponse,
+        parse_error: str,
+        channel: str,
+        chat_id: int,
+        user_id: int | None,
+        attempt: int,
+    ) -> ChannelResponse:
+        session_id = session_id_from_parts(channel, chat_id, user_id)
+        history = list(await self._memory.get_history(session_id))
+        system_prompt = self._compose_system_prompt(channel)
+        original_kind = response.render.kind if response.render is not None else "text"
+        original_content = response.render.text if response.render is not None else response.text
+        repair_prompt = self._build_format_repair_prompt(
+            channel=channel,
+            original_kind=original_kind,
+            parse_error=parse_error,
+            original_content=original_content,
+        )
+        generation = await self._llm_client.generate(
+            history,
+            repair_prompt,
+            user_content=None,
+            tools=[],
+            tool_context=None,
+            response_schema=self._response_schema(),
+            prompt_cache_key=f"{channel}:{chat_id}:format-repair",
+            previous_response_id=None,
+            system_prompt_override=system_prompt,
+        )
+        render, _ = self._extract_answer(generation.payload)
+        metadata = self._response_metadata(True)
+        metadata["format_repair_attempt"] = attempt
+        metadata["format_repair_original_kind"] = original_kind
+        return ChannelResponse(
+            channel=channel,
+            chat_id=chat_id,
+            text=render.text,
+            render=render,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _build_format_repair_prompt(
+        *, channel: str, original_kind: str, parse_error: str, original_content: str
+    ) -> str:
+        if channel == "telegram":
+            return (
+                "We tried to send a formatted response to Telegram but got a formatting parse error. "
+                "Rewrite the same answer with valid Telegram-compatible formatting.\n\n"
+                f"Original kind: {original_kind}\n"
+                f"Telegram error: {parse_error}\n\n"
+                "Requirements:\n"
+                "- Return the same meaning and content, only fix formatting.\n"
+                "- Keep kind as markdown_v2 or html only if valid for Telegram, otherwise use text.\n"
+                "- Do not use placeholder statements.\n"
+                "- Return structured output only.\n\n"
+                f"Original content:\n{original_content}"
+            )
+        return (
+            "We tried to send a formatted response to the target channel and got a formatting parse error. "
+            "Rewrite the same answer with valid channel-compatible formatting.\n\n"
+            f"Channel: {channel}\n"
+            f"Original kind: {original_kind}\n"
+            f"Parse error: {parse_error}\n\n"
+            "Requirements:\n"
+            "- Return the same meaning and content, only fix formatting.\n"
+            "- Keep kind aligned with valid formatting for this channel, otherwise use text.\n"
+            "- Do not use placeholder statements.\n"
+            "- Return structured output only.\n\n"
+            f"Original content:\n{original_content}"
         )
 
     def _build_model_user_input(self, message: ChannelMessage) -> tuple[str, str | list[dict[str, Any]] | None]:
@@ -215,22 +408,8 @@ class LLMMessageHandler:
         history: Sequence[Any],
         user_text: str,
         user_content: str | list[dict[str, Any]] | None,
+        system_prompt: str,
     ) -> AgentState:
-        system_prompt_getter = getattr(self._llm_client, "system_prompt", None)
-        system_prompt = "You are Minibot, a helpful assistant."
-        if callable(system_prompt_getter):
-            maybe_prompt = system_prompt_getter()
-            if isinstance(maybe_prompt, str) and maybe_prompt:
-                system_prompt = maybe_prompt
-        if any(binding.tool.name == "self_insert_artifact" for binding in self._tools):
-            system_prompt = (
-                f"{system_prompt}\n"
-                "When you need to inspect a local workspace file (image/document), call self_insert_artifact first "
-                "to inject it into conversation context before answering file contents. "
-                "For file-management requests (save, move, delete, send, list), do not call self_insert_artifact; "
-                "use file-management tools instead. If the user only uploaded files and gave no clear instruction, "
-                "ask a clarifying question."
-            )
         messages: list[AgentMessage] = [
             AgentMessage(role="system", content=[MessagePart(type="text", text=system_prompt)])
         ]
@@ -414,7 +593,7 @@ class LLMMessageHandler:
     def _suggest_persist_destination(path: str) -> str | None:
         marker = "uploads/temp/"
         if path.startswith(marker):
-            return f"uploads/{path[len(marker):]}"
+            return f"uploads/{path[len(marker) :]}"
         return None
 
     @staticmethod
@@ -427,7 +606,40 @@ class LLMMessageHandler:
         return {
             "type": "object",
             "properties": {
-                "answer": {"type": "string"},
+                "answer": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {
+                            "type": "string",
+                            "enum": ["text", "html", "markdown_v2"],
+                            "description": (
+                                "Strictly declare the actual output format you are returning in answer.content. "
+                                "If answer.content is HTML, set kind=html. If MarkdownV2, set kind=markdown_v2. "
+                                "If plain text, set kind=text. Do not default to text when using formatting."
+                                "This kind controls formatting in the channel renderer."
+                            ),
+                        },
+                        "content": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": (
+                                "Main reply body. For html, use Telegram-supported inline tags only; "
+                                "do not output full HTML documents with doctype/head/body/style/script/div/p/br. "
+                                "Use newline characters instead of <br>."
+                            ),
+                        },
+                        "meta": {
+                            "type": "object",
+                            "properties": {
+                                "disable_link_preview": {"type": "boolean"},
+                            },
+                            "required": [],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "required": ["kind", "content"],
+                    "additionalProperties": False,
+                },
                 "should_answer_to_user": {"type": "boolean"},
             },
             "required": ["answer", "should_answer_to_user"],
@@ -439,18 +651,30 @@ class LLMMessageHandler:
             return
         await self._memory.trim_history(session_id, self._max_history_messages)
 
-    def _extract_answer(self, payload: Any) -> tuple[str, bool]:
+    def _extract_answer(self, payload: Any) -> tuple[RenderableResponse, bool]:
         if isinstance(payload, dict):
             answer = payload.get("answer")
             should = payload.get("should_answer_to_user")
-            if isinstance(answer, str) and isinstance(should, bool):
-                return answer, should
+            render = self._render_from_payload(answer)
+            should_flag = self._coerce_should_answer(should)
+            if render is not None and should_flag is not None:
+                self._logger.debug(
+                    "structured output extracted from dict payload",
+                    extra={"kind": render.kind, "has_answer_object": isinstance(answer, dict)},
+                )
+                return render, should_flag
+            if render is not None and should is None:
+                self._logger.debug(
+                    "structured output missing should_answer_to_user; defaulting to true",
+                    extra={"kind": render.kind},
+                )
+                return render, True
             result = payload.get("result")
             if isinstance(result, str):
-                return result, True
+                return self._plain_render(result), True
             timestamp = payload.get("timestamp")
             if isinstance(timestamp, str):
-                return timestamp, True
+                return self._plain_render(timestamp), True
         if isinstance(payload, str):
             parsed: Any | None = None
             try:
@@ -463,16 +687,181 @@ class LLMMessageHandler:
             if isinstance(parsed, dict):
                 answer = parsed.get("answer")
                 should = parsed.get("should_answer_to_user")
-                if isinstance(answer, str) and isinstance(should, bool):
-                    return answer, should
+                render = self._render_from_payload(answer)
+                should_flag = self._coerce_should_answer(should)
+                if render is not None and should_flag is not None:
+                    self._logger.debug(
+                        "structured output extracted from parsed string payload",
+                        extra={"kind": render.kind, "has_answer_object": isinstance(answer, dict)},
+                    )
+                    return render, should_flag
+                if render is not None and should is None:
+                    self._logger.debug(
+                        "structured output missing should_answer_to_user in parsed payload; defaulting to true",
+                        extra={"kind": render.kind},
+                    )
+                    return render, True
                 result = parsed.get("result")
                 if isinstance(result, str):
-                    return result, True
+                    return self._plain_render(result), True
                 timestamp = parsed.get("timestamp")
                 if isinstance(timestamp, str):
-                    return timestamp, True
-            return payload, True
-        return str(payload), True
+                    return self._plain_render(timestamp), True
+                self._logger.debug(
+                    "parsed payload looked structured but failed validation",
+                    extra={
+                        "parsed_keys": sorted(str(key) for key in parsed.keys()),
+                        "should_type": type(should).__name__,
+                    },
+                )
+            return self._plain_render(payload), True
+        return self._plain_render(str(payload)), True
+
+    @staticmethod
+    def _coerce_should_answer(value: Any) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y"}:
+                return True
+            if normalized in {"false", "0", "no", "n"}:
+                return False
+        if isinstance(value, int) and value in {0, 1}:
+            return bool(value)
+        return None
+
+    def _render_from_payload(self, value: Any) -> RenderableResponse | None:
+        if isinstance(value, str):
+            self._logger.debug("structured output answer is legacy string; forcing text kind")
+            return self._plain_render(value)
+        if not isinstance(value, dict):
+            return None
+
+        content_value = value.get("content")
+        if not isinstance(content_value, str):
+            legacy_text = value.get("text")
+            if isinstance(legacy_text, str):
+                content_value = legacy_text
+
+        raw_kind = value.get("kind")
+        normalized_kind = self._normalize_render_kind(raw_kind)
+        meta_value = value.get("meta")
+        normalized_meta = meta_value if isinstance(meta_value, dict) else {}
+
+        if isinstance(content_value, str) and normalized_kind is not None:
+            if not isinstance(meta_value, dict) and meta_value is not None:
+                self._logger.debug(
+                    "structured output meta is not an object; coercing to empty object",
+                    extra={"meta_type": type(meta_value).__name__},
+                )
+            render = RenderableResponse(kind=normalized_kind, text=content_value, meta=normalized_meta)
+            self._logger.debug(
+                "structured output answer object normalized",
+                extra={
+                    "kind": render.kind,
+                    "meta_keys": sorted(render.meta.keys()),
+                    "source_keys": sorted(str(key) for key in value.keys()),
+                },
+            )
+            if not render.text.strip():
+                return None
+            return render
+
+        try:
+            render = RenderableResponse.model_validate(value)
+        except Exception as exc:
+            text = content_value
+            if isinstance(text, str):
+                self._logger.debug(
+                    "structured output answer object invalid; using plain text fallback",
+                    extra={
+                        "available_keys": sorted(str(key) for key in value.keys()),
+                        "validation_error": str(exc),
+                        "raw_kind": raw_kind,
+                    },
+                )
+                return self._plain_render(text)
+            return None
+        if not render.text.strip():
+            return None
+        self._logger.debug(
+            "structured output answer object validated",
+            extra={
+                "kind": render.kind,
+                "meta_keys": sorted(render.meta.keys()),
+            },
+        )
+        return render
+
+    @staticmethod
+    def _normalize_render_kind(value: Any) -> Literal["text", "html", "markdown_v2"] | None:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        if normalized in {"text", "plain", "plain_text", "plaintext"}:
+            return "text"
+        if normalized in {"html", "htm"}:
+            return "html"
+        if normalized in {"markdown_v2", "markdownv2", "markdown", "md"}:
+            return "markdown_v2"
+        return None
+
+    @staticmethod
+    def _plain_render(text: str) -> RenderableResponse:
+        return RenderableResponse(kind="text", text=text)
+
+    @staticmethod
+    def _is_tool_required_intent(text: str | None) -> bool:
+        if not isinstance(text, str):
+            return False
+        normalized = text.lower().strip()
+        if not normalized:
+            return False
+        required_markers = (
+            "con tools",
+            "use tools",
+            "usa tools",
+            "using tools",
+            "herramient",
+            "borra",
+            "borrar",
+            "elimina",
+            "eliminar",
+            "que tengo en memoria",
+            "qué tengo en memoria",
+            "chat history",
+            "historial",
+            "historico",
+            "histórico",
+            "memoria",
+            "lista archivos",
+            "listar archivos",
+            "list files",
+            "recuerdas",
+            "recuerda",
+        )
+        return any(marker in normalized for marker in required_markers)
+
+    @staticmethod
+    def _looks_like_tool_placeholder(text: str) -> bool:
+        normalized = text.lower().strip()
+        placeholder_markers = (
+            "voy a",
+            "déjame",
+            "dejame",
+            "i will",
+            "let me",
+            "revisar",
+            "comprobar",
+            "check",
+            "verify",
+        )
+        return any(marker in normalized for marker in placeholder_markers)
+
+    @staticmethod
+    def _count_tool_messages_in_state(state: AgentState) -> int:
+        return sum(1 for message in state.messages if message.role == "tool")
 
     def _format_runtime_error_message(self, exc: Exception) -> str:
         if not self._logger.isEnabledFor(logging.DEBUG):

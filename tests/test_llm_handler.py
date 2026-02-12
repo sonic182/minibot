@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 from minibot.core.channels import ChannelMessage
+from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryEntry
+from minibot.app.agent_runtime import RuntimeResult
 from minibot.app.handlers.llm_handler import LLMMessageHandler, resolve_owner_id
 from minibot.llm.provider_factory import LLMClient, LLMGeneration
 from minibot.shared.utils import session_id_for
@@ -85,12 +88,16 @@ class StubLLMClient:
         response_id: str | None = None,
         is_responses: bool = False,
         provider: str = "openai",
+        system_prompt: str = "You are Minibot, a helpful assistant.",
+        prompts_dir: str = "./prompts",
     ) -> None:
         self.payload = payload
         self.response_id = response_id
         self.calls: list[dict[str, Any]] = []
         self._is_responses = is_responses
         self._provider = provider
+        self._system_prompt = system_prompt
+        self._prompts_dir = prompts_dir
 
     async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
         self.calls.append({"args": args, "kwargs": kwargs})
@@ -109,11 +116,27 @@ class StubLLMClient:
             return "chat_completions"
         return "none"
 
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
+    def prompts_dir(self) -> str:
+        return self._prompts_dir
+
 
 class FailingLLMClient(StubLLMClient):
     async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
         _ = args, kwargs
         raise TimeoutError("request timed out")
+
+
+class StubRuntime:
+    def __init__(self, responses: list[RuntimeResult]) -> None:
+        self._responses = list(responses)
+        self.calls: list[dict[str, Any]] = []
+
+    async def run(self, **kwargs: Any) -> RuntimeResult:
+        self.calls.append(kwargs)
+        return self._responses.pop(0)
 
 
 def _handler(
@@ -146,6 +169,80 @@ async def test_handler_returns_structured_answer() -> None:
     call = stub_client.calls[-1]
     assert call["kwargs"].get("prompt_cache_key") == "telegram:1"
     assert call["kwargs"].get("previous_response_id") is None
+
+
+@pytest.mark.asyncio
+async def test_handler_returns_rich_text_answer_object() -> None:
+    handler, _, _ = _handler(
+        {
+            "answer": {
+                "kind": "html",
+                "text": "<b>hello</b>",
+                "meta": {"disable_link_preview": True},
+            },
+            "should_answer_to_user": True,
+        }
+    )
+
+    response = await handler.handle(_message_event("ping"))
+
+    assert response.text == "<b>hello</b>"
+    assert response.render is not None
+    assert response.render.kind == "html"
+    assert response.render.meta.get("disable_link_preview") is True
+
+
+@pytest.mark.asyncio
+async def test_handler_parses_rich_text_answer_from_json_string() -> None:
+    handler, _, _ = _handler('{"answer":{"kind":"markdown_v2","text":"*hi*"},"should_answer_to_user":true}')
+
+    response = await handler.handle(_message_event("ping"))
+
+    assert response.text == "*hi*"
+    assert response.render is not None
+    assert response.render.kind == "markdown_v2"
+
+
+@pytest.mark.asyncio
+async def test_handler_normalizes_markdown_kind_alias() -> None:
+    handler, _, _ = _handler(
+        {
+            "answer": {
+                "kind": "markdown",
+                "content": "*hi*",
+                "meta": {},
+            },
+            "should_answer_to_user": True,
+        }
+    )
+
+    response = await handler.handle(_message_event("ping"))
+
+    assert response.render is not None
+    assert response.render.kind == "markdown_v2"
+    assert response.text == "*hi*"
+
+
+@pytest.mark.asyncio
+async def test_handler_accepts_string_should_answer_flag() -> None:
+    handler, _, _ = _handler('{"answer":{"kind":"markdown_v2","content":"*ok*"},"should_answer_to_user":"true"}')
+
+    response = await handler.handle(_message_event("ping"))
+
+    assert response.render is not None
+    assert response.render.kind == "markdown_v2"
+    assert response.metadata.get("should_reply") is True
+
+
+@pytest.mark.asyncio
+async def test_handler_defaults_should_answer_when_missing() -> None:
+    handler, _, _ = _handler('{"answer":{"kind":"html","content":"<b>ok</b>"}}')
+
+    response = await handler.handle(_message_event("ping"))
+
+    assert response.render is not None
+    assert response.render.kind == "html"
+    assert response.metadata.get("should_reply") is True
 
 
 @pytest.mark.asyncio
@@ -411,3 +508,84 @@ async def test_handler_returns_error_details_in_debug_mode() -> None:
 
     assert "LLM error (TimeoutError)" in response.text
     assert "request timed out" in response.text
+
+
+@pytest.mark.asyncio
+async def test_handler_retries_runtime_when_tool_required_and_no_tool_calls() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(payload="unused", provider="openrouter")
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+
+    first_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"Voy a revisar la memoria."},"should_answer_to_user":true}',
+        response_id="r1",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+    )
+    second_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"No hay entradas guardadas."},"should_answer_to_user":true}',
+        response_id="r2",
+        state=AgentState(
+            messages=[
+                AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")]),
+                AgentMessage(role="tool", content=[MessagePart(type="json", value={"ok": True})]),
+            ]
+        ),
+    )
+    runtime = StubRuntime([first_result, second_result])
+    handler._runtime = runtime  # type: ignore[attr-defined]
+
+    response = await handler.handle(_message_event("que tengo en memoria"))
+
+    assert response.text == "No hay entradas guardadas."
+    assert len(runtime.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_handler_forces_reply_for_unresolved_tool_required_request() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(payload="unused", provider="openrouter")
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+
+    unresolved = RuntimeResult(
+        payload=(
+            '{"answer":{"kind":"text","content":"Voy a revisar qué tienes en memoria."},"should_answer_to_user":false}'
+        ),
+        response_id="r1",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+    )
+    unresolved_retry = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"Déjame comprobarlo."},"should_answer_to_user":false}',
+        response_id="r2",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+    )
+    runtime = StubRuntime([unresolved, unresolved_retry])
+    handler._runtime = runtime  # type: ignore[attr-defined]
+
+    response = await handler.handle(_message_event("que tengo en memoria"))
+
+    assert response.metadata.get("should_reply") is True
+    assert "could not complete" in response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_handler_injects_channel_prompt_fragment(tmp_path: Path) -> None:
+    prompts_dir = tmp_path / "prompts"
+    telegram_prompt = prompts_dir / "channels" / "telegram.md"
+    telegram_prompt.parent.mkdir(parents=True, exist_ok=True)
+    telegram_prompt.write_text("Always use kind=markdown_v2 for markdown requests.", encoding="utf-8")
+
+    memory = StubMemory()
+    client = StubLLMClient(
+        {"answer": "ok", "should_answer_to_user": True},
+        system_prompt="You are Minibot.",
+        prompts_dir=str(prompts_dir),
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+
+    await handler.handle(_message_event("ping"))
+
+    call_kwargs = client.calls[-1]["kwargs"]
+    override = call_kwargs.get("system_prompt_override")
+    assert isinstance(override, str)
+    assert "You are Minibot." in override
+    assert "Always use kind=markdown_v2" in override
