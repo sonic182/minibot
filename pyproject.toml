@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minibot"
-version = "0.0.3"
+version = "0.0.4"
 description = "Self-hosted Telegram-first AI assistant with async tooling, memory, and scheduling."
 authors = ["sonic182 <johander1822@gmail.com>"]
 license = "MIT"
