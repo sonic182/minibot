@@ -331,6 +331,8 @@ class LLMMessageHandler:
             parse_error=parse_error,
             original_content=original_content,
         )
+        await self._memory.append_history(session_id, "user", repair_prompt)
+        await self._enforce_history_limit(session_id)
         generation = await self._llm_client.generate(
             history,
             repair_prompt,
@@ -343,6 +345,8 @@ class LLMMessageHandler:
             system_prompt_override=system_prompt,
         )
         render, _ = self._extract_answer(generation.payload)
+        await self._memory.append_history(session_id, "assistant", render.text)
+        await self._enforce_history_limit(session_id)
         metadata = self._response_metadata(True)
         metadata["format_repair_attempt"] = attempt
         metadata["format_repair_original_kind"] = original_kind

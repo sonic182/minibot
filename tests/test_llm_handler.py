@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from minibot.core.channels import ChannelMessage
+from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryEntry
@@ -589,3 +589,44 @@ async def test_handler_injects_channel_prompt_fragment(tmp_path: Path) -> None:
     assert isinstance(override, str)
     assert "You are Minibot." in override
     assert "Always use kind=markdown_v2" in override
+
+
+@pytest.mark.asyncio
+async def test_repair_response_appends_retry_prompt_and_answer_to_history() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(
+        {
+            "answer": {
+                "kind": "markdown_v2",
+                "content": "*fixed*",
+                "meta": {},
+            },
+            "should_answer_to_user": True,
+        },
+        provider="openrouter",
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+
+    repaired = await handler.repair_format_response(
+        response=ChannelResponse(
+            channel="telegram",
+            chat_id=1,
+            text="bad",
+            render=RenderableResponse(kind="markdown_v2", text="bad"),
+        ),
+        parse_error="can't parse entities",
+        channel="telegram",
+        chat_id=1,
+        user_id=1,
+        attempt=1,
+    )
+
+    session_id = session_id_for(_message(channel="telegram", chat_id=1, user_id=1))
+    saved = memory._store.get(session_id, [])
+    assert len(saved) == 2
+    assert saved[0].role == "user"
+    assert "Telegram error" in saved[0].content
+    assert saved[1].role == "assistant"
+    assert saved[1].content == "*fixed*"
+    assert repaired.render is not None
+    assert repaired.render.kind == "markdown_v2"
