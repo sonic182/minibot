@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MCP bridge tooling with stdio/HTTP transports, dynamic tool discovery, and namespaced MCP tool bindings.
+- Channel prompt pack loading (`llm.prompts_dir`) so per-channel prompt fragments can be composed with the base system prompt.
+- Managed file storage enhancements: glob-style file search plus recursive folder deletion controls.
+- New runtime/LLM tuning knobs for agent timeout, request socket timeouts, and retry behavior.
+
+### Changed
+
+- Tooling and docs now position browser automation through MCP servers (for example Playwright MCP) instead of dedicated Playwright config.
+- CI and local setup docs now standardize dependency install commands on `poetry install --all-extras`.
+- Tool/config schema wiring was expanded for MCP server registration and stricter tool schema compatibility.
+
+### Fixed
+
+- Duplicate outbound message handling in dispatcher/channel flow.
+- OpenAI tool schema strictness issues that could surface as invalid function parameter errors.
+
 ## [0.0.3] - 2026-02-10
 
 ### Added
