@@ -62,6 +62,11 @@ def stdio_server_args() -> list[str]:
 
 
 @pytest.fixture
+def stdio_counter_server_args() -> list[str]:
+    return [sys.executable, str(FIXTURES_DIR / "stdio_counter_server.py")]
+
+
+@pytest.fixture
 def http_server_url() -> str:
     pytest.importorskip("uvicorn")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -112,13 +117,13 @@ def test_mcp_bridge_stdio_discovery_and_call(stdio_server_args: list[str]) -> No
     assert parsed["value"] == 3
 
 
-def test_mcp_bridge_stdio_process_persists_across_blocking_calls(stdio_server_args: list[str]) -> None:
+def test_mcp_bridge_stdio_process_persists_across_blocking_calls(stdio_counter_server_args: list[str]) -> None:
     client = MCPClient(
         server_name="dice_cli",
         transport="stdio",
         timeout_seconds=5,
-        command=stdio_server_args[0],
-        args=stdio_server_args[1:],
+        command=stdio_counter_server_args[0],
+        args=stdio_counter_server_args[1:],
     )
     bridge = MCPToolBridge(server_name="dice_cli", client=client)
     bindings = {binding.tool.name: binding for binding in bridge.build_bindings()}
