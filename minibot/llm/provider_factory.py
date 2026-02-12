@@ -287,10 +287,11 @@ class LLMClient:
                 binding = tool_map.get(tool_name)
                 if not binding:
                     raise ValueError(f"tool {tool_name} is not registered")
-                self._logger.info(
+                self._logger.debug(
                     "executing tool",
                     extra={
                         "tool": tool_name,
+                        "call_id": call_id,
                         "owner_id": context.owner_id,
                         "argument_keys": sorted(arguments.keys()),
                         "arguments": self._sanitize_tool_arguments_for_log(arguments),
@@ -298,10 +299,11 @@ class LLMClient:
                 )
                 raw_result = await binding.handler(arguments, context)
                 result = self._normalize_tool_result(raw_result)
-                self._logger.info(
+                self._logger.debug(
                     "tool execution completed",
                     extra={
                         "tool": tool_name,
+                        "call_id": call_id,
                         "owner_id": context.owner_id,
                     },
                 )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Literal, Sequence
 from typing import cast
 
@@ -140,7 +141,7 @@ class LLMMessageHandler:
                 "prompts_dir": self._prompts_dir,
                 "channel_prompt_loaded": bool(channel_prompt),
                 "fragment_count": len(fragments),
-                "prompt_preview_25": "\n\n".join(fragments)[:25],
+                "prompt_preview": "\n\n".join(fragments)[:200],
             },
         )
 
@@ -197,7 +198,9 @@ class LLMMessageHandler:
         )
         prompt_cache_key = _prompt_cache_key(message)
         system_prompt = self._compose_system_prompt(message.channel)
-        tool_required_intent = self._is_tool_required_intent(message.text)
+        tool_required_intent = False
+        suggested_tool: str | None = None
+        suggested_path: str | None = None
         tool_messages_count: int | None = None
         try:
             if self._runtime is None:
@@ -227,6 +230,12 @@ class LLMMessageHandler:
                     prompt_cache_key=prompt_cache_key,
                 )
                 tool_messages_count = self._count_tool_messages_in_state(generation.state)
+                if tool_messages_count == 0:
+                    tool_required_intent, suggested_tool, suggested_path = await self._decide_tool_requirement(
+                        history=history,
+                        user_text=model_text,
+                        prompt_cache_key=prompt_cache_key,
+                    )
                 if tool_required_intent and tool_messages_count == 0:
                     self._logger.debug(
                         "tool-required request returned without tool calls; retrying with stricter instruction",
@@ -262,7 +271,20 @@ class LLMMessageHandler:
                 render, should_reply = self._extract_answer(generation.payload)
 
             if tool_required_intent and tool_messages_count == 0:
-                if self._looks_like_tool_placeholder(render.text):
+                direct_tool_message = await self._attempt_direct_file_delete(
+                    user_text=message.text,
+                    tool_context=tool_context,
+                    suggested_tool=suggested_tool,
+                    suggested_path=suggested_path,
+                )
+                if direct_tool_message is not None:
+                    self._logger.info(
+                        "resolved tool-required delete request via direct delete_file fallback",
+                        extra={"chat_id": message.chat_id, "channel": message.channel},
+                    )
+                    render = self._plain_render(direct_tool_message)
+                    should_reply = True
+                else:
                     self._logger.warning(
                         "tool-required request still unresolved after retries; returning explicit failure message",
                         extra={
@@ -275,8 +297,8 @@ class LLMMessageHandler:
                         },
                     )
                     render = self._plain_render(
-                        "I could not complete that with tools in this attempt. Please try again, or ask me to "
-                        "run a specific tool like chat_history_info."
+                        "I could not verify or execute that action with tools in this attempt. "
+                        "Please try again, or ask me to run a specific tool."
                     )
                 if not should_reply:
                     self._logger.debug(
@@ -815,57 +837,153 @@ class LLMMessageHandler:
     def _plain_render(text: str) -> RenderableResponse:
         return RenderableResponse(kind="text", text=text)
 
-    @staticmethod
-    def _is_tool_required_intent(text: str | None) -> bool:
-        if not isinstance(text, str):
-            return False
-        normalized = text.lower().strip()
-        if not normalized:
-            return False
-        required_markers = (
-            "con tools",
-            "use tools",
-            "usa tools",
-            "using tools",
-            "herramient",
-            "borra",
-            "borrar",
-            "elimina",
-            "eliminar",
-            "que tengo en memoria",
-            "qué tengo en memoria",
-            "chat history",
-            "historial",
-            "historico",
-            "histórico",
-            "memoria",
-            "lista archivos",
-            "listar archivos",
-            "list files",
-            "recuerdas",
-            "recuerda",
+    async def _decide_tool_requirement(
+        self,
+        *,
+        history: Sequence[Any],
+        user_text: str,
+        prompt_cache_key: str | None,
+    ) -> tuple[bool, str | None, str | None]:
+        if not self._tools:
+            return False, None, None
+        tool_names = [binding.tool.name for binding in self._tools]
+        classifier_prompt = (
+            "Decide whether the user's request requires executing at least one tool before answering. "
+            "Use the available tool names exactly as given. "
+            "Return structured output only.\n\n"
+            f"Available tools: {', '.join(tool_names)}\n"
+            f"User request:\n{user_text}"
         )
-        return any(marker in normalized for marker in required_markers)
+        try:
+            generation = await self._llm_client.generate(
+                history,
+                classifier_prompt,
+                user_content=None,
+                tools=[],
+                tool_context=None,
+                response_schema=self._tool_requirement_schema(),
+                prompt_cache_key=f"{prompt_cache_key}:tool-requirement" if prompt_cache_key else None,
+                previous_response_id=None,
+                system_prompt_override="You are a strict tool-routing classifier.",
+            )
+            payload = generation.payload
+            payload_obj: dict[str, Any] | None = None
+            if isinstance(payload, dict):
+                payload_obj = payload
+            elif isinstance(payload, str):
+                stripped = payload.strip()
+                if stripped:
+                    parsed = json.loads(stripped)
+                    if isinstance(parsed, dict):
+                        payload_obj = parsed
+            if not payload_obj:
+                return False, None, None
+            raw_required = payload_obj.get("requires_tools", False)
+            requires_tools = bool(raw_required)
+            raw_tool = payload_obj.get("suggested_tool")
+            suggested_tool = raw_tool if isinstance(raw_tool, str) and raw_tool in tool_names else None
+            raw_path = payload_obj.get("path")
+            suggested_path = raw_path.strip() if isinstance(raw_path, str) and raw_path.strip() else None
+            self._logger.debug(
+                "tool requirement decision computed",
+                extra={
+                    "requires_tools": requires_tools,
+                    "suggested_tool": suggested_tool,
+                    "suggested_path": suggested_path,
+                },
+            )
+            return requires_tools, suggested_tool, suggested_path
+        except Exception:
+            self._logger.exception("tool requirement decision failed")
+            return False, None, None
 
     @staticmethod
-    def _looks_like_tool_placeholder(text: str) -> bool:
-        normalized = text.lower().strip()
-        placeholder_markers = (
-            "voy a",
-            "déjame",
-            "dejame",
-            "i will",
-            "let me",
-            "revisar",
-            "comprobar",
-            "check",
-            "verify",
-        )
-        return any(marker in normalized for marker in placeholder_markers)
+    def _tool_requirement_schema() -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "requires_tools": {"type": "boolean"},
+                "suggested_tool": {"type": ["string", "null"]},
+                "path": {"type": ["string", "null"]},
+            },
+            "required": ["requires_tools", "suggested_tool", "path"],
+            "additionalProperties": False,
+        }
 
     @staticmethod
     def _count_tool_messages_in_state(state: AgentState) -> int:
         return sum(1 for message in state.messages if message.role == "tool")
+
+    async def _attempt_direct_file_delete(
+        self,
+        *,
+        user_text: str,
+        tool_context: ToolContext,
+        suggested_tool: str | None,
+        suggested_path: str | None,
+    ) -> str | None:
+        if suggested_tool != "delete_file":
+            return None
+        binding = next((item for item in self._tools if item.tool.name == "delete_file"), None)
+        if binding is None:
+            return None
+        candidates = self._extract_delete_path_candidates(user_text)
+        if suggested_path is not None and suggested_path not in candidates:
+            candidates.insert(0, suggested_path)
+        if not candidates:
+            return None
+        self._logger.debug(
+            "attempting direct delete_file fallback",
+            extra={"candidate_count": len(candidates), "candidates": candidates[:5]},
+        )
+        last_message: str | None = None
+        for candidate in candidates:
+            try:
+                payload = {"path": candidate}
+                raw_result = await binding.handler(payload, tool_context)
+                if not isinstance(raw_result, dict):
+                    continue
+                message = str(raw_result.get("message") or "")
+                deleted_count = int(raw_result.get("deleted_count") or 0)
+                if deleted_count > 0:
+                    return message or f"Deleted file successfully: {candidate}"
+                if message:
+                    last_message = message
+            except Exception:
+                self._logger.exception("direct delete_file fallback failed", extra={"path": candidate})
+        return last_message
+
+    @staticmethod
+    def _extract_delete_path_candidates(text: str) -> list[str]:
+        candidates: list[str] = []
+
+        def _normalize(path_value: str) -> str | None:
+            value = path_value.strip().strip('"').strip("'")
+            if not value:
+                return None
+            if value.startswith("./"):
+                value = value[2:]
+            return value.replace("\\", "/")
+
+        quoted = re.findall(r"['\"]([^'\"]+)['\"]", text)
+        for item in quoted:
+            normalized = _normalize(item)
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+
+        inline_paths = re.findall(r"(?:\.?/?[a-zA-Z0-9_-]+/)+[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]{1,10}", text)
+        for item in inline_paths:
+            normalized = _normalize(item)
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+
+        filename_match = re.search(r"([a-zA-Z0-9_.-]+\.[a-zA-Z0-9]{1,10})", text)
+        if filename_match:
+            filename = _normalize(filename_match.group(1))
+            if filename and filename not in candidates:
+                candidates.append(filename)
+
+        return candidates
 
     def _format_runtime_error_message(self, exc: Exception) -> str:
         if not self._logger.isEnabledFor(logging.DEBUG):

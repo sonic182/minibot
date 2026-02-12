@@ -323,10 +323,18 @@ class FileStorageTool:
     async def _delete_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         path = self._require_str(payload, "path")
         result = self._storage.delete_file(path)
+        deleted_count = int(result.get("deleted_count", 0))
+        message = (
+            f"Deleted file successfully: {result['path']}"
+            if deleted_count == 1
+            else f"No file found to delete: {path}"
+        )
         return {
             "ok": True,
             "path": result["path"],
-            "deleted": True,
+            "deleted": bool(result.get("deleted", False)),
+            "deleted_count": deleted_count,
+            "message": message,
         }
 
     async def _self_insert_artifact(self, payload: dict[str, Any], _: ToolContext) -> ToolResult:

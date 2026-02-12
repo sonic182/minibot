@@ -106,12 +106,22 @@ class LocalFileStorage:
             "overwrite": overwrite,
         }
 
-    def delete_file(self, path: str) -> dict[str, str | bool]:
-        target = self.resolve_existing_file(path)
+    def delete_file(self, path: str) -> dict[str, str | bool | int]:
+        try:
+            target = self.resolve_existing_file(path)
+        except ValueError as exc:
+            if str(exc) == "file does not exist":
+                return {
+                    "path": path,
+                    "deleted": False,
+                    "deleted_count": 0,
+                }
+            raise
         target.unlink()
         return {
             "path": self._relative_to_root(target),
             "deleted": True,
+            "deleted_count": 1,
         }
 
     def file_info(self, path: str) -> dict[str, str | int | bool]:

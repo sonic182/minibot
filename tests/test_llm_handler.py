@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from llm_async.models import Tool
 
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
@@ -13,6 +14,7 @@ from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryEntry
 from minibot.app.agent_runtime import RuntimeResult
 from minibot.app.handlers.llm_handler import LLMMessageHandler, resolve_owner_id
+from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.provider_factory import LLMClient, LLMGeneration
 from minibot.shared.utils import session_id_for
 
@@ -533,6 +535,10 @@ async def test_handler_retries_runtime_when_tool_required_and_no_tool_calls() ->
     )
     runtime = StubRuntime([first_result, second_result])
     handler._runtime = runtime  # type: ignore[attr-defined]
+    handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
+        Any,
+        lambda **kwargs: _async_tuple(True, None, None),
+    )
 
     response = await handler.handle(_message_event("que tengo en memoria"))
 
@@ -560,11 +566,111 @@ async def test_handler_forces_reply_for_unresolved_tool_required_request() -> No
     )
     runtime = StubRuntime([unresolved, unresolved_retry])
     handler._runtime = runtime  # type: ignore[attr-defined]
+    handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
+        Any,
+        lambda **kwargs: _async_tuple(True, None, None),
+    )
 
     response = await handler.handle(_message_event("que tengo en memoria"))
 
     assert response.metadata.get("should_reply") is True
-    assert "could not complete" in response.text.lower()
+    assert "could not verify or execute" in response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_handler_rejects_success_claim_when_tool_required_without_tool_outputs() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(payload="unused", provider="openrouter")
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+
+    first = RuntimeResult(
+        payload=(
+            '{"answer":{"kind":"text","content":"Deleted generated/random1.svg successfully."},'
+            '"should_answer_to_user":true}'
+        ),
+        response_id="r1",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+    )
+    second = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"Done, file removed."},"should_answer_to_user":true}',
+        response_id="r2",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+    )
+    runtime = StubRuntime([first, second])
+    handler._runtime = runtime  # type: ignore[attr-defined]
+    handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
+        Any,
+        lambda **kwargs: _async_tuple(True, None, None),
+    )
+
+    response = await handler.handle(_message_event("delete generated/random1.svg"))
+
+    assert response.metadata.get("should_reply") is True
+    assert "could not verify or execute" in response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_handler_direct_delete_file_fallback_executes_when_model_skips_tools() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(payload="unused", provider="openrouter")
+
+    async def _delete_handler(payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        if payload.get("path") == "generated/random1.svg":
+            return {
+                "ok": True,
+                "path": "generated/random1.svg",
+                "deleted": True,
+                "deleted_count": 1,
+                "message": "Deleted file successfully: generated/random1.svg",
+            }
+        return {
+            "ok": True,
+            "path": str(payload.get("path") or ""),
+            "deleted": False,
+            "deleted_count": 0,
+            "message": f"No file found to delete: {payload.get('path')}",
+        }
+
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        tools=[
+            ToolBinding(
+                tool=Tool(
+                    name="delete_file",
+                    description="Delete a managed file.",
+                    parameters={"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+                ),
+                handler=_delete_handler,
+            )
+        ],
+    )
+
+    first = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"I will delete it now."},"should_answer_to_user":true}',
+        response_id="r1",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+    )
+    second = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"Done."},"should_answer_to_user":true}',
+        response_id="r2",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+    )
+    runtime = StubRuntime([first, second])
+    handler._runtime = runtime  # type: ignore[attr-defined]
+    handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
+        Any,
+        lambda **kwargs: _async_tuple(True, "delete_file", "generated/random1.svg"),
+    )
+
+    response = await handler.handle(_message_event("elimina random1.svg de la carpeta generated"))
+
+    assert response.metadata.get("should_reply") is True
+    assert response.text == "Deleted file successfully: generated/random1.svg"
+
+
+async def _async_tuple(*values: Any) -> tuple[Any, ...]:
+    return values
 
 
 @pytest.mark.asyncio
