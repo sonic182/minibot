@@ -10,6 +10,7 @@ import logging
 import aiosonic
 
 from llm_async.models.tool_call import ToolCall
+from llm_async.models import Tool
 from llm_async.providers import ClaudeProvider, GoogleProvider, OpenAIProvider, OpenRouterProvider
 from llm_async.providers.openai_responses import OpenAIResponsesProvider
 from llm_async.utils.retry import RetryConfig
@@ -135,7 +136,7 @@ class LLMClient:
 
         conversation = list(messages)
         tool_bindings = list(tools or [])
-        tool_specs = [binding.tool for binding in tool_bindings] or None
+        tool_specs = self._prepare_tool_specs(tool_bindings)
         tool_map = {binding.tool.name: binding for binding in tool_bindings}
         context = tool_context or ToolContext()
         iterations = 0
@@ -237,7 +238,7 @@ class LLMClient:
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
     ) -> LLMCompletionStep:
-        tool_specs = [binding.tool for binding in (tools or [])] or None
+        tool_specs = self._prepare_tool_specs(tools or [])
         strict_response_schema = response_schema
         if isinstance(response_schema, dict) and self._should_apply_openai_strict_schema(self._model):
             strict_response_schema = to_openai_strict_schema(response_schema)
@@ -525,6 +526,25 @@ class LLMClient:
                 sanitized_dict["..."] = f"+{len(value) - _MAX_LOG_ARGUMENT_COLLECTION_ITEMS} keys"
             return sanitized_dict
         return str(value)
+
+    def _prepare_tool_specs(self, tool_bindings: Sequence[ToolBinding]) -> list[Tool] | None:
+        if not tool_bindings:
+            return None
+        if not self._should_apply_openai_strict_schema(self._model):
+            return [binding.tool for binding in tool_bindings]
+        strict_tools: list[Tool] = []
+        for binding in tool_bindings:
+            parameters = binding.tool.parameters
+            if isinstance(parameters, dict):
+                parameters = to_openai_strict_schema(parameters)
+            strict_tools.append(
+                Tool(
+                    name=binding.tool.name,
+                    description=binding.tool.description,
+                    parameters=parameters,
+                )
+            )
+        return strict_tools
 
     @staticmethod
     def _is_sensitive_argument_key(key: str) -> bool:

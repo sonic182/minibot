@@ -36,6 +36,20 @@ class Dispatcher:
             agent_timeout_seconds=settings.runtime.agent_timeout_seconds,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
+        if settings.tools.mcp.enabled:
+            mcp_prefix = f"{settings.tools.mcp.name_prefix}_"
+            mcp_tool_names = sorted(
+                binding.tool.name
+                for binding in tools
+                if binding.tool.name.startswith(mcp_prefix) and "__" in binding.tool.name
+            )
+            self._logger.info(
+                "mcp tool configuration loaded",
+                extra={
+                    "mcp_servers_configured": len(settings.tools.mcp.servers),
+                    "mcp_tools_enabled": mcp_tool_names or ["none"],
+                },
+            )
         self._task: Optional[asyncio.Task[None]] = None
 
     async def start(self) -> None:
