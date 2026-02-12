@@ -8,7 +8,6 @@ from minibot.adapters.config.schema import (
     HTTPClientToolConfig,
     KeyValueMemoryConfig,
     LLMMConfig,
-    PlaywrightToolConfig,
     PythonExecToolConfig,
     SchedulerConfig,
     ScheduledPromptsConfig,
@@ -92,7 +91,6 @@ def _settings(
     calculator_enabled: bool,
     python_exec_enabled: bool,
     prompts_enabled: bool,
-    playwright_enabled: bool,
     file_storage_enabled: bool,
 ) -> Settings:
     return Settings(
@@ -103,7 +101,6 @@ def _settings(
             time=TimeToolConfig(enabled=time_enabled),
             calculator=CalculatorToolConfig(enabled=calculator_enabled),
             python_exec=PythonExecToolConfig(enabled=python_exec_enabled),
-            playwright=PlaywrightToolConfig(enabled=playwright_enabled),
             file_storage=FileStorageToolConfig(enabled=file_storage_enabled),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
@@ -118,7 +115,6 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
         calculator_enabled=True,
         python_exec_enabled=True,
         prompts_enabled=True,
-        playwright_enabled=False,
         file_storage_enabled=False,
     )
 
@@ -131,7 +127,6 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
     assert "calculate_expression" in names
     assert "python_execute" in names
     assert "python_environment_info" in names
-    assert "browser_open" not in names
     assert "schedule_prompt" not in names
 
 
@@ -143,7 +138,6 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         calculator_enabled=False,
         python_exec_enabled=False,
         prompts_enabled=True,
-        playwright_enabled=True,
         file_storage_enabled=True,
     )
 
@@ -159,15 +153,6 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
 
     assert {"user_memory_save", "user_memory_get", "user_memory_search", "user_memory_delete"}.issubset(names)
     assert "http_request" in names
-    assert {
-        "browser_navigate",
-        "browser_info",
-        "browser_get_data",
-        "browser_wait_for",
-        "browser_click",
-        "browser_query_selector",
-        "browser_close",
-    }.issubset(names)
     assert {
         "schedule_prompt",
         "cancel_scheduled_prompt",

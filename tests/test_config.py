@@ -72,10 +72,6 @@ max_total_media_bytes = "12MB"
 enabled = true
 max_bytes = "16KB"
 
-[tools.playwright]
-enabled = true
-max_screenshot_bytes = "2MB"
-
 [tools.python_exec]
 max_output_bytes = "64KB"
 max_code_bytes = "32KB"
@@ -97,7 +93,6 @@ incoming_temp_subdir = "uploads/temp"
     assert settings.channels["telegram"].max_document_bytes == 10_000_000
     assert settings.channels["telegram"].max_total_media_bytes == 12_000_000
     assert settings.tools.http_client.max_bytes == 16_000
-    assert settings.tools.playwright.max_screenshot_bytes == 2_000_000
     assert settings.tools.python_exec.max_output_bytes == 64_000
     assert settings.tools.python_exec.max_code_bytes == 32_000
     assert settings.tools.python_exec.artifacts_max_file_bytes == 5_000_000

@@ -39,9 +39,6 @@ class _ToolSettings:
     class _PythonExec:
         enabled = False
 
-    class _Playwright:
-        enabled = False
-
     class _FileStorage:
         enabled = False
 
@@ -50,7 +47,6 @@ class _ToolSettings:
     time = _Time()
     calculator = _Calculator()
     python_exec = _PythonExec()
-    playwright = _Playwright()
     file_storage = _FileStorage()
 
 
