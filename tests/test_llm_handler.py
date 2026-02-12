@@ -628,7 +628,7 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
             "path": str(payload.get("path") or ""),
             "deleted": False,
             "deleted_count": 0,
-            "message": f"No file found to delete: {payload.get('path')}",
+            "message": f"No file or folder found to delete: {payload.get('path')}",
         }
 
     handler = LLMMessageHandler(

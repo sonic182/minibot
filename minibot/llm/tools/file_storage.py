@@ -4,7 +4,7 @@ import logging
 import mimetypes
 from pathlib import Path
 from typing import Any
-from typing import cast
+from typing import Literal, cast
 
 from llm_async.models import Tool
 
@@ -174,16 +174,25 @@ class FileStorageTool:
     def _delete_file_schema(self) -> Tool:
         return Tool(
             name="delete_file",
-            description="Delete a managed file from disk.",
+            description="Delete a managed file or folder from disk.",
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Existing relative file path under managed root.",
-                    }
+                        "description": "Relative path under managed root.",
+                    },
+                    "target": {
+                        "type": ["string", "null"],
+                        "enum": ["any", "file", "folder", None],
+                        "description": "Target kind filter. Use folder to only delete folders.",
+                    },
+                    "recursive": {
+                        "type": ["boolean", "null"],
+                        "description": "Set true to delete non-empty folders recursively.",
+                    },
                 },
-                "required": ["path"],
+                "required": ["path", "target", "recursive"],
                 "additionalProperties": False,
             },
         )
@@ -322,18 +331,28 @@ class FileStorageTool:
 
     async def _delete_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         path = self._require_str(payload, "path")
-        result = self._storage.delete_file(path)
+        target = (self._optional_str(payload.get("target")) or "any").lower()
+        if target not in {"any", "file", "folder"}:
+            raise ValueError("target must be one of: any, file, folder")
+        recursive = bool(payload.get("recursive") or False)
+        resolved_target = cast(Literal["any", "file", "folder"], target)
+        result = self._storage.delete_file(path, recursive=recursive, target=resolved_target)
         deleted_count = int(result.get("deleted_count", 0))
+        resolved_path = str(result["path"])
+        target_type = str(result.get("target_type") or "path")
         message = (
-            f"Deleted file successfully: {result['path']}"
-            if deleted_count == 1
-            else f"No file found to delete: {path}"
+            f"Deleted {target_type} successfully: {resolved_path}"
+            if deleted_count > 0
+            else f"No file or folder found to delete: {resolved_path}"
         )
         return {
             "ok": True,
             "path": result["path"],
             "deleted": bool(result.get("deleted", False)),
             "deleted_count": deleted_count,
+            "target": target,
+            "recursive": recursive,
+            "target_type": target_type,
             "message": message,
         }
 

@@ -64,6 +64,21 @@ def test_local_storage_delete_file_returns_zero_when_missing(tmp_path: Path) -> 
     assert deleted["deleted_count"] == 0
 
 
+def test_local_storage_delete_folder_recursive_and_non_recursive(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    storage.create_text_file(path="docs/nested/a.txt", content="A", overwrite=False)
+
+    with pytest.raises(ValueError):
+        storage.delete_file("docs", target="folder", recursive=False)
+
+    deleted = storage.delete_file("docs", target="folder", recursive=True)
+
+    assert deleted["path"] == "docs"
+    assert deleted["deleted"] is True
+    assert int(deleted["deleted_count"]) >= 2
+    assert not (tmp_path / "docs").exists()
+
+
 def test_local_storage_file_info_returns_basic_metadata(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     storage.create_text_file(path="docs/report.txt", content="hello", overwrite=False)
@@ -154,7 +169,27 @@ async def test_delete_file_tool_reports_not_found(tmp_path: Path) -> None:
     assert deleted["ok"] is True
     assert deleted["deleted"] is False
     assert deleted["deleted_count"] == 0
-    assert deleted["message"] == "No file found to delete: missing.txt"
+    assert deleted["message"] == "No file or folder found to delete: missing.txt"
+
+
+@pytest.mark.asyncio
+async def test_delete_file_tool_deletes_folder_recursively(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    storage.create_text_file(path="folder/sub/a.txt", content="A", overwrite=False)
+    tool = FileStorageTool(storage=storage)
+    delete_binding = next(binding for binding in tool.bindings() if binding.tool.name == "delete_file")
+
+    deleted = await delete_binding.handler(
+        {"path": "folder", "target": "folder", "recursive": True},
+        ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
+    )
+
+    assert isinstance(deleted, dict)
+    assert deleted["ok"] is True
+    assert deleted["deleted"] is True
+    assert int(deleted["deleted_count"]) >= 2
+    assert deleted["target_type"] == "folder"
+    assert deleted["message"].startswith("Deleted folder successfully: folder")
 
 
 @pytest.mark.asyncio
