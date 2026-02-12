@@ -8,6 +8,7 @@ from typing import Optional
 from minibot.adapters.container import AppContainer
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
+from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 from minibot.llm.tools.factory import build_enabled_tools
 
@@ -107,6 +108,21 @@ class Dispatcher:
             await self._event_bus.publish(OutboundEvent(response=repaired))
         except Exception as exc:
             self._logger.exception("failed to handle format repair", exc_info=exc)
+            fallback_text = event.response.render.text if event.response.render is not None else event.response.text
+            fallback_metadata = dict(event.response.metadata)
+            fallback_metadata["format_repair_failed"] = True
+            fallback_metadata["format_repair_error"] = str(exc)
+            fallback_response = ChannelResponse(
+                channel=event.channel,
+                chat_id=event.chat_id,
+                text=fallback_text,
+                render=RenderableResponse(kind="text", text=fallback_text),
+                metadata=fallback_metadata,
+            )
+            try:
+                await self._event_bus.publish(OutboundEvent(response=fallback_response))
+            except Exception as publish_exc:
+                self._logger.exception("failed to publish format repair fallback", exc_info=publish_exc)
 
     async def stop(self) -> None:
         await self._subscription.close()

@@ -67,6 +67,17 @@ def test_local_storage_file_info_returns_basic_metadata(tmp_path: Path) -> None:
     assert info["is_image"] is False
 
 
+def test_local_storage_glob_files_matches_nested_paths(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    storage.create_text_file(path="notes/today.md", content="# today", overwrite=False)
+    storage.create_text_file(path="notes/archive/old.md", content="# old", overwrite=False)
+    storage.create_text_file(path="notes/readme.txt", content="hello", overwrite=False)
+
+    matches = storage.glob_files(pattern="**/*.md", folder="notes")
+
+    assert [entry["path"] for entry in matches] == ["notes/archive/old.md", "notes/today.md"]
+
+
 @pytest.mark.asyncio
 async def test_send_file_publishes_outbound_file_event(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
@@ -132,6 +143,27 @@ async def test_file_info_tool_returns_metadata(tmp_path: Path) -> None:
     assert result["path"] == "docs/a.txt"
     assert result["extension"] == ".txt"
     assert result["size_bytes"] == 3
+
+
+@pytest.mark.asyncio
+async def test_glob_files_tool_lists_matching_files(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    storage.create_text_file(path="docs/a.md", content="A", overwrite=False)
+    storage.create_text_file(path="docs/sub/b.md", content="B", overwrite=False)
+    storage.create_text_file(path="docs/sub/c.txt", content="C", overwrite=False)
+    tool = FileStorageTool(storage=storage)
+    glob_binding = next(binding for binding in tool.bindings() if binding.tool.name == "glob_files")
+
+    result = await glob_binding.handler(
+        {"pattern": "**/*.md", "folder": "docs", "limit": 1},
+        ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
+    )
+
+    assert isinstance(result, dict)
+    assert result["pattern"] == "**/*.md"
+    assert result["limit"] == 1
+    assert result["count"] == 1
+    assert result["entries"][0]["path"] == "docs/a.md"
 
 
 @pytest.mark.asyncio

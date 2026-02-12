@@ -149,6 +149,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
                 if not normalized:
                     raise ValueError("title cannot be empty")
                 stmt = stmt.where(func.lower(KVEntry.title) == normalized.lower())
+                stmt = stmt.order_by(KVEntry.updated_at.desc(), KVEntry.id.desc())
             else:
                 raise ValueError("title is required when entry_id is not provided")
             stmt = stmt.limit(1)
@@ -168,20 +169,34 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             raise ValueError("entry_id or title is required")
 
         async with self._session_factory() as session:
-            stmt = delete(KVEntry).where(KVEntry.owner_id == owner_id)
             if entry_id:
-                stmt = stmt.where(KVEntry.id == entry_id)
+                target_stmt = select(KVEntry.id).where(KVEntry.owner_id == owner_id, KVEntry.id == entry_id).limit(1)
+                target_result = await session.execute(target_stmt)
+                target_id = target_result.scalar_one_or_none()
+                if target_id is None:
+                    return False
             elif title is not None:
                 normalized = title.strip()
                 if not normalized:
                     raise ValueError("title cannot be empty")
-                stmt = stmt.where(func.lower(KVEntry.title) == normalized.lower())
+                target_stmt = (
+                    select(KVEntry.id)
+                    .where(KVEntry.owner_id == owner_id)
+                    .where(func.lower(KVEntry.title) == normalized.lower())
+                    .order_by(KVEntry.updated_at.desc(), KVEntry.id.desc())
+                    .limit(1)
+                )
+                target_result = await session.execute(target_stmt)
+                target_id = target_result.scalar_one_or_none()
+                if target_id is None:
+                    return False
             else:
                 raise ValueError("title is required when entry_id is not provided")
 
+            stmt = delete(KVEntry).where(KVEntry.owner_id == owner_id, KVEntry.id == target_id)
             result = await session.execute(stmt)
             await session.commit()
-            return int(result.rowcount or 0) > 0
+            return bool(result)
 
     async def search_entries(
         self,

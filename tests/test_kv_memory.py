@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 
 from minibot.adapters.config.schema import KeyValueMemoryConfig
-from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
+from minibot.adapters.memory.kv_sqlalchemy import KVEntry, SQLAlchemyKeyValueMemory
 
 
 @pytest_asyncio.fixture()
@@ -79,6 +81,43 @@ async def test_kv_memory_delete_by_title_and_missing(kv_memory: SQLAlchemyKeyVal
 
     deleted_missing = await kv_memory.delete_entry(owner_id="tenant", title="archive")
     assert deleted_missing is False
+
+
+@pytest.mark.asyncio
+async def test_kv_memory_delete_by_title_removes_single_matching_entry(kv_memory: SQLAlchemyKeyValueMemory) -> None:
+    now = datetime.now(timezone.utc)
+    older = KVEntry(
+        id=uuid4().hex,
+        owner_id="tenant",
+        title="Archive",
+        data="older",
+        payload={},
+        source=None,
+        created_at=now,
+        updated_at=now,
+        expires_at=None,
+    )
+    newer = KVEntry(
+        id=uuid4().hex,
+        owner_id="tenant",
+        title="archive",
+        data="newer",
+        payload={},
+        source=None,
+        created_at=now,
+        updated_at=now + timedelta(microseconds=1),
+        expires_at=None,
+    )
+    async with kv_memory._session_factory() as session:  # type: ignore[attr-defined]
+        session.add_all([older, newer])
+        await session.commit()
+
+    deleted = await kv_memory.delete_entry(owner_id="tenant", title="archive")
+    assert deleted is True
+
+    remaining = await kv_memory.search_entries(owner_id="tenant", query="archive", limit=10, offset=0)
+    assert remaining.total == 1
+    assert remaining.entries[0].id == older.id
 
 
 @pytest.mark.asyncio

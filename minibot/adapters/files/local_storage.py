@@ -31,6 +31,43 @@ class LocalFileStorage:
             )
         return entries
 
+    def glob_files(
+        self,
+        pattern: str,
+        folder: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, str | int | bool]]:
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError("pattern must be a non-empty string")
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be >= 1")
+
+        target = self.resolve_dir(folder)
+        matches: list[Path] = []
+        try:
+            for candidate in target.rglob(pattern.strip()):
+                if not candidate.is_file():
+                    continue
+                matches.append(candidate)
+                if limit is not None and len(matches) >= limit:
+                    break
+        except ValueError as exc:
+            raise ValueError("invalid glob pattern") from exc
+
+        entries: list[dict[str, str | int | bool]] = []
+        for item in sorted(matches, key=lambda path: self._relative_to_root(path).lower()):
+            stat = item.stat()
+            entries.append(
+                {
+                    "name": item.name,
+                    "path": self._relative_to_root(item),
+                    "is_dir": False,
+                    "size_bytes": int(stat.st_size),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                }
+            )
+        return entries
+
     def create_text_file(self, path: str, content: str, overwrite: bool = False) -> dict[str, str | int]:
         if not isinstance(content, str):
             raise ValueError("content must be a string")

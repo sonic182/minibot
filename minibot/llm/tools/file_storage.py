@@ -31,6 +31,7 @@ class FileStorageTool:
     def bindings(self) -> list[ToolBinding]:
         return [
             ToolBinding(tool=self._list_files_schema(), handler=self._list_files),
+            ToolBinding(tool=self._glob_files_schema(), handler=self._glob_files),
             ToolBinding(tool=self._file_info_schema(), handler=self._file_info),
             ToolBinding(tool=self._create_file_schema(), handler=self._create_file),
             ToolBinding(tool=self._move_file_schema(), handler=self._move_file),
@@ -77,6 +78,32 @@ class FileStorageTool:
                     },
                 },
                 "required": ["path", "content", "overwrite"],
+                "additionalProperties": False,
+            },
+        )
+
+    def _glob_files_schema(self) -> Tool:
+        return Tool(
+            name="glob_files",
+            description="List files matching a glob pattern under the managed file root.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob pattern (for example **/*.md or uploads/**/*.png).",
+                    },
+                    "folder": {
+                        "type": ["string", "null"],
+                        "description": "Optional folder relative to managed root to scope search.",
+                    },
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Maximum number of matches to return. Defaults to all matches.",
+                    },
+                },
+                "required": ["pattern", "folder", "limit"],
                 "additionalProperties": False,
             },
         )
@@ -209,6 +236,20 @@ class FileStorageTool:
         return {
             "root_dir": str(self._storage.root_dir),
             "folder": folder or ".",
+            "entries": entries,
+            "count": len(entries),
+        }
+
+    async def _glob_files(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        pattern = self._require_str(payload, "pattern")
+        folder = self._optional_str(payload.get("folder"))
+        limit = self._optional_int(payload.get("limit"))
+        entries = self._storage.glob_files(pattern=pattern, folder=folder, limit=limit)
+        return {
+            "root_dir": str(self._storage.root_dir),
+            "folder": folder or ".",
+            "pattern": pattern,
+            "limit": limit,
             "entries": entries,
             "count": len(entries),
         }
@@ -414,3 +455,13 @@ class FileStorageTool:
             raise ValueError("Expected string value")
         stripped = value.strip()
         return stripped or None
+
+    @staticmethod
+    def _optional_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("Expected integer value")
+        if value < 1:
+            raise ValueError("Expected integer value >= 1")
+        return value

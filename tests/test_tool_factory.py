@@ -176,6 +176,7 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
     }.issubset(names)
     assert {
         "list_files",
+        "glob_files",
         "file_info",
         "create_file",
         "move_file",
