@@ -15,7 +15,6 @@ from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.mcp_bridge import MCPToolBridge
 from minibot.llm.tools.user_memory import build_kv_tools
-from minibot.llm.tools.playwright import PlaywrightTool
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.scheduler import SchedulePromptTool
 from minibot.llm.tools.time import CurrentTimeTool
@@ -58,9 +57,6 @@ def build_enabled_tools(
     if settings.tools.python_exec.enabled:
         python_exec_tool = HostPythonExecTool(settings.tools.python_exec, storage=managed_storage)
         tools.extend(python_exec_tool.bindings())
-    if settings.tools.playwright.enabled:
-        playwright_tool = PlaywrightTool(settings.tools.playwright)
-        tools.extend(playwright_tool.bindings())
     if settings.tools.file_storage.enabled:
         file_storage = managed_storage or LocalFileStorage(
             root_dir=settings.tools.file_storage.root_dir,

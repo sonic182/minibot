@@ -108,46 +108,6 @@ response_processing_mode = "auto"
 max_chars = 6000
 normalize_whitespace = true
 
-# Optional browser automation tool (Playwright).
-[tools.playwright]
-enabled = false
-browser = "chromium"
-launch_channel = "chrome"
-chromium_executable_path = ""
-headless = false
-user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-viewport_width = 1920
-viewport_height = 1080
-locale = "en-US"
-timezone_id = "America/New_York"
-permissions = ["geolocation"]
-geolocation_latitude = 40.7128
-geolocation_longitude = -74.0060
-screen_width = 1920
-screen_height = 1080
-extra_http_headers = { Accept-Language = "en-US,en;q=0.9", Sec-Ch-Ua = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"', Sec-Ch-Ua-Mobile = "?0", Sec-Ch-Ua-Platform = '"Windows"' }
-navigation_timeout_seconds = 20
-action_timeout_seconds = 10
-max_text_chars = 6000
-# Screenshot output is currently disabled in tool responses.
-# Kept here only for forward compatibility; currently not used.
-# max_screenshot_bytes = "2MB"
-postprocess_outputs = true
-postprocess_expose_raw = false
-postprocess_snapshot_ttl_seconds = 30
-session_ttl_seconds = 600
-allowed_domains = []
-allow_http = false
-block_private_networks = true
-launch_args = [
-  "--disable-blink-features=AutomationControlled",
-  "--disable-dev-shm-usage",
-  "--no-sandbox",
-  "--disable-extensions",
-  "--lang=en-US,en",
-  "--disable-notifications",
-]
-
 # Managed file workspace tools.
 [tools.file_storage]
 enabled = false
@@ -239,5 +199,34 @@ timeout_seconds = 10
 # transport = "http"
 # url = "http://127.0.0.1:8765/mcp"
 # headers = {}
+# enabled_tools = []
+# disabled_tools = []
+
+# Playwright MCP server example (Chromium CLI bridge):
+# Requires Node.js and npx on the host running MiniBot.
+# [[tools.mcp.servers]]
+# name = "playwright-cli"
+# transport = "stdio"
+# command = "npx"
+# Notice: if npx is not on PATH (for example with asdf), use "/home/myuser/.asdf/shims/npx".
+# args = [
+#   # Recommended: pin a version if --output-dir behavior affects you
+#   "@playwright/mcp@0.0.64",
+#   # Or use "@playwright/mcp@latest",
+#
+#   # "--headless",
+#   "--browser=chromium",
+#
+#   # Enable screenshots (vision) and PDFs
+#   "--caps=vision,pdf",
+#
+#   # Output directory (screenshots/downloads/session)
+#   "--output-dir=./data/files/browser",
+#
+#   # Persist browser state/session under output-dir
+#   "--save-session"
+# ]
+# env = {}
+# cwd = "."
 # enabled_tools = []
 # disabled_tools = []

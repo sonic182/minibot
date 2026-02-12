@@ -22,7 +22,6 @@ from minibot.adapters.config.schema import (
     LLMMConfig,
     MCPServerConfig,
     MCPToolConfig,
-    PlaywrightToolConfig,
     PythonExecToolConfig,
     SchedulerConfig,
     ScheduledPromptsConfig,
@@ -161,7 +160,6 @@ def test_build_enabled_tools_includes_mcp_dynamic_tools(stdio_server_args: list[
             time=TimeToolConfig(enabled=False),
             calculator=CalculatorToolConfig(enabled=False),
             python_exec=PythonExecToolConfig(enabled=False),
-            playwright=PlaywrightToolConfig(enabled=False),
             file_storage=FileStorageToolConfig(enabled=False),
             mcp=MCPToolConfig(
                 enabled=True,

@@ -24,8 +24,6 @@ async def run() -> None:
         enabled_tools.append("calculator")
     if settings.tools.python_exec.enabled:
         enabled_tools.append("python_exec")
-    if settings.tools.playwright.enabled:
-        enabled_tools.append("playwright")
     if settings.tools.file_storage.enabled:
         enabled_tools.append("file_storage")
     if settings.scheduler.prompts.enabled:

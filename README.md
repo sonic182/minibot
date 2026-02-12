@@ -53,7 +53,7 @@ Top features
 - 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
 - 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, optional Python execution, and MCP server bridges.
 - 🗂️ Managed file workspace tools: `list_files`, `create_file`, `send_file`, and `self_insert_artifact` (directive-based artifact insertion).
-- 🌐 Optional browser automation with Playwright (`browser_navigate`, `browser_info`, `browser_get_data`, `browser_wait_for`, `browser_click`, `browser_query_selector`, `browser_close`).
+- 🌐 Optional browser automation via MCP servers (for example Playwright MCP tools).
 - ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
 - 📊 Structured logfmt logs, request correlation IDs, and a focused test suite (`pytest` + `pytest-asyncio`).
 
@@ -86,7 +86,6 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
 - `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, and pagination defaults. Enable it only when you need tool-based memory storage.
 - `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` (raw byte cap), optional `max_chars` (LLM-facing char cap), and `response_processing_mode` (`auto`/`none`) for response shaping via [aiosonic].
-- `[tools.playwright]`: enables browser automation with Playwright. Configure `browser` (`chromium`, `firefox`, `webkit`), Chromium `launch_channel` (for example `chrome`) and optional `chromium_executable_path`, launch args, browser fingerprint/context defaults (UA, viewport, locale, timezone, geolocation, headers), output caps, session TTL, and egress restrictions (`allowed_domains`, `allow_http`, `block_private_networks`). Browser outputs can be post-processed in Python before reaching the LLM (`postprocess_outputs`, enabled by default), with optional raw snapshot exposure (`postprocess_expose_raw`) and a snapshot cache TTL (`postprocess_snapshot_ttl_seconds`). Post-processed text is emitted as compact Markdown with links preserved.
 - `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
 - `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`), and optional artifact export controls (`artifacts_*`) to persist generated files into managed storage for later `send_file`.
 - `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
@@ -141,6 +140,39 @@ url = "http://127.0.0.1:8765/mcp"
 headers = {}
 enabled_tools = []
 disabled_tools = []
+```
+
+Playwright MCP server example:
+
+Requires Node.js (and `npx`) on the host running MiniBot.
+
+```toml
+[[tools.mcp.servers]]
+name = "playwright-cli"
+transport = "stdio"
+command = "npx"
+# Notice: if npx is not on PATH (for example with asdf), use "/home/myuser/.asdf/shims/npx".
+args = [
+  # Recommended: pin a version if --output-dir behavior affects you
+  "@playwright/mcp@0.0.64",
+  # Or use "@playwright/mcp@latest",
+
+  # "--headless",
+  "--browser=chromium",
+
+  # Enable screenshots (vision) and PDFs
+  "--caps=vision,pdf",
+
+  # Output directory (screenshots/downloads/session)
+  "--output-dir=./data/files/browser",
+
+  # Persist browser state/session under output-dir
+  "--save-session"
+]
+env = {}
+cwd = "."
+# enabled_tools = []
+# disabled_tools = []
 ```
 
 Tool filtering behavior:
@@ -309,45 +341,6 @@ flowchart TD
     DEC -- no --> SKIP[No outbound message]
 ```
 
-Playwright (optional)
----------------------
-
-Use Playwright when you want browser navigation and extraction tools (`browser_*`).
-
-Setup:
-
-1. `poetry install --extras playwright`
-2. `poetry run playwright install chromium`
-3. Linux only: `poetry run playwright install-deps chromium`
-
-`playwright` extra installs all browser-tool runtime deps: `playwright`, `selectolax`, and `markdownify`.
-If you install packages manually, install all three.
-
-Quick local config:
-
-```toml
-[tools.playwright]
-enabled = true
-```
-
-Safer production baseline:
-
-```toml
-[tools.playwright]
-enabled = true
-browser = "chromium"
-headless = true
-allow_http = false
-block_private_networks = true
-allowed_domains = ["example.com", "docs.example.com"]
-```
-
-Notes:
-
-- Prefer `headless = true` on servers.
-- Keep `allowed_domains` non-empty when possible.
-- If you use Debian system Chromium, set `launch_channel = ""` and optionally `chromium_executable_path = "/usr/bin/chromium"`.
-
 Tooling
 -------
 
@@ -361,7 +354,7 @@ Tools live under `minibot/llm/tools/` and are exposed to [llm-async] with server
 - 🐍 `python_execute` + `python_environment_info`: optional host Python execution and runtime/package inspection, including optional artifact export into managed files (`save_artifacts=true`) so outputs can be sent with `send_file`.
 - 🗂️ `list_files`, `create_file`, `send_file`: managed workspace file listing/writing/sending.
 - 🧩 `self_insert_artifact`: injects a managed file (`tools.file_storage.root_dir` relative path) into runtime directives so the model can analyze it as multimodal context in-loop.
-- 🧭 `browser_*` (optional): Playwright navigation and extraction with domain/network guardrails.
+- 🧭 `mcp_*` dynamic tools (optional): tool bindings discovered from configured MCP servers.
 - 🖼️ Telegram media inputs (`photo`/`document`) are supported on `openai_responses`, `openai`, and `openrouter`.
 
 Conversation context:
