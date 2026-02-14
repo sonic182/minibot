@@ -30,12 +30,20 @@ def _write_config(
     provider: str,
     agents_enabled: bool,
     agents_dir: Path | None = None,
+    allowed_delegate_agents: list[str] | None = None,
 ) -> Path:
     config_path = tmp_path / "config.toml"
     sqlite_url = f"sqlite+aiosqlite:///{(tmp_path / 'test_agents_functional.db').as_posix()}"
     agents_block = ""
     if agents_enabled:
         resolved_agents_dir = agents_dir or (tmp_path / "agents")
+        supervisor_block = ""
+        if allowed_delegate_agents:
+            entries = ", ".join([f'"{name}"' for name in allowed_delegate_agents])
+            supervisor_block = (
+                "\n[agents.supervisor]\n"
+                f"allowed_delegate_agents = [{entries}]\n"
+            )
         agents_block = (
             "\n[agents]\n"
             "enabled = true\n"
@@ -43,7 +51,7 @@ def _write_config(
             "max_delegation_depth = 2\n"
             "default_timeout_seconds = 2\n"
             "include_agent_trace_in_metadata = true\n"
-        )
+        ) + supervisor_block
     config_path.write_text(
         "\n".join(
             [
@@ -327,3 +335,49 @@ async def test_agents_functional_router_error_no_delegation_supervisor_handles(t
 
     assert response.text == "supervisor after router error"
     assert response.metadata["primary_agent"] == "supervisor"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "openai_responses"])
+async def test_agents_functional_supervisor_allowlist_blocks_disallowed_agent(tmp_path: Path, provider: str) -> None:
+    agents_dir = tmp_path / "agents"
+    _write_agent(agents_dir=agents_dir, name="allowed_worker", model_provider=provider)
+    _write_agent(agents_dir=agents_dir, name="blocked_worker", model_provider=provider)
+
+    default_client = ScriptedLLMClient(provider=provider)
+    default_client.generate_steps = [
+        {
+            "payload": {"should_delegate": True, "agent_name": "blocked_worker", "reason": "route anyway"},
+            "response_id": "router-allowlist",
+            "total_tokens": 3,
+        }
+    ]
+    default_client.runtime_steps = [
+        {
+            "content": '{"answer":{"kind":"text","content":"handled by supervisor"},"should_answer_to_user":true}',
+            "response_id": "supervisor-allowlist",
+            "total_tokens": 6,
+        }
+    ]
+    blocked_client = ScriptedLLMClient(provider=provider)
+    blocked_client.runtime_steps = [
+        {
+            "content": '{"answer":{"kind":"text","content":"blocked agent response"},"should_answer_to_user":true}',
+            "response_id": "blocked-1",
+            "total_tokens": 6,
+        }
+    ]
+
+    factory = ScriptedLLMFactory(default_client=default_client, agent_clients={"blocked_worker": blocked_client})
+    config_path = _write_config(
+        tmp_path=tmp_path,
+        provider=provider,
+        agents_enabled=True,
+        agents_dir=agents_dir,
+        allowed_delegate_agents=["allowed_worker"],
+    )
+    response = await _run_single_turn(config_path=config_path, text="delegate please", llm_factory=factory)
+
+    assert response.text == "handled by supervisor"
+    assert response.metadata["primary_agent"] == "supervisor"
+    assert blocked_client.complete_requests == []

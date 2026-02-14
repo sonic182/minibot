@@ -11,7 +11,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole, RuntimeLimits
-from minibot.core.agents import DelegationDecision
+from minibot.core.agents import AgentSpec, DelegationDecision
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
@@ -138,7 +138,7 @@ class AgentOrchestrator:
         prompt_cache_key: str | None,
     ) -> DelegationDecision:
         default_client = self._llm_factory.create_default()
-        candidates = self._registry.all()
+        candidates = self._eligible_candidates()
         if not candidates:
             return DelegationDecision(False)
         names = [item.name for item in candidates]
@@ -194,6 +194,14 @@ class AgentOrchestrator:
                 if preferred is not None:
                     return DelegationDecision(True, preferred, "heuristic: workspace intent")
             return DelegationDecision(False)
+
+    def _eligible_candidates(self) -> list[AgentSpec]:
+        candidates = list(self._registry.all())
+        allowed = [name.strip() for name in self._settings.agents.supervisor.allowed_delegate_agents if name.strip()]
+        if not allowed:
+            return candidates
+        allowed_set = set(allowed)
+        return [candidate for candidate in candidates if candidate.name in allowed_set]
 
     @staticmethod
     def _build_state(

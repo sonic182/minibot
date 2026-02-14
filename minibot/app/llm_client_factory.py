@@ -8,11 +8,11 @@ from minibot.llm.provider_factory import LLMClient
 class LLMClientFactory:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._cache: dict[tuple[str, str], LLMClient] = {}
+        self._cache: dict[tuple[object, ...], LLMClient] = {}
 
     def create_default(self) -> LLMClient:
         config = self._resolved_config(self._settings.llm, provider_override=None)
-        key = (config.provider, config.model)
+        key = self._cache_key(config)
         cached = self._cache.get(key)
         if cached is not None:
             return cached
@@ -35,7 +35,7 @@ class LLMClientFactory:
         if spec.max_tool_iterations is not None:
             config.max_tool_iterations = spec.max_tool_iterations
         resolved = self._resolved_config(config, provider_override=config.provider)
-        key = (resolved.provider, resolved.model)
+        key = self._cache_key(resolved)
         cached = self._cache.get(key)
         if cached is not None:
             return cached
@@ -47,12 +47,29 @@ class LLMClientFactory:
         config = base.model_copy(deep=True)
         if provider_override:
             config.provider = provider_override
+            config.api_key = ""
+            config.base_url = None
         provider_name = config.provider.lower().strip()
         provider_cfg = self._settings.providers.get(provider_name)
         if provider_cfg is not None:
-            if not config.api_key:
-                config.api_key = provider_cfg.api_key
-            if not config.base_url and provider_cfg.base_url:
-                config.base_url = provider_cfg.base_url
+            config.api_key = provider_cfg.api_key
+            config.base_url = provider_cfg.base_url
         return config
 
+    @staticmethod
+    def _cache_key(config: LLMMConfig) -> tuple[object, ...]:
+        return (
+            config.provider.lower().strip(),
+            config.model,
+            config.temperature,
+            config.max_new_tokens,
+            config.reasoning_effort,
+            config.max_tool_iterations,
+            config.request_timeout_seconds,
+            config.sock_connect_timeout_seconds,
+            config.sock_read_timeout_seconds,
+            config.retry_attempts,
+            config.retry_delay_seconds,
+            config.api_key,
+            config.base_url,
+        )
