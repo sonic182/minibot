@@ -31,9 +31,14 @@ class _FakeSettings:
     class _Runtime:
         agent_timeout_seconds = 120
 
+    class _Agents:
+        enabled = False
+        default_timeout_seconds = 90
+
     tools = _Tools()
     memory = _Memory()
     runtime = _Runtime()
+    agents = _Agents()
 
 
 def _message_event(text: str) -> MessageEvent:

@@ -94,6 +94,49 @@ class LLMMConfig(BaseModel):
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
 
 
+class ProviderConfig(BaseModel):
+    api_key: str = ""
+    base_url: str | None = None
+
+
+class AgentToolCapabilitiesConfig(BaseModel):
+    write: bool = True
+    edit: bool = True
+    bash: bool = True
+
+
+class AgentDefinitionConfig(BaseModel):
+    name: str
+    description: str = ""
+    mode: Literal["agent"] = "agent"
+    enabled: bool = True
+    model_provider: str | None = None
+    model: str | None = None
+    temperature: float | None = None
+    max_new_tokens: PositiveInt | None = None
+    reasoning_effort: str | None = None
+    max_tool_iterations: PositiveInt | None = None
+    tools: AgentToolCapabilitiesConfig = AgentToolCapabilitiesConfig()
+    tool_allow: List[str] = Field(default_factory=list)
+    tool_deny: List[str] = Field(default_factory=list)
+    mcp_servers: List[str] = Field(default_factory=list)
+
+
+class SupervisorAgentConfig(BaseModel):
+    name: str = "supervisor"
+    allowed_delegate_agents: List[str] = Field(default_factory=list)
+    system_prompt_append: str = ""
+
+
+class AgentsConfig(BaseModel):
+    enabled: bool = False
+    directory: str = "./agents"
+    max_delegation_depth: PositiveInt = 2
+    default_timeout_seconds: PositiveInt = 90
+    include_agent_trace_in_metadata: bool = True
+    supervisor: SupervisorAgentConfig = SupervisorAgentConfig()
+
+
 class MemoryConfig(BaseModel):
     backend: str = "sqlite"
     sqlite_url: str = "sqlite+aiosqlite:///./data/minibot.db"
@@ -249,7 +292,9 @@ class Settings(BaseModel):
     channels: Dict[str, TelegramChannelConfig] = Field(
         default_factory=lambda: {"telegram": TelegramChannelConfig(bot_token="")}
     )
-    llm: LLMMConfig
+    providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
+    llm: LLMMConfig = LLMMConfig()
+    agents: AgentsConfig = AgentsConfig()
     memory: MemoryConfig = MemoryConfig()
     tools: ToolsConfig = ToolsConfig()
     scheduler: SchedulerConfig = SchedulerConfig()

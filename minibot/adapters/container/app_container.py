@@ -5,7 +5,10 @@ import inspect
 from pathlib import Path
 from typing import Optional
 
+from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.llm.provider_factory import LLMClient
@@ -24,6 +27,8 @@ class AppContainer:
     _memory_backend: Optional[MemoryBackend] = None
     _kv_memory_backend: Optional[KeyValueMemory] = None
     _llm_client: Optional[LLMClient] = None
+    _llm_factory: Optional[LLMClientFactory] = None
+    _agent_registry: Optional[AgentRegistry] = None
     _prompt_store: Optional[SQLAlchemyScheduledPromptStore] = None
     _prompt_service: Optional[ScheduledPromptService] = None
 
@@ -38,7 +43,12 @@ class AppContainer:
             cls._kv_memory_backend = SQLAlchemyKeyValueMemory(cls._settings.tools.kv_memory)
         else:
             cls._kv_memory_backend = None
-        cls._llm_client = LLMClient(cls._settings.llm)
+        cls._llm_factory = LLMClientFactory(cls._settings)
+        cls._llm_client = cls._llm_factory.create_default()
+        if cls._settings.agents.enabled:
+            cls._agent_registry = AgentRegistry(load_agent_specs(cls._settings.agents.directory))
+        else:
+            cls._agent_registry = AgentRegistry([])
         prompts_config = cls._settings.scheduler.prompts
         if prompts_config.enabled:
             cls._prompt_store = SQLAlchemyScheduledPromptStore(prompts_config)
@@ -84,6 +94,18 @@ class AppContainer:
         if cls._llm_client is None:
             raise RuntimeError("LLM client not configured")
         return cls._llm_client
+
+    @classmethod
+    def get_llm_factory(cls) -> LLMClientFactory:
+        if cls._llm_factory is None:
+            raise RuntimeError("LLM factory not configured")
+        return cls._llm_factory
+
+    @classmethod
+    def get_agent_registry(cls) -> AgentRegistry:
+        if cls._agent_registry is None:
+            raise RuntimeError("agent registry not configured")
+        return cls._agent_registry
 
     @classmethod
     def get_scheduled_prompt_service(cls) -> ScheduledPromptService | None:

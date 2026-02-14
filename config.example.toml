@@ -25,7 +25,6 @@ allowed_document_mime_types = []
 # LLM provider and generation settings.
 [llm]
 provider = "openai_responses"
-api_key = ""
 base_url = ""
 model = "gpt-5-mini"
 max_tool_iterations = 15
@@ -36,6 +35,38 @@ retry_attempts = 3
 retry_delay_seconds = 2.0
 system_prompt = "You are Minibot, a helpful assistant."
 prompts_dir = "./prompts"
+
+[providers.openai]
+api_key = ""
+base_url = ""
+
+[providers.openai_responses]
+api_key = ""
+base_url = ""
+
+[providers.openrouter]
+api_key = ""
+base_url = ""
+
+[providers.claude]
+api_key = ""
+base_url = ""
+
+[providers.google]
+api_key = ""
+base_url = ""
+
+[agents]
+enabled = true
+directory = "./agents"
+max_delegation_depth = 2
+default_timeout_seconds = 90
+include_agent_trace_in_metadata = true
+
+[agents.supervisor]
+name = "supervisor"
+allowed_delegate_agents = ["playwright_mcp_agent", "workspace_manager_agent"]
+system_prompt_append = ""
 
 # Optional request params. Omit keys to avoid sending them.
 # temperature = 0.2

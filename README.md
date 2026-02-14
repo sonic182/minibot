@@ -31,6 +31,15 @@ Quickstart (Poetry)
 3. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
 4. `poetry run minibot`
 
+Console test channel
+--------------------
+
+Use the built-in console channel to send/receive messages through the same dispatcher/handler pipeline without Telegram.
+
+- REPL mode: `poetry run minibot-console`
+- One-shot mode: `poetry run minibot-console --once "hello"`
+- Read one-shot input from stdin: `echo "hello" | poetry run minibot-console --once -`
+
 Up & Running with Telegram
 ---------------------------
 
@@ -38,7 +47,7 @@ Up & Running with Telegram
 2. Update `config.toml`:
    * set `channels.telegram.bot_token`
    * populate `allowed_chat_ids` or `allowed_user_ids` with your ID numbers
-   * configure the LLM provider section (`provider`, `api_key`, `model`)
+   * configure the LLM provider section (`provider`, `model`) and `[providers.<provider>]` credentials
 3. Run `poetry run minibot` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
 4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
 
@@ -81,7 +90,9 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 
 - `[runtime]`: global flags such as log level and environment.
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
-- `[llm]`: configures the chosen [llm-async] provider (currently `openai`, `openai_responses`, or `openrouter`), plus API key, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir` (default `./prompts`) for channel prompt fragments injected at request time. Request params are only sent when present in `config.toml` (omit keys like `temperature`, `max_new_tokens`, or `reasoning_effort` to avoid sending them). For OpenRouter, optional `llm.openrouter.models` lets you provide a fallback model pool, `llm.openrouter.provider` lets you send routing controls (`order`, `allow_fallbacks`, `only`, `ignore`, `sort`, throughput/latency preferences, `max_price`, and `provider_extra` for future keys), and `llm.openrouter.plugins` lets you pass request plugins (for example `file-parser` PDF engine selection).
+- `[llm]`: configures default model/provider behavior for supervisor and agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir`). Request params are only sent when present in `config.toml`.
+- `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
+- `[agents]`: enables file-defined agents from `./agents/*.md` (frontmatter + prompt body) and delegation settings.
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; `max_history_tokens` triggers compaction once cumulative generation usage crosses the threshold; `notify_compaction_updates` controls whether compaction status messages are sent to end users.
 - `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
 - `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, and pagination defaults. Enable it only when you need tool-based memory storage.

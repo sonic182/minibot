@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from minibot.adapters.container import AppContainer
+from minibot.app.agent_orchestrator import AgentOrchestrator
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
 from minibot.core.channels import ChannelResponse, RenderableResponse
@@ -28,10 +29,20 @@ class Dispatcher:
             prompt_service,
             event_bus,
         )
+        try:
+            orchestrator = AgentOrchestrator(
+                settings=settings,
+                llm_factory=AppContainer.get_llm_factory(),
+                registry=AppContainer.get_agent_registry(),
+                tools=tools,
+            )
+        except RuntimeError:
+            orchestrator = None
         self._handler = LLMMessageHandler(
             memory=memory_backend,
             llm_client=AppContainer.get_llm_client(),
             tools=tools,
+            agent_orchestrator=orchestrator,
             default_owner_id=settings.tools.kv_memory.default_owner_id,
             max_history_messages=settings.memory.max_history_messages,
             max_history_tokens=settings.memory.max_history_tokens,
