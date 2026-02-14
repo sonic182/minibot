@@ -651,7 +651,7 @@ class LLMClient:
             return None
         if self._provider_name == "openrouter":
             if self._max_new_tokens is None:
-                return 8192 * 2
+                return 4096
             return min(self._max_new_tokens, 32768)
         if self._max_new_tokens is not None:
             return self._max_new_tokens
