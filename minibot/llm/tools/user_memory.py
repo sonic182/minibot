@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any
 
 from llm_async.models import Tool
 
 from minibot.core.memory import KeyValueEntry, KeyValueMemory
+from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str, require_owner
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.schema_utils import (
+    nullable_string,
+    pagination_properties,
+    selector_entry_id_title_properties,
+    strict_object,
+)
+from minibot.shared.datetime_utils import parse_optional_iso_datetime_utc
 
 
 def build_kv_tools(memory: KeyValueMemory) -> list[ToolBinding]:
@@ -29,27 +36,16 @@ def _save_tool() -> Tool:
             "Examples: job title, interests, important dates, contact preferences, project details. "
             "Do NOT use this for storing conversation messages - use chat_history tools for conversation management."
         ),
-        parameters={
-            "type": "object",
-            "properties": {
+        parameters=strict_object(
+            properties={
                 "title": {"type": "string", "description": "Short title for the entry", "maxLength": 100},
                 "data": {"type": "string", "description": "Full content"},
-                "metadata": {
-                    "type": ["string", "null"],
-                    "description": "Optional JSON metadata",
-                },
-                "source": {
-                    "type": ["string", "null"],
-                    "description": "Optional source or URL",
-                },
-                "expires_at": {
-                    "type": ["string", "null"],
-                    "description": "ISO datetime when entry expires",
-                },
+                "metadata": nullable_string("Optional JSON metadata"),
+                "source": nullable_string("Optional source or URL"),
+                "expires_at": nullable_string("ISO datetime when entry expires"),
             },
-            "required": ["title", "data", "metadata", "source", "expires_at"],
-            "additionalProperties": False,
-        },
+            required=["title", "data", "metadata", "source", "expires_at"],
+        ),
     )
 
 
@@ -61,15 +57,7 @@ def _get_tool() -> Tool:
             "Use this when you need to recall particular information you previously saved about the user. "
             "This accesses long-term user memory, not conversation history."
         ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "entry_id": {"type": ["string", "null"]},
-                "title": {"type": ["string", "null"]},
-            },
-            "required": ["entry_id", "title"],
-            "additionalProperties": False,
-        },
+        parameters=strict_object(properties=selector_entry_id_title_properties(), required=["entry_id", "title"]),
     )
 
 
@@ -80,15 +68,7 @@ def _delete_tool() -> Tool:
             "Delete a specific saved user memory entry by unique ID or title. "
             "Use this when stored long-term user information is outdated or should be removed."
         ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "entry_id": {"type": ["string", "null"]},
-                "title": {"type": ["string", "null"]},
-            },
-            "required": ["entry_id", "title"],
-            "additionalProperties": False,
-        },
+        parameters=strict_object(properties=selector_entry_id_title_properties(), required=["entry_id", "title"]),
     )
 
 
@@ -100,19 +80,13 @@ def _search_tool() -> Tool:
             "Use this to find relevant information about the user without knowing the exact entry ID or title. "
             "This searches long-term user memory, not conversation history."
         ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": ["string", "null"],
-                    "description": "Text to search in title/data",
-                },
-                "limit": {"type": ["integer", "null"], "minimum": 1},
-                "offset": {"type": ["integer", "null"], "minimum": 0},
+        parameters=strict_object(
+            properties={
+                "query": nullable_string("Text to search in title/data"),
+                **pagination_properties(),
             },
-            "required": ["query", "limit", "offset"],
-            "additionalProperties": False,
-        },
+            required=["query", "limit", "offset"],
+        ),
     )
 
 
@@ -121,11 +95,11 @@ async def _save_entry(
     payload: dict[str, Any],
     context: ToolContext,
 ) -> dict[str, Any]:
-    owner_id = _owner_from_context(context)
-    title = _require_str(payload, "title")
-    data = _require_str(payload, "data")
+    owner_id = require_owner(context)
+    title = require_non_empty_str(payload, "title")
+    data = require_non_empty_str(payload, "data")
     metadata = _coerce_metadata(payload.get("metadata"))
-    source = _optional_str(payload.get("source"))
+    source = optional_str(payload.get("source"))
     expires_at = _parse_datetime(payload.get("expires_at"))
     entry = await memory.save_entry(
         owner_id=owner_id,
@@ -143,9 +117,9 @@ async def _get_entry(
     payload: dict[str, Any],
     context: ToolContext,
 ) -> dict[str, Any]:
-    owner_id = _owner_from_context(context)
-    entry_id = _optional_str(payload.get("entry_id"))
-    title = _optional_str(payload.get("title"))
+    owner_id = require_owner(context)
+    entry_id = optional_str(payload.get("entry_id"))
+    title = optional_str(payload.get("title"))
     if not entry_id and not title:
         raise ValueError("entry_id or title is required")
     entry = await memory.get_entry(owner_id=owner_id, entry_id=entry_id, title=title)
@@ -159,10 +133,24 @@ async def _search_entries(
     payload: dict[str, Any],
     context: ToolContext,
 ) -> dict[str, Any]:
-    owner_id = _owner_from_context(context)
-    query = _optional_str(payload.get("query"))
-    limit = _optional_int(payload.get("limit"))
-    offset = _optional_int(payload.get("offset"))
+    owner_id = require_owner(context)
+    query = optional_str(payload.get("query"))
+    limit = optional_int(
+        payload.get("limit"),
+        field="limit",
+        allow_float=True,
+        allow_string=True,
+        reject_bool=False,
+        type_error="Expected integer value",
+    )
+    offset = optional_int(
+        payload.get("offset"),
+        field="offset",
+        allow_float=True,
+        allow_string=True,
+        reject_bool=False,
+        type_error="Expected integer value",
+    )
     result = await memory.search_entries(owner_id=owner_id, query=query, limit=limit, offset=offset)
     return {
         "owner_id": owner_id,
@@ -178,9 +166,9 @@ async def _delete_entry(
     payload: dict[str, Any],
     context: ToolContext,
 ) -> dict[str, Any]:
-    owner_id = _owner_from_context(context)
-    entry_id = _optional_str(payload.get("entry_id"))
-    title = _optional_str(payload.get("title"))
+    owner_id = require_owner(context)
+    entry_id = optional_str(payload.get("entry_id"))
+    title = optional_str(payload.get("title"))
     if not entry_id and not title:
         raise ValueError("entry_id or title is required")
     deleted = await memory.delete_entry(owner_id=owner_id, entry_id=entry_id, title=title)
@@ -206,41 +194,6 @@ def _entry_payload(entry: KeyValueEntry) -> dict[str, Any]:
     }
 
 
-def _require_str(payload: dict[str, Any], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{key} must be a non-empty string")
-    return value.strip()
-
-
-def _owner_from_context(context: ToolContext) -> str:
-    if not context.owner_id:
-        raise ValueError("owner context is required")
-    return context.owner_id
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError("Expected string value")
-    stripped = value.strip()
-    return stripped or None
-
-
-def _optional_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return int(value)
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        return int(stripped)
-    raise ValueError("Expected integer value")
-
-
 def _coerce_metadata(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -254,12 +207,5 @@ def _coerce_metadata(value: Any) -> dict[str, Any] | None:
     raise ValueError("metadata must be an object or JSON string")
 
 
-def _parse_datetime(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError("expires_at must be an ISO datetime string")
-    dt = datetime.fromisoformat(value)
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+def _parse_datetime(value: Any):
+    return parse_optional_iso_datetime_utc(value, field="expires_at")

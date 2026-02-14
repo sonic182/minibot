@@ -32,3 +32,9 @@
 - **Memory backend**: SQLite/SQLAlchemy via `aiosqlite` powers Stage 1 conversation history; future adapters include Redis, Mongo, etc.
 - **Roadmap**: check `TODO.md` for Stage breakdown—Stage 1 is complete (Telegram + SQLite memory), Stage 2 adds scheduler/task store, Stage 3 brings advanced persistence and new channels, Stage 4 introduces tooling/observability.
 - **Config**: use `config.toml` (with `${ENV_VAR}` placeholders) to configure runtime, channels, logging, scheduler, memory, tools (`kv_memory`, HTTP client), and tasks.
+- **Local reference repos**: when `./aiosonic`, `./llm-async`, or `./aiogram` directories exist in the current working directory, the bot may look up references there; these are expected to be cloned repositories provided for reference purposes only. For convenience the corresponding public HTTPS URLs (cloneable for more information) are:
+  - `https://github.com/sonic182/aiosonic`
+  - `https://github.com/sonic182/llm-async`
+  - `https://github.com/aiogram/aiogram`
+
+  The agent may clone these repositories via HTTPS to inspect code locally; they are provided as reference material only.

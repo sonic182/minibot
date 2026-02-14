@@ -17,7 +17,16 @@ from llm_async.models import Tool
 
 from minibot.adapters.config.schema import PythonExecToolConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.llm.tools.arg_utils import int_with_default, optional_bool
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.schema_utils import (
+    nullable_boolean,
+    nullable_integer,
+    nullable_string,
+    strict_object,
+    string_field,
+)
+from minibot.shared.path_utils import normalize_path_separators, to_posix_relative
 
 
 class HostPythonExecTool:
@@ -39,42 +48,26 @@ class HostPythonExecTool:
                 "Execute arbitrary Python code on host backend with configurable timeout and "
                 "best-effort sandbox controls."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "Python source code to execute.",
-                    },
-                    "stdin": {
-                        "type": ["string", "null"],
-                        "description": "Optional stdin text sent to the process.",
-                    },
-                    "timeout_seconds": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "description": "Optional timeout for this execution.",
-                    },
-                    "save_artifacts": {
-                        "type": ["boolean", "null"],
-                        "description": "When true, save generated files into managed files storage.",
-                    },
+            parameters=strict_object(
+                properties={
+                    "code": string_field("Python source code to execute."),
+                    "stdin": nullable_string("Optional stdin text sent to the process."),
+                    "timeout_seconds": nullable_integer(minimum=1, description="Optional timeout for this execution."),
+                    "save_artifacts": nullable_boolean(
+                        "When true, save generated files into managed files storage."
+                    ),
                     "artifact_globs": {
                         "type": ["array", "null"],
                         "items": {"type": "string"},
                         "description": "Optional glob patterns to select generated files (for example ['*.png']).",
                     },
-                    "artifact_subdir": {
-                        "type": ["string", "null"],
-                        "description": "Destination subdirectory under managed files root.",
-                    },
-                    "max_artifacts": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "description": "Optional per-run cap for exported artifact count.",
-                    },
+                    "artifact_subdir": nullable_string("Destination subdirectory under managed files root."),
+                    "max_artifacts": nullable_integer(
+                        minimum=1,
+                        description="Optional per-run cap for exported artifact count.",
+                    ),
                 },
-                "required": [
+                required=[
                     "code",
                     "stdin",
                     "timeout_seconds",
@@ -83,8 +76,7 @@ class HostPythonExecTool:
                     "artifact_subdir",
                     "max_artifacts",
                 ],
-                "additionalProperties": False,
-            },
+            ),
         )
 
     def _environment_schema(self) -> Tool:
@@ -94,26 +86,17 @@ class HostPythonExecTool:
                 "Return details about the configured Python runtime and installed packages available "
                 "to python_execute."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "include_packages": {
-                        "type": ["boolean", "null"],
-                        "description": "When true, include installed packages.",
-                    },
-                    "limit": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "description": "Maximum packages returned when include_packages is true.",
-                    },
-                    "name_prefix": {
-                        "type": ["string", "null"],
-                        "description": "Optional case-insensitive package prefix filter.",
-                    },
+            parameters=strict_object(
+                properties={
+                    "include_packages": nullable_boolean("When true, include installed packages."),
+                    "limit": nullable_integer(
+                        minimum=1,
+                        description="Maximum packages returned when include_packages is true.",
+                    ),
+                    "name_prefix": nullable_string("Optional case-insensitive package prefix filter."),
                 },
-                "required": ["include_packages", "limit", "name_prefix"],
-                "additionalProperties": False,
-            },
+                required=["include_packages", "limit", "name_prefix"],
+            ),
         )
 
     async def _handle(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
@@ -320,59 +303,32 @@ class HostPythonExecTool:
         return parsed
 
     def _coerce_timeout(self, value: Any) -> int:
-        max_timeout = self._config.max_timeout_seconds
-        if value is None:
-            return self._config.default_timeout_seconds
-        if isinstance(value, bool):
-            raise ValueError("timeout_seconds must be an integer")
-        if isinstance(value, int):
-            timeout = value
-        elif isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return self._config.default_timeout_seconds
-            timeout = int(stripped)
-        else:
-            raise ValueError("timeout_seconds must be an integer")
-        if timeout < 1:
-            raise ValueError("timeout_seconds must be >= 1")
-        if timeout > max_timeout:
-            return max_timeout
-        return timeout
+        return int_with_default(
+            value,
+            default=self._config.default_timeout_seconds,
+            field="timeout_seconds",
+            min_value=1,
+            max_value=self._config.max_timeout_seconds,
+            clamp_max=True,
+            type_error="timeout_seconds must be an integer",
+            min_error="timeout_seconds must be >= 1",
+        )
 
     def _coerce_package_limit(self, value: Any) -> int:
-        default_limit = 100
-        max_limit = 500
-        if value is None:
-            return default_limit
-        if isinstance(value, bool):
-            raise ValueError("limit must be an integer")
-        if isinstance(value, int):
-            limit = value
-        elif isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return default_limit
-            limit = int(stripped)
-        else:
-            raise ValueError("limit must be an integer")
-        if limit < 1:
-            raise ValueError("limit must be >= 1")
-        return min(limit, max_limit)
+        return int_with_default(
+            value,
+            default=100,
+            field="limit",
+            min_value=1,
+            max_value=500,
+            clamp_max=True,
+            type_error="limit must be an integer",
+            min_error="limit must be >= 1",
+        )
 
     @staticmethod
     def _coerce_optional_bool(value: Any, default: bool) -> bool:
-        if value is None:
-            return default
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            lowered = value.strip().lower()
-            if lowered in {"true", "1", "yes", "on"}:
-                return True
-            if lowered in {"false", "0", "no", "off"}:
-                return False
-        raise ValueError("include_packages must be a boolean")
+        return optional_bool(value, default=default, error_message="include_packages must be a boolean")
 
     @staticmethod
     def _coerce_prefix(value: Any) -> str | None:
@@ -418,29 +374,22 @@ class HostPythonExecTool:
             return self._config.artifacts_default_subdir.strip() or "generated"
         if not isinstance(value, str):
             raise ValueError("artifact_subdir must be a string")
-        cleaned = value.strip().replace("\\", "/").strip("/")
+        cleaned = normalize_path_separators(value.strip()).strip("/")
         if not cleaned:
             return self._config.artifacts_default_subdir.strip() or "generated"
         return cleaned
 
     def _coerce_max_artifacts(self, value: Any) -> int:
-        config_max = self._config.artifacts_max_files
-        if value is None:
-            return config_max
-        if isinstance(value, bool):
-            raise ValueError("max_artifacts must be an integer")
-        if isinstance(value, int):
-            parsed = value
-        elif isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return config_max
-            parsed = int(stripped)
-        else:
-            raise ValueError("max_artifacts must be an integer")
-        if parsed < 1:
-            raise ValueError("max_artifacts must be >= 1")
-        return min(parsed, config_max)
+        return int_with_default(
+            value,
+            default=self._config.artifacts_max_files,
+            field="max_artifacts",
+            min_value=1,
+            max_value=self._config.artifacts_max_files,
+            clamp_max=True,
+            type_error="max_artifacts must be an integer",
+            min_error="max_artifacts must be >= 1",
+        )
 
     def _resolve_python_executable(self) -> str:
         explicit_path = (self._config.python_path or "").strip()
@@ -655,7 +604,7 @@ class HostPythonExecTool:
         total_saved_bytes = 0
 
         for source_path in candidates:
-            rel_name = str(source_path.relative_to(run_dir)).replace("\\", "/")
+            rel_name = to_posix_relative(source_path, run_dir)
             if len(saved) >= max_artifacts:
                 skipped.append({"name": rel_name, "reason": "max_artifacts_reached"})
                 continue
@@ -692,7 +641,7 @@ class HostPythonExecTool:
         return saved, skipped
 
     def _allocate_artifact_destination(self, subdir: str, filename: str) -> str:
-        safe_subdir = subdir.replace("\\", "/").strip("/")
+        safe_subdir = normalize_path_separators(subdir).strip("/")
         candidate = f"{safe_subdir}/{filename}" if safe_subdir else filename
         target = self._storage.resolve_file(candidate) if self._storage is not None else Path(candidate)
         if not target.exists():

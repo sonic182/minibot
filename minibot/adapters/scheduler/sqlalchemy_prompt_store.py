@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timedelta
 from typing import Any, Sequence
 from uuid import uuid4
 
@@ -11,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from minibot.adapters.config.schema import ScheduledPromptsConfig
+from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
 from minibot.core.jobs import (
     PromptRecurrence,
     PromptRole,
@@ -19,22 +19,13 @@ from minibot.core.jobs import (
     ScheduledPromptRepository,
     ScheduledPromptStatus,
 )
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _ensure_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+from minibot.shared.datetime_utils import ensure_utc, utcnow
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
-    return _ensure_utc(value)
+    return ensure_utc(value)
 
 
 Base = declarative_base()
@@ -60,9 +51,9 @@ class ScheduledPromptModel(Base):
     recurrence: Mapped[str] = mapped_column(String(16), nullable=False, default=PromptRecurrence.NONE.value)
     recurrence_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recurrence_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
 
@@ -70,9 +61,9 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
     def __init__(self, config: ScheduledPromptsConfig) -> None:
         self._config = config
         self._database_url = make_url(config.sqlite_url)
-        storage_path = self._resolve_storage_path(config.sqlite_url)
+        storage_path = resolve_sqlite_storage_path(config.sqlite_url)
         if storage_path:
-            self._ensure_storage_dir(storage_path)
+            ensure_parent_dir(storage_path)
 
         engine_kwargs: dict[str, Any] = {"future": True, "echo": config.echo}
         if not self._database_url.drivername.startswith("sqlite"):
@@ -119,7 +110,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
                 role=prompt.role.value,
                 content=prompt.text,
                 status=ScheduledPromptStatus.PENDING.value,
-                run_at=_ensure_utc(prompt.run_at),
+                run_at=ensure_utc(prompt.run_at),
                 retry_count=0,
                 max_attempts=prompt.max_attempts,
                 metadata_payload=metadata,
@@ -205,14 +196,14 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
         )
 
     async def retry_job(self, job_id: str, next_run_at: datetime, error: str | None = None) -> None:
-        now = _utcnow()
+        now = utcnow()
         async with self._session_factory() as session:
             await session.execute(
                 update(ScheduledPromptModel)
                 .where(ScheduledPromptModel.id == job_id)
                 .values(
                     status=ScheduledPromptStatus.PENDING.value,
-                    run_at=_ensure_utc(next_run_at),
+                    run_at=ensure_utc(next_run_at),
                     lease_expires_at=None,
                     last_error=error,
                     retry_count=ScheduledPromptModel.retry_count + 1,
@@ -222,14 +213,14 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             await session.commit()
 
     async def reschedule_recurring(self, job_id: str, next_run_at: datetime) -> None:
-        now = _utcnow()
+        now = utcnow()
         async with self._session_factory() as session:
             await session.execute(
                 update(ScheduledPromptModel)
                 .where(ScheduledPromptModel.id == job_id)
                 .values(
                     status=ScheduledPromptStatus.PENDING.value,
-                    run_at=_ensure_utc(next_run_at),
+                    run_at=ensure_utc(next_run_at),
                     lease_expires_at=None,
                     last_error=None,
                     retry_count=0,
@@ -307,7 +298,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             return [self._to_domain(model) for model in result.scalars().all()]
 
     async def _update_job(self, job_id: str, values: dict[str, Any]) -> None:
-        now = _utcnow()
+        now = utcnow()
         payload = dict(values)
         payload.setdefault("updated_at", now)
         async with self._session_factory() as session:
@@ -317,7 +308,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             await session.commit()
 
     def _to_domain(self, model: ScheduledPromptModel) -> ScheduledPrompt:
-        run_at = _ensure_utc(model.run_at)
+        run_at = ensure_utc(model.run_at)
         lease_expires = _as_utc(model.lease_expires_at)
         recurrence = PromptRecurrence.NONE
         if model.recurrence:
@@ -345,14 +336,3 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             recurrence_interval_seconds=model.recurrence_interval_seconds,
             recurrence_end_at=_as_utc(model.recurrence_end_at),
         )
-
-    def _resolve_storage_path(self, sqlite_url: str) -> Path | None:
-        url = make_url(sqlite_url)
-        if url.database and url.drivername.startswith("sqlite") and url.database != ":memory":
-            return Path(url.database)
-        return None
-
-    def _ensure_storage_dir(self, path: Path) -> None:
-        directory = path.parent
-        if directory and not directory.exists():
-            directory.mkdir(parents=True, exist_ok=True)

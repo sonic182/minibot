@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from minibot.shared.prompt_loader import load_channel_prompt, load_policy_prompts
+from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
 
 
 def test_load_channel_prompt_reads_channel_file(tmp_path: Path) -> None:
@@ -29,3 +29,12 @@ def test_load_policy_prompts_reads_all_policy_files(tmp_path: Path) -> None:
     loaded = load_policy_prompts(str(tmp_path))
 
     assert loaded == ["policy a", "policy b"]
+
+
+def test_load_compact_prompt_reads_compact_file(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "compact.md"
+    prompt_file.write_text("compact instruction", encoding="utf-8")
+
+    loaded = load_compact_prompt(str(tmp_path))
+
+    assert loaded == "compact instruction"

@@ -63,8 +63,11 @@ class StubMemory:
         entry = MemoryEntry(role=role, content=content, created_at=datetime.now(timezone.utc))
         self._store.setdefault(session_id, []).append(entry)
 
-    async def get_history(self, session_id: str, limit: int = 32) -> list[MemoryEntry]:
-        return self._store.get(session_id, [])[-limit:]
+    async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:
+        entries = self._store.get(session_id, [])
+        if limit is None:
+            return list(entries)
+        return entries[-limit:]
 
     async def count_history(self, session_id: str) -> int:
         return len(self._store.get(session_id, []))
@@ -92,6 +95,7 @@ class StubLLMClient:
         provider: str = "openai",
         system_prompt: str = "You are Minibot, a helpful assistant.",
         prompts_dir: str = "./prompts",
+        total_tokens: int | None = None,
     ) -> None:
         self.payload = payload
         self.response_id = response_id
@@ -100,10 +104,11 @@ class StubLLMClient:
         self._provider = provider
         self._system_prompt = system_prompt
         self._prompts_dir = prompts_dir
+        self.total_tokens = total_tokens
 
     async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
         self.calls.append({"args": args, "kwargs": kwargs})
-        return LLMGeneration(self.payload, self.response_id)
+        return LLMGeneration(self.payload, self.response_id, total_tokens=self.total_tokens)
 
     def is_responses_provider(self) -> bool:
         return self._is_responses
@@ -168,6 +173,11 @@ async def test_handler_returns_structured_answer() -> None:
     response = await handler.handle(_message_event("ping"))
     assert response.text == "hello"
     assert response.metadata.get("should_reply") is True
+    token_trace = response.metadata.get("token_trace")
+    assert isinstance(token_trace, dict)
+    assert token_trace.get("turn_total_tokens") == 0
+    assert token_trace.get("session_total_tokens") == 0
+    assert token_trace.get("accounting_scope") == "all_turn_calls"
     call = stub_client.calls[-1]
     assert call["kwargs"].get("prompt_cache_key") == "telegram:1"
     assert call["kwargs"].get("previous_response_id") is None
@@ -304,6 +314,77 @@ async def test_handler_trims_history_when_limit_is_configured() -> None:
     session_id = session_id_for(event.message)
     assert await memory.count_history(session_id) == 2
     assert memory.trim_calls
+
+
+@pytest.mark.asyncio
+async def test_handler_compacts_history_when_token_limit_reached() -> None:
+    memory = StubMemory()
+    client = StubLLMClient({"answer": "ok", "should_answer_to_user": True}, total_tokens=60)
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        max_history_tokens=50,
+        notify_compaction_updates=True,
+    )
+
+    response = await handler.handle(_message_event("one"))
+
+    session_id = session_id_for(_message_event("one").message)
+    assert await memory.count_history(session_id) == 1
+    assert memory._store[session_id][0].role == "assistant"
+    assert client.calls[-1]["args"][1] == "compact"
+    assert response.metadata.get("compaction_updates") == ["running compaction...", "done compacting"]
+    token_trace = response.metadata.get("token_trace")
+    assert isinstance(token_trace, dict)
+    assert token_trace.get("turn_total_tokens") == 120
+    assert token_trace.get("compaction_performed") is True
+    assert token_trace.get("session_total_tokens_before_compaction") == 120
+    assert token_trace.get("session_total_tokens_after_compaction") == 0
+
+
+@pytest.mark.asyncio
+async def test_handler_uses_compact_prompt_from_prompts_dir(tmp_path: Path) -> None:
+    (tmp_path / "compact.md").write_text("compact with these rules", encoding="utf-8")
+    memory = StubMemory()
+    client = StubLLMClient(
+        {"answer": "ok", "should_answer_to_user": True},
+        total_tokens=60,
+        prompts_dir=str(tmp_path),
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client), max_history_tokens=50)
+
+    await handler.handle(_message_event("one"))
+
+    assert "compact with these rules" in str(client.calls[-1]["kwargs"].get("system_prompt_override", ""))
+
+
+@pytest.mark.asyncio
+async def test_handler_reports_compaction_error_without_breaking_response() -> None:
+    class _CompactionFailClient(StubLLMClient):
+        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+            self.calls.append({"args": args, "kwargs": kwargs})
+            if len(self.calls) > 1:
+                raise RuntimeError("compact failed")
+            return LLMGeneration(self.payload, self.response_id, total_tokens=self.total_tokens)
+
+    memory = StubMemory()
+    client = _CompactionFailClient({"answer": "ok", "should_answer_to_user": True}, total_tokens=60)
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        max_history_tokens=50,
+        notify_compaction_updates=True,
+    )
+
+    response = await handler.handle(_message_event("one"))
+
+    assert response.text == "ok"
+    assert response.metadata.get("compaction_updates") == ["running compaction...", "error compacting"]
+    token_trace = response.metadata.get("token_trace")
+    assert isinstance(token_trace, dict)
+    assert token_trace.get("turn_total_tokens") == 60
+    assert token_trace.get("compaction_performed") is False
+    assert token_trace.get("session_total_tokens_after_compaction") == 60
 
 
 @pytest.mark.asyncio
@@ -537,13 +618,46 @@ async def test_handler_retries_runtime_when_tool_required_and_no_tool_calls() ->
     handler._runtime = runtime  # type: ignore[attr-defined]
     handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
         Any,
-        lambda **kwargs: _async_tuple(True, None, None),
+        lambda **kwargs: _async_tuple(True, None, None, 0),
     )
 
     response = await handler.handle(_message_event("que tengo en memoria"))
 
     assert response.text == "No hay entradas guardadas."
     assert len(runtime.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_handler_token_trace_counts_runtime_and_classifier_tokens() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(payload="unused", provider="openrouter")
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+
+    runtime_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"ok"},"should_answer_to_user":true}',
+        response_id="r1",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+        total_tokens=10,
+    )
+    runtime = StubRuntime([runtime_result])
+    handler._runtime = runtime  # type: ignore[attr-defined]
+
+    async def _decide_with_tokens(**kwargs: Any) -> tuple[bool, None, None, int]:
+        handler._track_token_usage(kwargs["session_id"], 5)  # type: ignore[attr-defined]
+        return False, None, None, 5
+
+    handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
+        Any,
+        _decide_with_tokens,
+    )
+
+    response = await handler.handle(_message_event("hi"))
+
+    token_trace = response.metadata.get("token_trace")
+    assert isinstance(token_trace, dict)
+    assert token_trace.get("turn_total_tokens") == 15
+    assert token_trace.get("session_total_tokens") == 15
+    assert token_trace.get("compaction_performed") is False
 
 
 @pytest.mark.asyncio
@@ -568,7 +682,7 @@ async def test_handler_forces_reply_for_unresolved_tool_required_request() -> No
     handler._runtime = runtime  # type: ignore[attr-defined]
     handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
         Any,
-        lambda **kwargs: _async_tuple(True, None, None),
+        lambda **kwargs: _async_tuple(True, None, None, 0),
     )
 
     response = await handler.handle(_message_event("que tengo en memoria"))
@@ -600,7 +714,7 @@ async def test_handler_rejects_success_claim_when_tool_required_without_tool_out
     handler._runtime = runtime  # type: ignore[attr-defined]
     handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
         Any,
-        lambda **kwargs: _async_tuple(True, None, None),
+        lambda **kwargs: _async_tuple(True, None, None, 0),
     )
 
     response = await handler.handle(_message_event("delete generated/random1.svg"))
@@ -660,7 +774,7 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
     handler._runtime = runtime  # type: ignore[attr-defined]
     handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
         Any,
-        lambda **kwargs: _async_tuple(True, "delete_file", "generated/random1.svg"),
+        lambda **kwargs: _async_tuple(True, "delete_file", "generated/random1.svg", 0),
     )
 
     response = await handler.handle(_message_event("elimina random1.svg de la carpeta generated"))
@@ -736,3 +850,6 @@ async def test_repair_response_appends_retry_prompt_and_answer_to_history() -> N
     assert saved[1].content == "*fixed*"
     assert repaired.render is not None
     assert repaired.render.kind == "markdown_v2"
+    token_trace = repaired.metadata.get("token_trace")
+    assert isinstance(token_trace, dict)
+    assert token_trace.get("accounting_scope") == "all_turn_calls"

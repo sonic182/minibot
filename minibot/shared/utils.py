@@ -16,3 +16,10 @@ def session_identifier(channel: str, chat_id: int | None, user_id: int | None) -
 def session_id_from_parts(channel: str, chat_id: int | None, user_id: int | None) -> str:
     identifier = session_identifier(channel, chat_id, user_id)
     return sha1(identifier.encode()).hexdigest()
+
+
+def humanize_token_count(value: int) -> str:
+    if abs(value) <= 9999:
+        return str(value)
+    short = f"{value / 1000:.1f}".rstrip("0").rstrip(".")
+    return f"{short}k"

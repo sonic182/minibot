@@ -39,3 +39,16 @@ def _load_policy_prompts_cached(prompts_dir: str) -> tuple[str, ...]:
 
 def load_policy_prompts(prompts_dir: str) -> list[str]:
     return list(_load_policy_prompts_cached(prompts_dir))
+
+
+@lru_cache(maxsize=32)
+def _load_compact_prompt_cached(prompts_dir: str) -> str | None:
+    prompt_path = Path(prompts_dir) / "compact.md"
+    if not prompt_path.exists() or not prompt_path.is_file():
+        return None
+    content = prompt_path.read_text(encoding="utf-8").strip()
+    return content or None
+
+
+def load_compact_prompt(prompts_dir: str) -> str | None:
+    return _load_compact_prompt_cached(prompts_dir)

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Mapping, Optional
+from datetime import datetime
+from typing import Any, Mapping
 from uuid import uuid4
 
 from sqlalchemy import JSON, DateTime, Index, String, Text, delete, func, or_, select, text
@@ -13,13 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from minibot.adapters.config.schema import KeyValueMemoryConfig
+from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
 from minibot.core.memory import KeyValueEntry, KeyValueMemory, KeyValueSearchResult
+from minibot.shared.datetime_utils import ensure_utc, utcnow
 
 KVBase = declarative_base()
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class KVEntry(KVBase):
@@ -31,9 +28,9 @@ class KVEntry(KVBase):
     data: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
     source: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -50,9 +47,9 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
     def __init__(self, config: KeyValueMemoryConfig) -> None:
         self._config = config
         self._database_url: URL = make_url(config.sqlite_url)
-        storage_path = self._resolve_storage_path(config.sqlite_url)
+        storage_path = resolve_sqlite_storage_path(config.sqlite_url)
         if storage_path:
-            self._ensure_storage_dir(storage_path)
+            ensure_parent_dir(storage_path)
 
         engine_kwargs: dict[str, Any] = {
             "future": True,
@@ -96,7 +93,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             raise ValueError("data cannot be empty")
 
         metadata_dict: dict[str, Any] = dict(metadata or {})
-        now = _utcnow()
+        now = utcnow()
         async with self._session_factory() as session:
             stmt = (
                 select(KVEntry)
@@ -366,9 +363,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             return value
         if isinstance(value, str):
             parsed = datetime.fromisoformat(value)
-            if parsed.tzinfo is None:
-                return parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc)
+            return ensure_utc(parsed)
         return None
 
     def _coerce_metadata(self, value: Any) -> dict[str, Any]:
@@ -403,14 +398,3 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             updated_at=model.updated_at,
             expires_at=model.expires_at,
         )
-
-    def _resolve_storage_path(self, sqlite_url: str) -> Optional[Path]:
-        url = make_url(sqlite_url)
-        if url.database and url.drivername.startswith("sqlite") and url.database != ":memory":
-            return Path(url.database)
-        return None
-
-    def _ensure_storage_dir(self, path: Path) -> None:
-        directory = path.parent
-        if directory and not directory.exists():
-            directory.mkdir(parents=True, exist_ok=True)

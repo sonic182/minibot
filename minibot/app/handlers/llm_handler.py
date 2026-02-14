@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import re
 from typing import Any, Literal, Sequence
 from typing import cast
 
-import ast
 import json
 
 from minibot.app.agent_runtime import AgentRuntime
@@ -14,9 +14,20 @@ from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileR
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
-from minibot.shared.prompt_loader import load_channel_prompt, load_policy_prompts
+from minibot.shared.parse_utils import parse_json_maybe_python_object
+from minibot.shared.path_utils import normalize_path_separators
+from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
 from minibot.shared.utils import session_id_for, session_id_from_parts
 from minibot.llm.tools.base import ToolBinding, ToolContext
+
+
+@dataclass(frozen=True)
+class _CompactionResult:
+    updates: list[str]
+    performed: bool
+    tokens_used: int
+    session_total_tokens_before_compaction: int | None
+    session_total_tokens_after_compaction: int
 
 
 class LLMMessageHandler:
@@ -27,6 +38,8 @@ class LLMMessageHandler:
         tools: Sequence[ToolBinding] | None = None,
         default_owner_id: str | None = None,
         max_history_messages: int | None = None,
+        max_history_tokens: int | None = None,
+        notify_compaction_updates: bool = False,
         agent_timeout_seconds: int = 120,
     ) -> None:
         self._memory = memory
@@ -34,6 +47,9 @@ class LLMMessageHandler:
         self._tools = list(tools or [])
         self._default_owner_id = default_owner_id
         self._max_history_messages = max_history_messages
+        self._max_history_tokens = max_history_tokens
+        self._notify_compaction_updates = notify_compaction_updates
+        self._session_total_tokens: dict[str, int] = {}
         self._prompts_dir = self._llm_prompts_dir()
         max_tool_iterations_getter = getattr(self._llm_client, "max_tool_iterations", None)
         max_tool_iterations = 8
@@ -158,6 +174,7 @@ class LLMMessageHandler:
     async def handle(self, event: MessageEvent) -> ChannelResponse:
         message = event.message
         session_id = session_id_for(message)
+        turn_total_tokens = 0
         model_text, model_user_content = self._build_model_user_input(message)
         if message.attachments:
             self._logger.debug(
@@ -180,12 +197,19 @@ class LLMMessageHandler:
             await self._memory.append_history(session_id, "assistant", answer)
             await self._enforce_history_limit(session_id)
             chat_id = message.chat_id or message.user_id or 0
+            metadata = self._response_metadata(True)
+            metadata["token_trace"] = self._build_token_trace(
+                turn_total_tokens=0,
+                session_total_tokens_before_compaction=None,
+                session_total_tokens_after_compaction=self._current_session_tokens(session_id),
+                compaction_performed=False,
+            )
             return ChannelResponse(
                 channel=message.channel,
                 chat_id=chat_id,
                 text=answer,
                 render=self._plain_render(answer),
-                metadata=self._response_metadata(True),
+                metadata=metadata,
             )
 
         history = list(await self._memory.get_history(session_id))
@@ -215,6 +239,7 @@ class LLMMessageHandler:
                     previous_response_id=None,
                     system_prompt_override=system_prompt,
                 )
+                turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
                 render, should_reply = self._extract_answer(generation.payload)
             else:
                 state = self._build_agent_state(
@@ -229,13 +254,21 @@ class LLMMessageHandler:
                     response_schema=self._response_schema(),
                     prompt_cache_key=prompt_cache_key,
                 )
+                turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
                 tool_messages_count = self._count_tool_messages_in_state(generation.state)
                 if tool_messages_count == 0:
-                    tool_required_intent, suggested_tool, suggested_path = await self._decide_tool_requirement(
+                    (
+                        tool_required_intent,
+                        suggested_tool,
+                        suggested_path,
+                        classifier_tokens,
+                    ) = await self._decide_tool_requirement(
+                        session_id=session_id,
                         history=history,
                         user_text=model_text,
                         prompt_cache_key=prompt_cache_key,
                     )
+                    turn_total_tokens += classifier_tokens
                 if tool_required_intent and tool_messages_count == 0:
                     self._logger.debug(
                         "tool-required request returned without tool calls; retrying with stricter instruction",
@@ -259,6 +292,7 @@ class LLMMessageHandler:
                         response_schema=self._response_schema(),
                         prompt_cache_key=prompt_cache_key,
                     )
+                    turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
                     tool_messages_count = self._count_tool_messages_in_state(generation.state)
                     self._logger.debug(
                         "tool-required retry completed",
@@ -322,14 +356,30 @@ class LLMMessageHandler:
         answer = render.text
         await self._memory.append_history(session_id, "assistant", answer)
         await self._enforce_history_limit(session_id)
+        compaction_result = await self._compact_history_if_needed(
+            session_id,
+            prompt_cache_key=prompt_cache_key,
+            system_prompt=system_prompt,
+            notify=self._notify_compaction_updates,
+        )
+        turn_total_tokens += compaction_result.tokens_used
 
         chat_id = message.chat_id or message.user_id or 0
+        metadata = self._response_metadata(should_reply)
+        if compaction_result.updates:
+            metadata["compaction_updates"] = compaction_result.updates
+        metadata["token_trace"] = self._build_token_trace(
+            turn_total_tokens=turn_total_tokens,
+            session_total_tokens_before_compaction=compaction_result.session_total_tokens_before_compaction,
+            session_total_tokens_after_compaction=compaction_result.session_total_tokens_after_compaction,
+            compaction_performed=compaction_result.performed,
+        )
         return ChannelResponse(
             channel=message.channel,
             chat_id=chat_id,
             text=answer,
             render=render,
-            metadata=self._response_metadata(should_reply),
+            metadata=metadata,
         )
 
     async def repair_format_response(
@@ -343,6 +393,7 @@ class LLMMessageHandler:
         attempt: int,
     ) -> ChannelResponse:
         session_id = session_id_from_parts(channel, chat_id, user_id)
+        turn_total_tokens = 0
         history = list(await self._memory.get_history(session_id))
         system_prompt = self._compose_system_prompt(channel)
         original_kind = response.render.kind if response.render is not None else "text"
@@ -366,12 +417,26 @@ class LLMMessageHandler:
             previous_response_id=None,
             system_prompt_override=system_prompt,
         )
+        turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
         render, _ = self._extract_answer(generation.payload)
         await self._memory.append_history(session_id, "assistant", render.text)
         await self._enforce_history_limit(session_id)
+        compaction_result = await self._compact_history_if_needed(
+            session_id,
+            prompt_cache_key=f"{channel}:{chat_id}:format-repair",
+            system_prompt=system_prompt,
+            notify=False,
+        )
+        turn_total_tokens += compaction_result.tokens_used
         metadata = self._response_metadata(True)
         metadata["format_repair_attempt"] = attempt
         metadata["format_repair_original_kind"] = original_kind
+        metadata["token_trace"] = self._build_token_trace(
+            turn_total_tokens=turn_total_tokens,
+            session_total_tokens_before_compaction=compaction_result.session_total_tokens_before_compaction,
+            session_total_tokens_after_compaction=compaction_result.session_total_tokens_after_compaction,
+            compaction_performed=compaction_result.performed,
+        )
         return ChannelResponse(
             channel=channel,
             chat_id=chat_id,
@@ -677,6 +742,122 @@ class LLMMessageHandler:
             return
         await self._memory.trim_history(session_id, self._max_history_messages)
 
+    def _track_token_usage(self, session_id: str, tokens: int | None) -> int:
+        if tokens is None or tokens <= 0:
+            return 0
+        self._session_total_tokens[session_id] = self._session_total_tokens.get(session_id, 0) + tokens
+        return tokens
+
+    def _current_session_tokens(self, session_id: str) -> int:
+        return self._session_total_tokens.get(session_id, 0)
+
+    @staticmethod
+    def _build_token_trace(
+        *,
+        turn_total_tokens: int,
+        session_total_tokens_before_compaction: int | None,
+        session_total_tokens_after_compaction: int,
+        compaction_performed: bool,
+    ) -> dict[str, Any]:
+        return {
+            "turn_total_tokens": max(0, int(turn_total_tokens)),
+            "session_total_tokens": max(0, int(session_total_tokens_after_compaction)),
+            "session_total_tokens_before_compaction": session_total_tokens_before_compaction,
+            "session_total_tokens_after_compaction": max(0, int(session_total_tokens_after_compaction)),
+            "compaction_performed": compaction_performed,
+            "accounting_scope": "all_turn_calls",
+        }
+
+    def _compact_system_prompt(self, system_prompt: str) -> str:
+        compact_prompt = load_compact_prompt(self._prompts_dir)
+        if compact_prompt:
+            return f"{system_prompt}\n\n{compact_prompt}"
+        return (
+            f"{system_prompt}\n\n"
+            "You are compacting conversation memory. Return a concise but complete summary of the "
+            "conversation so far, preserving user goals, constraints, and pending tasks. "
+            "Do not include preamble."
+        )
+
+    async def _compact_history_if_needed(
+        self,
+        session_id: str,
+        *,
+        prompt_cache_key: str,
+        system_prompt: str,
+        notify: bool,
+    ) -> _CompactionResult:
+        updates: list[str] = []
+        if self._max_history_tokens is None:
+            return _CompactionResult(
+                updates=updates,
+                performed=False,
+                tokens_used=0,
+                session_total_tokens_before_compaction=None,
+                session_total_tokens_after_compaction=self._current_session_tokens(session_id),
+            )
+        total_tokens = self._session_total_tokens.get(session_id, 0)
+        if total_tokens < self._max_history_tokens:
+            return _CompactionResult(
+                updates=updates,
+                performed=False,
+                tokens_used=0,
+                session_total_tokens_before_compaction=None,
+                session_total_tokens_after_compaction=total_tokens,
+            )
+        history = list(await self._memory.get_history(session_id))
+        if not history:
+            session_before_reset = total_tokens
+            self._session_total_tokens[session_id] = 0
+            return _CompactionResult(
+                updates=updates,
+                performed=False,
+                tokens_used=0,
+                session_total_tokens_before_compaction=session_before_reset,
+                session_total_tokens_after_compaction=0,
+            )
+        if notify:
+            updates.append("running compaction...")
+        compaction_tokens = 0
+        try:
+            compact_generation = await self._llm_client.generate(
+                history,
+                "compact",
+                user_content=None,
+                tools=[],
+                tool_context=None,
+                response_schema=None,
+                prompt_cache_key=f"{prompt_cache_key}:compact",
+                previous_response_id=None,
+                system_prompt_override=self._compact_system_prompt(system_prompt),
+            )
+            compaction_tokens = self._track_token_usage(session_id, getattr(compact_generation, "total_tokens", None))
+            session_before_reset = self._current_session_tokens(session_id)
+            compact_render, _ = self._extract_answer(compact_generation.payload)
+            await self._memory.trim_history(session_id, 0)
+            await self._memory.append_history(session_id, "assistant", compact_render.text)
+            self._session_total_tokens[session_id] = 0
+            if notify:
+                updates.append("done compacting")
+            return _CompactionResult(
+                updates=updates,
+                performed=True,
+                tokens_used=compaction_tokens,
+                session_total_tokens_before_compaction=session_before_reset,
+                session_total_tokens_after_compaction=0,
+            )
+        except Exception as exc:
+            self._logger.exception("history compaction failed", exc_info=exc)
+            if notify:
+                updates.append("error compacting")
+            return _CompactionResult(
+                updates=updates,
+                performed=False,
+                tokens_used=compaction_tokens,
+                session_total_tokens_before_compaction=None,
+                session_total_tokens_after_compaction=self._current_session_tokens(session_id),
+            )
+
     def _extract_answer(self, payload: Any) -> tuple[RenderableResponse, bool]:
         if isinstance(payload, dict):
             answer = payload.get("answer")
@@ -702,14 +883,7 @@ class LLMMessageHandler:
             if isinstance(timestamp, str):
                 return self._plain_render(timestamp), True
         if isinstance(payload, str):
-            parsed: Any | None = None
-            try:
-                parsed = json.loads(payload)
-            except Exception:
-                try:
-                    parsed = ast.literal_eval(payload)
-                except Exception:
-                    parsed = None
+            parsed = parse_json_maybe_python_object(payload)
             if isinstance(parsed, dict):
                 answer = parsed.get("answer")
                 should = parsed.get("should_answer_to_user")
@@ -840,12 +1014,13 @@ class LLMMessageHandler:
     async def _decide_tool_requirement(
         self,
         *,
+        session_id: str,
         history: Sequence[Any],
         user_text: str,
         prompt_cache_key: str | None,
-    ) -> tuple[bool, str | None, str | None]:
+    ) -> tuple[bool, str | None, str | None, int]:
         if not self._tools:
-            return False, None, None
+            return False, None, None, 0
         tool_names = [binding.tool.name for binding in self._tools]
         classifier_prompt = (
             "Decide whether the user's request requires executing at least one tool before answering. "
@@ -866,6 +1041,7 @@ class LLMMessageHandler:
                 previous_response_id=None,
                 system_prompt_override="You are a strict tool-routing classifier.",
             )
+            classifier_tokens = self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
             payload = generation.payload
             payload_obj: dict[str, Any] | None = None
             if isinstance(payload, dict):
@@ -877,7 +1053,7 @@ class LLMMessageHandler:
                     if isinstance(parsed, dict):
                         payload_obj = parsed
             if not payload_obj:
-                return False, None, None
+                return False, None, None, classifier_tokens
             raw_required = payload_obj.get("requires_tools", False)
             requires_tools = bool(raw_required)
             raw_tool = payload_obj.get("suggested_tool")
@@ -892,10 +1068,10 @@ class LLMMessageHandler:
                     "suggested_path": suggested_path,
                 },
             )
-            return requires_tools, suggested_tool, suggested_path
+            return requires_tools, suggested_tool, suggested_path, classifier_tokens
         except Exception:
             self._logger.exception("tool requirement decision failed")
-            return False, None, None
+            return False, None, None, 0
 
     @staticmethod
     def _tool_requirement_schema() -> dict[str, Any]:
@@ -963,7 +1139,7 @@ class LLMMessageHandler:
                 return None
             if value.startswith("./"):
                 value = value[2:]
-            return value.replace("\\", "/")
+            return normalize_path_separators(value)
 
         quoted = re.findall(r"['\"]([^'\"]+)['\"]", text)
         for item in quoted:

@@ -120,6 +120,67 @@ async def test_generate_parses_structured_json_from_fenced_block(monkeypatch: py
 
 
 @pytest.mark.asyncio
+async def test_generate_captures_total_tokens_from_openai_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _UsageProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            return _FakeResponse(
+                main_response=_FakeMessage(content="ok", tool_calls=None),
+                original={"id": "resp-usage", "usage": {"prompt_tokens": 19, "completion_tokens": 10}},
+            )
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _UsageProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+
+    result = await client.generate([], "hello")
+
+    assert result.total_tokens == 29
+
+
+@pytest.mark.asyncio
+async def test_generate_captures_total_tokens_from_responses_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _UsageProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            return _FakeResponse(
+                main_response=_FakeMessage(content="ok", tool_calls=None),
+                original={"id": "resp-usage", "usage": {"input_tokens": 11, "output_tokens": 7}},
+            )
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _UsageProvider)
+    client = LLMClient(LLMMConfig(provider="openai_responses", api_key="secret", model="x"))
+
+    result = await client.generate([], "hello")
+
+    assert result.total_tokens == 18
+
+
+@pytest.mark.asyncio
+async def test_complete_once_captures_total_tokens_from_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _UsageProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            return _FakeResponse(
+                main_response=_FakeMessage(content="ok", tool_calls=None),
+                original={"id": "resp-step", "usage": {"input_tokens": 5, "output_tokens": 3}},
+            )
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _UsageProvider)
+    client = LLMClient(LLMMConfig(provider="openai_responses", api_key="secret", model="x"))
+
+    result = await client.complete_once(messages=[{"role": "user", "content": "hello"}])
+
+    assert result.response_id == "resp-step"
+    assert result.total_tokens == 8
+
+
+@pytest.mark.asyncio
 async def test_generate_uses_system_prompt_override(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm import provider_factory
 

@@ -18,6 +18,7 @@ from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent, OutboundFormatRepairEvent
+from minibot.shared.path_utils import to_posix_relative
 
 
 class TelegramService:
@@ -372,7 +373,7 @@ class TelegramService:
         return path
 
     def _relative_to_root(self, path: Path) -> str:
-        return str(path.relative_to(self._managed_root_dir)).replace("\\", "/")
+        return to_posix_relative(path, self._managed_root_dir)
 
     @staticmethod
     def _upload_filename(prefix: str, message_id: int, chat_id: int, suffix: str) -> str:

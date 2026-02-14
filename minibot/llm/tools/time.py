@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from llm_async.models import Tool
 
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.schema_utils import nullable_string, strict_object
 
 
 class CurrentTimeTool:
@@ -19,17 +20,10 @@ class CurrentTimeTool:
         return Tool(
             name="current_datetime",
             description=description,
-            parameters={
-                "type": "object",
-                "properties": {
-                    "format": {
-                        "type": ["string", "null"],
-                        "description": "Python strftime format string.",
-                    }
-                },
-                "required": ["format"],
-                "additionalProperties": False,
-            },
+            parameters=strict_object(
+                properties={"format": nullable_string("Python strftime format string.")},
+                required=["format"],
+            ),
         )
 
     async def _handle(self, payload: dict[str, str], _: ToolContext) -> dict[str, str]:

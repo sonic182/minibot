@@ -18,8 +18,11 @@ class StubMemory:
         entry = MemoryEntry(role=role, content=content, created_at=datetime.now(timezone.utc))
         self._store.setdefault(session_id, []).append(entry)
 
-    async def get_history(self, session_id: str, limit: int = 32) -> list[MemoryEntry]:
-        return self._store.get(session_id, [])[-limit:]
+    async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:
+        entries = self._store.get(session_id, [])
+        if limit is None:
+            return list(entries)
+        return entries[-limit:]
 
     async def count_history(self, session_id: str) -> int:
         return len(self._store.get(session_id, []))
