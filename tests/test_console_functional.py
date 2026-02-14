@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from minibot.adapters.container.app_container import AppContainer
 from minibot.adapters.messaging.console.service import ConsoleService
 from minibot.app.dispatcher import Dispatcher
-
-pytest_plugins = ("tests.fixtures.llm.server",)
+from tests.fixtures.llm.mock_client import ScriptedLLMClient, ScriptedLLMFactory
 
 
 def _reset_container() -> None:
@@ -24,7 +24,7 @@ def _reset_container() -> None:
     AppContainer._prompt_service = None
 
 
-def _write_config(tmp_path: Path, base_url: str, provider: str = "openai", agents_enabled: bool = False) -> Path:
+def _write_config(tmp_path: Path, provider: str = "openai", agents_enabled: bool = False) -> Path:
     config_path = tmp_path / "config.toml"
     agents_lines = ""
     if agents_enabled:
@@ -53,7 +53,7 @@ def _write_config(tmp_path: Path, base_url: str, provider: str = "openai", agent
                 "",
                 f"[providers.{provider}]",
                 'api_key = "test-key"',
-                f'base_url = "{base_url}"',
+                'base_url = "http://mock.local/v1"',
                 "",
                 "[memory]",
                 f'sqlite_url = "{sqlite_url}"',
@@ -69,62 +69,89 @@ def _write_config(tmp_path: Path, base_url: str, provider: str = "openai", agent
     return config_path
 
 
-@pytest.mark.asyncio
-async def test_console_functional_openai_chat_completion_flow(tmp_path: Path, fake_llm_server) -> None:
+async def _run_console_turn(
+    *,
+    config_path: Path,
+    llm_factory: ScriptedLLMFactory,
+    text: str,
+    chat_id: int,
+    user_id: int,
+):
     _reset_container()
-    config_path = _write_config(tmp_path, fake_llm_server["base_url"], provider="openai", agents_enabled=False)
     AppContainer.configure(config_path)
     await AppContainer.initialize_storage()
     bus = AppContainer.get_event_bus()
-    dispatcher = Dispatcher(bus)
-    console_service = ConsoleService(bus, chat_id=100, user_id=200)
-    await dispatcher.start()
-    await console_service.start()
-
-    try:
-        await console_service.publish_user_message("hello from console")
-        response = await console_service.wait_for_response(3.0)
-        assert response.response.channel == "console"
-        assert "ok from fake chat" in response.response.text
-        assert fake_llm_server["state"].chat_requests
-    finally:
-        await console_service.stop()
-        await dispatcher.stop()
-        _reset_container()
+    with (
+        patch.object(AppContainer, "get_llm_factory", return_value=llm_factory),
+        patch.object(AppContainer, "get_llm_client", return_value=llm_factory.create_default()),
+    ):
+        dispatcher = Dispatcher(bus)
+        console_service = ConsoleService(bus, chat_id=chat_id, user_id=user_id)
+        await dispatcher.start()
+        await console_service.start()
+        try:
+            await console_service.publish_user_message(text)
+            return await console_service.wait_for_response(3.0)
+        finally:
+            await console_service.stop()
+            await dispatcher.stop()
+            _reset_container()
 
 
 @pytest.mark.asyncio
-async def test_console_functional_openai_responses_flow(tmp_path: Path, fake_llm_server) -> None:
-    _reset_container()
-    config_path = _write_config(
-        tmp_path,
-        fake_llm_server["base_url"],
-        provider="openai_responses",
-        agents_enabled=False,
+async def test_console_functional_openai_chat_completion_flow(tmp_path: Path) -> None:
+    default_client = ScriptedLLMClient(provider="openai")
+    default_client.runtime_steps = [
+        {
+            "content": '{"answer":{"kind":"text","content":"ok from fake chat"},"should_answer_to_user":true}',
+            "response_id": "console-openai-1",
+            "total_tokens": 8,
+        }
+    ]
+    factory = ScriptedLLMFactory(default_client=default_client)
+    config_path = _write_config(tmp_path, provider="openai", agents_enabled=False)
+
+    response = await _run_console_turn(
+        config_path=config_path,
+        llm_factory=factory,
+        text="hello from console",
+        chat_id=100,
+        user_id=200,
     )
-    AppContainer.configure(config_path)
-    await AppContainer.initialize_storage()
-    bus = AppContainer.get_event_bus()
-    dispatcher = Dispatcher(bus)
-    console_service = ConsoleService(bus, chat_id=101, user_id=201)
-    await dispatcher.start()
-    await console_service.start()
 
-    try:
-        await console_service.publish_user_message("hello via responses api")
-        response = await console_service.wait_for_response(3.0)
-        assert response.response.channel == "console"
-        assert "ok from fake responses" in response.response.text
-        assert fake_llm_server["state"].responses_requests
-    finally:
-        await console_service.stop()
-        await dispatcher.stop()
-        _reset_container()
+    assert response.response.channel == "console"
+    assert "ok from fake chat" in response.response.text
+    assert default_client.complete_requests
 
 
 @pytest.mark.asyncio
-async def test_console_functional_agent_delegation_metadata(tmp_path: Path, fake_llm_server) -> None:
-    _reset_container()
+async def test_console_functional_openai_responses_flow(tmp_path: Path) -> None:
+    default_client = ScriptedLLMClient(provider="openai_responses")
+    default_client.runtime_steps = [
+        {
+            "content": '{"answer":{"kind":"text","content":"ok from fake responses"},"should_answer_to_user":true}',
+            "response_id": "console-responses-1",
+            "total_tokens": 8,
+        }
+    ]
+    factory = ScriptedLLMFactory(default_client=default_client)
+    config_path = _write_config(tmp_path, provider="openai_responses", agents_enabled=False)
+
+    response = await _run_console_turn(
+        config_path=config_path,
+        llm_factory=factory,
+        text="hello via responses api",
+        chat_id=101,
+        user_id=201,
+    )
+
+    assert response.response.channel == "console"
+    assert "ok from fake responses" in response.response.text
+    assert default_client.complete_requests
+
+
+@pytest.mark.asyncio
+async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     (agents_dir / "worker.md").write_text(
@@ -144,58 +171,34 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path, fake
         ),
         encoding="utf-8",
     )
-    state = fake_llm_server["state"]
-    state.chat_payloads = [
-        {
-            "id": "chatcmpl-router",
-            "object": "chat.completion",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": '{"should_delegate":true,"agent_name":"worker","reason":"test"}',
-                    },
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {"prompt_tokens": 4, "completion_tokens": 4, "total_tokens": 8},
-        },
-        {
-            "id": "chatcmpl-worker",
-            "object": "chat.completion",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": (
-                            '{"answer":{"kind":"text","content":"delegated response"},'
-                            '"should_answer_to_user":true}'
-                        ),
-                    },
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {"prompt_tokens": 4, "completion_tokens": 4, "total_tokens": 8},
-        },
-    ]
-    config_path = _write_config(tmp_path, fake_llm_server["base_url"], provider="openai", agents_enabled=True)
-    AppContainer.configure(config_path)
-    await AppContainer.initialize_storage()
-    bus = AppContainer.get_event_bus()
-    dispatcher = Dispatcher(bus)
-    console_service = ConsoleService(bus, chat_id=102, user_id=202)
-    await dispatcher.start()
-    await console_service.start()
 
-    try:
-        await console_service.publish_user_message("route this to specialist")
-        response = await console_service.wait_for_response(3.0)
-        assert response.response.text == "delegated response"
-        assert response.response.metadata["primary_agent"] == "worker"
-        assert isinstance(response.response.metadata.get("agent_trace"), list)
-    finally:
-        await console_service.stop()
-        await dispatcher.stop()
-        _reset_container()
+    default_client = ScriptedLLMClient(provider="openai")
+    default_client.generate_steps = [
+        {
+            "payload": {"should_delegate": True, "agent_name": "worker", "reason": "test"},
+            "response_id": "router-1",
+            "total_tokens": 8,
+        }
+    ]
+    worker_client = ScriptedLLMClient(provider="openai")
+    worker_client.runtime_steps = [
+        {
+            "content": '{"answer":{"kind":"text","content":"delegated response"},"should_answer_to_user":true}',
+            "response_id": "worker-1",
+            "total_tokens": 8,
+        }
+    ]
+    factory = ScriptedLLMFactory(default_client=default_client, agent_clients={"worker": worker_client})
+
+    config_path = _write_config(tmp_path, provider="openai", agents_enabled=True)
+    response = await _run_console_turn(
+        config_path=config_path,
+        llm_factory=factory,
+        text="route this to specialist",
+        chat_id=102,
+        user_id=202,
+    )
+
+    assert response.response.text == "delegated response"
+    assert response.response.metadata["primary_agent"] == "worker"
+    assert isinstance(response.response.metadata.get("agent_trace"), list)

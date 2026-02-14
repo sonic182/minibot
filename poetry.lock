@@ -2393,9 +2393,9 @@ multidict = ">=4.0"
 propcache = ">=0.2.1"
 
 [extras]
-mcp = ["mcp", "uvicorn"]
+mcp = ["mcp"]
 
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.12,<3.15"
-content-hash = "02a44231261fa2237a31dbb7171704e41c1635cacfc246798b69250213e75b19"
+content-hash = "9b4bdd48f74a7b32bb27b70f1308210f1f1c4e874eb44e01167f7321eda9f2d0"
