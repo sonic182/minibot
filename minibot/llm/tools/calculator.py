@@ -7,7 +7,9 @@ from typing import Any
 
 from llm_async.models import Tool
 
+from minibot.llm.tools.arg_utils import int_with_default
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.schema_utils import nullable_integer, strict_object, string_field
 
 _ALLOWED_CHARS_PATTERN = re.compile(r"^[0-9.()+\-*/%\s]+$")
 _TOKEN_PATTERN = re.compile(r"\d+(?:\.\d+)?|\.\d+|\*\*|[+\-*/%()]")
@@ -34,22 +36,13 @@ class CalculatorTool:
                 "Safely evaluate arithmetic expressions with Decimal precision. "
                 "Supports +, -, *, /, %, **, parentheses, and unary +/- operators."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "expression": {
-                        "type": "string",
-                        "description": "Arithmetic expression to evaluate.",
-                    },
-                    "scale": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "description": "Optional Decimal precision.",
-                    },
+            parameters=strict_object(
+                properties={
+                    "expression": string_field("Arithmetic expression to evaluate."),
+                    "scale": nullable_integer(minimum=1, description="Optional Decimal precision."),
                 },
-                "required": ["expression", "scale"],
-                "additionalProperties": False,
-            },
+                required=["expression", "scale"],
+            ),
         )
 
     async def _handle(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
@@ -81,23 +74,16 @@ class CalculatorTool:
             }
 
     def _coerce_scale(self, value: Any) -> int:
-        if value is None:
-            return self._default_scale
-        if isinstance(value, bool):
-            raise ValueError("scale must be an integer")
-        if isinstance(value, int):
-            if value < 1:
-                raise ValueError("scale must be >= 1")
-            return value
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return self._default_scale
-            parsed = int(stripped)
-            if parsed < 1:
-                raise ValueError("scale must be >= 1")
-            return parsed
-        raise ValueError("scale must be an integer")
+        return int_with_default(
+            value,
+            default=self._default_scale,
+            field="scale",
+            min_value=1,
+            allow_string=True,
+            reject_bool=True,
+            type_error="scale must be an integer",
+            min_error="scale must be >= 1",
+        )
 
     def _validate_expression(self, expression: str) -> str:
         normalized = expression.strip()

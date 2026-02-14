@@ -13,7 +13,10 @@ from minibot.app.event_bus import EventBus
 from minibot.core.agent_runtime import AgentMessage, AppendMessageDirective, MessagePart, MessageRole, ToolResult
 from minibot.core.channels import ChannelFileResponse
 from minibot.core.events import OutboundFileEvent
+from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.schema_utils import nullable_boolean, nullable_integer, nullable_string, strict_object
+from minibot.shared.path_utils import to_posix_relative
 
 
 class FileStorageTool:
@@ -44,26 +47,20 @@ class FileStorageTool:
         return Tool(
             name="list_files",
             description="List files and folders under the managed file root.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "folder": {
-                        "type": ["string", "null"],
-                        "description": "Optional folder relative to the managed root. Defaults to root.",
-                    }
+            parameters=strict_object(
+                properties={
+                    "folder": nullable_string("Optional folder relative to the managed root. Defaults to root.")
                 },
-                "required": ["folder"],
-                "additionalProperties": False,
-            },
+                required=["folder"],
+            ),
         )
 
     def _create_file_schema(self) -> Tool:
         return Tool(
             name="create_file",
             description="Create a text or markdown file under the managed file root.",
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=strict_object(
+                properties={
                     "path": {
                         "type": "string",
                         "description": "Relative file path (for example notes/today.md).",
@@ -72,87 +69,64 @@ class FileStorageTool:
                         "type": "string",
                         "description": "Text content to write into the file.",
                     },
-                    "overwrite": {
-                        "type": ["boolean", "null"],
-                        "description": "Set true to replace existing files.",
-                    },
+                    "overwrite": nullable_boolean("Set true to replace existing files."),
                 },
-                "required": ["path", "content", "overwrite"],
-                "additionalProperties": False,
-            },
+                required=["path", "content", "overwrite"],
+            ),
         )
 
     def _glob_files_schema(self) -> Tool:
         return Tool(
             name="glob_files",
             description="List files matching a glob pattern under the managed file root.",
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=strict_object(
+                properties={
                     "pattern": {
                         "type": "string",
                         "description": "Glob pattern (for example **/*.md or uploads/**/*.png).",
                     },
-                    "folder": {
-                        "type": ["string", "null"],
-                        "description": "Optional folder relative to managed root to scope search.",
-                    },
-                    "limit": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "description": "Maximum number of matches to return. Defaults to all matches.",
-                    },
+                    "folder": nullable_string("Optional folder relative to managed root to scope search."),
+                    "limit": nullable_integer(
+                        minimum=1,
+                        description="Maximum number of matches to return. Defaults to all matches.",
+                    ),
                 },
-                "required": ["pattern", "folder", "limit"],
-                "additionalProperties": False,
-            },
+                required=["pattern", "folder", "limit"],
+            ),
         )
 
     def _file_info_schema(self) -> Tool:
         return Tool(
             name="file_info",
             description="Get basic metadata for a managed file.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Relative file path under managed root.",
-                    }
-                },
-                "required": ["path"],
-                "additionalProperties": False,
-            },
+            parameters=strict_object(
+                properties={"path": {"type": "string", "description": "Relative file path under managed root."}},
+                required=["path"],
+            ),
         )
 
     def _send_file_schema(self) -> Tool:
         return Tool(
             name="send_file",
             description="Send a managed file to the current channel chat.",
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=strict_object(
+                properties={
                     "path": {
                         "type": "string",
                         "description": "Relative file path under the managed root.",
                     },
-                    "caption": {
-                        "type": ["string", "null"],
-                        "description": "Optional caption sent with the file.",
-                    },
+                    "caption": nullable_string("Optional caption sent with the file."),
                 },
-                "required": ["path", "caption"],
-                "additionalProperties": False,
-            },
+                required=["path", "caption"],
+            ),
         )
 
     def _move_file_schema(self) -> Tool:
         return Tool(
             name="move_file",
             description="Move or rename a managed file to another managed path.",
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=strict_object(
+                properties={
                     "source_path": {
                         "type": "string",
                         "description": "Existing relative file path under managed root.",
@@ -161,40 +135,30 @@ class FileStorageTool:
                         "type": "string",
                         "description": "Target relative file path under managed root.",
                     },
-                    "overwrite": {
-                        "type": ["boolean", "null"],
-                        "description": "Set true to replace an existing destination file.",
-                    },
+                    "overwrite": nullable_boolean("Set true to replace an existing destination file."),
                 },
-                "required": ["source_path", "destination_path", "overwrite"],
-                "additionalProperties": False,
-            },
+                required=["source_path", "destination_path", "overwrite"],
+            ),
         )
 
     def _delete_file_schema(self) -> Tool:
         return Tool(
             name="delete_file",
             description="Delete a managed file or folder from disk.",
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=strict_object(
+                properties={
                     "path": {
                         "type": "string",
                         "description": "Relative path under managed root.",
                     },
                     "target": {
-                        "type": ["string", "null"],
+                        **nullable_string("Target kind filter. Use folder to only delete folders."),
                         "enum": ["any", "file", "folder", None],
-                        "description": "Target kind filter. Use folder to only delete folders.",
                     },
-                    "recursive": {
-                        "type": ["boolean", "null"],
-                        "description": "Set true to delete non-empty folders recursively.",
-                    },
+                    "recursive": nullable_boolean("Set true to delete non-empty folders recursively."),
                 },
-                "required": ["path", "target", "recursive"],
-                "additionalProperties": False,
-            },
+                required=["path", "target", "recursive"],
+            ),
         )
 
     def _self_insert_artifact_schema(self) -> Tool:
@@ -204,9 +168,8 @@ class FileStorageTool:
                 "Inject a managed file into conversation context for multimodal analysis. "
                 "Path must be relative to managed root."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=strict_object(
+                properties={
                     "path": {
                         "type": "string",
                         "description": "Relative file path under managed root (for example uploads/friends.jpg).",
@@ -217,30 +180,19 @@ class FileStorageTool:
                         "description": "How to represent this file in injected message content.",
                     },
                     "role": {
-                        "type": ["string", "null"],
+                        **nullable_string("Target role for injected message. Defaults to user."),
                         "enum": ["user", "system", None],
-                        "description": "Target role for injected message. Defaults to user.",
                     },
-                    "text": {
-                        "type": ["string", "null"],
-                        "description": "Optional text prepended before injected file/image part.",
-                    },
-                    "mime": {
-                        "type": ["string", "null"],
-                        "description": "Optional MIME hint.",
-                    },
-                    "filename": {
-                        "type": ["string", "null"],
-                        "description": "Optional display filename for file mode.",
-                    },
+                    "text": nullable_string("Optional text prepended before injected file/image part."),
+                    "mime": nullable_string("Optional MIME hint."),
+                    "filename": nullable_string("Optional display filename for file mode."),
                 },
-                "required": ["path", "as", "role", "text", "mime", "filename"],
-                "additionalProperties": False,
-            },
+                required=["path", "as", "role", "text", "mime", "filename"],
+            ),
         )
 
     async def _list_files(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
-        folder = self._optional_str(payload.get("folder"))
+        folder = optional_str(payload.get("folder"))
         entries = self._storage.list_files(folder)
         return {
             "root_dir": str(self._storage.root_dir),
@@ -250,9 +202,17 @@ class FileStorageTool:
         }
 
     async def _glob_files(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
-        pattern = self._require_str(payload, "pattern")
-        folder = self._optional_str(payload.get("folder"))
-        limit = self._optional_int(payload.get("limit"))
+        pattern = require_non_empty_str(payload, "pattern")
+        folder = optional_str(payload.get("folder"))
+        limit = optional_int(
+            payload.get("limit"),
+            field="limit",
+            min_value=1,
+            allow_float=False,
+            allow_string=False,
+            type_error="Expected integer value",
+            min_error="Expected integer value >= 1",
+        )
         entries = self._storage.glob_files(pattern=pattern, folder=folder, limit=limit)
         return {
             "root_dir": str(self._storage.root_dir),
@@ -264,8 +224,8 @@ class FileStorageTool:
         }
 
     async def _create_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
-        path = self._require_str(payload, "path")
-        content = self._require_str(payload, "content")
+        path = require_non_empty_str(payload, "path")
+        content = require_non_empty_str(payload, "content")
         overwrite = bool(payload.get("overwrite") or False)
         result = self._storage.create_text_file(path=path, content=content, overwrite=overwrite)
         return {
@@ -276,7 +236,7 @@ class FileStorageTool:
         }
 
     async def _file_info(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
-        path = self._require_str(payload, "path")
+        path = require_non_empty_str(payload, "path")
         info = self._storage.file_info(path)
         return {
             "ok": True,
@@ -291,8 +251,8 @@ class FileStorageTool:
         if context.chat_id is None:
             raise ValueError("chat context is required")
 
-        path = self._require_str(payload, "path")
-        caption = self._optional_str(payload.get("caption"))
+        path = require_non_empty_str(payload, "path")
+        caption = optional_str(payload.get("caption"))
         absolute_path = self._storage.resolve_existing_file(path)
 
         await self._event_bus.publish(
@@ -314,8 +274,8 @@ class FileStorageTool:
         }
 
     async def _move_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
-        source_path = self._require_str(payload, "source_path")
-        destination_path = self._require_str(payload, "destination_path")
+        source_path = require_non_empty_str(payload, "source_path")
+        destination_path = require_non_empty_str(payload, "destination_path")
         overwrite = bool(payload.get("overwrite") or False)
         result = self._storage.move_file(
             source_path=source_path,
@@ -330,8 +290,8 @@ class FileStorageTool:
         }
 
     async def _delete_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
-        path = self._require_str(payload, "path")
-        target = (self._optional_str(payload.get("target")) or "any").lower()
+        path = require_non_empty_str(payload, "path")
+        target = (optional_str(payload.get("target")) or "any").lower()
         if target not in {"any", "file", "folder"}:
             raise ValueError("target must be one of: any, file, folder")
         recursive = bool(payload.get("recursive") or False)
@@ -357,8 +317,8 @@ class FileStorageTool:
         }
 
     async def _self_insert_artifact(self, payload: dict[str, Any], _: ToolContext) -> ToolResult:
-        path = self._require_str(payload, "path")
-        insert_as = self._require_str(payload, "as").lower()
+        path = require_non_empty_str(payload, "path")
+        insert_as = require_non_empty_str(payload, "as").lower()
         if insert_as not in {"image", "file"}:
             return ToolResult(
                 content={
@@ -367,7 +327,7 @@ class FileStorageTool:
                     "message": "as must be either 'image' or 'file'",
                 }
             )
-        role = self._optional_str(payload.get("role")) or "user"
+        role = optional_str(payload.get("role")) or "user"
         if role not in {"user", "system"}:
             return ToolResult(
                 content={
@@ -377,9 +337,9 @@ class FileStorageTool:
                 }
             )
 
-        text = self._optional_str(payload.get("text"))
-        mime_hint = self._optional_str(payload.get("mime"))
-        filename_hint = self._optional_str(payload.get("filename"))
+        text = optional_str(payload.get("text"))
+        mime_hint = optional_str(payload.get("mime"))
+        filename_hint = optional_str(payload.get("filename"))
         self._logger.debug(
             "self_insert_artifact resolving managed path",
             extra={"path": path, "managed_root": str(self._storage.root_dir)},
@@ -405,7 +365,7 @@ class FileStorageTool:
                 code = "invalid_path"
             return ToolResult(content={"status": "error", "code": code, "message": reason})
 
-        relative_path = str(absolute_path.relative_to(self._storage.root_dir)).replace("\\", "/")
+        relative_path = to_posix_relative(absolute_path, self._storage.root_dir)
         resolved_mime = self._resolve_mime(absolute_path, mime_hint)
         filename = filename_hint or absolute_path.name
         file_size = absolute_path.stat().st_size
@@ -466,29 +426,3 @@ class FileStorageTool:
         if isinstance(guessed, str) and guessed:
             return guessed.lower()
         return "application/octet-stream"
-
-    @staticmethod
-    def _require_str(payload: dict[str, Any], key: str) -> str:
-        value = payload.get(key)
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"{key} must be a non-empty string")
-        return value.strip()
-
-    @staticmethod
-    def _optional_str(value: Any) -> str | None:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            raise ValueError("Expected string value")
-        stripped = value.strip()
-        return stripped or None
-
-    @staticmethod
-    def _optional_int(value: Any) -> int | None:
-        if value is None:
-            return None
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError("Expected integer value")
-        if value < 1:
-            raise ValueError("Expected integer value >= 1")
-        return value

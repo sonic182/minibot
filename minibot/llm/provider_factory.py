@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 from dataclasses import dataclass
 import json
 import re
@@ -19,7 +18,9 @@ from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
 from minibot.core.agent_runtime import ToolResult
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.shared.parse_utils import parse_json_maybe_python_object, parse_json_with_fenced_fallback
 from minibot.shared.json_schema import to_openai_strict_schema
+from minibot.shared.utils import humanize_token_count
 
 
 LLM_PROVIDERS = {
@@ -53,12 +54,14 @@ _OPENAI_STRICT_MODEL_PATTERNS = (
 class LLMGeneration:
     payload: Any
     response_id: str | None = None
+    total_tokens: int | None = None
 
 
 @dataclass
 class LLMCompletionStep:
     message: Any
     response_id: str | None
+    total_tokens: int | None = None
 
 
 @dataclass
@@ -155,6 +158,8 @@ class LLMClient:
         if self._is_responses_provider and self._reasoning_effort:
             extra_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
 
+        total_tokens_used = 0
+
         while True:
             call_kwargs: dict[str, Any] = {
                 "model": self._model,
@@ -171,19 +176,31 @@ class LLMClient:
             call_kwargs.update(extra_kwargs)
 
             response = await self._provider.acomplete(**call_kwargs)
+            usage_tokens = self._extract_total_tokens(response)
+            if usage_tokens is not None:
+                total_tokens_used += usage_tokens
             message = response.main_response
             if not message:
                 raise RuntimeError("LLM did not return a completion")
+            self._logger.debug(
+                "llm completion received",
+                extra={
+                    "tool_calls": len(getattr(message, "tool_calls", None) or []),
+                    "step_tokens": humanize_token_count(usage_tokens) if isinstance(usage_tokens, int) else "0",
+                    "cumulative_tokens": humanize_token_count(total_tokens_used),
+                    "provider": self.provider_name(),
+                },
+            )
             if not message.tool_calls or not tool_map:
                 payload = message.content
                 response_id = self._extract_response_id(response)
                 if response_schema and isinstance(payload, str):
                     try:
                         parsed = self._parse_structured_payload(payload)
-                        return LLMGeneration(parsed, response_id)
+                        return LLMGeneration(parsed, response_id, total_tokens=total_tokens_used or None)
                     except Exception:
                         self._logger.warning("failed to parse structured response; falling back to text")
-                return LLMGeneration(payload, response_id)
+                return LLMGeneration(payload, response_id, total_tokens=total_tokens_used or None)
             tool_messages = await self._execute_tool_calls(
                 message.tool_calls,
                 tool_map,
@@ -208,7 +225,7 @@ class LLMClient:
                 )
                 response_id = self._extract_response_id(response)
                 payload = self._tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
-                return LLMGeneration(payload, response_id)
+                return LLMGeneration(payload, response_id, total_tokens=total_tokens_used or None)
             if self._is_responses_provider:
                 response_id = self._extract_response_id(response)
                 if response_id:
@@ -225,7 +242,7 @@ class LLMClient:
                 )
                 response_id = self._extract_response_id(response)
                 payload = self._tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
-                return LLMGeneration(payload, response_id)
+                return LLMGeneration(payload, response_id, total_tokens=total_tokens_used or None)
 
     def is_responses_provider(self) -> bool:
         return self._is_responses_provider
@@ -265,7 +282,20 @@ class LLMClient:
         message = response.main_response
         if not message:
             raise RuntimeError("LLM did not return a completion")
-        return LLMCompletionStep(message=message, response_id=self._extract_response_id(response))
+        usage_tokens = self._extract_total_tokens(response)
+        self._logger.debug(
+            "llm runtime completion step received",
+            extra={
+                "tool_calls": len(getattr(message, "tool_calls", None) or []),
+                "step_tokens": humanize_token_count(usage_tokens) if isinstance(usage_tokens, int) else "0",
+                "provider": self.provider_name(),
+            },
+        )
+        return LLMCompletionStep(
+            message=message,
+            response_id=self._extract_response_id(response),
+            total_tokens=usage_tokens,
+        )
 
     async def execute_tool_calls_for_runtime(
         self,
@@ -384,6 +414,27 @@ class LLMClient:
                 return resp_id
         return None
 
+    @staticmethod
+    def _extract_total_tokens(response: Any) -> int | None:
+        original = getattr(response, "original", None)
+        if not isinstance(original, dict):
+            return None
+        usage = original.get("usage")
+        if not isinstance(usage, dict):
+            return None
+        total_tokens = usage.get("total_tokens")
+        if isinstance(total_tokens, int):
+            return total_tokens
+        input_tokens = usage.get("input_tokens")
+        output_tokens = usage.get("output_tokens")
+        if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+            return input_tokens + output_tokens
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+            return prompt_tokens + completion_tokens
+        return None
+
     async def _execute_tool_calls(
         self,
         tool_calls: Sequence[ToolCall],
@@ -468,13 +519,9 @@ class LLMClient:
                     repaired_candidates.append(text + ("}" * missing))
         candidates.extend(repaired_candidates)
         for candidate in candidates:
-            try:
-                parsed = json.loads(candidate)
-            except json.JSONDecodeError:
-                try:
-                    parsed = ast.literal_eval(candidate)
-                except (ValueError, SyntaxError):
-                    continue
+            parsed = parse_json_maybe_python_object(candidate)
+            if parsed is None:
+                continue
             if isinstance(parsed, dict):
                 return dict(parsed)
         raise ValueError("Tool call arguments must be valid JSON")
@@ -689,11 +736,4 @@ class LLMClient:
 
     @staticmethod
     def _parse_structured_payload(payload: str) -> Any:
-        try:
-            return json.loads(payload)
-        except Exception:
-            stripped = payload.strip()
-            stripped = re.sub(r"^```json\s*", "", stripped, flags=re.IGNORECASE)
-            stripped = re.sub(r"^```\s*", "", stripped)
-            stripped = re.sub(r"\s*```$", "", stripped)
-            return json.loads(stripped)
+        return parse_json_with_fenced_fallback(payload)

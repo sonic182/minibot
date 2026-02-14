@@ -11,6 +11,7 @@ from minibot.app.handlers import LLMMessageHandler
 from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 from minibot.llm.tools.factory import build_enabled_tools
+from minibot.shared.utils import humanize_token_count
 
 
 class Dispatcher:
@@ -33,6 +34,8 @@ class Dispatcher:
             tools=tools,
             default_owner_id=settings.tools.kv_memory.default_owner_id,
             max_history_messages=settings.memory.max_history_messages,
+            max_history_tokens=settings.memory.max_history_tokens,
+            notify_compaction_updates=settings.memory.notify_compaction_updates,
             agent_timeout_seconds=settings.runtime.agent_timeout_seconds,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
@@ -78,6 +81,7 @@ class Dispatcher:
             )
             response = await self._handler.handle(event)
             should_reply = response.metadata.get("should_reply", True)
+            token_trace = response.metadata.get("token_trace")
             self._logger.debug(
                 "handler response",
                 extra={
@@ -87,12 +91,39 @@ class Dispatcher:
                     "should_reply": should_reply,
                     "llm_provider": response.metadata.get("llm_provider"),
                     "llm_model": response.metadata.get("llm_model"),
+                    "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
+                    if isinstance(token_trace, dict)
+                    and isinstance(token_trace.get("turn_total_tokens"), int)
+                    else None,
+                    "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
+                    if isinstance(token_trace, dict)
+                    and isinstance(token_trace.get("session_total_tokens"), int)
+                    else None,
+                    "compaction_performed": token_trace.get("compaction_performed")
+                    if isinstance(token_trace, dict)
+                    else None,
                 },
             )
             if not should_reply:
                 self._logger.info("skipping user reply as instructed", extra={"event_id": event.event_id})
                 return
             await self._event_bus.publish(OutboundEvent(response=response))
+            compaction_updates = response.metadata.get("compaction_updates")
+            if isinstance(compaction_updates, list):
+                for update in compaction_updates:
+                    if not isinstance(update, str) or not update.strip():
+                        continue
+                    await self._event_bus.publish(
+                        OutboundEvent(
+                            response=ChannelResponse(
+                                channel=response.channel,
+                                chat_id=response.chat_id,
+                                text=update,
+                                render=RenderableResponse(kind="text", text=update),
+                                metadata={"should_reply": True, "compaction_update": True},
+                            )
+                        )
+                    )
         except Exception as exc:
             self._logger.exception("failed to handle message", exc_info=exc)
 
@@ -107,6 +138,7 @@ class Dispatcher:
                 attempt=event.attempt,
             )
             should_reply = repaired.metadata.get("should_reply", True)
+            token_trace = repaired.metadata.get("token_trace")
             self._logger.debug(
                 "format repair handler response",
                 extra={
@@ -115,6 +147,17 @@ class Dispatcher:
                     "text": repaired.text,
                     "should_reply": should_reply,
                     "attempt": event.attempt,
+                    "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
+                    if isinstance(token_trace, dict)
+                    and isinstance(token_trace.get("turn_total_tokens"), int)
+                    else None,
+                    "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
+                    if isinstance(token_trace, dict)
+                    and isinstance(token_trace.get("session_total_tokens"), int)
+                    else None,
+                    "compaction_performed": token_trace.get("compaction_performed")
+                    if isinstance(token_trace, dict)
+                    else None,
                 },
             )
             if not should_reply:

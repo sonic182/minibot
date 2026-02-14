@@ -17,6 +17,7 @@ from minibot.core.agent_runtime import (
 )
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.shared.utils import humanize_token_count
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class RuntimeResult:
     payload: Any
     response_id: str | None
     state: AgentState
+    total_tokens: int = 0
 
 
 class AgentRuntime:
@@ -55,6 +57,7 @@ class AgentRuntime:
         step = 0
         previous_response_id: str | None = None
         responses_followup_messages: list[dict[str, Any]] | None = None
+        total_tokens = 0
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
@@ -68,6 +71,7 @@ class AgentRuntime:
                         else "I reached the maximum execution steps before finishing.",
                         response_id=previous_response_id,
                         state=state,
+                        total_tokens=total_tokens,
                     )
 
                 call_messages = self._render_messages(state)
@@ -85,6 +89,8 @@ class AgentRuntime:
                     prompt_cache_key=prompt_cache_key,
                     previous_response_id=previous_response_id,
                 )
+                if isinstance(completion.total_tokens, int) and completion.total_tokens > 0:
+                    total_tokens += completion.total_tokens
                 responses_followup_messages = None
                 self._logger.debug(
                     "agent runtime provider step completed",
@@ -92,6 +98,10 @@ class AgentRuntime:
                         "step": step,
                         "response_id": completion.response_id,
                         "message_count": len(state.messages),
+                        "step_tokens": humanize_token_count(completion.total_tokens)
+                        if isinstance(completion.total_tokens, int)
+                        else "0",
+                        "runtime_total_tokens": humanize_token_count(total_tokens),
                     },
                 )
                 previous_response_id = completion.response_id
@@ -108,6 +118,7 @@ class AgentRuntime:
                         payload=getattr(completion.message, "content", ""),
                         response_id=completion.response_id,
                         state=state,
+                        total_tokens=total_tokens,
                     )
 
                 tool_calls_count += len(tool_calls)
@@ -129,6 +140,7 @@ class AgentRuntime:
                         else "I reached the maximum number of tool calls before finishing.",
                         response_id=completion.response_id,
                         state=state,
+                        total_tokens=total_tokens,
                     )
 
                 state.messages.append(self._from_provider_assistant_tool_call_message(completion.message))

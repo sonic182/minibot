@@ -12,6 +12,7 @@ from llm_async.models import Tool
 
 from minibot.adapters.config.schema import HTTPClientToolConfig
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.schema_utils import nullable_string, strict_object
 
 _SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 
@@ -132,9 +133,8 @@ def _http_tool_schema() -> Tool:
             "Returns an object with status, headers, body, truncated, truncated_chars, "
             "processor_used, and content_type."
         ),
-        parameters={
-            "type": "object",
-            "properties": {
+        parameters=strict_object(
+            properties={
                 "method": {
                     "type": "string",
                     "description": "HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS)",
@@ -147,18 +147,11 @@ def _http_tool_schema() -> Tool:
                     "type": ["object", "null"],
                     "additionalProperties": {"type": "string"},
                 },
-                "body": {
-                    "type": ["string", "null"],
-                    "description": "Optional request body (UTF-8 string)",
-                },
-                "json": {
-                    "type": ["string", "null"],
-                    "description": "Optional JSON payload encoded as a JSON string",
-                },
+                "body": nullable_string("Optional request body (UTF-8 string)"),
+                "json": nullable_string("Optional JSON payload encoded as a JSON string"),
             },
-            "required": ["url", "method", "headers", "body", "json"],
-            "additionalProperties": False,
-        },
+            required=["url", "method", "headers", "body", "json"],
+        ),
     )
 
 

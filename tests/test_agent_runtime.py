@@ -63,7 +63,7 @@ class _StubRuntimeLLMClient:
 @pytest.mark.asyncio
 async def test_runtime_returns_final_message_without_tool_calls() -> None:
     llm_client = _StubRuntimeLLMClient(
-        steps=[LLMCompletionStep(message=_FakeMessage(content="hello"), response_id="resp-1")],
+        steps=[LLMCompletionStep(message=_FakeMessage(content="hello"), response_id="resp-1", total_tokens=7)],
         executions=[],
     )
     runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
@@ -73,6 +73,7 @@ async def test_runtime_returns_final_message_without_tool_calls() -> None:
 
     assert result.payload == "hello"
     assert result.response_id == "resp-1"
+    assert result.total_tokens == 7
     assert result.state.messages[-1].role == "assistant"
 
 
@@ -80,8 +81,8 @@ async def test_runtime_returns_final_message_without_tool_calls() -> None:
 async def test_runtime_applies_append_message_directive_for_trusted_tool() -> None:
     tool_call = _FakeToolCall(id="call-1", function={"name": "self_insert_artifact", "arguments": "{}"})
     steps = [
-        LLMCompletionStep(message=_FakeMessage(content="", tool_calls=[tool_call]), response_id="resp-1"),
-        LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-2"),
+        LLMCompletionStep(message=_FakeMessage(content="", tool_calls=[tool_call]), response_id="resp-1", total_tokens=4),
+        LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-2", total_tokens=6),
     ]
     directive = AppendMessageDirective(
         type="append_message",
@@ -108,6 +109,7 @@ async def test_runtime_applies_append_message_directive_for_trusted_tool() -> No
     result = await runtime.run(state=state, tool_context=ToolContext(owner_id="1"))
 
     assert result.payload == "done"
+    assert result.total_tokens == 10
     assert any(message.metadata.get("synthetic") is True for message in result.state.messages)
     assert any(message.metadata.get("source_tool") == "self_insert_artifact" for message in result.state.messages)
 

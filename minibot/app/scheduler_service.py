@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from minibot.adapters.config.schema import ScheduledPromptsConfig
@@ -18,10 +18,7 @@ from minibot.core.jobs import (
     ScheduledPromptRepository,
     ScheduledPromptStatus,
 )
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+from minibot.shared.datetime_utils import ensure_utc, utcnow
 
 
 class ScheduledPromptService:
@@ -65,7 +62,7 @@ class ScheduledPromptService:
 
     async def run_pending(self) -> int:
         jobs = await self._repository.lease_due_jobs(
-            now=_utcnow(),
+            now=utcnow(),
             limit=self._batch_size,
             lease_timeout_seconds=self._lease_timeout,
         )
@@ -242,7 +239,7 @@ class ScheduledPromptService:
             self._wake_event.clear()
 
     def _schedule_wake(self, when: datetime) -> None:
-        delay = max((when - _utcnow()).total_seconds(), 0.0)
+        delay = max((when - utcnow()).total_seconds(), 0.0)
         task = asyncio.create_task(self._wake_after_delay(delay))
         self._wake_tasks.add(task)
 
@@ -300,7 +297,7 @@ class ScheduledPromptService:
             return
 
         delay = self._retry_delay(job)
-        next_run = _utcnow() + timedelta(seconds=delay)
+        next_run = utcnow() + timedelta(seconds=delay)
         await self._repository.retry_job(job.id, next_run, error)
         self._schedule_wake(next_run)
         self._logger.warning(
@@ -327,15 +324,13 @@ class ScheduledPromptService:
 
     def _normalize_datetime(self, run_at: datetime) -> datetime:
         normalized = self._ensure_utc(run_at)
-        now = _utcnow()
+        now = utcnow()
         if normalized <= now:
             return now
         return normalized
 
     def _ensure_utc(self, value: datetime) -> datetime:
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+        return ensure_utc(value)
 
     def _resolve_recurrence(
         self,
@@ -376,7 +371,7 @@ class ScheduledPromptService:
         if interval is None or interval <= 0:
             return None
 
-        now = _utcnow()
+        now = utcnow()
         next_run = job.run_at
         if next_run <= now:
             elapsed_seconds = (now - job.run_at).total_seconds()

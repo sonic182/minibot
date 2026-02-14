@@ -6,6 +6,8 @@ from pathlib import Path
 import shutil
 from typing import Literal
 
+from minibot.shared.path_utils import to_posix_relative
+
 
 class LocalFileStorage:
     def __init__(self, root_dir: str, max_write_bytes: int) -> None:
@@ -222,4 +224,4 @@ class LocalFileStorage:
         return resolved
 
     def _relative_to_root(self, path: Path) -> str:
-        return str(path.relative_to(self._root)).replace("\\", "/")
+        return to_posix_relative(path, self._root)

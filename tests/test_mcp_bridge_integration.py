@@ -42,7 +42,7 @@ class _MemoryStub:
     async def append_history(self, session_id: str, role: str, content: str) -> None:
         del session_id, role, content
 
-    async def get_history(self, session_id: str, limit: int = 32):
+    async def get_history(self, session_id: str, limit: int | None = None):
         del session_id, limit
         return []
 

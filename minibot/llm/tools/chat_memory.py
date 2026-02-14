@@ -3,7 +3,9 @@ from __future__ import annotations
 from llm_async.models import Tool
 
 from minibot.core.memory import MemoryBackend
+from minibot.llm.tools.arg_utils import optional_int, require_channel
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.schema_utils import empty_object_schema, integer_field, strict_object
 from minibot.shared.utils import session_id_from_parts
 
 
@@ -28,12 +30,7 @@ class ChatMemoryTool:
                 "Also use when deciding whether a history trim is needed. "
                 "Do not call for normal answering."
             ),
-            parameters={
-                "type": "object",
-                "properties": {},
-                "required": [],
-                "additionalProperties": False,
-            },
+            parameters=empty_object_schema(),
         )
 
     def _trim_schema(self) -> Tool:
@@ -45,20 +42,17 @@ class ChatMemoryTool:
                 "Use only when the user explicitly asks to clear/reset/forget/trim chat history. "
                 "Do not call during normal reasoning."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "keep_latest": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "description": (
+            parameters=strict_object(
+                properties={
+                    "keep_latest": integer_field(
+                        minimum=0,
+                        description=(
                             "How many latest messages to keep. 0 means clear all messages for this conversation."
                         ),
-                    }
+                    )
                 },
-                "required": ["keep_latest"],
-                "additionalProperties": False,
-            },
+                required=["keep_latest"],
+            ),
         )
 
     async def _info(self, _: dict[str, object], context: ToolContext) -> dict[str, object]:
@@ -84,24 +78,21 @@ class ChatMemoryTool:
         }
 
     def _session_id(self, context: ToolContext) -> str:
-        if not context.channel:
-            raise ValueError("channel context is required")
-        return session_id_from_parts(context.channel, context.chat_id, context.user_id)
+        channel = require_channel(context)
+        return session_id_from_parts(channel, context.chat_id, context.user_id)
 
     @staticmethod
     def _to_non_negative_int(value: object, key: str) -> int:
-        if isinstance(value, bool):
-            raise ValueError(f"{key} must be an integer")
-        if isinstance(value, int):
-            if value < 0:
-                raise ValueError(f"{key} must be >= 0")
-            return value
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                raise ValueError(f"{key} is required")
-            parsed = int(stripped)
-            if parsed < 0:
-                raise ValueError(f"{key} must be >= 0")
-            return parsed
-        raise ValueError(f"{key} must be an integer")
+        parsed = optional_int(
+            value,
+            field=key,
+            min_value=0,
+            allow_float=False,
+            allow_string=True,
+            reject_bool=True,
+            type_error=f"{key} must be an integer",
+            min_error=f"{key} must be >= 0",
+        )
+        if parsed is None:
+            raise ValueError(f"{key} is required")
+        return parsed

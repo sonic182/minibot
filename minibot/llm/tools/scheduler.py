@@ -1,13 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from llm_async.models import Tool
 
 from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.core.jobs import PromptRecurrence, PromptRole, ScheduledPromptStatus
+from minibot.llm.tools.arg_utils import enum_by_value, optional_bool, optional_int, require_channel, require_owner
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.schema_utils import (
+    job_id_property,
+    nullable_integer,
+    nullable_string,
+    pagination_properties,
+    strict_object,
+)
+from minibot.shared.datetime_utils import parse_iso_datetime_utc, parse_optional_iso_datetime_utc, utcnow
 
 
 class SchedulePromptTool:
@@ -27,30 +36,24 @@ class SchedulePromptTool:
         return Tool(
             name="schedule_prompt",
             description="Schedule a future message to be sent to this chat on behalf of the user.",
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=strict_object(
+                properties={
                     "content": {
                         "type": "string",
                         "description": "Message text to inject when the schedule is due.",
                     },
-                    "run_at": {
-                        "type": ["string", "null"],
-                        "description": "ISO 8601 timestamp (UTC preferred) when the prompt should run.",
-                    },
-                    "delay_seconds": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "description": "Alternative to run_at: delay from now in seconds.",
-                    },
+                    "run_at": nullable_string("ISO 8601 timestamp (UTC preferred) when the prompt should run."),
+                    "delay_seconds": nullable_integer(
+                        minimum=1,
+                        description="Alternative to run_at: delay from now in seconds.",
+                    ),
                     "role": {
-                        "type": ["string", "null"],
-                        "enum": [role.value for role in PromptRole],
-                        "description": (
+                        **nullable_string(
                             "Optional role for the injected prompt."
                             " Use 'assistant' (default) to send the content directly to the user,"
                             " or 'user' to treat it as a new prompt that the bot should answer."
                         ),
+                        "enum": [role.value for role in PromptRole],
                     },
                     "metadata": {
                         "type": ["object", "null"],
@@ -58,24 +61,21 @@ class SchedulePromptTool:
                         "additionalProperties": False,
                     },
                     "recurrence_type": {
-                        "type": ["string", "null"],
+                        **nullable_string("Optional recurrence mode. Use 'interval' for repeated execution."),
                         "enum": [recurrence.value for recurrence in PromptRecurrence],
-                        "description": "Optional recurrence mode. Use 'interval' for repeated execution.",
                     },
-                    "recurrence_interval_seconds": {
-                        "type": ["integer", "null"],
-                        "minimum": self._min_recurrence_interval_seconds,
-                        "description": (
+                    "recurrence_interval_seconds": nullable_integer(
+                        minimum=self._min_recurrence_interval_seconds,
+                        description=(
                             "Interval in seconds between recurring executions."
                             f" Minimum: {self._min_recurrence_interval_seconds}."
                         ),
-                    },
-                    "recurrence_end_at": {
-                        "type": ["string", "null"],
-                        "description": "Optional ISO 8601 timestamp after which recurrence stops.",
-                    },
+                    ),
+                    "recurrence_end_at": nullable_string(
+                        "Optional ISO 8601 timestamp after which recurrence stops."
+                    ),
                 },
-                "required": [
+                required=[
                     "content",
                     "run_at",
                     "delay_seconds",
@@ -85,50 +85,24 @@ class SchedulePromptTool:
                     "recurrence_interval_seconds",
                     "recurrence_end_at",
                 ],
-                "additionalProperties": False,
-            },
+            ),
         )
 
     def _cancel_schema(self) -> Tool:
         return Tool(
             name="cancel_scheduled_prompt",
             description="Cancel a scheduled prompt job by id for this owner/chat context.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "job_id": {
-                        "type": "string",
-                        "description": "Identifier returned by schedule_prompt.",
-                    }
-                },
-                "required": ["job_id"],
-                "additionalProperties": False,
-            },
+            parameters=strict_object(properties={"job_id": job_id_property()}, required=["job_id"]),
         )
 
     def _list_schema(self) -> Tool:
         return Tool(
             name="list_scheduled_prompts",
             description="List scheduled prompt jobs for this owner/chat context.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "active_only": {
-                        "type": ["boolean", "null"],
-                        "description": "When true, only pending/leased jobs are returned.",
-                    },
-                    "limit": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                    },
-                    "offset": {
-                        "type": ["integer", "null"],
-                        "minimum": 0,
-                    },
-                },
-                "required": ["active_only", "limit", "offset"],
-                "additionalProperties": False,
-            },
+            parameters=strict_object(
+                properties=pagination_properties(include_active_only=True),
+                required=["active_only", "limit", "offset"],
+            ),
         )
 
     def _delete_schema(self) -> Tool:
@@ -138,22 +112,12 @@ class SchedulePromptTool:
                 "Delete a scheduled prompt job by id for this owner/chat context."
                 " Active jobs are cancelled first and then deleted."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "job_id": {
-                        "type": "string",
-                        "description": "Identifier returned by schedule_prompt.",
-                    }
-                },
-                "required": ["job_id"],
-                "additionalProperties": False,
-            },
+            parameters=strict_object(properties={"job_id": job_id_property()}, required=["job_id"]),
         )
 
     async def _handle_schedule(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        owner_id = _require_owner(context)
-        channel = _require_channel(context)
+        owner_id = require_owner(context)
+        channel = require_channel(context, message="channel context is required for scheduling")
         content = _require_string(payload.get("content"), "content")
         run_at = _resolve_run_at(payload)
         role = _resolve_role(payload.get("role"))
@@ -161,8 +125,11 @@ class SchedulePromptTool:
         recurrence_type = _resolve_recurrence(
             payload.get("recurrence_type"), payload.get("recurrence_interval_seconds")
         )
-        recurrence_interval = _optional_int(
-            payload.get("recurrence_interval_seconds"), field="recurrence_interval_seconds"
+        recurrence_interval = optional_int(
+            payload.get("recurrence_interval_seconds"),
+            field="recurrence_interval_seconds",
+            allow_float=True,
+            type_error="recurrence_interval_seconds must be numeric",
         )
         recurrence_end_at = _optional_datetime(payload.get("recurrence_end_at"))
         if recurrence_type == PromptRecurrence.INTERVAL:
@@ -207,8 +174,8 @@ class SchedulePromptTool:
         }
 
     async def _handle_cancel(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        owner_id = _require_owner(context)
-        channel = _require_channel(context)
+        owner_id = require_owner(context)
+        channel = require_channel(context, message="channel context is required for scheduling")
         job_id = _require_string(payload.get("job_id"), "job_id")
         job = await self._service.cancel_prompt(
             job_id=job_id,
@@ -232,11 +199,21 @@ class SchedulePromptTool:
         }
 
     async def _handle_list(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        owner_id = _require_owner(context)
-        channel = _require_channel(context)
+        owner_id = require_owner(context)
+        channel = require_channel(context, message="channel context is required for scheduling")
         active_only = _optional_bool(payload.get("active_only"), default=True)
-        limit = _optional_int(payload.get("limit"), field="limit") or 20
-        offset = _optional_int(payload.get("offset"), field="offset") or 0
+        limit = optional_int(
+            payload.get("limit"),
+            field="limit",
+            allow_float=True,
+            type_error="limit must be numeric",
+        ) or 20
+        offset = optional_int(
+            payload.get("offset"),
+            field="offset",
+            allow_float=True,
+            type_error="offset must be numeric",
+        ) or 0
         jobs = await self._service.list_prompts(
             owner_id=owner_id,
             channel=channel,
@@ -264,8 +241,8 @@ class SchedulePromptTool:
         }
 
     async def _handle_delete(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        owner_id = _require_owner(context)
-        channel = _require_channel(context)
+        owner_id = require_owner(context)
+        channel = require_channel(context, message="channel context is required for scheduling")
         job_id = _require_string(payload.get("job_id"), "job_id")
         result = await self._service.delete_prompt(
             job_id=job_id,
@@ -290,18 +267,6 @@ class SchedulePromptTool:
         }
 
 
-def _require_owner(context: ToolContext) -> str:
-    if not context.owner_id:
-        raise ValueError("owner context is required")
-    return context.owner_id
-
-
-def _require_channel(context: ToolContext) -> str:
-    if not context.channel:
-        raise ValueError("channel context is required for scheduling")
-    return context.channel
-
-
 def _require_string(value: Any, field: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{field} must be a string")
@@ -319,28 +284,18 @@ def _resolve_run_at(payload: dict[str, Any]) -> datetime:
     if run_at_raw is not None:
         if not isinstance(run_at_raw, str):
             raise ValueError("run_at must be an ISO 8601 string")
-        parsed = datetime.fromisoformat(run_at_raw)
-        return _ensure_timezone(parsed)
+        return parse_iso_datetime_utc(run_at_raw, field="run_at")
     if isinstance(delay_value, (int, float)):
         delay_seconds = max(int(delay_value), 0)
     elif isinstance(delay_value, str):
         delay_seconds = int(delay_value.strip())
     else:
         raise ValueError("delay_seconds must be numeric")
-    return datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+    return utcnow() + timedelta(seconds=delay_seconds)
 
 
 def _resolve_role(role: Any) -> PromptRole:
-    if not role:
-        return PromptRole.USER
-    if isinstance(role, PromptRole):
-        return role
-    if isinstance(role, str):
-        normalized = role.strip().lower()
-        for candidate in PromptRole:
-            if candidate.value == normalized:
-                return candidate
-    raise ValueError("invalid role for scheduled prompt")
+    return enum_by_value(role, enum_type=PromptRole, field="role for scheduled prompt", default=PromptRole.USER)
 
 
 def _coerce_metadata(value: Any) -> dict[str, Any] | None:
@@ -351,58 +306,15 @@ def _coerce_metadata(value: Any) -> dict[str, Any] | None:
     raise ValueError("metadata must be an object")
 
 
-def _ensure_timezone(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
 def _resolve_recurrence(value: Any, interval_value: Any) -> PromptRecurrence:
     if value is None:
         return PromptRecurrence.INTERVAL if interval_value is not None else PromptRecurrence.NONE
-    if isinstance(value, PromptRecurrence):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        for recurrence in PromptRecurrence:
-            if recurrence.value == normalized:
-                return recurrence
-    raise ValueError("invalid recurrence_type")
-
-
-def _optional_int(value: Any, field: str) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        raise ValueError(f"{field} must be numeric")
-    if isinstance(value, (int, float)):
-        return int(value)
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        return int(stripped)
-    raise ValueError(f"{field} must be numeric")
+    return enum_by_value(value, enum_type=PromptRecurrence, field="recurrence_type", allow_falsy_default=False)
 
 
 def _optional_bool(value: Any, default: bool) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "off"}:
-            return False
-    raise ValueError("active_only must be a boolean")
+    return optional_bool(value, default=default, error_message="active_only must be a boolean")
 
 
 def _optional_datetime(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError("recurrence_end_at must be an ISO 8601 string")
-    parsed = datetime.fromisoformat(value)
-    return _ensure_timezone(parsed)
+    return parse_optional_iso_datetime_utc(value, field="recurrence_end_at")
