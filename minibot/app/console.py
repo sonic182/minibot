@@ -47,7 +47,7 @@ async def run(
         if once is not None:
             message = once
             if message == "-":
-                message = await asyncio.to_thread(sys.stdin.read)
+                message = sys.stdin.read()
             stripped = message.strip()
             if not stripped:
                 raise ValueError("empty input for --once")
@@ -55,11 +55,20 @@ async def run(
             await console_service.wait_for_response(timeout_seconds)
             return
 
+        confirm_exit = False
         while True:
-            user_text = await asyncio.to_thread(prompt_input, "[bold cyan]you[/]")
+            try:
+                user_text = prompt_input("[bold cyan]you[/]")
+            except KeyboardInterrupt:
+                if confirm_exit:
+                    return
+                console.print("[yellow]Press Ctrl+C again to exit, or type 'exit'.[/]")
+                confirm_exit = True
+                continue
             stripped = user_text.strip()
             if not stripped:
                 continue
+            confirm_exit = False
             if stripped.lower() in {"quit", "exit"}:
                 return
             await console_service.publish_user_message(stripped)
@@ -74,15 +83,18 @@ async def run(
 
 def main(argv: Optional[list[str]] = None) -> None:
     args = build_arg_parser().parse_args(argv)
-    asyncio.run(
-        run(
-            once=args.once,
-            chat_id=args.chat_id,
-            user_id=args.user_id,
-            timeout_seconds=args.timeout_seconds,
-            config_path=args.config,
+    try:
+        asyncio.run(
+            run(
+                once=args.once,
+                chat_id=args.chat_id,
+                user_id=args.user_id,
+                timeout_seconds=args.timeout_seconds,
+                config_path=args.config,
+            )
         )
-    )
+    except KeyboardInterrupt:
+        return
 
 
 if __name__ == "__main__":

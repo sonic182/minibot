@@ -10,13 +10,12 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
-from tests.fixtures.llm.fake_openai_api import FakeLLMState, build_app
-
-
 @pytest_asyncio.fixture
 async def fake_llm_server() -> AsyncGenerator[dict[str, Any], None]:
     pytest.importorskip("starlette")
     uvicorn = pytest.importorskip("uvicorn")
+    from tests.fixtures.llm.fake_openai_api import FakeLLMState, build_app
+
     state = FakeLLMState()
     app = build_app(state)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:

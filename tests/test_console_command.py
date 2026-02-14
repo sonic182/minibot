@@ -155,6 +155,90 @@ async def test_console_run_once_reads_stdin_when_dash(monkeypatch: pytest.Monkey
     assert published["text"] == "from stdin"
 
 
+@pytest.mark.asyncio
+async def test_console_repl_requires_double_ctrl_c_to_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app import console as console_module
+
+    printed: list[str] = []
+
+    class _FakeConsole:
+        def print(self, value) -> None:
+            printed.append(str(value))
+
+    class _FakeContainer:
+        @classmethod
+        def configure(cls, config_path=None) -> None:
+            del config_path
+
+        @classmethod
+        def get_logger(cls):
+            class _Logger:
+                def error(self, *_args, **_kwargs) -> None:
+                    return None
+
+            return _Logger()
+
+        @classmethod
+        def get_event_bus(cls):
+            return object()
+
+        @classmethod
+        async def initialize_storage(cls) -> None:
+            return None
+
+    class _FakeDispatcher:
+        def __init__(self, event_bus) -> None:
+            del event_bus
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    class _FakeConsoleService:
+        def __init__(self, event_bus, *, chat_id, user_id, console) -> None:
+            del event_bus, chat_id, user_id, console
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+        async def publish_user_message(self, text: str) -> None:
+            del text
+
+        async def wait_for_response(self, timeout_seconds: float):
+            del timeout_seconds
+            return object()
+
+    sequence = iter([KeyboardInterrupt(), KeyboardInterrupt()])
+
+    def _prompt(_label: str) -> str:
+        value = next(sequence)
+        if isinstance(value, BaseException):
+            raise value
+        return str(value)
+
+    monkeypatch.setattr(console_module, "AppContainer", _FakeContainer)
+    monkeypatch.setattr(console_module, "Dispatcher", _FakeDispatcher)
+    monkeypatch.setattr(console_module, "ConsoleService", _FakeConsoleService)
+    monkeypatch.setattr(console_module, "CompatConsole", _FakeConsole)
+    monkeypatch.setattr(console_module, "prompt_input", _prompt)
+
+    await console_module.run(
+        once=None,
+        chat_id=1,
+        user_id=1,
+        timeout_seconds=1.0,
+        config_path=None,
+    )
+
+    assert printed
+    assert "Press Ctrl+C again to exit" in printed[-1]
+
+
 def test_configure_console_file_only_logging_removes_stream_handlers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

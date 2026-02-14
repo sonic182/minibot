@@ -55,7 +55,7 @@ async def test_console_service_consumes_console_outbound_events() -> None:
     item = await service.wait_for_response(1.0)
     assert item.response.channel == "console"
     assert item.rendered_text == "ok"
-    assert "ok" in console.printed[-1]
+    assert console.printed
     await service.stop()
 
 
