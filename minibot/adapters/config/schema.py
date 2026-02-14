@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter
+from pydantic import model_validator
 
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
@@ -99,12 +100,6 @@ class ProviderConfig(BaseModel):
     base_url: str | None = None
 
 
-class AgentToolCapabilitiesConfig(BaseModel):
-    write: bool = True
-    edit: bool = True
-    bash: bool = True
-
-
 class AgentDefinitionConfig(BaseModel):
     name: str
     description: str = ""
@@ -116,10 +111,15 @@ class AgentDefinitionConfig(BaseModel):
     max_new_tokens: PositiveInt | None = None
     reasoning_effort: str | None = None
     max_tool_iterations: PositiveInt | None = None
-    tools: AgentToolCapabilitiesConfig = AgentToolCapabilitiesConfig()
-    tool_allow: List[str] = Field(default_factory=list)
-    tool_deny: List[str] = Field(default_factory=list)
+    tools_allow: List[str] = Field(default_factory=list)
+    tools_deny: List[str] = Field(default_factory=list)
     mcp_servers: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_tool_policy(self) -> "AgentDefinitionConfig":
+        if self.tools_allow and self.tools_deny:
+            raise ValueError("only one of tools_allow or tools_deny can be set")
+        return self
 
 
 class SupervisorAgentConfig(BaseModel):

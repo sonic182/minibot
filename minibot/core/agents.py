@@ -16,11 +16,8 @@ class AgentSpec:
     max_new_tokens: int | None = None
     reasoning_effort: str | None = None
     max_tool_iterations: int | None = None
-    allow_write: bool = True
-    allow_edit: bool = True
-    allow_bash: bool = True
-    tool_allow: list[str] = field(default_factory=list)
-    tool_deny: list[str] = field(default_factory=list)
+    tools_allow: list[str] = field(default_factory=list)
+    tools_deny: list[str] = field(default_factory=list)
     mcp_servers: list[str] = field(default_factory=list)
 
 
@@ -29,4 +26,3 @@ class DelegationDecision:
     should_delegate: bool
     agent_name: str | None = None
     reason: str = ""
-

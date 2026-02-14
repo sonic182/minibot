@@ -91,16 +91,16 @@ def _write_agent(
     name: str = "worker",
     description: str = "worker agent",
     model_provider: str = "openai",
-    tool_allow: list[str] | None = None,
-    tool_deny: list[str] | None = None,
+    tools_allow: list[str] | None = None,
+    tools_deny: list[str] | None = None,
 ) -> None:
     agents_dir.mkdir(parents=True, exist_ok=True)
     allow_lines = ""
     deny_lines = ""
-    if tool_allow:
-        allow_lines = "tool_allow:\n" + "".join([f"  - {item}\n" for item in tool_allow])
-    if tool_deny:
-        deny_lines = "tool_deny:\n" + "".join([f"  - {item}\n" for item in tool_deny])
+    if tools_allow:
+        allow_lines = "tools_allow:\n" + "".join([f"  - {item}\n" for item in tools_allow])
+    if tools_deny:
+        deny_lines = "tools_deny:\n" + "".join([f"  - {item}\n" for item in tools_deny])
     (agents_dir / f"{name}.md").write_text(
         (
             "---\n"
@@ -109,10 +109,6 @@ def _write_agent(
             "mode: agent\n"
             f"model_provider: {model_provider}\n"
             "model: gpt-4o-mini\n"
-            "tools:\n"
-            "  write: false\n"
-            "  edit: false\n"
-            "  bash: false\n"
             f"{allow_lines}"
             f"{deny_lines}"
             "---\n\n"
@@ -187,7 +183,12 @@ async def test_agents_functional_no_delegation_when_router_false(tmp_path: Path,
 @pytest.mark.parametrize("provider", ["openai", "openai_responses"])
 async def test_agents_functional_delegated_agent_calls_tool_and_summarizes(tmp_path: Path, provider: str) -> None:
     agents_dir = tmp_path / "agents"
-    _write_agent(agents_dir=agents_dir, name="worker", model_provider=provider)
+    _write_agent(
+        agents_dir=agents_dir,
+        name="worker",
+        model_provider=provider,
+        tools_allow=["calculate_expression"],
+    )
 
     default_client = ScriptedLLMClient(provider=provider)
     default_client.generate_steps = [
@@ -269,7 +270,7 @@ async def test_agents_functional_delegated_failure_falls_back_to_supervisor(tmp_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["openai", "openai_responses"])
-async def test_agents_functional_tool_deny_overrides_allow_in_specialist_request(
+async def test_agents_functional_tool_deny_in_specialist_request(
     tmp_path: Path,
     provider: str,
 ) -> None:
@@ -278,8 +279,7 @@ async def test_agents_functional_tool_deny_overrides_allow_in_specialist_request
         agents_dir=agents_dir,
         name="policy_worker",
         model_provider=provider,
-        tool_allow=["calculate_expression", "current_datetime"],
-        tool_deny=["calculate_expression"],
+        tools_deny=["calculate_expression"],
     )
 
     default_client = ScriptedLLMClient(provider=provider)

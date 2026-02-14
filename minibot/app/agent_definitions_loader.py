@@ -37,11 +37,8 @@ def load_agent_specs(directory: str) -> list[AgentSpec]:
                 max_new_tokens=cfg.max_new_tokens,
                 reasoning_effort=cfg.reasoning_effort,
                 max_tool_iterations=cfg.max_tool_iterations,
-                allow_write=cfg.tools.write,
-                allow_edit=cfg.tools.edit,
-                allow_bash=cfg.tools.bash,
-                tool_allow=list(cfg.tool_allow),
-                tool_deny=list(cfg.tool_deny),
+                tools_allow=list(cfg.tools_allow),
+                tools_deny=list(cfg.tools_deny),
                 mcp_servers=list(cfg.mcp_servers),
             )
         )

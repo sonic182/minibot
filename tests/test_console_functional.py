@@ -162,10 +162,6 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
             "mode: agent\n"
             "model_provider: openai\n"
             "model: gpt-4o-mini\n"
-            "tools:\n"
-            "  write: false\n"
-            "  edit: false\n"
-            "  bash: false\n"
             "---\n\n"
             "You are worker agent."
         ),

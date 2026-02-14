@@ -195,6 +195,87 @@ Troubleshooting:
 
 - If discovery fails for a server, startup logs include `failed to load mcp tools` with the server name.
 
+Agent Tool Scoping
+------------------
+
+Agent definitions live in `./agents/*.md` with YAML frontmatter plus a prompt body.
+
+Minimal example:
+
+```md
+---
+name: workspace_manager_agent
+description: Handles workspace file operations
+mode: agent
+model_provider: openai_responses
+model: gpt-5-mini
+temperature: 0.1
+tools_allow:
+  - list_files
+  - create_file
+  - move_file
+  - delete_file
+  - send_file
+---
+
+You manage files in the workspace safely and precisely.
+```
+
+How to give a specific MCP server to an agent:
+
+- Use `mcp_servers` with server names from `[[tools.mcp.servers]].name` in `config.toml`.
+- If `mcp_servers` is set, MCP tools are filtered to those servers.
+
+```md
+---
+name: browser_agent
+description: Browser automation specialist
+mode: agent
+model_provider: openai_responses
+model: gpt-5-mini
+mcp_servers:
+  - playwright-cli
+---
+
+Use browser tools to navigate, inspect, and extract results.
+```
+
+How to give a suite of local tools (for example file tools):
+
+- Use `tools_allow` patterns.
+- This is the recommended way to build a local "tool suite" per agent.
+
+```md
+---
+name: files_agent
+description: Files workspace manager
+mode: agent
+tools_allow:
+  - list_files
+  - create_file
+  - move_file
+  - delete_file
+  - send_file
+  - self_insert_artifact
+---
+
+Focus only on workspace file workflows.
+```
+
+Useful patterns and behavior:
+
+- `tools_allow` and `tools_deny` are mutually exclusive. Defining both is an agent config error.
+- Wildcards are supported (`fnmatch`), for example:
+  - `tools_allow: ["mcp_playwright-cli__*"]`
+  - `tools_deny: ["mcp_playwright-cli__browser_close"]`
+- If neither allow nor deny is set, local (non-MCP) tools are not exposed.
+- If `mcp_servers` is set, all tools from those MCP servers are exposed (and tools from other MCP servers are excluded).
+- In `tools_allow` mode, exposed tools are: allowed local tools + allowed MCP-server tools.
+- In `tools_deny` mode, exposed tools are: all local tools except denied + allowed MCP-server tools.
+- Use `[agents.supervisor].allowed_delegate_agents` in `config.toml` to restrict which agents can be selected by routing.
+- Keep secrets out of agent files. Put credentials in `[providers.<provider>]`.
+- Some models reject parameters like `temperature`; if you see provider `HTTP 400` for unsupported parameters, remove that field from the agent frontmatter (or from global `[llm]` defaults).
+
 Suggested model presets
 -----------------------
 
