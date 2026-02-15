@@ -16,5 +16,5 @@ Attachment handling for delegations:
 - Examples:
   - Single file: "Screenshot saved to: browser/screenshot.png"
   - Multiple files: "Generated files:\n  1. browser/screenshot1.png\n  2. browser/screenshot2.png"
-- Do NOT call send_file (console channel cannot send files to users)
+- Do NOT call filesystem(action="send") for console (console channel cannot send files to users)
 - Include helpful context like file type or purpose when reporting paths

@@ -16,9 +16,30 @@ class ChatMemoryTool:
 
     def bindings(self) -> list[ToolBinding]:
         return [
+            ToolBinding(tool=self._history_schema(), handler=self._history),
             ToolBinding(tool=self._info_schema(), handler=self._info),
             ToolBinding(tool=self._trim_schema(), handler=self._trim),
         ]
+
+    def _history_schema(self) -> Tool:
+        return Tool(
+            name="history",
+            description=("Conversation history operations for the current chat. Use action=info|trim."),
+            parameters=strict_object(
+                properties={
+                    "action": {
+                        "type": "string",
+                        "enum": ["info", "trim"],
+                        "description": "History operation to perform.",
+                    },
+                    "keep_latest": integer_field(
+                        minimum=0,
+                        description="Required when action=trim. 0 means clear all messages.",
+                    ),
+                },
+                required=["action", "keep_latest"],
+            ),
+        )
 
     def _info_schema(self) -> Tool:
         return Tool(
@@ -76,6 +97,14 @@ class ChatMemoryTool:
             "remaining_messages": remaining,
             "max_history_messages": self._max_history_messages,
         }
+
+    async def _history(self, payload: dict[str, object], context: ToolContext) -> dict[str, object]:
+        action = payload.get("action")
+        if action == "info":
+            return await self._info(payload, context)
+        if action == "trim":
+            return await self._trim(payload, context)
+        raise ValueError("action must be one of: info, trim")
 
     def _session_id(self, context: ToolContext) -> str:
         channel = require_channel(context)

@@ -25,6 +25,7 @@ class HTTPClientTool:
 
     def bindings(self) -> list[ToolBinding]:
         return [
+            ToolBinding(tool=_http_client_schema(), handler=self._handle_request),
             ToolBinding(tool=_http_tool_schema(), handler=self._handle_request),
         ]
 
@@ -152,6 +153,15 @@ def _http_tool_schema() -> Tool:
             },
             required=["url", "method", "headers", "body", "json"],
         ),
+    )
+
+
+def _http_client_schema() -> Tool:
+    schema = _http_tool_schema()
+    return Tool(
+        name="http_client",
+        description=schema.description,
+        parameters=schema.parameters,
     )
 
 

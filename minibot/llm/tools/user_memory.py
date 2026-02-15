@@ -19,11 +19,61 @@ from minibot.shared.datetime_utils import parse_optional_iso_datetime_utc
 
 def build_kv_tools(memory: KeyValueMemory) -> list[ToolBinding]:
     return [
+        ToolBinding(tool=_memory_tool(), handler=lambda payload, ctx: _memory_action(memory, payload, ctx)),
         ToolBinding(tool=_save_tool(), handler=lambda payload, ctx: _save_entry(memory, payload, ctx)),
         ToolBinding(tool=_get_tool(), handler=lambda payload, ctx: _get_entry(memory, payload, ctx)),
         ToolBinding(tool=_search_tool(), handler=lambda payload, ctx: _search_entries(memory, payload, ctx)),
         ToolBinding(tool=_delete_tool(), handler=lambda payload, ctx: _delete_entry(memory, payload, ctx)),
     ]
+
+
+def _memory_tool() -> Tool:
+    return Tool(
+        name="memory",
+        description=("User memory operations for long-term facts and preferences. Use action=save|get|search|delete."),
+        parameters=strict_object(
+            properties={
+                "action": {
+                    "type": "string",
+                    "enum": ["save", "get", "search", "delete"],
+                    "description": "Memory operation to perform.",
+                },
+                "entry_id": nullable_string("Entry id for get/delete."),
+                "title": nullable_string("Entry title for save/get/delete."),
+                "data": nullable_string("Entry content for save."),
+                "query": nullable_string("Search query for search."),
+                "metadata": nullable_string("Optional JSON metadata for save."),
+                "source": nullable_string("Optional source for save."),
+                "expires_at": nullable_string("ISO datetime when entry expires for save."),
+                **pagination_properties(),
+            },
+            required=[
+                "action",
+                "entry_id",
+                "title",
+                "data",
+                "query",
+                "metadata",
+                "source",
+                "expires_at",
+                "limit",
+                "offset",
+            ],
+        ),
+    )
+
+
+async def _memory_action(memory: KeyValueMemory, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+    action = optional_str(payload.get("action"))
+    if action == "save":
+        return await _save_entry(memory, payload, context)
+    if action == "get":
+        return await _get_entry(memory, payload, context)
+    if action == "search":
+        return await _search_entries(memory, payload, context)
+    if action == "delete":
+        return await _delete_entry(memory, payload, context)
+    raise ValueError("action must be one of: save, get, search, delete")
 
 
 def _save_tool() -> Tool:

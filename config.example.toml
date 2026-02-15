@@ -68,7 +68,7 @@ delegated_tool_call_policy = "auto"
 
 [orchestration.main_agent]
 name = "minibot"
-# offload mcp to dedicated agents, and to keep all other tools accessible
+# Keep all built-in tools enabled and hide direct MCP tools from main agent.
 tools_deny = ["mcp*"]
 
 # Optional request params. Omit keys to avoid sending them.

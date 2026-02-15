@@ -33,6 +33,8 @@ class FileStorageTool:
 
     def bindings(self) -> list[ToolBinding]:
         return [
+            ToolBinding(tool=self._filesystem_schema(), handler=self._filesystem),
+            ToolBinding(tool=self._artifact_insert_schema(), handler=self._self_insert_artifact),
             ToolBinding(tool=self._list_files_schema(), handler=self._list_files),
             ToolBinding(tool=self._glob_files_schema(), handler=self._glob_files),
             ToolBinding(tool=self._file_info_schema(), handler=self._file_info),
@@ -42,6 +44,59 @@ class FileStorageTool:
             ToolBinding(tool=self._send_file_schema(), handler=self._send_file),
             ToolBinding(tool=self._self_insert_artifact_schema(), handler=self._self_insert_artifact),
         ]
+
+    def _filesystem_schema(self) -> Tool:
+        return Tool(
+            name="filesystem",
+            description=("Managed workspace file operations. Use action=list|glob|info|write|move|delete|send."),
+            parameters=strict_object(
+                properties={
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "glob", "info", "write", "move", "delete", "send"],
+                        "description": "Filesystem operation to perform.",
+                    },
+                    "folder": nullable_string("Optional folder path for list/glob."),
+                    "pattern": nullable_string("Glob pattern for action=glob."),
+                    "limit": nullable_integer(minimum=1, description="Optional result limit for action=glob."),
+                    "path": nullable_string("Path for info/write/delete/send."),
+                    "content": nullable_string("Content for action=write."),
+                    "overwrite": nullable_boolean("Overwrite flag for action=write/move."),
+                    "source_path": nullable_string("Source path for action=move."),
+                    "destination_path": nullable_string("Destination path for action=move."),
+                    "target": {
+                        **nullable_string("Target kind filter for action=delete."),
+                        "enum": ["any", "file", "folder", None],
+                    },
+                    "recursive": nullable_boolean("Recursive delete for action=delete."),
+                    "caption": nullable_string("Optional caption for action=send."),
+                },
+                required=[
+                    "action",
+                    "folder",
+                    "pattern",
+                    "limit",
+                    "path",
+                    "content",
+                    "overwrite",
+                    "source_path",
+                    "destination_path",
+                    "target",
+                    "recursive",
+                    "caption",
+                ],
+            ),
+        )
+
+    def _artifact_insert_schema(self) -> Tool:
+        return Tool(
+            name="artifact_insert",
+            description=(
+                "Insert a managed file artifact into conversation context for multimodal analysis. "
+                "Equivalent to self_insert_artifact."
+            ),
+            parameters=self._self_insert_artifact_schema().parameters,
+        )
 
     def _list_files_schema(self) -> Tool:
         return Tool(
@@ -456,6 +511,58 @@ class FileStorageTool:
             },
             directives=directives,
         )
+
+    async def _filesystem(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any] | ToolResult:
+        action = (optional_str(payload.get("action")) or "").lower()
+        if action == "list":
+            return await self._list_files({"folder": payload.get("folder")}, context)
+        if action == "glob":
+            return await self._glob_files(
+                {
+                    "pattern": payload.get("pattern"),
+                    "folder": payload.get("folder"),
+                    "limit": payload.get("limit"),
+                },
+                context,
+            )
+        if action == "info":
+            return await self._file_info({"path": payload.get("path")}, context)
+        if action == "write":
+            return await self._create_file(
+                {
+                    "path": payload.get("path"),
+                    "content": payload.get("content"),
+                    "overwrite": payload.get("overwrite"),
+                },
+                context,
+            )
+        if action == "move":
+            return await self._move_file(
+                {
+                    "source_path": payload.get("source_path"),
+                    "destination_path": payload.get("destination_path"),
+                    "overwrite": payload.get("overwrite"),
+                },
+                context,
+            )
+        if action == "delete":
+            return await self._delete_file(
+                {
+                    "path": payload.get("path"),
+                    "target": payload.get("target"),
+                    "recursive": payload.get("recursive"),
+                },
+                context,
+            )
+        if action == "send":
+            return await self._send_file(
+                {
+                    "path": payload.get("path"),
+                    "caption": payload.get("caption"),
+                },
+                context,
+            )
+        raise ValueError("action must be one of: list, glob, info, write, move, delete, send")
 
     @staticmethod
     def _resolve_mime(path: Path, mime_hint: str | None) -> str:
