@@ -9,6 +9,7 @@ from minibot.adapters.config.schema import Settings
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.tool_capabilities import summarize_agent_capabilities
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole, RuntimeLimits
 from minibot.core.agents import AgentSpec, DelegationDecision
@@ -22,6 +23,14 @@ class OrchestratedRunResult:
     primary_agent: str
     agent_trace: list[dict[str, Any]]
     fallback_used: bool
+
+
+@dataclass(frozen=True)
+class OrchestrationPlan:
+    strategy: str
+    reason: str
+    agent_name: str | None = None
+    requires_tool_execution: bool = False
 
 
 class AgentOrchestrator:
@@ -48,10 +57,19 @@ class AgentOrchestrator:
         tool_context: ToolContext,
         response_schema: dict[str, Any],
         prompt_cache_key: str | None,
+        plan: OrchestrationPlan | None = None,
     ) -> OrchestratedRunResult | None:
         if not self._settings.agents.enabled or self._registry.is_empty():
             return None
-        decision = await self._decide_agent(history=history, user_text=user_text, prompt_cache_key=prompt_cache_key)
+        if plan is None:
+            plan = await self.plan(
+                history=history,
+                user_text=user_text,
+                prompt_cache_key=prompt_cache_key,
+            )
+        if plan.strategy != "delegate_agent" or not plan.agent_name:
+            return None
+        decision = DelegationDecision(True, agent_name=plan.agent_name, reason=plan.reason)
         if not decision.should_delegate or not decision.agent_name:
             return None
         spec = self._registry.get(decision.agent_name)
@@ -100,7 +118,7 @@ class AgentOrchestrator:
                         "agent": "supervisor",
                         "decision": "delegated",
                         "target": spec.name,
-                        "reason": decision.reason,
+                        "reason": plan.reason,
                     },
                     {
                         "agent": spec.name,
@@ -120,7 +138,7 @@ class AgentOrchestrator:
                         "agent": "supervisor",
                         "decision": "delegated",
                         "target": spec.name,
-                        "reason": decision.reason,
+                        "reason": plan.reason,
                     },
                     {
                         "agent": spec.name,
@@ -130,25 +148,50 @@ class AgentOrchestrator:
                 fallback_used=True,
             )
 
-    async def _decide_agent(
+    async def plan(
         self,
         *,
         history: Sequence[Any],
         user_text: str,
         prompt_cache_key: str | None,
-    ) -> DelegationDecision:
-        default_client = self._llm_factory.create_default()
+    ) -> OrchestrationPlan:
+        if not self._settings.agents.enabled or self._registry.is_empty():
+            return OrchestrationPlan(strategy="supervisor_tools", reason="agents-disabled")
+
         candidates = self._eligible_candidates()
         if not candidates:
-            return DelegationDecision(False)
+            return OrchestrationPlan(strategy="supervisor_tools", reason="no-eligible-agents")
+
+        plan = await self._decide_plan(
+            history=history,
+            user_text=user_text,
+            candidates=candidates,
+            prompt_cache_key=prompt_cache_key,
+        )
+        if plan.strategy == "delegate_agent" and plan.agent_name in {item.name for item in candidates}:
+            return plan
+        if plan.strategy in {"direct_response", "supervisor_tools"}:
+            return plan
+        return OrchestrationPlan(strategy="supervisor_tools", reason="planner-invalid")
+
+    async def _decide_plan(
+        self,
+        *,
+        history: Sequence[Any],
+        user_text: str,
+        candidates: Sequence[AgentSpec],
+        prompt_cache_key: str | None,
+    ) -> OrchestrationPlan:
+        default_client = self._llm_factory.create_default()
         names = [item.name for item in candidates]
         prompt = (
-            "Decide whether to delegate this request to one specialist agent. "
-            "Return JSON object with fields should_delegate:boolean, agent_name:string|null, reason:string. "
-            "If no delegation is needed, set should_delegate=false and agent_name=null.\n\n"
+            "Decide request execution strategy. "
+            "Return JSON object with fields strategy, agent_name, reason, requires_tool_execution. "
+            "strategy must be one of direct_response, supervisor_tools, delegate_agent. "
+            "When strategy is delegate_agent provide a valid agent_name from the list. "
+            "For direct_response set requires_tool_execution=false.\n\n"
             f"User request:\n{user_text}\n\n"
-            "Agents:\n"
-            + "\n".join([f"- {item.name}: {item.description}" for item in candidates])
+            "Agents:\n" + "\n".join([f"- {item.name}: {summarize_agent_capabilities(item)}" for item in candidates])
         )
         try:
             generation = await default_client.generate(
@@ -160,11 +203,15 @@ class AgentOrchestrator:
                 response_schema={
                     "type": "object",
                     "properties": {
-                        "should_delegate": {"type": "boolean"},
+                        "strategy": {
+                            "type": "string",
+                            "enum": ["direct_response", "supervisor_tools", "delegate_agent"],
+                        },
                         "agent_name": {"type": ["string", "null"]},
                         "reason": {"type": "string"},
+                        "requires_tool_execution": {"type": "boolean"},
                     },
-                    "required": ["should_delegate", "agent_name", "reason"],
+                    "required": ["strategy", "agent_name", "reason", "requires_tool_execution"],
                     "additionalProperties": False,
                 },
                 prompt_cache_key=f"{prompt_cache_key}:agent-router" if prompt_cache_key else None,
@@ -174,26 +221,48 @@ class AgentOrchestrator:
             payload = generation.payload
             parsed = payload if isinstance(payload, dict) else json.loads(str(payload))
             if not isinstance(parsed, dict):
-                return DelegationDecision(False)
-            should_delegate = bool(parsed.get("should_delegate", False))
+                return OrchestrationPlan(strategy="supervisor_tools", reason="planner-invalid-payload")
+            strategy = str(parsed.get("strategy", "supervisor_tools"))
             agent_name = parsed.get("agent_name")
-            if not should_delegate:
-                return DelegationDecision(False, reason=str(parsed.get("reason", "")))
-            if not isinstance(agent_name, str) or agent_name not in names:
-                return DelegationDecision(False)
             reason = str(parsed.get("reason", "")).strip()
-            return DelegationDecision(True, agent_name=agent_name, reason=reason)
+            requires_tool_execution = bool(parsed.get("requires_tool_execution", False))
+            if strategy == "delegate_agent":
+                if not isinstance(agent_name, str) or agent_name not in names:
+                    return OrchestrationPlan(strategy="supervisor_tools", reason="planner-invalid-agent")
+                return OrchestrationPlan(
+                    strategy="delegate_agent",
+                    agent_name=agent_name,
+                    reason=reason,
+                    requires_tool_execution=requires_tool_execution,
+                )
+            if strategy == "direct_response":
+                return OrchestrationPlan(strategy="direct_response", reason=reason, requires_tool_execution=False)
+            return OrchestrationPlan(
+                strategy="supervisor_tools",
+                reason=reason,
+                requires_tool_execution=requires_tool_execution,
+            )
         except Exception:
             lowered = user_text.lower().strip()
             if "playwright" in lowered or "browse" in lowered or "browser" in lowered:
                 preferred = next((name for name in names if "playwright" in name), None)
                 if preferred is not None:
-                    return DelegationDecision(True, preferred, "heuristic: browsing intent")
+                    return OrchestrationPlan(
+                        strategy="delegate_agent",
+                        agent_name=preferred,
+                        reason="heuristic: browsing intent",
+                        requires_tool_execution=True,
+                    )
             if any(token in lowered for token in {"file", "workspace", "folder", "delete", "move", "rename"}):
                 preferred = next((name for name in names if "workspace" in name), None)
                 if preferred is not None:
-                    return DelegationDecision(True, preferred, "heuristic: workspace intent")
-            return DelegationDecision(False)
+                    return OrchestrationPlan(
+                        strategy="delegate_agent",
+                        agent_name=preferred,
+                        reason="heuristic: workspace intent",
+                        requires_tool_execution=True,
+                    )
+            return OrchestrationPlan(strategy="supervisor_tools", reason="heuristic-default")
 
     def _eligible_candidates(self) -> list[AgentSpec]:
         candidates = list(self._registry.all())

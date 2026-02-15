@@ -61,12 +61,14 @@ enabled = true
 directory = "./agents"
 max_delegation_depth = 2
 default_timeout_seconds = 90
+tool_ownership_mode = "exclusive"
 include_agent_trace_in_metadata = true
 
 [agents.supervisor]
 name = "supervisor"
 allowed_delegate_agents = ["playwright_mcp_agent", "workspace_manager_agent"]
 system_prompt_append = ""
+tools_allow = ["current_*", "calculate_*", "http_*"]
 
 # Optional request params. Omit keys to avoid sending them.
 # temperature = 0.2

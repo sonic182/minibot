@@ -31,7 +31,7 @@ def _write_config(tmp_path: Path, provider: str = "openai", agents_enabled: bool
         agents_lines = (
             "\n[agents]\n"
             "enabled = true\n"
-            f"directory = \"{tmp_path / 'agents'}\"\n"
+            f'directory = "{tmp_path / "agents"}"\n'
             "max_delegation_depth = 2\n"
             "default_timeout_seconds = 90\n"
         )
@@ -171,7 +171,12 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
     default_client = ScriptedLLMClient(provider="openai")
     default_client.generate_steps = [
         {
-            "payload": {"should_delegate": True, "agent_name": "worker", "reason": "test"},
+            "payload": {
+                "strategy": "delegate_agent",
+                "agent_name": "worker",
+                "reason": "test",
+                "requires_tool_execution": False,
+            },
             "response_id": "router-1",
             "total_tokens": 8,
         }

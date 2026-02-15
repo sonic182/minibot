@@ -5,11 +5,9 @@ mode: agent
 model_provider: openrouter
 model: openai/gpt-5-mini
 temperature: 0.1
-tools:
-  write: false
-  edit: false
-  bash: false
-tool_allow:
+mcp_servers:
+  - playwright-cli
+tools_allow:
   - mcp_playwright-cli__*
 ---
 

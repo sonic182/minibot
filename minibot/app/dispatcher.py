@@ -9,6 +9,7 @@ from minibot.adapters.container import AppContainer
 from minibot.app.agent_orchestrator import AgentOrchestrator
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
+from minibot.app.tool_capabilities import supervisor_tool_view
 from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 from minibot.llm.tools.factory import build_enabled_tools
@@ -29,11 +30,17 @@ class Dispatcher:
             prompt_service,
             event_bus,
         )
+        agent_registry = AppContainer.get_agent_registry()
+        supervisor_tools_view = supervisor_tool_view(
+            tools=tools,
+            agents_config=settings.agents,
+            agent_specs=agent_registry.all(),
+        )
         try:
             orchestrator = AgentOrchestrator(
                 settings=settings,
                 llm_factory=AppContainer.get_llm_factory(),
-                registry=AppContainer.get_agent_registry(),
+                registry=agent_registry,
                 tools=tools,
             )
         except RuntimeError:
@@ -41,7 +48,7 @@ class Dispatcher:
         self._handler = LLMMessageHandler(
             memory=memory_backend,
             llm_client=AppContainer.get_llm_client(),
-            tools=tools,
+            tools=supervisor_tools_view.tools,
             agent_orchestrator=orchestrator,
             default_owner_id=settings.tools.kv_memory.default_owner_id,
             max_history_messages=settings.memory.max_history_messages,
@@ -63,6 +70,11 @@ class Dispatcher:
                     "mcp_servers_configured": len(settings.tools.mcp.servers),
                     "mcp_tools_enabled": mcp_tool_names or ["none"],
                 },
+            )
+        if supervisor_tools_view.hidden_tool_names:
+            self._logger.info(
+                "supervisor tools hidden due to exclusive ownership",
+                extra={"hidden_tools": supervisor_tools_view.hidden_tool_names},
             )
         self._task: Optional[asyncio.Task[None]] = None
 
@@ -103,12 +115,10 @@ class Dispatcher:
                     "llm_provider": response.metadata.get("llm_provider"),
                     "llm_model": response.metadata.get("llm_model"),
                     "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
-                    if isinstance(token_trace, dict)
-                    and isinstance(token_trace.get("turn_total_tokens"), int)
+                    if isinstance(token_trace, dict) and isinstance(token_trace.get("turn_total_tokens"), int)
                     else None,
                     "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
-                    if isinstance(token_trace, dict)
-                    and isinstance(token_trace.get("session_total_tokens"), int)
+                    if isinstance(token_trace, dict) and isinstance(token_trace.get("session_total_tokens"), int)
                     else None,
                     "compaction_performed": token_trace.get("compaction_performed")
                     if isinstance(token_trace, dict)
@@ -159,12 +169,10 @@ class Dispatcher:
                     "should_reply": should_reply,
                     "attempt": event.attempt,
                     "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
-                    if isinstance(token_trace, dict)
-                    and isinstance(token_trace.get("turn_total_tokens"), int)
+                    if isinstance(token_trace, dict) and isinstance(token_trace.get("turn_total_tokens"), int)
                     else None,
                     "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
-                    if isinstance(token_trace, dict)
-                    and isinstance(token_trace.get("session_total_tokens"), int)
+                    if isinstance(token_trace, dict) and isinstance(token_trace.get("session_total_tokens"), int)
                     else None,
                     "compaction_performed": token_trace.get("compaction_performed")
                     if isinstance(token_trace, dict)

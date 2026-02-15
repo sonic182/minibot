@@ -228,6 +228,8 @@ class LLMMessageHandler:
         primary_agent = "supervisor"
         agent_trace: list[dict[str, Any]] = []
         delegation_fallback_used = False
+        routing_strategy = "supervisor_tools"
+        routing_reason = "default"
         tool_required_intent = False
         suggested_tool: str | None = None
         suggested_path: str | None = None
@@ -235,22 +237,55 @@ class LLMMessageHandler:
         try:
             delegated_handled = False
             if self._agent_orchestrator is not None:
-                delegated = await self._agent_orchestrator.maybe_delegate(
+                plan = await self._agent_orchestrator.plan(
                     history=history,
                     user_text=model_text,
-                    user_content=model_user_content,
-                    tool_context=tool_context,
-                    response_schema=self._response_schema(),
                     prompt_cache_key=prompt_cache_key,
                 )
-                if delegated is not None:
-                    turn_total_tokens += self._track_token_usage(session_id, delegated.total_tokens)
-                    agent_trace = list(delegated.agent_trace)
-                    delegation_fallback_used = delegated.fallback_used
-                    if delegated.payload is not None:
-                        primary_agent = delegated.primary_agent
-                        render, should_reply = self._extract_answer(delegated.payload)
-                        delegated_handled = True
+                routing_strategy = plan.strategy
+                routing_reason = plan.reason
+                agent_trace.append(
+                    {
+                        "agent": "supervisor",
+                        "decision": "planned",
+                        "strategy": plan.strategy,
+                        "target": plan.agent_name,
+                        "reason": plan.reason,
+                    }
+                )
+                if plan.strategy == "delegate_agent":
+                    delegated = await self._agent_orchestrator.maybe_delegate(
+                        history=history,
+                        user_text=model_text,
+                        user_content=model_user_content,
+                        tool_context=tool_context,
+                        response_schema=self._response_schema(),
+                        prompt_cache_key=prompt_cache_key,
+                        plan=plan,
+                    )
+                    if delegated is not None:
+                        turn_total_tokens += self._track_token_usage(session_id, delegated.total_tokens)
+                        agent_trace.extend(delegated.agent_trace)
+                        delegation_fallback_used = delegated.fallback_used
+                        if delegated.payload is not None:
+                            primary_agent = delegated.primary_agent
+                            render, should_reply = self._extract_answer(delegated.payload)
+                            delegated_handled = True
+                elif plan.strategy == "direct_response":
+                    generation = await self._llm_client.generate(
+                        history,
+                        model_text,
+                        user_content=model_user_content,
+                        tools=[],
+                        tool_context=tool_context,
+                        response_schema=self._response_schema(),
+                        prompt_cache_key=prompt_cache_key,
+                        previous_response_id=None,
+                        system_prompt_override=system_prompt,
+                    )
+                    turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+                    render, should_reply = self._extract_answer(generation.payload)
+                    delegated_handled = True
             if not delegated_handled:
                 if self._runtime is None:
                     generation = await self._llm_client.generate(
@@ -398,6 +433,8 @@ class LLMMessageHandler:
         if agent_trace:
             metadata["agent_trace"] = agent_trace
         metadata["delegation_fallback_used"] = delegation_fallback_used
+        metadata["routing_strategy"] = routing_strategy
+        metadata["routing_reason"] = routing_reason
         if compaction_result.updates:
             metadata["compaction_updates"] = compaction_result.updates
         metadata["token_trace"] = self._build_token_trace(

@@ -5,11 +5,7 @@ mode: agent
 model_provider: openai_responses
 model: gpt-5-mini
 temperature: 0.1
-tools:
-  write: true
-  edit: true
-  bash: false
-tool_allow:
+tools_allow:
   - list_files
   - glob_files
   - file_info

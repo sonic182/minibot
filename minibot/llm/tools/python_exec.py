@@ -53,9 +53,7 @@ class HostPythonExecTool:
                     "code": string_field("Python source code to execute."),
                     "stdin": nullable_string("Optional stdin text sent to the process."),
                     "timeout_seconds": nullable_integer(minimum=1, description="Optional timeout for this execution."),
-                    "save_artifacts": nullable_boolean(
-                        "When true, save generated files into managed files storage."
-                    ),
+                    "save_artifacts": nullable_boolean("When true, save generated files into managed files storage."),
                     "artifact_globs": {
                         "type": ["array", "null"],
                         "items": {"type": "string"},

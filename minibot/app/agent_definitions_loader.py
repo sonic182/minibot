@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from minibot.adapters.config.schema import AgentDefinitionConfig
 from minibot.core.agents import AgentSpec
 
@@ -19,7 +21,10 @@ def load_agent_specs(directory: str) -> list[AgentSpec]:
         payload = _parse_frontmatter(frontmatter)
         if not isinstance(payload, dict):
             raise ValueError(f"{path}: frontmatter must be a YAML object")
-        cfg = AgentDefinitionConfig.model_validate(payload)
+        try:
+            cfg = AgentDefinitionConfig.model_validate(payload)
+        except ValidationError as exc:
+            raise ValueError(f"{path}: invalid agent frontmatter: {exc}") from exc
         if not cfg.enabled:
             continue
         system_prompt = body.strip()

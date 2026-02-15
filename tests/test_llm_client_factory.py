@@ -70,9 +70,7 @@ def test_create_for_agent_provider_override_uses_provider_credentials(monkeypatc
             base_url="https://openai.local",
             model="gpt-4o-mini",
         ),
-        providers={
-            "anthropic": ProviderConfig(api_key="anthropic-key", base_url="https://anthropic.local")
-        },
+        providers={"anthropic": ProviderConfig(api_key="anthropic-key", base_url="https://anthropic.local")},
     )
     factory = LLMClientFactory(settings)
 

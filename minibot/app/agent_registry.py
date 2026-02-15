@@ -21,4 +21,3 @@ class AgentRegistry:
 
     def is_empty(self) -> bool:
         return not self._by_name
-

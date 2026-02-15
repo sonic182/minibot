@@ -115,6 +115,8 @@ class AgentDefinitionConfig(BaseModel):
     tools_deny: List[str] = Field(default_factory=list)
     mcp_servers: List[str] = Field(default_factory=list)
 
+    model_config = ConfigDict(extra="forbid")
+
     @model_validator(mode="after")
     def _validate_tool_policy(self) -> "AgentDefinitionConfig":
         if self.tools_allow and self.tools_deny:
@@ -126,6 +128,14 @@ class SupervisorAgentConfig(BaseModel):
     name: str = "supervisor"
     allowed_delegate_agents: List[str] = Field(default_factory=list)
     system_prompt_append: str = ""
+    tools_allow: List[str] = Field(default_factory=list)
+    tools_deny: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_tool_policy(self) -> "SupervisorAgentConfig":
+        if self.tools_allow and self.tools_deny:
+            raise ValueError("only one of tools_allow or tools_deny can be set")
+        return self
 
 
 class AgentsConfig(BaseModel):
@@ -133,6 +143,7 @@ class AgentsConfig(BaseModel):
     directory: str = "./agents"
     max_delegation_depth: PositiveInt = 2
     default_timeout_seconds: PositiveInt = 90
+    tool_ownership_mode: Literal["shared", "exclusive"] = "shared"
     include_agent_trace_in_metadata: bool = True
     supervisor: SupervisorAgentConfig = SupervisorAgentConfig()
 

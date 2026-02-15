@@ -52,3 +52,24 @@ def test_load_agent_specs_rejects_allow_and_deny_together(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError):
         load_agent_specs(str(agents_dir))
+
+
+def test_load_agent_specs_rejects_unknown_frontmatter_keys(tmp_path: Path) -> None:
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    (agents_dir / "invalid_agent.md").write_text(
+        (
+            "---\n"
+            "name: invalid_agent\n"
+            "description: invalid\n"
+            "mode: agent\n"
+            "tool_allow:\n"
+            "  - list_files\n"
+            "---\n\n"
+            "You are invalid agent."
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="invalid agent frontmatter"):
+        load_agent_specs(str(agents_dir))
