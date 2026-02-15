@@ -107,6 +107,7 @@ class LLMClient:
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
         self._openrouter_models = list(getattr(getattr(config, "openrouter", None), "models", []) or [])
         self._openrouter_provider = self._build_openrouter_provider_payload(config)
+        self._openrouter_reasoning_enabled = self._resolve_openrouter_reasoning_enabled(config)
         self._openrouter_plugins = list(getattr(getattr(config, "openrouter", None), "plugins", []) or [])
         self._is_responses_provider = isinstance(self._provider, OpenAIResponsesProvider)
         self._logger = logging.getLogger("minibot.llm")
@@ -175,7 +176,7 @@ class LLMClient:
             call_kwargs.update(self._openrouter_kwargs())
             call_kwargs.update(extra_kwargs)
 
-            response = await self._provider.acomplete(**call_kwargs)
+            response = await self._complete_with_schema_fallback(call_kwargs)
             usage_tokens = self._extract_total_tokens(response)
             if usage_tokens is not None:
                 total_tokens_used += usage_tokens
@@ -278,7 +279,7 @@ class LLMClient:
         if self._is_responses_provider and self._reasoning_effort:
             call_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
 
-        response = await self._provider.acomplete(**call_kwargs)
+        response = await self._complete_with_schema_fallback(call_kwargs)
         message = response.main_response
         if not message:
             raise RuntimeError("LLM did not return a completion")
@@ -634,6 +635,16 @@ class LLMClient:
                 payload[field_name] = value
         return payload
 
+    @staticmethod
+    def _resolve_openrouter_reasoning_enabled(config: LLMMConfig) -> bool | None:
+        openrouter_cfg = getattr(config, "openrouter", None)
+        if openrouter_cfg is None:
+            return None
+        value = getattr(openrouter_cfg, "reasoning_enabled", None)
+        if isinstance(value, bool):
+            return value
+        return None
+
     def _openrouter_kwargs(self) -> dict[str, Any]:
         if self._provider_name != "openrouter":
             return {}
@@ -642,9 +653,37 @@ class LLMClient:
             kwargs["models"] = self._openrouter_models
         if self._openrouter_provider:
             kwargs["provider"] = self._openrouter_provider
+        if self._openrouter_reasoning_enabled is True:
+            kwargs["reasoning"] = {"enabled": True}
         if self._openrouter_plugins:
             kwargs["plugins"] = self._openrouter_plugins
         return kwargs
+
+    async def _complete_with_schema_fallback(self, call_kwargs: dict[str, Any]) -> Any:
+        try:
+            return await self._provider.acomplete(**call_kwargs)
+        except Exception as exc:
+            if not self._should_retry_without_response_schema(call_kwargs, exc):
+                raise
+            retry_kwargs = dict(call_kwargs)
+            retry_kwargs["response_schema"] = None
+            self._logger.warning(
+                "retrying openrouter request without response_schema",
+                extra={"model": self._model, "provider": self.provider_name()},
+            )
+            return await self._provider.acomplete(**retry_kwargs)
+
+    def _should_retry_without_response_schema(self, call_kwargs: dict[str, Any], exc: Exception) -> bool:
+        if self._provider_name != "openrouter":
+            return False
+        if call_kwargs.get("response_schema") is None:
+            return False
+        message = str(exc).lower()
+        if "json mode is not supported" in message:
+            return True
+        if '"code":20024' in message:
+            return True
+        return False
 
     def _resolved_max_tokens(self) -> int | None:
         if self._is_responses_provider:

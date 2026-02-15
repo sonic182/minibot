@@ -3,7 +3,8 @@
 # Production note: use "INFO" (or "WARNING") here and set `environment = "production"`.
 log_level = "DEBUG"
 environment = "development"
-agent_timeout_seconds = 300
+# E2E/research-heavy profile: increase agent timeout to reduce long-run failures.
+agent_timeout_seconds = 420
 
 # Telegram adapter settings.
 [channels.telegram]
@@ -27,10 +28,10 @@ allowed_document_mime_types = []
 provider = "openai_responses"
 base_url = ""
 model = "gpt-5-mini"
-max_tool_iterations = 40
-request_timeout_seconds = 120
+max_tool_iterations = 60
+request_timeout_seconds = 180
 sock_connect_timeout_seconds = 10
-sock_read_timeout_seconds = 120
+sock_read_timeout_seconds = 180
 retry_attempts = 3
 retry_delay_seconds = 2.0
 system_prompt = "You are Minibot, a helpful assistant."
@@ -58,7 +59,7 @@ base_url = ""
 
 [orchestration]
 directory = "./agents"
-default_timeout_seconds = 240
+default_timeout_seconds = 360
 tool_ownership_mode = "exclusive"
 # Delegated specialist tool-call policy:
 # - "auto": require at least one tool call when delegated agent has any scoped tools
@@ -252,14 +253,19 @@ timeout_seconds = 30
 #   "@playwright/mcp@0.0.64",
 #   # Or use "@playwright/mcp@latest",
 #
-#   # "--headless",
+#   "--headless",
 #   "--browser=chromium",
 #
-#   # Enable screenshots (vision) and PDFs
-#   "--caps=vision,pdf",
+#   # Fast extraction defaults + screenshots/pdf support
+#   "--caps=vision,pdf,network",
+#   "--block-service-workers",
+#   "--image-responses=omit",
+#   "--snapshot-mode=incremental",
+#   "--timeout-action=2000",
+#   "--timeout-navigation=8000",
 #
-#   # Persist browser state/session under output-dir
-#   "--save-session"
+#   # Persist browser state/session under output-dir (optional)
+#   # "--save-session"
 # ]
 # # Note: MiniBot injects --output-dir from [tools.browser].output_dir for server name "playwright-cli".
 # env = {}

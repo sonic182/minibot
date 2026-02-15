@@ -73,6 +73,7 @@ class OpenRouterProviderRoutingConfig(BaseModel):
 class OpenRouterLLMConfig(BaseModel):
     models: List[str] = Field(default_factory=list)
     provider: OpenRouterProviderRoutingConfig | None = None
+    reasoning_enabled: bool | None = None
     plugins: List[Dict[str, Any]] = Field(default_factory=list)
 
 
@@ -115,6 +116,7 @@ class AgentDefinitionConfig(BaseModel):
     tools_deny: List[str] = Field(default_factory=list)
     mcp_servers: List[str] = Field(default_factory=list)
     openrouter_provider_overrides: Dict[str, Any] = Field(default_factory=dict)
+    openrouter_reasoning_enabled: bool | None = None
 
     model_config = ConfigDict(extra="allow")
 

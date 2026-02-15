@@ -21,6 +21,7 @@ class AgentSpec:
     tools_deny: list[str] = field(default_factory=list)
     mcp_servers: list[str] = field(default_factory=list)
     openrouter_provider_overrides: dict[str, Any] = field(default_factory=dict)
+    openrouter_reasoning_enabled: bool | None = None
 
 
 @dataclass(frozen=True)
