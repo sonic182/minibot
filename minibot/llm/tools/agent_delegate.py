@@ -286,6 +286,10 @@ def _agent_response_schema() -> dict[str, Any]:
     return assistant_response_schema(kinds=["text", "html", "markdown", "json"], include_attachments=True)
 
 
+def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
+    return validate_attachments(raw_attachments)
+
+
 def _extract_outcome(payload: Any) -> _DelegationOutcome:
     payload_obj = payload_to_object(payload)
     if payload_obj is not None:
