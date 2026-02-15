@@ -83,11 +83,10 @@ def test_browser_agent_forbids_base64_return():
     content = agent_file.read_text(encoding="utf-8")
 
     critical_phrases = [
-        "NEVER return image data",
-        "FORBIDDEN: Do NOT use browser_run_code to get base64",
-        "Do NOT return image contents",
-        "attachments containing ONLY the path",
-        "NEVER return base64",
+        "Do NOT return base64 or image contents",
+        "Do NOT use browser_run_code for screenshots",
+        "attachments containing the relative path",
+        "Never use browser_run_code to take screenshots or get base64 data",
     ]
 
     for phrase in critical_phrases:
