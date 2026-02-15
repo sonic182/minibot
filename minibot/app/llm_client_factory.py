@@ -46,6 +46,8 @@ class LLMClientFactory:
             }
             provider_cfg = OpenRouterProviderRoutingConfig.model_validate(merged_provider_cfg)
             config.openrouter.provider = provider_cfg
+        if spec.openrouter_reasoning_enabled is not None:
+            config.openrouter.reasoning_enabled = spec.openrouter_reasoning_enabled
         resolved = self._resolved_config(config, provider_override=config.provider)
         key = self._cache_key(resolved)
         cached = self._cache.get(key)

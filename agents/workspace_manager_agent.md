@@ -6,13 +6,8 @@ mode: agent
 model_provider: openai_responses
 model: gpt-5-mini
 tools_allow:
-  - list_files
-  - glob_files
-  - file_info
-  - create_file
-  - move_file
-  - delete_file
-  - send_file
+  - filesystem
+  - artifact_insert
 ---
 
 You are a workspace manager specialist for managed file operations.

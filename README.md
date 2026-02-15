@@ -169,14 +169,19 @@ args = [
   "@playwright/mcp@0.0.64",
   # Or use "@playwright/mcp@latest",
 
-  # "--headless",
+  "--headless",
   "--browser=chromium",
 
-  # Enable screenshots (vision) and PDFs
-  "--caps=vision,pdf",
+  # Fast extraction defaults + screenshots/pdf support
+  "--caps=vision,pdf,network",
+  "--block-service-workers",
+  "--image-responses=omit",
+  "--snapshot-mode=incremental",
+  "--timeout-action=2000",
+  "--timeout-navigation=8000",
 
-  # Persist browser state/session under output-dir
-  "--save-session"
+  # Persist browser state/session under output-dir (optional)
+  # "--save-session"
 ]
 env = {}
 cwd = "."

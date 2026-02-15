@@ -55,9 +55,29 @@ class AgentDelegateTool:
 
     def bindings(self) -> list[ToolBinding]:
         return [
+            ToolBinding(tool=self._agent_delegate_schema(), handler=self._agent_delegate),
             ToolBinding(tool=self._list_agents_schema(), handler=self._list_agents),
             ToolBinding(tool=self._invoke_agent_schema(), handler=self._invoke_agent),
         ]
+
+    def _agent_delegate_schema(self) -> Tool:
+        return Tool(
+            name="agent_delegate",
+            description="Agent delegation operations. Use action=list|invoke.",
+            parameters=strict_object(
+                properties={
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "invoke"],
+                        "description": "Delegation operation to perform.",
+                    },
+                    "agent_name": string_field("Exact name returned by agent_delegate action=list."),
+                    "task": string_field("Concrete delegated task for the specialist."),
+                    "context": string_field("Optional supporting context for the specialist."),
+                },
+                required=["action"],
+            ),
+        )
 
     def _list_agents_schema(self) -> Tool:
         return Tool(
@@ -122,7 +142,7 @@ class AgentDelegateTool:
                 timeout_seconds=self._default_timeout_seconds,
                 min_timeout_seconds=30,
             ),
-            allowed_append_message_tools=["self_insert_artifact"],
+            allowed_append_message_tools=["self_insert_artifact", "artifact_insert"],
             allow_system_inserts=False,
             managed_files_root=None,
         )
@@ -240,6 +260,14 @@ class AgentDelegateTool:
                 "error": str(exc),
                 "delegation_attempts": attempts,
             }
+
+    async def _agent_delegate(self, payload: dict[str, object], context: ToolContext) -> dict[str, object]:
+        action = optional_str(payload.get("action"), error_message="action must be a string")
+        if action == "list":
+            return await self._list_agents(payload, context)
+        if action == "invoke":
+            return await self._invoke_agent(payload, context)
+        raise ValueError("action must be one of: list, invoke")
 
     def _scoped_tools(self, spec: AgentSpec) -> list[ToolBinding]:
         scoped = filter_tools_for_agent(self._tools, spec)

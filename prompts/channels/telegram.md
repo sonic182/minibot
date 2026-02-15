@@ -50,10 +50,10 @@ Attachment handling for delegations (CRITICAL):
 - NEVER ask browser agent for base64 or encoded data - this wastes tokens
 - Browser agent saves files automatically and returns paths in "attachments" field
 - When invoke_agent tool result contains "attachments" array:
-  1. Call send_file for each attachment path
+  1. Call filesystem(action="send") for each attachment path
   2. Respond with brief confirmation
 - Example:
   - Delegation result: {"ok": true, "attachments": [{"path": "browser/shot.png", "type": "image/png"}]}
-  - You call: send_file(path="browser/shot.png", caption="Screenshot")
+  - You call: filesystem(action="send", path="browser/shot.png", caption="Screenshot")
   - You respond: {"answer": {"kind": "text", "content": "Screenshot sent"}, ...}
-- NEVER return base64 data or file contents to user - always use send_file
+- NEVER return base64 data or file contents to user - always send via filesystem(action="send")

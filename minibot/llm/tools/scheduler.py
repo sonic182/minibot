@@ -11,6 +11,7 @@ from minibot.llm.tools.arg_utils import enum_by_value, optional_bool, optional_i
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.schema_utils import (
     job_id_property,
+    nullable_boolean,
     nullable_integer,
     nullable_string,
     pagination_properties,
@@ -30,7 +31,61 @@ class SchedulePromptTool:
             ToolBinding(tool=self._cancel_schema(), handler=self._handle_cancel),
             ToolBinding(tool=self._delete_schema(), handler=self._handle_delete),
             ToolBinding(tool=self._list_schema(), handler=self._handle_list),
+            ToolBinding(tool=self._schedule_unified_schema(), handler=self._handle_schedule_unified),
         ]
+
+    def _schedule_unified_schema(self) -> Tool:
+        return Tool(
+            name="schedule",
+            description=("Scheduled prompt management. Use action=create|list|cancel|delete."),
+            parameters=strict_object(
+                properties={
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "list", "cancel", "delete"],
+                        "description": "Schedule operation to perform.",
+                    },
+                    "job_id": job_id_property(),
+                    "content": nullable_string("Message text for action=create."),
+                    "run_at": nullable_string("ISO timestamp for action=create."),
+                    "delay_seconds": nullable_integer(minimum=1, description="Delay for action=create."),
+                    "role": {
+                        **nullable_string("Role for action=create."),
+                        "enum": [role.value for role in PromptRole],
+                    },
+                    "metadata": {
+                        "type": ["object", "null"],
+                        "additionalProperties": False,
+                    },
+                    "recurrence_type": {
+                        **nullable_string("Recurrence mode for action=create."),
+                        "enum": [recurrence.value for recurrence in PromptRecurrence],
+                    },
+                    "recurrence_interval_seconds": nullable_integer(
+                        minimum=self._min_recurrence_interval_seconds,
+                        description="Interval for action=create recurrence.",
+                    ),
+                    "recurrence_end_at": nullable_string("Recurrence end timestamp for action=create."),
+                    "active_only": nullable_boolean("Filter active jobs for action=list."),
+                    **pagination_properties(),
+                },
+                required=[
+                    "action",
+                    "job_id",
+                    "content",
+                    "run_at",
+                    "delay_seconds",
+                    "role",
+                    "metadata",
+                    "recurrence_type",
+                    "recurrence_interval_seconds",
+                    "recurrence_end_at",
+                    "active_only",
+                    "limit",
+                    "offset",
+                ],
+            ),
+        )
 
     def _schedule_schema(self) -> Tool:
         return Tool(
@@ -269,6 +324,18 @@ class SchedulePromptTool:
             "stopped_before_delete": bool(result["stopped_before_delete"]),
             "status_before_delete": job.status.value,
         }
+
+    async def _handle_schedule_unified(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        action = _require_string(payload.get("action"), "action").lower()
+        if action == "create":
+            return await self._handle_schedule(payload, context)
+        if action == "list":
+            return await self._handle_list(payload, context)
+        if action == "cancel":
+            return await self._handle_cancel(payload, context)
+        if action == "delete":
+            return await self._handle_delete(payload, context)
+        raise ValueError("action must be one of: create, list, cancel, delete")
 
 
 def _require_string(value: Any, field: str) -> str:
