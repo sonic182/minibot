@@ -279,6 +279,51 @@ Useful patterns and behavior:
 - Keep secrets out of agent files. Put credentials in `[providers.<provider>]`.
 - Some models reject parameters like `temperature`; if you see provider `HTTP 400` for unsupported parameters, remove that field from the agent frontmatter (or from global `[llm]` defaults).
 
+OpenRouter Agents Custom Params
+-------------------------------
+
+For specialists that run on OpenRouter, you can override provider-routing params per agent in frontmatter.
+
+Use this naming rule:
+
+- `openrouter_provider_<field_name>` where `<field_name>` is any key supported under `[llm.openrouter.provider]`.
+
+Examples:
+
+- `openrouter_provider_only`
+- `openrouter_provider_sort`
+- `openrouter_provider_order`
+- `openrouter_provider_allow_fallbacks`
+- `openrouter_provider_max_price`
+
+Example:
+
+```md
+---
+name: browser_agent
+description: Browser automation specialist
+mode: agent
+model_provider: openrouter
+model: x-ai/grok-4.1-fast
+openrouter_provider_only:
+  - openai
+  - anthropic
+openrouter_provider_sort: price
+openrouter_provider_allow_fallbacks: true
+openrouter_provider_order:
+  - anthropic
+  - openai
+---
+
+Use browser tools to navigate, inspect, and extract results.
+```
+
+Notes:
+
+- These keys are optional and only affect OpenRouter calls.
+- Agent-level values override global `[llm.openrouter.provider]` values for matching fields and preserve non-overridden fields.
+- Keep credentials in `[providers.openrouter]`; never place secrets in agent files.
+
 Suggested model presets
 -----------------------
 

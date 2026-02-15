@@ -4,7 +4,7 @@ import tomllib
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter
+from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter, ValidationError
 from pydantic import model_validator
 
 
@@ -114,13 +114,40 @@ class AgentDefinitionConfig(BaseModel):
     tools_allow: List[str] = Field(default_factory=list)
     tools_deny: List[str] = Field(default_factory=list)
     mcp_servers: List[str] = Field(default_factory=list)
+    openrouter_provider_overrides: Dict[str, Any] = Field(default_factory=dict)
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     @model_validator(mode="after")
     def _validate_tool_policy(self) -> "AgentDefinitionConfig":
         if self.tools_allow and self.tools_deny:
             raise ValueError("only one of tools_allow or tools_deny can be set")
+        extras = dict(self.model_extra or {})
+        invalid_extra_keys: list[str] = []
+        overrides: dict[str, Any] = {}
+        valid_provider_keys = set(OpenRouterProviderRoutingConfig.model_fields)
+        prefix = "openrouter_provider_"
+        for key, value in extras.items():
+            if not key.startswith(prefix):
+                invalid_extra_keys.append(key)
+                continue
+            provider_key = key[len(prefix) :]
+            if provider_key not in valid_provider_keys:
+                invalid_extra_keys.append(key)
+                continue
+            overrides[provider_key] = value
+        if invalid_extra_keys:
+            invalid_keys = ", ".join(sorted(invalid_extra_keys))
+            raise ValueError(f"unknown frontmatter keys: {invalid_keys}")
+        try:
+            provider_cfg = OpenRouterProviderRoutingConfig.model_validate(overrides)
+        except ValidationError as exc:
+            raise ValueError(f"invalid openrouter provider overrides: {exc}") from exc
+        self.openrouter_provider_overrides = provider_cfg.model_dump(
+            mode="python",
+            exclude_none=True,
+            exclude_defaults=True,
+        )
         return self
 
 

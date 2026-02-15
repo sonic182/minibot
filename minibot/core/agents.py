@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class AgentSpec:
     tools_allow: list[str] = field(default_factory=list)
     tools_deny: list[str] = field(default_factory=list)
     mcp_servers: list[str] = field(default_factory=list)
+    openrouter_provider_overrides: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

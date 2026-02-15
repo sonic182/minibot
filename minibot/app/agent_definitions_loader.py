@@ -45,6 +45,7 @@ def load_agent_specs(directory: str) -> list[AgentSpec]:
                 tools_allow=list(cfg.tools_allow),
                 tools_deny=list(cfg.tools_deny),
                 mcp_servers=list(cfg.mcp_servers),
+                openrouter_provider_overrides=dict(cfg.openrouter_provider_overrides),
             )
         )
     return specs

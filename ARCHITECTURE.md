@@ -217,7 +217,7 @@ flowchart TD
 ## Agent Architecture (Current)
 
 - Agent definitions live in `agents/*.md`:
-  - frontmatter describes identity/routing/runtime policy (`name`, `description`, `model_provider`, `model`, `max_tool_iterations`, `tools_allow`, `tools_deny`, `mcp_servers`),
+  - frontmatter describes identity/routing/runtime policy (`name`, `description`, `model_provider`, `model`, `max_tool_iterations`, `tools_allow`, `tools_deny`, `mcp_servers`, OpenRouter per-agent routing keys),
   - Markdown body becomes the specialist system prompt.
 - `AppContainer` always loads those files at boot and builds `AgentRegistry`; disabled agents are filtered by frontmatter `enabled: false`.
 - `Dispatcher` computes main-agent tool exposure via `tool_ownership_mode`:

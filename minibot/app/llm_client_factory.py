@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from minibot.adapters.config.schema import LLMMConfig, Settings
+import json
+
+from minibot.adapters.config.schema import LLMMConfig, OpenRouterProviderRoutingConfig, Settings
 from minibot.core.agents import AgentSpec
 from minibot.llm.provider_factory import LLMClient
 
@@ -34,6 +36,16 @@ class LLMClientFactory:
             config.reasoning_effort = spec.reasoning_effort
         if spec.max_tool_iterations is not None:
             config.max_tool_iterations = spec.max_tool_iterations
+        if spec.openrouter_provider_overrides:
+            provider_cfg = config.openrouter.provider
+            if provider_cfg is None:
+                provider_cfg = OpenRouterProviderRoutingConfig()
+            merged_provider_cfg = {
+                **provider_cfg.model_dump(mode="python", exclude_none=True),
+                **spec.openrouter_provider_overrides,
+            }
+            provider_cfg = OpenRouterProviderRoutingConfig.model_validate(merged_provider_cfg)
+            config.openrouter.provider = provider_cfg
         resolved = self._resolved_config(config, provider_override=config.provider)
         key = self._cache_key(resolved)
         cached = self._cache.get(key)
@@ -58,6 +70,13 @@ class LLMClientFactory:
 
     @staticmethod
     def _cache_key(config: LLMMConfig) -> tuple[object, ...]:
+        openrouter_provider_payload = None
+        if config.openrouter.provider is not None:
+            openrouter_provider_payload = json.dumps(
+                config.openrouter.provider.model_dump(mode="python"),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         return (
             config.provider.lower().strip(),
             config.model,
@@ -72,4 +91,5 @@ class LLMClientFactory:
             config.retry_delay_seconds,
             config.api_key,
             config.base_url,
+            openrouter_provider_payload,
         )

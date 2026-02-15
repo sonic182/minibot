@@ -6,6 +6,15 @@ mode: agent
 model_provider: openrouter
 # model: x-ai/grok-4.1-fast
 model: z-ai/glm-4.7
+openrouter_provider_quantizations:
+  - fp8
+openrouter_provider_only:
+  - siliconflow
+  - google-vertex
+  - together
+  - novita
+  - atlas-cloud
+openrouter_provider_sort: latency
 reasoning_effort: low
 max_tool_iterations: 25
 mcp_servers:
