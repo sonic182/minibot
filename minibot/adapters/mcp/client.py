@@ -26,6 +26,8 @@ class MCPToolCallResult:
 
 
 class MCPClient:
+    _STDIO_READ_CHUNK_SIZE = 64 * 1024
+
     def __init__(
         self,
         *,
@@ -57,6 +59,7 @@ class MCPClient:
         self._stdio_loop: asyncio.AbstractEventLoop | None = None
         self._stdio_lock: asyncio.Lock | None = None
         self._stdio_start_lock: asyncio.Lock | None = None
+        self._stdio_read_buffer = bytearray()
         self._blocking_runner = _BlockingLoopRunner()
 
     async def list_tools(self) -> list[MCPToolDefinition]:
@@ -119,22 +122,15 @@ class MCPClient:
     async def _request_stdio(self, payload: dict[str, Any]) -> dict[str, Any]:
         process = await self._ensure_stdio_process()
         assert process.stdin is not None
-        assert process.stdout is not None
         request_id = payload["id"]
         stdio_lock, _ = self._ensure_stdio_runtime()
         async with stdio_lock:
             process.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
             await process.stdin.drain()
-            while True:
-                line = await asyncio.wait_for(process.stdout.readline(), timeout=self._timeout_seconds)
-                if not line:
-                    raise RuntimeError(f"empty mcp stdio response: {await self._read_stdio_stderr(process)}")
-                parsed = json.loads(line.decode("utf-8"))
-                if parsed.get("id") != request_id:
-                    continue
-                if "error" in parsed:
-                    raise RuntimeError(f"mcp server error: {parsed['error']}")
-                return parsed
+            parsed = await self._read_matching_stdio_response(process, request_id=request_id)
+            if "error" in parsed:
+                raise RuntimeError(f"mcp server error: {parsed['error']}")
+            return parsed
 
     async def _ensure_stdio_process(self) -> asyncio.subprocess.Process:
         _, stdio_start_lock = self._ensure_stdio_runtime()
@@ -155,8 +151,10 @@ class MCPClient:
                 stderr=asyncio.subprocess.PIPE,
                 env=self._env,
                 cwd=self._cwd,
+                limit=8 * 1024 * 1024,
             )
             self._stdio_process = process
+            self._stdio_read_buffer.clear()
             response = await self._request_stdio_raw(
                 {
                     "jsonrpc": "2.0",
@@ -190,19 +188,12 @@ class MCPClient:
         if process is None:
             raise RuntimeError("mcp stdio process is not started")
         assert process.stdin is not None
-        assert process.stdout is not None
         request_id = payload["id"]
         stdio_lock, _ = self._ensure_stdio_runtime()
         async with stdio_lock:
             process.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
             await process.stdin.drain()
-            while True:
-                line = await asyncio.wait_for(process.stdout.readline(), timeout=self._timeout_seconds)
-                if not line:
-                    raise RuntimeError(f"empty mcp stdio response: {await self._read_stdio_stderr(process)}")
-                parsed = json.loads(line.decode("utf-8"))
-                if parsed.get("id") == request_id:
-                    return parsed
+            return await self._read_matching_stdio_response(process, request_id=request_id)
 
     def _ensure_stdio_runtime(self) -> tuple[asyncio.Lock, asyncio.Lock]:
         current_loop = asyncio.get_running_loop()
@@ -213,10 +204,72 @@ class MCPClient:
             with suppress(ProcessLookupError):
                 process.kill()
         self._stdio_process = None
+        self._stdio_read_buffer.clear()
         self._stdio_loop = current_loop
         self._stdio_lock = asyncio.Lock()
         self._stdio_start_lock = asyncio.Lock()
         return self._stdio_lock, self._stdio_start_lock
+
+    async def _read_matching_stdio_response(
+        self,
+        process: asyncio.subprocess.Process,
+        *,
+        request_id: int,
+    ) -> dict[str, Any]:
+        while True:
+            line = await asyncio.wait_for(self._read_stdio_line(process), timeout=self._timeout_seconds)
+            if not line:
+                raise RuntimeError(f"empty mcp stdio response: {await self._read_stdio_stderr(process)}")
+
+            decoded_line = line.decode("utf-8", errors="replace").strip()
+            if not decoded_line:
+                continue
+
+            try:
+                parsed = json.loads(decoded_line)
+            except json.JSONDecodeError:
+                self._logger.debug(
+                    "ignoring non-json mcp stdio output",
+                    extra={
+                        "server": self._server_name,
+                        "line_preview": decoded_line[:200],
+                    },
+                )
+                continue
+
+            if not isinstance(parsed, dict):
+                continue
+            if parsed.get("id") != request_id:
+                continue
+            return parsed
+
+    async def _read_stdio_line(self, process: asyncio.subprocess.Process) -> bytes:
+        assert process.stdout is not None
+        buffered_line = self._consume_buffered_line()
+        if buffered_line is not None:
+            return buffered_line
+
+        while True:
+            chunk = await process.stdout.read(self._STDIO_READ_CHUNK_SIZE)
+            if not chunk:
+                if self._stdio_read_buffer:
+                    trailing = bytes(self._stdio_read_buffer)
+                    self._stdio_read_buffer.clear()
+                    return trailing
+                return b""
+
+            self._stdio_read_buffer.extend(chunk)
+            buffered_line = self._consume_buffered_line()
+            if buffered_line is not None:
+                return buffered_line
+
+    def _consume_buffered_line(self) -> bytes | None:
+        newline_index = self._stdio_read_buffer.find(b"\n")
+        if newline_index < 0:
+            return None
+        line = bytes(self._stdio_read_buffer[: newline_index + 1])
+        del self._stdio_read_buffer[: newline_index + 1]
+        return line
 
     async def _read_stdio_stderr(self, process: asyncio.subprocess.Process) -> str:
         if process.stderr is None:
