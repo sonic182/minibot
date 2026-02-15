@@ -81,7 +81,11 @@ async def test_runtime_returns_final_message_without_tool_calls() -> None:
 async def test_runtime_applies_append_message_directive_for_trusted_tool() -> None:
     tool_call = _FakeToolCall(id="call-1", function={"name": "self_insert_artifact", "arguments": "{}"})
     steps = [
-        LLMCompletionStep(message=_FakeMessage(content="", tool_calls=[tool_call]), response_id="resp-1", total_tokens=4),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-1",
+            total_tokens=4,
+        ),
         LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-2", total_tokens=6),
     ]
     directive = AppendMessageDirective(

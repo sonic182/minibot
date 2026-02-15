@@ -31,6 +31,15 @@ Quickstart (Poetry)
 3. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
 4. `poetry run minibot`
 
+Console test channel
+--------------------
+
+Use the built-in console channel to send/receive messages through the same dispatcher/handler pipeline without Telegram.
+
+- REPL mode: `poetry run minibot-console`
+- One-shot mode: `poetry run minibot-console --once "hello"`
+- Read one-shot input from stdin: `echo "hello" | poetry run minibot-console --once -`
+
 Up & Running with Telegram
 ---------------------------
 
@@ -38,7 +47,7 @@ Up & Running with Telegram
 2. Update `config.toml`:
    * set `channels.telegram.bot_token`
    * populate `allowed_chat_ids` or `allowed_user_ids` with your ID numbers
-   * configure the LLM provider section (`provider`, `api_key`, `model`)
+   * configure the LLM provider section (`provider`, `model`) and `[providers.<provider>]` credentials
 3. Run `poetry run minibot` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
 4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
 
@@ -81,7 +90,9 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 
 - `[runtime]`: global flags such as log level and environment.
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
-- `[llm]`: configures the chosen [llm-async] provider (currently `openai`, `openai_responses`, or `openrouter`), plus API key, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir` (default `./prompts`) for channel prompt fragments injected at request time. Request params are only sent when present in `config.toml` (omit keys like `temperature`, `max_new_tokens`, or `reasoning_effort` to avoid sending them). For OpenRouter, optional `llm.openrouter.models` lets you provide a fallback model pool, `llm.openrouter.provider` lets you send routing controls (`order`, `allow_fallbacks`, `only`, `ignore`, `sort`, throughput/latency preferences, `max_price`, and `provider_extra` for future keys), and `llm.openrouter.plugins` lets you pass request plugins (for example `file-parser` PDF engine selection).
+- `[llm]`: configures default model/provider behavior for the main agent and specialist agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir`). Request params are only sent when present in `config.toml`.
+- `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
+- `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`) or exclusively owned by specialist agents (`exclusive`).
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; `max_history_tokens` triggers compaction once cumulative generation usage crosses the threshold; `notify_compaction_updates` controls whether compaction status messages are sent to end users.
 - `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
 - `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, and pagination defaults. Enable it only when you need tool-based memory storage.
@@ -89,6 +100,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
 - `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`), and optional artifact export controls (`artifacts_*`) to persist generated files into managed storage for later `send_file`.
 - `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
+- `[tools.browser]`: configures browser artifact paths used by prompts and Playwright MCP launch defaults. `output_dir` is the canonical directory for screenshots/downloads/session artifacts.
 - `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
@@ -163,9 +175,6 @@ args = [
   # Enable screenshots (vision) and PDFs
   "--caps=vision,pdf",
 
-  # Output directory (screenshots/downloads/session)
-  "--output-dir=./data/files/browser",
-
   # Persist browser state/session under output-dir
   "--save-session"
 ]
@@ -175,6 +184,8 @@ cwd = "."
 # disabled_tools = []
 ```
 
+For server name `playwright-cli`, MiniBot injects `--output-dir` automatically from `[tools.browser].output_dir`.
+
 Tool filtering behavior:
 
 - `enabled_tools`: if empty, all discovered tools are allowed; if set, only listed remote tool names are exposed.
@@ -183,6 +194,141 @@ Tool filtering behavior:
 Troubleshooting:
 
 - If discovery fails for a server, startup logs include `failed to load mcp tools` with the server name.
+
+Agent Tool Scoping
+------------------
+
+Agent definitions live in `./agents/*.md` with YAML frontmatter plus a prompt body.
+
+Minimal example:
+
+```md
+---
+name: workspace_manager_agent
+description: Handles workspace file operations
+mode: agent
+model_provider: openai_responses
+model: gpt-5-mini
+temperature: 0.1
+tools_allow:
+  - list_files
+  - create_file
+  - move_file
+  - delete_file
+  - send_file
+---
+
+You manage files in the workspace safely and precisely.
+```
+
+How to give a specific MCP server to an agent:
+
+- Use `mcp_servers` with server names from `[[tools.mcp.servers]].name` in `config.toml`.
+- If `mcp_servers` is set, MCP tools are filtered to those servers.
+
+```md
+---
+name: browser_agent
+description: Browser automation specialist
+mode: agent
+model_provider: openai_responses
+model: gpt-5-mini
+mcp_servers:
+  - playwright-cli
+---
+
+Use browser tools to navigate, inspect, and extract results.
+```
+
+How to give a suite of local tools (for example file tools):
+
+- Use `tools_allow` patterns.
+- This is the recommended way to build a local "tool suite" per agent.
+
+```md
+---
+name: files_agent
+description: Files workspace manager
+mode: agent
+tools_allow:
+  - list_files
+  - create_file
+  - move_file
+  - delete_file
+  - send_file
+  - self_insert_artifact
+---
+
+Focus only on workspace file workflows.
+```
+
+Useful patterns and behavior:
+
+- `enabled` can be set per-agent in frontmatter to include/exclude a specialist.
+- `tools_allow` and `tools_deny` are mutually exclusive. Defining both is an agent config error.
+- Wildcards are supported (`fnmatch`), for example:
+  - `tools_allow: ["mcp_playwright-cli__*"]`
+  - `tools_deny: ["mcp_playwright-cli__browser_close"]`
+- If neither allow nor deny is set, local (non-MCP) tools are not exposed.
+- If `mcp_servers` is set, all tools from those MCP servers are exposed (and tools from other MCP servers are excluded).
+- In `tools_allow` mode, exposed tools are: allowed local tools + allowed MCP-server tools.
+- In `tools_deny` mode, exposed tools are: all local tools except denied + allowed MCP-server tools.
+- Main agent delegates through tool calls (`list_agents`, `invoke_agent`) and waits for tool results before finalizing responses.
+- Use `[orchestration.main_agent].tools_allow`/`tools_deny` to restrict the main-agent toolset.
+- With `[orchestration].tool_ownership_mode = "exclusive"`, tools assigned to specialist agents are removed from main-agent runtime and remain available only through delegation.
+- With `[orchestration].tool_ownership_mode = "exclusive_mcp"`, only agent-owned MCP tools are removed from main-agent runtime; local/system tools remain shared.
+- Use `[orchestration].delegated_tool_call_policy` to enforce specialist tool use:
+  - `auto` (default): requires at least one tool call when the delegated agent has any available scoped tools.
+  - `always`: requires at least one tool call for every delegated agent.
+  - `never`: disables delegated tool-call enforcement.
+- Environment setup from config (for example `[tools.browser].output_dir`) is injected into both main-agent and delegated-agent system prompts.
+- Keep secrets out of agent files. Put credentials in `[providers.<provider>]`.
+- Some models reject parameters like `temperature`; if you see provider `HTTP 400` for unsupported parameters, remove that field from the agent frontmatter (or from global `[llm]` defaults).
+
+OpenRouter Agents Custom Params
+-------------------------------
+
+For specialists that run on OpenRouter, you can override provider-routing params per agent in frontmatter.
+
+Use this naming rule:
+
+- `openrouter_provider_<field_name>` where `<field_name>` is any key supported under `[llm.openrouter.provider]`.
+
+Examples:
+
+- `openrouter_provider_only`
+- `openrouter_provider_sort`
+- `openrouter_provider_order`
+- `openrouter_provider_allow_fallbacks`
+- `openrouter_provider_max_price`
+
+Example:
+
+```md
+---
+name: browser_agent
+description: Browser automation specialist
+mode: agent
+model_provider: openrouter
+model: x-ai/grok-4.1-fast
+openrouter_provider_only:
+  - openai
+  - anthropic
+openrouter_provider_sort: price
+openrouter_provider_allow_fallbacks: true
+openrouter_provider_order:
+  - anthropic
+  - openai
+---
+
+Use browser tools to navigate, inspect, and extract results.
+```
+
+Notes:
+
+- These keys are optional and only affect OpenRouter calls.
+- Agent-level values override global `[llm.openrouter.provider]` values for matching fields and preserve non-overridden fields.
+- Keep credentials in `[providers.openrouter]`; never place secrets in agent files.
 
 Suggested model presets
 -----------------------

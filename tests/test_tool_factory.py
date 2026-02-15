@@ -3,11 +3,14 @@ from __future__ import annotations
 from typing import Any, cast
 
 from minibot.adapters.config.schema import (
+    BrowserToolConfig,
     CalculatorToolConfig,
     FileStorageToolConfig,
     HTTPClientToolConfig,
     KeyValueMemoryConfig,
     LLMMConfig,
+    MCPServerConfig,
+    MCPToolConfig,
     PythonExecToolConfig,
     SchedulerConfig,
     ScheduledPromptsConfig,
@@ -102,6 +105,7 @@ def _settings(
             calculator=CalculatorToolConfig(enabled=calculator_enabled),
             python_exec=PythonExecToolConfig(enabled=python_exec_enabled),
             file_storage=FileStorageToolConfig(enabled=file_storage_enabled),
+            browser=BrowserToolConfig(output_dir="./data/files/browser"),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
     )
@@ -173,3 +177,51 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
     assert "calculate_expression" not in names
     assert "python_execute" not in names
     assert "python_environment_info" not in names
+
+
+def test_build_enabled_tools_overrides_playwright_output_dir(monkeypatch) -> None:
+    captured_args: list[str] = []
+
+    class _FakeMCPClient:
+        def __init__(self, **kwargs: Any) -> None:
+            captured_args.extend(list(kwargs.get("args") or []))
+
+    class _FakeMCPBridge:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def build_bindings(self) -> list[Any]:
+            return []
+
+    monkeypatch.setattr("minibot.llm.tools.factory.MCPClient", _FakeMCPClient)
+    monkeypatch.setattr("minibot.llm.tools.factory.MCPToolBridge", _FakeMCPBridge)
+
+    settings = Settings(
+        llm=LLMMConfig(api_key="secret"),
+        tools=ToolsConfig(
+            kv_memory=KeyValueMemoryConfig(enabled=False),
+            http_client=HTTPClientToolConfig(enabled=False),
+            time=TimeToolConfig(enabled=False),
+            calculator=CalculatorToolConfig(enabled=False),
+            python_exec=PythonExecToolConfig(enabled=False),
+            file_storage=FileStorageToolConfig(enabled=False),
+            browser=BrowserToolConfig(output_dir="./custom/browser-out"),
+            mcp=MCPToolConfig(
+                enabled=True,
+                servers=[
+                    MCPServerConfig(
+                        name="playwright-cli",
+                        transport="stdio",
+                        command="npx",
+                        args=["@playwright/mcp@0.0.64", "--output-dir=./data/files/browser", "--save-session"],
+                    )
+                ],
+            ),
+        ),
+        scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=False)),
+    )
+
+    _ = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
+
+    assert "--output-dir=./custom/browser-out" in captured_args
+    assert "--output-dir=./data/files/browser" not in captured_args

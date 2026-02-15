@@ -2,8 +2,8 @@
 [runtime]
 # Production note: use "INFO" (or "WARNING") here and set `environment = "production"`.
 log_level = "DEBUG"
-environment = "development"
-agent_timeout_seconds = 300
+environment = "test"
+agent_timeout_seconds = 120
 
 # Telegram adapter settings.
 [channels.telegram]
@@ -27,10 +27,10 @@ allowed_document_mime_types = []
 provider = "openai_responses"
 base_url = ""
 model = "gpt-5-mini"
-max_tool_iterations = 40
-request_timeout_seconds = 120
+max_tool_iterations = 15
+request_timeout_seconds = 45
 sock_connect_timeout_seconds = 10
-sock_read_timeout_seconds = 120
+sock_read_timeout_seconds = 45
 retry_attempts = 3
 retry_delay_seconds = 2.0
 system_prompt = "You are Minibot, a helpful assistant."
@@ -58,18 +58,13 @@ base_url = ""
 
 [orchestration]
 directory = "./agents"
-default_timeout_seconds = 240
+default_timeout_seconds = 90
 tool_ownership_mode = "exclusive"
-# Delegated specialist tool-call policy:
-# - "auto": require at least one tool call when delegated agent has any scoped tools
-# - "always": require at least one tool call for every delegated agent
-# - "never": do not enforce delegated tool calls
-delegated_tool_call_policy = "auto"
+# include_agent_trace_in_metadata = true
 
 [orchestration.main_agent]
 name = "minibot"
-# offload mcp to dedicated agents, and to keep all other tools accessible
-tools_deny = ["mcp*"]
+tools_allow = ["current_*", "calculate_*", "http_*", "*_agent*"]
 
 # Optional request params. Omit keys to avoid sending them.
 # temperature = 0.2
@@ -103,13 +98,13 @@ tools_deny = ["mcp*"]
 # Conversation memory persistence.
 [memory]
 backend = "sqlite"
-sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
+sqlite_url = "sqlite+aiosqlite:///./testdata/minibot.db"
 max_history_messages = 200
 
 # Scheduled prompt storage and polling.
 [scheduler.prompts]
 enabled = true
-sqlite_url = "sqlite+aiosqlite:///./data/scheduled_prompts.db"
+sqlite_url = "sqlite+aiosqlite:///./testdata/scheduled_prompts.db"
 # Poll cadence for scanning due jobs.
 poll_interval_seconds = 60
 # How long a claimed job stays leased before becoming claimable again.
@@ -125,8 +120,8 @@ echo = false
 
 # Optional key/value memory tool.
 [tools.kv_memory]
-enabled = false
-sqlite_url = "sqlite+aiosqlite:///./data/kv_memory.db"
+enabled = true
+sqlite_url = "sqlite+aiosqlite:///./testdata/kv_memory.db"
 pool_size = 5
 echo = false
 default_limit = 20
@@ -135,8 +130,8 @@ default_owner_id = "primary"
 
 # Optional HTTP fetch tool.
 [tools.http_client]
-enabled = false
-timeout_seconds = 30
+enabled = true
+timeout_seconds = 10
 max_bytes = "16KB"
 response_processing_mode = "auto"
 max_chars = 6000
@@ -144,16 +139,12 @@ normalize_whitespace = true
 
 # Managed file workspace tools.
 [tools.file_storage]
-enabled = false
-root_dir = "./data/files"
+enabled = true
+root_dir = "./testdata/files"
 max_write_bytes = "64KB"
 save_incoming_uploads = false
 uploads_subdir = "uploads"
 incoming_temp_subdir = "uploads/temp"
-
-# Browser runtime paths used by browser-specialist prompts and Playwright MCP output-dir.
-[tools.browser]
-output_dir = "./data/files/browser"
 
 # Built-in calculator tool.
 [tools.calculator]
@@ -218,51 +209,33 @@ record_separator = " "
 
 # Optional Model Context Protocol bridge.
 [tools.mcp]
-enabled = false
+enabled = true
 name_prefix = "mcp"
-timeout_seconds = 30
+timeout_seconds = 10
 
-# [[tools.mcp.servers]]
-# name = "dice_cli"
-# transport = "stdio"
-# command = "python"
-# args = ["tests/fixtures/mcp/stdio_dice_server.py"]
-# env = {}
-# cwd = "."
-# enabled_tools = []
-# disabled_tools = []
-
-# [[tools.mcp.servers]]
-# name = "dice_http"
-# transport = "http"
-# url = "http://127.0.0.1:8765/mcp"
-# headers = {}
-# enabled_tools = []
-# disabled_tools = []
-
-# Playwright MCP server example (Chromium CLI bridge):
-# Requires Node.js and npx on the host running MiniBot.
-# [[tools.mcp.servers]]
-# name = "playwright-cli"
-# transport = "stdio"
-# command = "npx"
+[[tools.mcp.servers]]
+name = "playwright-cli"
+transport = "stdio"
+command = "npx"
 # Notice: if npx is not on PATH (for example with asdf), use "/home/myuser/.asdf/shims/npx".
-# args = [
-#   # Recommended: pin a version if --output-dir behavior affects you
-#   "@playwright/mcp@0.0.64",
-#   # Or use "@playwright/mcp@latest",
-#
-#   # "--headless",
-#   "--browser=chromium",
-#
-#   # Enable screenshots (vision) and PDFs
-#   "--caps=vision,pdf",
-#
-#   # Persist browser state/session under output-dir
-#   "--save-session"
-# ]
-# # Note: MiniBot injects --output-dir from [tools.browser].output_dir for server name "playwright-cli".
-# env = {}
-# cwd = "."
-# enabled_tools = []
-# disabled_tools = []
+args = [
+  # Recommended: pin a version if --output-dir behavior affects you
+  "@playwright/mcp@0.0.64",
+  # Or use "@playwright/mcp@latest",
+
+  # "--headless",
+  "--browser=chrome",
+
+  # Enable screenshots (vision) and PDFs
+  "--caps=vision,pdf",
+
+  # Output directory (screenshots/downloads/session)
+  "--output-dir=./testdata/files/browser",
+
+  # Persist browser state/session under output-dir
+  "--save-session"
+]
+env = {}
+cwd = "."
+enabled_tools = []
+disabled_tools = []

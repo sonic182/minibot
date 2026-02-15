@@ -81,3 +81,18 @@ def pagination_properties(*, include_active_only: bool = False) -> dict[str, Any
 
 def single_required_field_object(field_name: str, field_schema: dict[str, Any]) -> dict[str, Any]:
     return strict_object(properties={field_name: field_schema}, required=[field_name])
+
+
+def attachment_array_schema() -> dict[str, Any]:
+    return {
+        "type": ["array", "null"],
+        "items": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Relative path under managed root"},
+                "type": {"type": "string", "description": "MIME type or file type hint"},
+                "caption": {"type": "string", "description": "Optional file description"},
+            },
+            "required": ["path", "type"],
+        },
+    }

@@ -6,8 +6,10 @@ import logging
 from typing import Optional
 
 from minibot.adapters.container import AppContainer
+from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
+from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 from minibot.llm.tools.factory import build_enabled_tools
@@ -21,22 +23,32 @@ class Dispatcher:
         settings = AppContainer.get_settings()
         prompt_service = AppContainer.get_scheduled_prompt_service()
         memory_backend = AppContainer.get_memory_backend()
+        agent_registry = AppContainer.get_agent_registry()
+        llm_factory = AppContainer.get_llm_factory()
         tools = build_enabled_tools(
             settings,
             memory_backend,
             AppContainer.get_kv_memory_backend(),
             prompt_service,
             event_bus,
+            agent_registry,
+            llm_factory,
+        )
+        main_agent_tools_view = main_agent_tool_view(
+            tools=tools,
+            orchestration_config=settings.orchestration,
+            agent_specs=agent_registry.all(),
         )
         self._handler = LLMMessageHandler(
             memory=memory_backend,
             llm_client=AppContainer.get_llm_client(),
-            tools=tools,
+            tools=main_agent_tools_view.tools,
             default_owner_id=settings.tools.kv_memory.default_owner_id,
             max_history_messages=settings.memory.max_history_messages,
             max_history_tokens=settings.memory.max_history_tokens,
             notify_compaction_updates=settings.memory.notify_compaction_updates,
             agent_timeout_seconds=settings.runtime.agent_timeout_seconds,
+            environment_prompt_fragment=build_environment_prompt_fragment(settings),
         )
         self._logger = logging.getLogger("minibot.dispatcher")
         if settings.tools.mcp.enabled:
@@ -52,6 +64,11 @@ class Dispatcher:
                     "mcp_servers_configured": len(settings.tools.mcp.servers),
                     "mcp_tools_enabled": mcp_tool_names or ["none"],
                 },
+            )
+        if main_agent_tools_view.hidden_tool_names:
+            self._logger.info(
+                "main agent tools hidden due to exclusive ownership",
+                extra={"hidden_tools": main_agent_tools_view.hidden_tool_names},
             )
         self._task: Optional[asyncio.Task[None]] = None
 
@@ -92,12 +109,10 @@ class Dispatcher:
                     "llm_provider": response.metadata.get("llm_provider"),
                     "llm_model": response.metadata.get("llm_model"),
                     "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
-                    if isinstance(token_trace, dict)
-                    and isinstance(token_trace.get("turn_total_tokens"), int)
+                    if isinstance(token_trace, dict) and isinstance(token_trace.get("turn_total_tokens"), int)
                     else None,
                     "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
-                    if isinstance(token_trace, dict)
-                    and isinstance(token_trace.get("session_total_tokens"), int)
+                    if isinstance(token_trace, dict) and isinstance(token_trace.get("session_total_tokens"), int)
                     else None,
                     "compaction_performed": token_trace.get("compaction_performed")
                     if isinstance(token_trace, dict)
@@ -148,12 +163,10 @@ class Dispatcher:
                     "should_reply": should_reply,
                     "attempt": event.attempt,
                     "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
-                    if isinstance(token_trace, dict)
-                    and isinstance(token_trace.get("turn_total_tokens"), int)
+                    if isinstance(token_trace, dict) and isinstance(token_trace.get("turn_total_tokens"), int)
                     else None,
                     "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
-                    if isinstance(token_trace, dict)
-                    and isinstance(token_trace.get("session_total_tokens"), int)
+                    if isinstance(token_trace, dict) and isinstance(token_trace.get("session_total_tokens"), int)
                     else None,
                     "compaction_performed": token_trace.get("compaction_performed")
                     if isinstance(token_trace, dict)
