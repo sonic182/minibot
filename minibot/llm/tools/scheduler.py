@@ -27,11 +27,11 @@ class SchedulePromptTool:
 
     def bindings(self) -> list[ToolBinding]:
         return [
-            ToolBinding(tool=self._schedule_unified_schema(), handler=self._handle_schedule_unified),
             ToolBinding(tool=self._schedule_schema(), handler=self._handle_schedule),
             ToolBinding(tool=self._cancel_schema(), handler=self._handle_cancel),
             ToolBinding(tool=self._delete_schema(), handler=self._handle_delete),
             ToolBinding(tool=self._list_schema(), handler=self._handle_list),
+            ToolBinding(tool=self._schedule_unified_schema(), handler=self._handle_schedule_unified),
         ]
 
     def _schedule_unified_schema(self) -> Tool:

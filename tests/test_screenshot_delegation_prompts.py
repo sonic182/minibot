@@ -48,7 +48,7 @@ def test_telegram_channel_prompt_contains_attachment_handling():
         "NEVER ask browser agent for base64",
         "this wastes tokens",
         "attachments",
-        "send_file",
+        'filesystem(action="send")',
         "NEVER return base64 data",
     ]
 
@@ -66,7 +66,7 @@ def test_console_channel_prompt_contains_attachment_handling():
     critical_phrases = [
         "console cannot send files",
         "report file paths in your text response",
-        "Do NOT call send_file",
+        'Do NOT call filesystem(action="send")',
         "attachments",
     ]
 
@@ -154,7 +154,7 @@ async def test_integration_prompts_loaded_in_handler(tmp_path: Path):
     critical_checks = [
         ("NEVER ask for base64", "Anti-base64 instruction missing"),
         ("attachments", "Attachment handling missing"),
-        ("send_file", "send_file instruction missing"),
+        ('filesystem(action="send")', "filesystem send instruction missing"),
         ("this wastes tokens", "Token waste warning missing"),
     ]
 
@@ -173,9 +173,9 @@ def test_browser_agent_tool_access():
     assert "mcp_servers:" in content
     assert "playwright-cli" in content
 
-    # Should have list_files for path confirmation
+    # Should have filesystem for path confirmation
     assert "tools_allow:" in content
-    assert "list_files" in content
+    assert "filesystem" in content
 
 
 def test_handler_composes_system_prompt_with_all_fragments():
