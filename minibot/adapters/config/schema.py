@@ -166,7 +166,7 @@ class MainAgentConfig(BaseModel):
 class OrchestrationConfig(BaseModel):
     directory: str = "./agents"
     default_timeout_seconds: PositiveInt = 90
-    tool_ownership_mode: Literal["shared", "exclusive"] = "shared"
+    tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
     main_agent: MainAgentConfig = MainAgentConfig()
 
 

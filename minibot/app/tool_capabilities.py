@@ -23,13 +23,16 @@ def main_agent_tool_view(
     agent_specs: Sequence[AgentSpec],
 ) -> MainAgentToolView:
     main_agent_tools = _apply_main_agent_policy(list(tools), orchestration_config.main_agent)
-    if orchestration_config.tool_ownership_mode != "exclusive":
+    if orchestration_config.tool_ownership_mode not in {"exclusive", "exclusive_mcp"}:
         return MainAgentToolView(tools=main_agent_tools, hidden_tool_names=[])
 
     reserved_tool_names: set[str] = set()
     for spec in agent_specs:
         for binding in filter_tools_for_agent(main_agent_tools, spec):
-            reserved_tool_names.add(binding.tool.name)
+            tool_name = binding.tool.name
+            if orchestration_config.tool_ownership_mode == "exclusive_mcp" and not _is_mcp_tool_name(tool_name):
+                continue
+            reserved_tool_names.add(tool_name)
 
     visible_tools = [binding for binding in main_agent_tools if binding.tool.name not in reserved_tool_names]
     return MainAgentToolView(tools=visible_tools, hidden_tool_names=sorted(reserved_tool_names))
@@ -62,3 +65,7 @@ def _apply_main_agent_policy(tools: list[ToolBinding], main_agent: MainAgentConf
 
 def _matches_any(name: str, patterns: Sequence[str]) -> bool:
     return any(fnmatch(name, pattern) for pattern in patterns)
+
+
+def _is_mcp_tool_name(name: str) -> bool:
+    return name.startswith("mcp_") and "__" in name

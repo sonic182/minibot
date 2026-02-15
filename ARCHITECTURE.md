@@ -223,6 +223,7 @@ flowchart TD
 - `Dispatcher` computes main-agent tool exposure via `tool_ownership_mode`:
   - `shared`: main agent keeps tools after main-agent allow/deny policy,
   - `exclusive`: tools available to specialists are hidden from main agent.
+  - `exclusive_mcp`: only specialist-owned MCP tools are hidden; local/system tools stay shared.
 - Delegation is executed by `invoke_agent` tool:
   1. validate requested specialist name,
   2. instantiate specialist client (provider/model overrides supported),

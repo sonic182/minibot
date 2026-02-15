@@ -276,6 +276,7 @@ Useful patterns and behavior:
 - Main agent delegates through tool calls (`list_agents`, `invoke_agent`) and waits for tool results before finalizing responses.
 - Use `[orchestration.main_agent].tools_allow`/`tools_deny` to restrict the main-agent toolset.
 - With `[orchestration].tool_ownership_mode = "exclusive"`, tools assigned to specialist agents are removed from main-agent runtime and remain available only through delegation.
+- With `[orchestration].tool_ownership_mode = "exclusive_mcp"`, only agent-owned MCP tools are removed from main-agent runtime; local/system tools remain shared.
 - Keep secrets out of agent files. Put credentials in `[providers.<provider>]`.
 - Some models reject parameters like `temperature`; if you see provider `HTTP 400` for unsupported parameters, remove that field from the agent frontmatter (or from global `[llm]` defaults).
 

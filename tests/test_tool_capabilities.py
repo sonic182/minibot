@@ -41,6 +41,31 @@ def test_main_agent_tool_view_exclusive_hides_agent_owned_tools() -> None:
     assert view.hidden_tool_names == ["calculate_expression"]
 
 
+def test_main_agent_tool_view_exclusive_mcp_hides_only_agent_owned_mcp_tools() -> None:
+    tools = [
+        _binding("current_datetime"),
+        _binding("calculate_expression"),
+        _binding("mcp_playwright-cli__browser_navigate"),
+    ]
+    spec = AgentSpec(
+        name="worker",
+        description="worker",
+        system_prompt="worker",
+        source_path=Path("worker.md"),
+        mcp_servers=["playwright-cli"],
+        tools_allow=["calculate_*"],
+    )
+    config = OrchestrationConfig(
+        tool_ownership_mode="exclusive_mcp",
+        main_agent=MainAgentConfig(tools_allow=["current_*", "calculate_*", "mcp_*"]),
+    )
+
+    view = main_agent_tool_view(tools=tools, orchestration_config=config, agent_specs=[spec])
+
+    assert [binding.tool.name for binding in view.tools] == ["current_datetime", "calculate_expression"]
+    assert view.hidden_tool_names == ["mcp_playwright-cli__browser_navigate"]
+
+
 def test_summarize_agent_capabilities_includes_tool_hints() -> None:
     spec = AgentSpec(
         name="browser",
