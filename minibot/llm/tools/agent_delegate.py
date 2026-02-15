@@ -15,12 +15,16 @@ from minibot.core.agents import AgentSpec
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.schema_utils import empty_object_schema, strict_object, string_field
+from minibot.shared.parse_utils import parse_json_maybe_python_object
 
 
 @dataclass(frozen=True)
 class _DelegationOutcome:
     text: str
     payload: Any
+    should_answer_to_user: bool | None
+    valid: bool
+    error_code: str | None
 
 
 class AgentDelegateTool:
@@ -121,23 +125,32 @@ class AgentDelegateTool:
                 prompt_cache_key=None,
             )
             outcome = _extract_outcome(generation.payload)
+            result_status = _delegation_result_status(outcome)
+            ok = result_status == "success"
             self._logger.debug(
                 "delegated agent invocation completed",
                 extra={
                     "agent": spec.name,
                     "tool_count": len(scoped_tools),
                     "total_tokens": int(generation.total_tokens or 0),
+                    "result_status": result_status,
                     "result_preview": outcome.text[:240],
                 },
             )
-            return {
-                "ok": True,
+            response: dict[str, Any] = {
+                "ok": ok,
                 "agent": spec.name,
                 "result": outcome.text,
                 "payload": outcome.payload,
+                "result_status": result_status,
+                "should_answer_to_user": outcome.should_answer_to_user,
                 "tool_count": len(scoped_tools),
                 "total_tokens": int(generation.total_tokens or 0),
             }
+            if outcome.error_code is not None:
+                response["error_code"] = outcome.error_code
+                response["error"] = f"delegated agent returned {outcome.error_code}"
+            return response
         except Exception as exc:
             self._logger.exception(
                 "delegated agent invocation failed",
@@ -197,13 +210,65 @@ def _agent_response_schema() -> dict[str, Any]:
 
 
 def _extract_outcome(payload: Any) -> _DelegationOutcome:
+    if isinstance(payload, str):
+        parsed = parse_json_maybe_python_object(payload)
+        if parsed is not None and parsed is not payload:
+            return _extract_outcome(parsed)
+        return _DelegationOutcome(
+            text=payload,
+            payload=payload,
+            should_answer_to_user=None,
+            valid=False,
+            error_code="unstructured_payload",
+        )
     if isinstance(payload, dict):
         answer = payload.get("answer")
+        should = payload.get("should_answer_to_user")
+        should_flag = should if isinstance(should, bool) else None
+        if should_flag is None:
+            return _DelegationOutcome(
+                text=str(payload),
+                payload=payload,
+                should_answer_to_user=None,
+                valid=False,
+                error_code="missing_should_answer_to_user",
+            )
         if isinstance(answer, dict):
             content = answer.get("content")
             if isinstance(content, str) and content.strip():
-                return _DelegationOutcome(text=content, payload=payload)
-        return _DelegationOutcome(text=str(payload), payload=payload)
-    if isinstance(payload, str):
-        return _DelegationOutcome(text=payload, payload=payload)
-    return _DelegationOutcome(text=str(payload), payload=payload)
+                return _DelegationOutcome(
+                    text=content,
+                    payload=payload,
+                    should_answer_to_user=should_flag,
+                    valid=True,
+                    error_code=None,
+                )
+            return _DelegationOutcome(
+                text=str(payload),
+                payload=payload,
+                should_answer_to_user=should_flag,
+                valid=False,
+                error_code="missing_answer_content",
+            )
+        return _DelegationOutcome(
+            text=str(payload),
+            payload=payload,
+            should_answer_to_user=should_flag,
+            valid=False,
+            error_code="missing_answer_object",
+        )
+    return _DelegationOutcome(
+        text=str(payload),
+        payload=payload,
+        should_answer_to_user=None,
+        valid=False,
+        error_code="unstructured_payload",
+    )
+
+
+def _delegation_result_status(outcome: _DelegationOutcome) -> str:
+    if not outcome.valid:
+        return "invalid_result"
+    if outcome.should_answer_to_user is False:
+        return "not_user_answerable"
+    return "success"

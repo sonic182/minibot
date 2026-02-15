@@ -225,6 +225,7 @@ class LLMMessageHandler:
         primary_agent = "minibot"
         agent_trace: list[dict[str, Any]] = []
         delegation_fallback_used = False
+        delegation_unresolved = False
         tool_required_intent = False
         suggested_tool: str | None = None
         suggested_path: str | None = None
@@ -259,7 +260,9 @@ class LLMMessageHandler:
                 )
                 turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
                 tool_messages_count = self._count_tool_messages_in_state(generation.state)
-                agent_trace, delegation_fallback_used = self._extract_agent_trace(generation.state)
+                agent_trace, delegation_fallback_used, delegation_unresolved = self._extract_agent_trace(
+                    generation.state
+                )
                 if tool_messages_count == 0:
                     (
                         tool_required_intent,
@@ -301,7 +304,11 @@ class LLMMessageHandler:
                         getattr(generation, "total_tokens", None),
                     )
                     tool_messages_count = self._count_tool_messages_in_state(generation.state)
-                    agent_trace, delegation_fallback_used = self._extract_agent_trace(generation.state)
+                    (
+                        agent_trace,
+                        delegation_fallback_used,
+                        delegation_unresolved,
+                    ) = self._extract_agent_trace(generation.state)
                     self._logger.debug(
                         "tool-required retry completed",
                         extra={
@@ -311,6 +318,51 @@ class LLMMessageHandler:
                         },
                     )
                 render, should_reply = self._extract_answer(generation.payload)
+                if delegation_unresolved:
+                    self._logger.debug(
+                        "delegation returned unresolved state; retrying runtime once",
+                        extra={"chat_id": message.chat_id, "channel": message.channel},
+                    )
+                    retry_system_prompt = (
+                        f"{system_prompt}\n\n"
+                        "Delegation policy reminder: If invoke_agent result has should_answer_to_user=false "
+                        "or result_status other than success, you must resolve it in this turn. "
+                        "Do one additional concrete tool call or return an explicit failure message to user "
+                        "with should_answer_to_user=true."
+                    )
+                    retry_state = self._build_agent_state(
+                        history=history,
+                        user_text=model_text,
+                        user_content=model_user_content,
+                        system_prompt=retry_system_prompt,
+                    )
+                    generation = await self._runtime.run(
+                        state=retry_state,
+                        tool_context=tool_context,
+                        response_schema=self._response_schema(),
+                        prompt_cache_key=prompt_cache_key,
+                    )
+                    turn_total_tokens += self._track_token_usage(
+                        session_id,
+                        getattr(generation, "total_tokens", None),
+                    )
+                    tool_messages_count = self._count_tool_messages_in_state(generation.state)
+                    (
+                        agent_trace,
+                        delegation_fallback_used,
+                        delegation_unresolved,
+                    ) = self._extract_agent_trace(generation.state)
+                    render, should_reply = self._extract_answer(generation.payload)
+                    if delegation_unresolved:
+                        self._logger.warning(
+                            "delegation unresolved after bounded retry; returning explicit failure",
+                            extra={"chat_id": message.chat_id, "channel": message.channel},
+                        )
+                        render = self._plain_render(
+                            "I could not complete that delegated action reliably in this attempt. "
+                            "Please retry, or ask me to run a specific tool step-by-step."
+                        )
+                        should_reply = True
 
             if tool_required_intent and tool_messages_count == 0:
                 direct_tool_message = await self._attempt_direct_file_delete(
@@ -1064,9 +1116,12 @@ class LLMMessageHandler:
         return sum(1 for message in state.messages if message.role == "tool")
 
     @staticmethod
-    def _extract_agent_trace(state: AgentState) -> tuple[list[dict[str, Any]], bool]:
+    def _extract_agent_trace(state: AgentState) -> tuple[list[dict[str, Any]], bool, bool]:
         trace: list[dict[str, Any]] = []
         fallback_used = False
+        last_result_status: str | None = None
+        last_should_answer: bool | None = None
+        saw_invoke = False
         for message in state.messages:
             if message.role != "tool" or message.name != "invoke_agent":
                 continue
@@ -1075,21 +1130,42 @@ class LLMMessageHandler:
             part = message.content[0]
             if part.type != "json" or not isinstance(part.value, dict):
                 continue
+            saw_invoke = True
             agent = str(part.value.get("agent") or "")
             ok = bool(part.value.get("ok", False))
             error = part.value.get("error")
+            result_status = part.value.get("result_status")
+            delegated_should_answer = part.value.get("should_answer_to_user")
             if not ok:
                 fallback_used = True
+            if isinstance(result_status, str):
+                last_result_status = result_status
+            else:
+                last_result_status = None
+            if isinstance(delegated_should_answer, bool):
+                last_should_answer = delegated_should_answer
+            else:
+                last_should_answer = None
             trace_entry: dict[str, Any] = {
                 "agent": "minibot",
                 "decision": "invoke_agent",
                 "target": agent or None,
                 "ok": ok,
             }
+            if isinstance(result_status, str) and result_status.strip():
+                trace_entry["result_status"] = result_status
+            if isinstance(delegated_should_answer, bool):
+                trace_entry["should_answer_to_user"] = delegated_should_answer
             if isinstance(error, str) and error.strip():
                 trace_entry["error"] = error
             trace.append(trace_entry)
-        return trace, fallback_used
+        unresolved = False
+        if saw_invoke:
+            if last_result_status in {"invalid_result", "not_user_answerable"}:
+                unresolved = True
+            if last_should_answer is False:
+                unresolved = True
+        return trace, fallback_used, unresolved
 
     async def _attempt_direct_file_delete(
         self,
