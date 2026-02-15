@@ -1,7 +1,7 @@
 # Runtime mode and verbosity.
 [runtime]
 # Production note: use "INFO" (or "WARNING") here and set `environment = "production"`.
-log_level = "INFO"
+log_level = "DEBUG"
 environment = "test"
 agent_timeout_seconds = 120
 

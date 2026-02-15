@@ -59,10 +59,27 @@ class MCPToolBridge:
         llm_tool = Tool(name=tool_name, description=description, parameters=schema)
 
         async def _handler(payload: dict[str, Any], _: ToolContext) -> ToolResult:
+            self._logger.debug(
+                "executing mcp bridge tool",
+                extra={
+                    "server": self._server_name,
+                    "tool": tool.name,
+                    "argument_keys": sorted(payload.keys()),
+                },
+            )
             result = self._client.call_tool_blocking(tool.name, payload)
             content = result.content
             if isinstance(content, list):
                 content = _stringify_content_parts(content)
+            self._logger.debug(
+                "mcp bridge tool completed",
+                extra={
+                    "server": self._server_name,
+                    "tool": tool.name,
+                    "is_error": result.is_error,
+                    "result_preview": str(content)[:400],
+                },
+            )
             return ToolResult(content={"server": self._server_name, "tool": tool.name, "result": content})
 
         return ToolBinding(tool=llm_tool, handler=_handler)

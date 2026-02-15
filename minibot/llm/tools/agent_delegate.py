@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -35,6 +36,7 @@ class AgentDelegateTool:
         self._llm_factory = llm_factory
         self._tools = list(tools)
         self._default_timeout_seconds = default_timeout_seconds
+        self._logger = logging.getLogger("minibot.agent_delegate")
 
     def bindings(self) -> list[ToolBinding]:
         return [
@@ -86,6 +88,15 @@ class AgentDelegateTool:
                 "error": f"agent '{agent_name}' is not available",
             }
 
+        self._logger.debug(
+            "delegated agent invocation started",
+            extra={
+                "agent": agent_name,
+                "task_preview": task[:240],
+                "has_context": bool(details),
+            },
+        )
+
         llm_client = self._llm_factory.create_for_agent(spec)
         scoped_tools = self._scoped_tools(spec)
         max_tool_iterations = _max_tool_iterations(llm_client)
@@ -110,6 +121,15 @@ class AgentDelegateTool:
                 prompt_cache_key=None,
             )
             outcome = _extract_outcome(generation.payload)
+            self._logger.debug(
+                "delegated agent invocation completed",
+                extra={
+                    "agent": spec.name,
+                    "tool_count": len(scoped_tools),
+                    "total_tokens": int(generation.total_tokens or 0),
+                    "result_preview": outcome.text[:240],
+                },
+            )
             return {
                 "ok": True,
                 "agent": spec.name,
@@ -119,6 +139,10 @@ class AgentDelegateTool:
                 "total_tokens": int(generation.total_tokens or 0),
             }
         except Exception as exc:
+            self._logger.exception(
+                "delegated agent invocation failed",
+                extra={"agent": spec.name},
+            )
             return {
                 "ok": False,
                 "agent": spec.name,
