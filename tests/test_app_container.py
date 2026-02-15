@@ -14,6 +14,8 @@ def _reset_container(module) -> None:
     module.AppContainer._memory_backend = None
     module.AppContainer._kv_memory_backend = None
     module.AppContainer._llm_client = None
+    module.AppContainer._llm_factory = None
+    module.AppContainer._agent_registry = None
     module.AppContainer._prompt_store = None
     module.AppContainer._prompt_service = None
 
@@ -64,6 +66,13 @@ async def test_app_container_configures_and_initializes_backends(monkeypatch: py
             self.event_bus = event_bus
             self.config = config
 
+    class _LLMFactory:
+        def __init__(self, _settings) -> None:
+            self._client = object()
+
+        def create_default(self):
+            return self._client
+
     settings = Settings(llm=LLMMConfig(api_key="secret"))
     settings.tools.kv_memory.enabled = True
     settings.scheduler.prompts.enabled = True
@@ -75,7 +84,8 @@ async def test_app_container_configures_and_initializes_backends(monkeypatch: py
     monkeypatch.setattr(app_container, "SQLAlchemyKeyValueMemory", _AsyncBackend)
     monkeypatch.setattr(app_container, "SQLAlchemyScheduledPromptStore", _Store)
     monkeypatch.setattr(app_container, "ScheduledPromptService", _PromptService)
-    monkeypatch.setattr(app_container, "LLMClient", lambda *_: object())
+    monkeypatch.setattr(app_container, "LLMClientFactory", _LLMFactory)
+    monkeypatch.setattr(app_container, "load_agent_specs", lambda *_: [])
 
     app_container.AppContainer.configure()
     await app_container.AppContainer.initialize_storage()

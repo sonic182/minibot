@@ -71,9 +71,7 @@ class SchedulePromptTool:
                             f" Minimum: {self._min_recurrence_interval_seconds}."
                         ),
                     ),
-                    "recurrence_end_at": nullable_string(
-                        "Optional ISO 8601 timestamp after which recurrence stops."
-                    ),
+                    "recurrence_end_at": nullable_string("Optional ISO 8601 timestamp after which recurrence stops."),
                 },
                 required=[
                     "content",
@@ -202,18 +200,24 @@ class SchedulePromptTool:
         owner_id = require_owner(context)
         channel = require_channel(context, message="channel context is required for scheduling")
         active_only = _optional_bool(payload.get("active_only"), default=True)
-        limit = optional_int(
-            payload.get("limit"),
-            field="limit",
-            allow_float=True,
-            type_error="limit must be numeric",
-        ) or 20
-        offset = optional_int(
-            payload.get("offset"),
-            field="offset",
-            allow_float=True,
-            type_error="offset must be numeric",
-        ) or 0
+        limit = (
+            optional_int(
+                payload.get("limit"),
+                field="limit",
+                allow_float=True,
+                type_error="limit must be numeric",
+            )
+            or 20
+        )
+        offset = (
+            optional_int(
+                payload.get("offset"),
+                field="offset",
+                allow_float=True,
+                type_error="offset must be numeric",
+            )
+            or 0
+        )
         jobs = await self._service.list_prompts(
             owner_id=owner_id,
             channel=channel,

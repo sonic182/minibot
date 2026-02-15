@@ -222,6 +222,9 @@ class LLMMessageHandler:
         )
         prompt_cache_key = _prompt_cache_key(message)
         system_prompt = self._compose_system_prompt(message.channel)
+        primary_agent = "minibot"
+        agent_trace: list[dict[str, Any]] = []
+        delegation_fallback_used = False
         tool_required_intent = False
         suggested_tool: str | None = None
         suggested_path: str | None = None
@@ -256,6 +259,7 @@ class LLMMessageHandler:
                 )
                 turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
                 tool_messages_count = self._count_tool_messages_in_state(generation.state)
+                agent_trace, delegation_fallback_used = self._extract_agent_trace(generation.state)
                 if tool_messages_count == 0:
                     (
                         tool_required_intent,
@@ -292,8 +296,12 @@ class LLMMessageHandler:
                         response_schema=self._response_schema(),
                         prompt_cache_key=prompt_cache_key,
                     )
-                    turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+                    turn_total_tokens += self._track_token_usage(
+                        session_id,
+                        getattr(generation, "total_tokens", None),
+                    )
                     tool_messages_count = self._count_tool_messages_in_state(generation.state)
+                    agent_trace, delegation_fallback_used = self._extract_agent_trace(generation.state)
                     self._logger.debug(
                         "tool-required retry completed",
                         extra={
@@ -356,9 +364,10 @@ class LLMMessageHandler:
         answer = render.text
         await self._memory.append_history(session_id, "assistant", answer)
         await self._enforce_history_limit(session_id)
+        compact_prompt_cache_key = prompt_cache_key or f"{session_id}:runtime"
         compaction_result = await self._compact_history_if_needed(
             session_id,
-            prompt_cache_key=prompt_cache_key,
+            prompt_cache_key=compact_prompt_cache_key,
             system_prompt=system_prompt,
             notify=self._notify_compaction_updates,
         )
@@ -366,6 +375,10 @@ class LLMMessageHandler:
 
         chat_id = message.chat_id or message.user_id or 0
         metadata = self._response_metadata(should_reply)
+        metadata["primary_agent"] = primary_agent
+        if agent_trace:
+            metadata["agent_trace"] = agent_trace
+        metadata["delegation_fallback_used"] = delegation_fallback_used
         if compaction_result.updates:
             metadata["compaction_updates"] = compaction_result.updates
         metadata["token_trace"] = self._build_token_trace(
@@ -1089,6 +1102,34 @@ class LLMMessageHandler:
     @staticmethod
     def _count_tool_messages_in_state(state: AgentState) -> int:
         return sum(1 for message in state.messages if message.role == "tool")
+
+    @staticmethod
+    def _extract_agent_trace(state: AgentState) -> tuple[list[dict[str, Any]], bool]:
+        trace: list[dict[str, Any]] = []
+        fallback_used = False
+        for message in state.messages:
+            if message.role != "tool" or message.name != "invoke_agent":
+                continue
+            if not message.content:
+                continue
+            part = message.content[0]
+            if part.type != "json" or not isinstance(part.value, dict):
+                continue
+            agent = str(part.value.get("agent") or "")
+            ok = bool(part.value.get("ok", False))
+            error = part.value.get("error")
+            if not ok:
+                fallback_used = True
+            trace_entry: dict[str, Any] = {
+                "agent": "minibot",
+                "decision": "invoke_agent",
+                "target": agent or None,
+                "ok": ok,
+            }
+            if isinstance(error, str) and error.strip():
+                trace_entry["error"] = error
+            trace.append(trace_entry)
+        return trace, fallback_used
 
     async def _attempt_direct_file_delete(
         self,
