@@ -107,15 +107,15 @@ and emit outbound responses back to the active channel adapter.
 2. Channel adapter (`TelegramService` or `ConsoleService`) maps input into `ChannelMessage` and publishes `MessageEvent`.
 3. `MessageEvent` is published into `app.event_bus.EventBus`.
 4. `app.dispatcher.Dispatcher` consumes `MessageEvent` and invokes `LLMMessageHandler`.
-5. `Dispatcher` builds supervisor tool visibility first (`app.tool_capabilities.supervisor_tool_view`):
-   - optional supervisor allow/deny tool policy,
-   - optional exclusive ownership mode that hides agent-owned tools from supervisor.
+5. `Dispatcher` builds main-agent tool visibility first (`app.tool_capabilities.main_agent_tool_view`):
+   - optional main-agent allow/deny tool policy,
+   - optional exclusive ownership mode that hides agent-owned tools from the main agent.
 6. Handler loads history, composes system prompt fragments, and builds tool context.
-7. Supervisor (`minibot`) runs in `AgentRuntime` with full tool loop.
+7. Main agent (`minibot`) runs in `AgentRuntime` with full tool loop.
 8. Delegation is tool-driven:
-   - supervisor may call `invoke_agent`,
+   - main agent may call `invoke_agent`,
    - `invoke_agent` resolves specialist by name, applies agent tool policy, and runs specialist runtime with ephemeral in-turn state,
-   - result returns to supervisor as tool output, then supervisor composes final answer.
+   - result returns to main agent as tool output, then main agent composes final answer.
 9. Handler returns `ChannelResponse` with metadata (`primary_agent`, optional `agent_trace`, `delegation_fallback_used`, token trace).
 10. Dispatcher publishes `OutboundEvent` unless `metadata.should_reply` is false.
 11. Active channel adapter consumes outbound response and renders it to user (Telegram send or console print).
@@ -132,22 +132,48 @@ flowchart TD
     C --> CS[ConsoleService.publish_user_message]
     CS --> EB[(EventBus)]
     EB --> D[Dispatcher]
-    D --> STV[supervisor_tool_view]
+    D --> STV[main_agent_tool_view]
     D --> H[LLMMessageHandler.handle]
 
     STV --> H
-    H --> SUP[Supervisor AgentRuntime]
-    SUP --> DEC{Need specialist?}
-    DEC -->|no| FINAL[Supervisor final answer]
-    DEC -->|yes| IA[invoke_agent tool]
+    H --> SUP
+
+    SUP[Main Agent Runtime]
+    DEC{Need specialist?}
+    FINAL[Main agent final answer]
+    IA[invoke_agent tool]
+
+    subgraph MAIN[Main Agent minibot]
+        SUP
+        DEC
+        FINAL
+        IA
+    end
+
+    SUP --> DEC
+    DEC -->|no| FINAL
+    DEC -->|yes| IA
+
     IA --> AR[AgentRegistry lookup]
-    AR --> S[Specialist AgentRuntime]
-    S --> TP[Apply per-agent tool policy<br/>tools_allow/tools_deny/mcp_servers]
-    TP --> T[Specialist tool calls + output]
+
+    S[Specialist AgentRuntime]
+    TP[Apply per-agent tool policy; tools_allow/tools_deny/mcp_servers]
+    T[Specialist tool calls + output]
+
+    subgraph SPEC[Specialist Agent]
+        S
+        TP
+        T
+    end
+
+    S --> TP
+    TP --> T
+
+    AR --> S
     T --> SUP
     FINAL --> H
 
-    H --> RESP[ChannelResponse<br/>metadata: primary_agent, delegation_fallback_used, agent_trace]
+    H --> RESP[ChannelResponse metadata: primary_agent, delegation_fallback_used, agent_trace]
     RESP --> D
     D --> EB2[(OutboundEvent)]
     EB2 --> C
@@ -166,15 +192,15 @@ flowchart TD
 ## Application Layer
 
 - `app/event_bus.py`: in-process async pub/sub over `asyncio.Queue` with subscription iterators.
-- `app/dispatcher.py`: main event consumer; builds enabled tools, applies supervisor tool visibility policy, invokes handler pipeline, controls reply suppression.
+- `app/dispatcher.py`: main event consumer; builds enabled tools, applies main-agent tool visibility policy, invokes handler pipeline, controls reply suppression.
 - `app/agent_definitions_loader.py`: loads specialist definitions from Markdown files with YAML-like frontmatter.
 - `app/agent_registry.py`: in-memory registry for discovered `AgentSpec` entries.
 - `app/agent_policies.py`: enforces per-agent tool scoping (`tools_allow`, `tools_deny`, MCP server allowlist).
-- `app/tool_capabilities.py`: computes supervisor-visible tools and capability summaries for prompts/tool policies.
+- `app/tool_capabilities.py`: computes main-agent-visible tools and capability summaries for prompts/tool policies.
 - `app/handlers/llm_handler.py`:
   - assembles model input from text plus attachments,
   - composes per-channel system prompt by loading prompt fragments from `shared/prompt_loader.py`,
-  - runs supervisor runtime/tool loop,
+  - runs main-agent runtime/tool loop,
   - consumes delegated results from `invoke_agent` tool outputs,
   - enforces provider constraints for multimodal support,
   - stores transcript history safely (attachment summaries only, not raw blobs),
@@ -194,15 +220,15 @@ flowchart TD
   - frontmatter describes identity/routing/runtime policy (`name`, `description`, `model_provider`, `model`, `max_tool_iterations`, `tools_allow`, `tools_deny`, `mcp_servers`),
   - Markdown body becomes the specialist system prompt.
 - `AppContainer` always loads those files at boot and builds `AgentRegistry`; disabled agents are filtered by frontmatter `enabled: false`.
-- `Dispatcher` computes supervisor tool exposure via `tool_ownership_mode`:
-  - `shared`: supervisor keeps tools after supervisor allow/deny policy,
-  - `exclusive`: tools available to specialists are hidden from supervisor.
+- `Dispatcher` computes main-agent tool exposure via `tool_ownership_mode`:
+  - `shared`: main agent keeps tools after main-agent allow/deny policy,
+  - `exclusive`: tools available to specialists are hidden from main agent.
 - Delegation is executed by `invoke_agent` tool:
   1. validate requested specialist name,
   2. instantiate specialist client (provider/model overrides supported),
   3. filter tools by specialist policy,
   4. run specialist runtime with ephemeral in-turn state (no delegated SQLite transcript),
-  5. return tool result to supervisor for final answer synthesis.
+  5. return tool result to main agent for final answer synthesis.
 - Metadata emitted includes execution trace (`primary_agent`, `delegation_fallback_used`, `agent_trace`).
 - Recursive delegation is blocked for specialists by removing `invoke_agent` from specialist tool scope.
 
@@ -302,8 +328,8 @@ Main sections:
 - `[channels.telegram]` (auth allowlists, mode, media limits)
 - `[llm]`
   - `llm.prompts_dir` points to channel prompt packs (default `./prompts`)
-- `[orchestration]` (definitions directory, delegated runtime timeout defaults, supervisor policy)
-- `[orchestration.supervisor]` (supervisor tool allow/deny)
+- `[orchestration]` (definitions directory, delegated runtime timeout defaults, main-agent policy)
+- `[orchestration.main_agent]` (main-agent tool allow/deny)
 - `[memory]`
 - `[scheduler.prompts]`
 - `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `time`, `mcp`)
@@ -325,7 +351,7 @@ Current architecture supports:
 - one daemon process with in-process event bus,
 - SQLite-backed persistence for memory and scheduled prompts,
 - tool-augmented LLM interactions,
-- supervisor-driven tool-based delegation (`invoke_agent`) with per-agent tool scoping.
+- main-agent-driven tool-based delegation (`invoke_agent`) with per-agent tool scoping.
 
 Natural extension points already in place:
 

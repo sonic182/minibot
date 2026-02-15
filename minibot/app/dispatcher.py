@@ -8,7 +8,7 @@ from typing import Optional
 from minibot.adapters.container import AppContainer
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
-from minibot.app.tool_capabilities import supervisor_tool_view
+from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 from minibot.llm.tools.factory import build_enabled_tools
@@ -33,7 +33,7 @@ class Dispatcher:
             agent_registry,
             llm_factory,
         )
-        supervisor_tools_view = supervisor_tool_view(
+        main_agent_tools_view = main_agent_tool_view(
             tools=tools,
             orchestration_config=settings.orchestration,
             agent_specs=agent_registry.all(),
@@ -41,7 +41,7 @@ class Dispatcher:
         self._handler = LLMMessageHandler(
             memory=memory_backend,
             llm_client=AppContainer.get_llm_client(),
-            tools=supervisor_tools_view.tools,
+            tools=main_agent_tools_view.tools,
             default_owner_id=settings.tools.kv_memory.default_owner_id,
             max_history_messages=settings.memory.max_history_messages,
             max_history_tokens=settings.memory.max_history_tokens,
@@ -63,10 +63,10 @@ class Dispatcher:
                     "mcp_tools_enabled": mcp_tool_names or ["none"],
                 },
             )
-        if supervisor_tools_view.hidden_tool_names:
+        if main_agent_tools_view.hidden_tool_names:
             self._logger.info(
-                "supervisor tools hidden due to exclusive ownership",
-                extra={"hidden_tools": supervisor_tools_view.hidden_tool_names},
+                "main agent tools hidden due to exclusive ownership",
+                extra={"hidden_tools": main_agent_tools_view.hidden_tool_names},
             )
         self._task: Optional[asyncio.Task[None]] = None
 

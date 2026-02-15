@@ -124,13 +124,13 @@ class AgentDefinitionConfig(BaseModel):
         return self
 
 
-class SupervisorAgentConfig(BaseModel):
-    name: str = "supervisor"
+class MainAgentConfig(BaseModel):
+    name: str = "minibot"
     tools_allow: List[str] = Field(default_factory=list)
     tools_deny: List[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_tool_policy(self) -> "SupervisorAgentConfig":
+    def _validate_tool_policy(self) -> "MainAgentConfig":
         if self.tools_allow and self.tools_deny:
             raise ValueError("only one of tools_allow or tools_deny can be set")
         return self
@@ -140,7 +140,7 @@ class OrchestrationConfig(BaseModel):
     directory: str = "./agents"
     default_timeout_seconds: PositiveInt = 90
     tool_ownership_mode: Literal["shared", "exclusive"] = "shared"
-    supervisor: SupervisorAgentConfig = SupervisorAgentConfig()
+    main_agent: MainAgentConfig = MainAgentConfig()
 
 
 class MemoryConfig(BaseModel):

@@ -4,35 +4,35 @@ from dataclasses import dataclass
 from fnmatch import fnmatch
 from typing import Sequence
 
-from minibot.adapters.config.schema import OrchestrationConfig, SupervisorAgentConfig
+from minibot.adapters.config.schema import MainAgentConfig, OrchestrationConfig
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
 
 
 @dataclass(frozen=True)
-class SupervisorToolView:
+class MainAgentToolView:
     tools: list[ToolBinding]
     hidden_tool_names: list[str]
 
 
-def supervisor_tool_view(
+def main_agent_tool_view(
     *,
     tools: Sequence[ToolBinding],
     orchestration_config: OrchestrationConfig,
     agent_specs: Sequence[AgentSpec],
-) -> SupervisorToolView:
-    supervisor_tools = _apply_supervisor_policy(list(tools), orchestration_config.supervisor)
+) -> MainAgentToolView:
+    main_agent_tools = _apply_main_agent_policy(list(tools), orchestration_config.main_agent)
     if orchestration_config.tool_ownership_mode != "exclusive":
-        return SupervisorToolView(tools=supervisor_tools, hidden_tool_names=[])
+        return MainAgentToolView(tools=main_agent_tools, hidden_tool_names=[])
 
     reserved_tool_names: set[str] = set()
     for spec in agent_specs:
-        for binding in filter_tools_for_agent(supervisor_tools, spec):
+        for binding in filter_tools_for_agent(main_agent_tools, spec):
             reserved_tool_names.add(binding.tool.name)
 
-    visible_tools = [binding for binding in supervisor_tools if binding.tool.name not in reserved_tool_names]
-    return SupervisorToolView(tools=visible_tools, hidden_tool_names=sorted(reserved_tool_names))
+    visible_tools = [binding for binding in main_agent_tools if binding.tool.name not in reserved_tool_names]
+    return MainAgentToolView(tools=visible_tools, hidden_tool_names=sorted(reserved_tool_names))
 
 
 def summarize_agent_capabilities(spec: AgentSpec) -> str:
@@ -50,9 +50,9 @@ def summarize_agent_capabilities(spec: AgentSpec) -> str:
     return "; ".join(capability_hints)
 
 
-def _apply_supervisor_policy(tools: list[ToolBinding], supervisor: SupervisorAgentConfig) -> list[ToolBinding]:
-    allow_patterns = [item.strip() for item in supervisor.tools_allow if item.strip()]
-    deny_patterns = [item.strip() for item in supervisor.tools_deny if item.strip()]
+def _apply_main_agent_policy(tools: list[ToolBinding], main_agent: MainAgentConfig) -> list[ToolBinding]:
+    allow_patterns = [item.strip() for item in main_agent.tools_allow if item.strip()]
+    deny_patterns = [item.strip() for item in main_agent.tools_deny if item.strip()]
     if allow_patterns:
         return [binding for binding in tools if _matches_any(binding.tool.name, allow_patterns)]
     if deny_patterns:

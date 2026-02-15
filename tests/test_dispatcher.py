@@ -33,13 +33,13 @@ class _FakeSettings:
         agent_timeout_seconds = 120
 
     class _Orchestration:
-        class _Supervisor:
+        class _MainAgent:
             tools_allow: list[str] = []
             tools_deny: list[str] = []
 
         default_timeout_seconds = 90
         tool_ownership_mode = "shared"
-        supervisor = _Supervisor()
+        main_agent = _MainAgent()
 
     tools = _Tools()
     memory = _Memory()

@@ -176,12 +176,12 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
                 "agent_name": "worker",
                 "task": "answer delegated task",
             },
-            "response_id": "supervisor-1",
+            "response_id": "main-agent-1",
             "total_tokens": 8,
         },
         {
             "content": '{"answer":{"kind":"text","content":"delegated response"},"should_answer_to_user":true}',
-            "response_id": "supervisor-2",
+            "response_id": "main-agent-2",
             "total_tokens": 8,
         },
     ]

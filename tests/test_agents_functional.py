@@ -30,21 +30,21 @@ def _write_config(
     provider: str,
     orchestration_dir: Path,
     tool_ownership_mode: str = "shared",
-    supervisor_tools_allow: list[str] | None = None,
+    main_agent_tools_allow: list[str] | None = None,
 ) -> Path:
     config_path = tmp_path / "config.toml"
     sqlite_url = f"sqlite+aiosqlite:///{(tmp_path / 'test_agents_functional.db').as_posix()}"
-    supervisor_lines = ["\n[orchestration.supervisor]"]
-    if supervisor_tools_allow:
-        entries = ", ".join([f'"{name}"' for name in supervisor_tools_allow])
-        supervisor_lines.append(f"tools_allow = [{entries}]")
-    supervisor_block = "\n".join(supervisor_lines)
+    main_agent_lines = ["\n[orchestration.main_agent]"]
+    if main_agent_tools_allow:
+        entries = ", ".join([f'"{name}"' for name in main_agent_tools_allow])
+        main_agent_lines.append(f"tools_allow = [{entries}]")
+    main_agent_block = "\n".join(main_agent_lines)
     orchestration_block = (
         "\n[orchestration]\n"
         f'directory = "{orchestration_dir.as_posix()}"\n'
         "default_timeout_seconds = 30\n"
         f'tool_ownership_mode = "{tool_ownership_mode}"\n'
-    ) + supervisor_block
+    ) + main_agent_block
     config_path.write_text(
         "\n".join(
             [
@@ -134,7 +134,7 @@ async def _run_single_turn(*, config_path: Path, text: str, llm_factory: Scripte
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["openai", "openai_responses"])
-async def test_supervisor_invokes_specialist_via_tool(tmp_path: Path, provider: str) -> None:
+async def test_main_agent_invokes_specialist_via_tool(tmp_path: Path, provider: str) -> None:
     agents_dir = tmp_path / "agents"
     _write_agent(
         agents_dir=agents_dir,
@@ -154,12 +154,12 @@ async def test_supervisor_invokes_specialist_via_tool(tmp_path: Path, provider: 
                 "task": "Calculate 2+3 and return only result",
             },
             "call_id": "delegate-1",
-            "response_id": "sup-step-1",
+            "response_id": "main-step-1",
             "total_tokens": 5,
         },
         {
             "content": '{"answer":{"kind":"text","content":"delegated result is 5"},"should_answer_to_user":true}',
-            "response_id": "sup-final",
+            "response_id": "main-final",
             "total_tokens": 6,
         },
     ]
@@ -218,12 +218,12 @@ async def test_disabled_agent_is_not_invokable(tmp_path: Path, provider: str) ->
                 "task": "Try a task",
             },
             "call_id": "delegate-missing",
-            "response_id": "sup-step-1",
+            "response_id": "main-step-1",
             "total_tokens": 5,
         },
         {
             "content": '{"answer":{"kind":"text","content":"fallback answer"},"should_answer_to_user":true}',
-            "response_id": "sup-final",
+            "response_id": "main-final",
             "total_tokens": 5,
         },
     ]
@@ -247,7 +247,7 @@ async def test_disabled_agent_is_not_invokable(tmp_path: Path, provider: str) ->
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["openai", "openai_responses"])
-async def test_exclusive_ownership_hides_specialist_tool_from_supervisor(tmp_path: Path, provider: str) -> None:
+async def test_exclusive_ownership_hides_specialist_tool_from_main_agent(tmp_path: Path, provider: str) -> None:
     agents_dir = tmp_path / "agents"
     _write_agent(
         agents_dir=agents_dir,
@@ -267,12 +267,12 @@ async def test_exclusive_ownership_hides_specialist_tool_from_supervisor(tmp_pat
                 "task": "calculate 2+3",
             },
             "call_id": "delegate-exclusive",
-            "response_id": "sup-step-1",
+            "response_id": "main-step-1",
             "total_tokens": 5,
         },
         {
             "content": '{"answer":{"kind":"text","content":"result is 5"},"should_answer_to_user":true}',
-            "response_id": "sup-final",
+            "response_id": "main-final",
             "total_tokens": 6,
         },
     ]
@@ -300,7 +300,7 @@ async def test_exclusive_ownership_hides_specialist_tool_from_supervisor(tmp_pat
             provider=provider,
             orchestration_dir=agents_dir,
             tool_ownership_mode="exclusive",
-            supervisor_tools_allow=["current_*", "calculate_*", "invoke_agent"],
+            main_agent_tools_allow=["current_*", "calculate_*", "invoke_agent"],
         ),
         text="delegate this",
         llm_factory=ScriptedLLMFactory(
@@ -310,7 +310,7 @@ async def test_exclusive_ownership_hides_specialist_tool_from_supervisor(tmp_pat
     )
 
     assert response.text == "result is 5"
-    supervisor_tools = default_client.complete_requests[0]["tool_names"]
-    assert "calculate_expression" not in supervisor_tools
-    assert "invoke_agent" in supervisor_tools
+    main_agent_tools = default_client.complete_requests[0]["tool_names"]
+    assert "calculate_expression" not in main_agent_tools
+    assert "invoke_agent" in main_agent_tools
     assert worker_client.complete_requests
