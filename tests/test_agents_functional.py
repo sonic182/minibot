@@ -167,10 +167,18 @@ async def test_main_agent_invokes_specialist_via_tool(tmp_path: Path, provider: 
     worker_client = ScriptedLLMClient(provider=provider)
     worker_client.runtime_steps = [
         {
+            "content": "calling calculate",
+            "tool_name": "calculate_expression",
+            "arguments": {"expression": "2+3"},
+            "call_id": "worker-calc",
+            "response_id": "worker-step-1",
+            "total_tokens": 4,
+        },
+        {
             "content": '{"answer":{"kind":"text","content":"5"},"should_answer_to_user":true}',
             "response_id": "worker-final",
             "total_tokens": 4,
-        }
+        },
     ]
 
     response = await _run_single_turn(
@@ -193,6 +201,11 @@ async def test_main_agent_invokes_specialist_via_tool(tmp_path: Path, provider: 
     assert isinstance(trace, list)
     assert any(entry.get("target") == "workspace_manager_agent" and entry.get("ok") is True for entry in trace)
     assert worker_client.complete_requests
+    worker_messages = worker_client.complete_requests[0]["messages"]
+    assert isinstance(worker_messages, list)
+    worker_system = worker_messages[0].get("content") if worker_messages else None
+    assert isinstance(worker_system, str)
+    assert "Browser artifacts directory" in worker_system
 
 
 @pytest.mark.asyncio
@@ -224,6 +237,11 @@ async def test_disabled_agent_is_not_invokable(tmp_path: Path, provider: str) ->
         {
             "content": '{"answer":{"kind":"text","content":"fallback answer"},"should_answer_to_user":true}',
             "response_id": "main-final",
+            "total_tokens": 5,
+        },
+        {
+            "content": '{"answer":{"kind":"text","content":"fallback answer"},"should_answer_to_user":true}',
+            "response_id": "main-final-retry",
             "total_tokens": 5,
         },
     ]
@@ -314,3 +332,71 @@ async def test_exclusive_ownership_hides_specialist_tool_from_main_agent(tmp_pat
     assert "calculate_expression" not in main_agent_tools
     assert "invoke_agent" in main_agent_tools
     assert worker_client.complete_requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "openai_responses"])
+async def test_delegated_agent_without_tool_calls_triggers_fallback(tmp_path: Path, provider: str) -> None:
+    agents_dir = tmp_path / "agents"
+    _write_agent(
+        agents_dir=agents_dir,
+        name="workspace_manager_agent",
+        description="workspace specialist",
+        model_provider=provider,
+        tools_allow=["calculate_expression"],
+    )
+
+    default_client = ScriptedLLMClient(provider=provider)
+    default_client.runtime_steps = [
+        {
+            "content": "delegating",
+            "tool_name": "invoke_agent",
+            "arguments": {
+                "agent_name": "workspace_manager_agent",
+                "task": "calculate 2+3",
+            },
+            "call_id": "delegate-no-tool",
+            "response_id": "main-step-1",
+            "total_tokens": 5,
+        },
+        {
+            "content": '{"answer":{"kind":"text","content":"fallback answer"},"should_answer_to_user":true}',
+            "response_id": "main-final",
+            "total_tokens": 5,
+        },
+        {
+            "content": '{"answer":{"kind":"text","content":"fallback answer"},"should_answer_to_user":true}',
+            "response_id": "main-final-retry",
+            "total_tokens": 5,
+        },
+    ]
+
+    worker_client = ScriptedLLMClient(provider=provider)
+    worker_client.runtime_steps = [
+        {
+            "content": '{"answer":{"kind":"text","content":"5"},"should_answer_to_user":true}',
+            "response_id": "worker-final-1",
+            "total_tokens": 4,
+        },
+        {
+            "content": '{"answer":{"kind":"text","content":"5"},"should_answer_to_user":true}',
+            "response_id": "worker-final-2",
+            "total_tokens": 4,
+        },
+    ]
+
+    response = await _run_single_turn(
+        config_path=_write_config(
+            tmp_path=tmp_path,
+            provider=provider,
+            orchestration_dir=agents_dir,
+        ),
+        text="delegate this",
+        llm_factory=ScriptedLLMFactory(
+            default_client=default_client,
+            agent_clients={"workspace_manager_agent": worker_client},
+        ),
+    )
+
+    assert response.text == "fallback answer"
+    assert len(worker_client.complete_requests) == 2

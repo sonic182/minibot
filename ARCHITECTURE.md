@@ -230,6 +230,10 @@ flowchart TD
   3. filter tools by specialist policy,
   4. run specialist runtime with ephemeral in-turn state (no delegated SQLite transcript),
   5. return tool result to main agent for final answer synthesis.
+- Delegated tool-use enforcement is configurable via `[orchestration].delegated_tool_call_policy`:
+  - `auto` (default): requires at least one specialist tool call when delegated agent has any scoped tools,
+  - `always`: requires at least one specialist tool call for every delegation,
+  - `never`: disables delegated tool-call enforcement.
 - Metadata emitted includes execution trace (`primary_agent`, `delegation_fallback_used`, `agent_trace`).
 - Recursive delegation is blocked for specialists by removing `invoke_agent` from specialist tool scope.
 

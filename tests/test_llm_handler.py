@@ -812,6 +812,27 @@ async def test_handler_injects_channel_prompt_fragment(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_handler_injects_environment_prompt_fragment() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(
+        {"answer": "ok", "should_answer_to_user": True},
+        system_prompt="You are Minibot.",
+    )
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        environment_prompt_fragment="Environment context:\n- Browser artifacts directory: ./data/files/browser",
+    )
+
+    await handler.handle(_message_event("ping"))
+
+    call_kwargs = client.calls[-1]["kwargs"]
+    override = call_kwargs.get("system_prompt_override")
+    assert isinstance(override, str)
+    assert "Browser artifacts directory: ./data/files/browser" in override
+
+
+@pytest.mark.asyncio
 async def test_repair_response_appends_retry_prompt_and_answer_to_history() -> None:
     memory = StubMemory()
     client = StubLLMClient(

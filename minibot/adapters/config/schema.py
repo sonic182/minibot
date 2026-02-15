@@ -167,6 +167,7 @@ class OrchestrationConfig(BaseModel):
     directory: str = "./agents"
     default_timeout_seconds: PositiveInt = 90
     tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
+    delegated_tool_call_policy: Literal["auto", "always", "never"] = "auto"
     main_agent: MainAgentConfig = MainAgentConfig()
 
 
@@ -286,6 +287,10 @@ class FileStorageToolConfig(BaseModel):
     incoming_temp_subdir: str = "uploads/temp"
 
 
+class BrowserToolConfig(BaseModel):
+    output_dir: str = "./data/files/browser"
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
@@ -293,6 +298,7 @@ class ToolsConfig(BaseModel):
     calculator: CalculatorToolConfig = CalculatorToolConfig()
     python_exec: PythonExecToolConfig = PythonExecToolConfig()
     file_storage: FileStorageToolConfig = FileStorageToolConfig()
+    browser: BrowserToolConfig = BrowserToolConfig()
     mcp: MCPToolConfig = MCPToolConfig()
 
 

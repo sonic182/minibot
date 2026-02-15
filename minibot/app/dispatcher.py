@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from minibot.adapters.container import AppContainer
+from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
 from minibot.app.tool_capabilities import main_agent_tool_view
@@ -47,6 +48,7 @@ class Dispatcher:
             max_history_tokens=settings.memory.max_history_tokens,
             notify_compaction_updates=settings.memory.notify_compaction_updates,
             agent_timeout_seconds=settings.runtime.agent_timeout_seconds,
+            environment_prompt_fragment=build_environment_prompt_fragment(settings),
         )
         self._logger = logging.getLogger("minibot.dispatcher")
         if settings.tools.mcp.enabled:

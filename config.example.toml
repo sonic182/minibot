@@ -60,6 +60,11 @@ base_url = ""
 directory = "./agents"
 default_timeout_seconds = 90
 tool_ownership_mode = "exclusive"
+# Delegated specialist tool-call policy:
+# - "auto": require at least one tool call when delegated agent has any scoped tools
+# - "always": require at least one tool call for every delegated agent
+# - "never": do not enforce delegated tool calls
+delegated_tool_call_policy = "auto"
 
 [orchestration.main_agent]
 name = "minibot"
@@ -144,6 +149,10 @@ max_write_bytes = "64KB"
 save_incoming_uploads = false
 uploads_subdir = "uploads"
 incoming_temp_subdir = "uploads/temp"
+
+# Browser runtime paths used by browser-specialist prompts and Playwright MCP output-dir.
+[tools.browser]
+output_dir = "./data/files/browser"
 
 # Built-in calculator tool.
 [tools.calculator]
@@ -248,12 +257,10 @@ timeout_seconds = 10
 #   # Enable screenshots (vision) and PDFs
 #   "--caps=vision,pdf",
 #
-#   # Output directory (screenshots/downloads/session)
-#   "--output-dir=./data/files/browser",
-#
 #   # Persist browser state/session under output-dir
 #   "--save-session"
 # ]
+# # Note: MiniBot injects --output-dir from [tools.browser].output_dir for server name "playwright-cli".
 # env = {}
 # cwd = "."
 # enabled_tools = []

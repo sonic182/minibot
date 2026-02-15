@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from llm_async.models import Tool
 
@@ -35,11 +35,15 @@ class AgentDelegateTool:
         llm_factory: LLMClientFactory,
         tools: Sequence[ToolBinding],
         default_timeout_seconds: int,
+        delegated_tool_call_policy: Literal["auto", "always", "never"] = "auto",
+        environment_prompt_fragment: str = "",
     ) -> None:
         self._registry = registry
         self._llm_factory = llm_factory
         self._tools = list(tools)
         self._default_timeout_seconds = default_timeout_seconds
+        self._delegated_tool_call_policy = delegated_tool_call_policy
+        self._environment_prompt_fragment = environment_prompt_fragment.strip()
         self._logger = logging.getLogger("minibot.agent_delegate")
 
     def bindings(self) -> list[ToolBinding]:
@@ -116,7 +120,10 @@ class AgentDelegateTool:
             allow_system_inserts=False,
             managed_files_root=None,
         )
+        tool_required = self._delegated_tool_call_required(spec)
+        attempts = 1
         state = self._build_state(spec=spec, task=task, details=details)
+        total_tokens = 0
         try:
             generation = await runtime.run(
                 state=state,
@@ -124,6 +131,56 @@ class AgentDelegateTool:
                 response_schema=_agent_response_schema(),
                 prompt_cache_key=None,
             )
+            total_tokens += int(generation.total_tokens or 0)
+            tool_messages_count = self._count_tool_messages(generation.state)
+            if tool_required and tool_messages_count == 0:
+                attempts += 1
+                self._logger.warning(
+                    "delegated agent returned without tool calls; retrying once",
+                    extra={
+                        "agent": spec.name,
+                        "policy": self._delegated_tool_call_policy,
+                    },
+                )
+                retry_state = self._build_state(
+                    spec=spec,
+                    task=task,
+                    details=details,
+                    system_prompt_override=(
+                        f"{spec.system_prompt}\n\n"
+                        "Tool policy reminder: this delegated task requires at least one tool call before "
+                        "your final answer. Execute the necessary tool now, then return the result."
+                    ),
+                )
+                generation = await runtime.run(
+                    state=retry_state,
+                    tool_context=context,
+                    response_schema=_agent_response_schema(),
+                    prompt_cache_key=None,
+                )
+                total_tokens += int(generation.total_tokens or 0)
+                tool_messages_count = self._count_tool_messages(generation.state)
+                if tool_messages_count == 0:
+                    self._logger.warning(
+                        "delegated agent failed tool-use requirement",
+                        extra={
+                            "agent": spec.name,
+                            "policy": self._delegated_tool_call_policy,
+                        },
+                    )
+                    return {
+                        "ok": False,
+                        "agent": spec.name,
+                        "result": "Delegated agent did not execute required tools.",
+                        "result_status": "invalid_result",
+                        "should_answer_to_user": False,
+                        "tool_count": len(scoped_tools),
+                        "tool_messages_count": tool_messages_count,
+                        "delegation_attempts": attempts,
+                        "total_tokens": total_tokens,
+                        "error_code": "delegated_no_tool_calls",
+                        "error": "delegated agent returned without required tool calls",
+                    }
             outcome = _extract_outcome(generation.payload)
             result_status = _delegation_result_status(outcome)
             ok = result_status == "success"
@@ -132,7 +189,9 @@ class AgentDelegateTool:
                 extra={
                     "agent": spec.name,
                     "tool_count": len(scoped_tools),
-                    "total_tokens": int(generation.total_tokens or 0),
+                    "total_tokens": total_tokens,
+                    "tool_messages_count": tool_messages_count,
+                    "delegation_attempts": attempts,
                     "result_status": result_status,
                     "result_preview": outcome.text[:240],
                 },
@@ -145,7 +204,9 @@ class AgentDelegateTool:
                 "result_status": result_status,
                 "should_answer_to_user": outcome.should_answer_to_user,
                 "tool_count": len(scoped_tools),
-                "total_tokens": int(generation.total_tokens or 0),
+                "tool_messages_count": tool_messages_count,
+                "delegation_attempts": attempts,
+                "total_tokens": total_tokens,
             }
             if outcome.error_code is not None:
                 response["error_code"] = outcome.error_code
@@ -161,23 +222,48 @@ class AgentDelegateTool:
                 "agent": spec.name,
                 "error_code": "delegated_agent_failed",
                 "error": str(exc),
+                "delegation_attempts": attempts,
             }
 
     def _scoped_tools(self, spec: AgentSpec) -> list[ToolBinding]:
         scoped = filter_tools_for_agent(self._tools, spec)
         return [binding for binding in scoped if binding.tool.name != "invoke_agent"]
 
-    @staticmethod
-    def _build_state(*, spec: AgentSpec, task: str, details: str | None) -> AgentState:
+    def _build_state(
+        self,
+        *,
+        spec: AgentSpec,
+        task: str,
+        details: str | None,
+        system_prompt_override: str | None = None,
+    ) -> AgentState:
         user_text = task
         if details:
             user_text = f"Task:\n{task}\n\nContext:\n{details}"
+        system_prompt = system_prompt_override or spec.system_prompt
+        if self._environment_prompt_fragment:
+            system_prompt = f"{system_prompt}\n\n{self._environment_prompt_fragment}"
         return AgentState(
             messages=[
-                AgentMessage(role="system", content=[MessagePart(type="text", text=spec.system_prompt)]),
+                AgentMessage(
+                    role="system",
+                    content=[MessagePart(type="text", text=system_prompt)],
+                ),
                 AgentMessage(role="user", content=[MessagePart(type="text", text=user_text)]),
             ]
         )
+
+    def _delegated_tool_call_required(self, spec: AgentSpec) -> bool:
+        if self._delegated_tool_call_policy == "never":
+            return False
+        if self._delegated_tool_call_policy == "always":
+            return True
+        scoped_tools = self._scoped_tools(spec)
+        return len(scoped_tools) > 0
+
+    @staticmethod
+    def _count_tool_messages(state: AgentState) -> int:
+        return sum(1 for message in state.messages if message.role == "tool")
 
 
 def _max_tool_iterations(llm_client: Any) -> int:

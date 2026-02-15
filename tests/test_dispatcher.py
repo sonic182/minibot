@@ -17,11 +17,15 @@ class _FakeSettings:
         class _KV:
             default_owner_id = "primary"
 
+        class _Browser:
+            output_dir = "./data/files/browser"
+
         class _MCP:
             enabled = False
             name_prefix = "mcp"
 
         kv_memory = _KV()
+        browser = _Browser()
         mcp = _MCP()
 
     class _Memory:

@@ -100,6 +100,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
 - `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`), and optional artifact export controls (`artifacts_*`) to persist generated files into managed storage for later `send_file`.
 - `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
+- `[tools.browser]`: configures browser artifact paths used by prompts and Playwright MCP launch defaults. `output_dir` is the canonical directory for screenshots/downloads/session artifacts.
 - `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
@@ -174,9 +175,6 @@ args = [
   # Enable screenshots (vision) and PDFs
   "--caps=vision,pdf",
 
-  # Output directory (screenshots/downloads/session)
-  "--output-dir=./data/files/browser",
-
   # Persist browser state/session under output-dir
   "--save-session"
 ]
@@ -185,6 +183,8 @@ cwd = "."
 # enabled_tools = []
 # disabled_tools = []
 ```
+
+For server name `playwright-cli`, MiniBot injects `--output-dir` automatically from `[tools.browser].output_dir`.
 
 Tool filtering behavior:
 
@@ -277,6 +277,11 @@ Useful patterns and behavior:
 - Use `[orchestration.main_agent].tools_allow`/`tools_deny` to restrict the main-agent toolset.
 - With `[orchestration].tool_ownership_mode = "exclusive"`, tools assigned to specialist agents are removed from main-agent runtime and remain available only through delegation.
 - With `[orchestration].tool_ownership_mode = "exclusive_mcp"`, only agent-owned MCP tools are removed from main-agent runtime; local/system tools remain shared.
+- Use `[orchestration].delegated_tool_call_policy` to enforce specialist tool use:
+  - `auto` (default): requires at least one tool call when the delegated agent has any available scoped tools.
+  - `always`: requires at least one tool call for every delegated agent.
+  - `never`: disables delegated tool-call enforcement.
+- Environment setup from config (for example `[tools.browser].output_dir`) is injected into both main-agent and delegated-agent system prompts.
 - Keep secrets out of agent files. Put credentials in `[providers.<provider>]`.
 - Some models reject parameters like `temperature`; if you see provider `HTTP 400` for unsupported parameters, remove that field from the agent frontmatter (or from global `[llm]` defaults).
 

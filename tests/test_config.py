@@ -52,6 +52,7 @@ bot_token = "token"
     assert settings.llm.openrouter.provider.order == ["anthropic", "openai"]
     assert settings.llm.openrouter.provider.provider_extra["custom_hint"] == "value"
     assert settings.channels["telegram"].bot_token == "token"
+    assert settings.tools.browser.output_dir == "./data/files/browser"
 
 
 def test_load_settings_accepts_human_readable_byte_sizes(tmp_path: Path) -> None:

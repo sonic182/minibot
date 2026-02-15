@@ -41,6 +41,7 @@ class LLMMessageHandler:
         max_history_tokens: int | None = None,
         notify_compaction_updates: bool = False,
         agent_timeout_seconds: int = 120,
+        environment_prompt_fragment: str = "",
     ) -> None:
         self._memory = memory
         self._llm_client = llm_client
@@ -51,6 +52,7 @@ class LLMMessageHandler:
         self._notify_compaction_updates = notify_compaction_updates
         self._session_total_tokens: dict[str, int] = {}
         self._prompts_dir = self._llm_prompts_dir()
+        self._environment_prompt_fragment = environment_prompt_fragment.strip()
         max_tool_iterations_getter = getattr(self._llm_client, "max_tool_iterations", None)
         max_tool_iterations = 8
         if callable(max_tool_iterations_getter):
@@ -150,6 +152,8 @@ class LLMMessageHandler:
         channel_prompt = load_channel_prompt(self._prompts_dir, channel)
         if channel_prompt:
             fragments.append(channel_prompt)
+        if self._environment_prompt_fragment:
+            fragments.append(self._environment_prompt_fragment)
         self._logger.debug(
             "composed system prompt",
             extra={
