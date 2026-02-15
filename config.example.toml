@@ -68,20 +68,21 @@ delegated_tool_call_policy = "auto"
 
 [orchestration.main_agent]
 name = "minibot"
-tools_allow = [
-  "current_*",
-  "calculate_*",
-  "http_*",
-  "invoke_agent",
-  "list_files",
-  "glob_files",
-  "file_info",
-  "create_file",
-  "move_file",
-  "delete_file",
-  "send_file",
-  "self_insert_artifact",
-]
+# better not to say tools allowed as some tools may be missing...
+# tools_allow = [
+#   "current_*",
+#   "calculate_*",
+#   "http_*",
+#   "invoke_agent",
+#   "list_files",
+#   "glob_files",
+#   "file_info",
+#   "create_file",
+#   "move_file",
+#   "delete_file",
+#   "send_file",
+#   "self_insert_artifact",
+# ]
 
 # Optional request params. Omit keys to avoid sending them.
 # temperature = 0.2
