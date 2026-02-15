@@ -15,6 +15,11 @@
 - **No automated tests** unless asked — prefer linting or formatting to verify changes.
 - **Linting is welcome** — run `ruff check` or `ruff format`; this repo does not configure `flake8` despite it being available.
 
+## Output Classification Rule
+- **NEVER classify LLM intent/state by regex, substring, or ad-hoc text matching.**
+- Use structured schema fields (for example `should_answer_to_user`, typed status/error fields) or model-native/tool-native structured outputs.
+- Text matching is acceptable only for deterministic protocol/format parsing (for example markdown fences, SSE framing), not for semantic decision-making.
+
 ## Code Style
 - **Line length**: 119 characters.
 - **Python version**: 3.12–3.13 (`pyproject.toml` constraint: `>=3.12,<3.14`) with explicit type hints (Pydantic models, protocols, etc.).
