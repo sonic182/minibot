@@ -622,7 +622,6 @@ class LLMMessageHandler:
         return parsed
 
     def _build_incoming_files_text(self, prompt_text: str, incoming_files: Sequence[IncomingFileRef]) -> str:
-        intent = self._infer_incoming_file_intent(prompt_text)
         lines = [
             "Incoming managed files:",
             *[
@@ -635,22 +634,17 @@ class LLMMessageHandler:
         ]
         first_path = incoming_files[0].path if incoming_files else ""
         suggested_destination = self._suggest_persist_destination(first_path)
-        if intent == "management":
+        lines.append(
+            "For file-management requests, prefer move_file/delete_file/send_file/list_files. "
+            "Do NOT call self_insert_artifact unless user explicitly asks to inspect content."
+        )
+        if suggested_destination:
             lines.append(
-                "Intent looks like file management. Prefer move_file/delete_file/send_file/list_files. "
-                "Do NOT call self_insert_artifact unless user explicitly asks to inspect content."
+                "If user asks to save the uploaded file, move_file "
+                f"source_path={first_path} destination_path={suggested_destination}."
             )
-            if suggested_destination:
-                lines.append(
-                    "If user asked to save, move_file "
-                    f"source_path={first_path} destination_path={suggested_destination}."
-                )
-        elif intent == "analysis":
-            lines.append(
-                "Intent looks like content inspection. Use self_insert_artifact if needed to analyze file contents."
-            )
-        else:
-            lines.append("If intent is unclear, ask a clarifying question before acting.")
+        lines.append("For analysis requests, use self_insert_artifact when inspection is required.")
+        lines.append("If user intent is unclear, ask a clarifying question before acting.")
         if prompt_text:
             return f"{prompt_text}\n\n" + "\n".join(lines)
         return (
@@ -658,40 +652,6 @@ class LLMMessageHandler:
             + "\n".join(lines)
             + "\nAsk the user what to do, unless the intent is already obvious."
         )
-
-    @staticmethod
-    def _infer_incoming_file_intent(prompt_text: str) -> str:
-        normalized = prompt_text.lower().strip()
-        if not normalized:
-            return "unknown"
-        management_keywords = {
-            "save",
-            "store",
-            "keep",
-            "move",
-            "rename",
-            "delete",
-            "remove",
-            "send",
-            "forward",
-            "list",
-        }
-        analysis_keywords = {
-            "analyze",
-            "analysis",
-            "describe",
-            "read",
-            "what is",
-            "summarize",
-            "extract",
-            "inspect",
-            "about",
-        }
-        if any(keyword in normalized for keyword in management_keywords):
-            return "management"
-        if any(keyword in normalized for keyword in analysis_keywords):
-            return "analysis"
-        return "unknown"
 
     @staticmethod
     def _suggest_persist_destination(path: str) -> str | None:

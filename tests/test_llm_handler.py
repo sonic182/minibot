@@ -523,7 +523,7 @@ async def test_handler_builds_text_notice_for_incoming_managed_files() -> None:
     assert isinstance(call_args[1], str)
     assert "Incoming managed files:" in call_args[1]
     assert "uploads/temp/friends.jpg" in call_args[1]
-    assert "content inspection" in call_args[1]
+    assert "For analysis requests" in call_args[1]
     assert stub_client.calls[-1]["kwargs"].get("user_content") is None
 
 
@@ -555,7 +555,7 @@ async def test_handler_guides_move_for_save_intent_with_incoming_files() -> None
 
     call_args = stub_client.calls[-1]["args"]
     assert isinstance(call_args[1], str)
-    assert "Intent looks like file management" in call_args[1]
+    assert "For file-management requests" in call_args[1]
     assert "Do NOT call self_insert_artifact" in call_args[1]
     assert "destination_path=uploads/photo_1.jpg" in call_args[1]
 
