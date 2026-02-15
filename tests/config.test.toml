@@ -1,0 +1,241 @@
+# Runtime mode and verbosity.
+[runtime]
+# Production note: use "INFO" (or "WARNING") here and set `environment = "production"`.
+log_level = "INFO"
+environment = "test"
+agent_timeout_seconds = 120
+
+# Telegram adapter settings.
+[channels.telegram]
+enabled = true
+bot_token = ""
+allowed_chat_ids = []
+allowed_user_ids = []
+require_authorized = true
+mode = "long_polling"
+webhook_url = ""
+media_enabled = true
+# Byte-size values accept raw integers or quoted units (SI preferred), e.g. "5MB", "16KB", "2MiB".
+max_photo_bytes = "5MB"
+max_document_bytes = "10MB"
+max_total_media_bytes = "12MB"
+max_attachments_per_message = 3
+allowed_document_mime_types = []
+
+# LLM provider and generation settings.
+[llm]
+provider = "openai_responses"
+base_url = ""
+model = "gpt-5-mini"
+max_tool_iterations = 15
+request_timeout_seconds = 45
+sock_connect_timeout_seconds = 10
+sock_read_timeout_seconds = 45
+retry_attempts = 3
+retry_delay_seconds = 2.0
+system_prompt = "You are Minibot, a helpful assistant."
+prompts_dir = "./prompts"
+
+[providers.openai]
+api_key = ""
+base_url = ""
+
+[providers.openai_responses]
+api_key = ""
+base_url = ""
+
+[providers.openrouter]
+api_key = ""
+base_url = ""
+
+[providers.claude]
+api_key = ""
+base_url = ""
+
+[providers.google]
+api_key = ""
+base_url = ""
+
+[orchestration]
+directory = "./agents"
+default_timeout_seconds = 90
+tool_ownership_mode = "exclusive"
+# include_agent_trace_in_metadata = true
+
+[orchestration.main_agent]
+name = "minibot"
+tools_allow = ["current_*", "calculate_*", "http_*", "*_agent*"]
+
+# Optional request params. Omit keys to avoid sending them.
+# temperature = 0.2
+# max_new_tokens = 512
+# reasoning_effort = "medium"
+
+# Optional OpenRouter-specific routing configuration.
+# Applied only when `llm.provider = "openrouter"`.
+[llm.openrouter]
+# Optional model pool for fallback routing.
+# models = ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
+# Optional OpenRouter plugins (for example PDF parsing engine).
+# plugins = [{ id = "file-parser", pdf = { engine = "pdf-text" } }]
+
+[llm.openrouter.provider]
+# order = ["anthropic", "openai"]
+# allow_fallbacks = true
+# require_parameters = false
+# data_collection = "deny"
+# zdr = true
+# enforce_distillable_text = false
+# only = ["anthropic"]
+# ignore = ["parasail"]
+# quantizations = ["int8"]
+# sort = "price"
+# preferred_min_throughput = 20
+# preferred_max_latency = 2.0
+# max_price = { prompt = 3.0, completion = 15.0 }
+# provider_extra = {}
+
+# Conversation memory persistence.
+[memory]
+backend = "sqlite"
+sqlite_url = "sqlite+aiosqlite:///./testdata/minibot.db"
+max_history_messages = 200
+
+# Scheduled prompt storage and polling.
+[scheduler.prompts]
+enabled = true
+sqlite_url = "sqlite+aiosqlite:///./testdata/scheduled_prompts.db"
+# Poll cadence for scanning due jobs.
+poll_interval_seconds = 60
+# How long a claimed job stays leased before becoming claimable again.
+lease_timeout_seconds = 120
+# Max due jobs processed per poll cycle.
+batch_size = 10
+# Max attempts before job is marked failed.
+max_attempts = 3
+# Minimum allowed interval for recurring jobs (`recurrence_type = "interval"`).
+min_recurrence_interval_seconds = 60
+pool_size = 5
+echo = false
+
+# Optional key/value memory tool.
+[tools.kv_memory]
+enabled = true
+sqlite_url = "sqlite+aiosqlite:///./testdata/kv_memory.db"
+pool_size = 5
+echo = false
+default_limit = 20
+max_limit = 100
+default_owner_id = "primary"
+
+# Optional HTTP fetch tool.
+[tools.http_client]
+enabled = true
+timeout_seconds = 10
+max_bytes = "16KB"
+response_processing_mode = "auto"
+max_chars = 6000
+normalize_whitespace = true
+
+# Managed file workspace tools.
+[tools.file_storage]
+enabled = true
+root_dir = "./testdata/files"
+max_write_bytes = "64KB"
+save_incoming_uploads = false
+uploads_subdir = "uploads"
+incoming_temp_subdir = "uploads/temp"
+
+# Built-in calculator tool.
+[tools.calculator]
+enabled = true
+default_scale = 28
+max_expression_length = 200
+max_exponent_abs = 1000
+
+# Python code execution tool.
+[tools.python_exec]
+enabled = true
+backend = "host"
+python_path = ""
+venv_path = ""
+sandbox_mode = "basic"
+default_timeout_seconds = 8
+max_timeout_seconds = 20
+max_output_bytes = "64KB"
+max_code_bytes = "32KB"
+artifacts_enabled = true
+artifacts_default_subdir = "generated"
+artifacts_allowed_extensions = [".png", ".jpg", ".jpeg", ".pdf", ".csv", ".txt", ".json", ".svg"]
+artifacts_max_files = 5
+artifacts_max_file_bytes = "5MB"
+artifacts_max_total_bytes = "20MB"
+# For safety, artifact export is blocked in sandbox_mode = "jail" unless explicitly enabled below.
+artifacts_allow_in_jail = false
+# Required when artifacts_allow_in_jail = true. Must be a host path accessible by both Firejail process and bot.
+artifacts_jail_shared_dir = ""
+pass_parent_env = false
+env_allowlist = ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"]
+
+# RLIMIT sandbox parameters.
+[tools.python_exec.rlimit]
+enabled = false
+cpu_seconds = 2
+memory_mb = 256
+fsize_mb = 16
+nproc = 64
+nofile = 256
+
+# Cgroup sandbox parameters.
+[tools.python_exec.cgroup]
+enabled = false
+driver = "systemd"
+cpu_quota_percent = 100
+memory_max_mb = 256
+
+# External jail wrapper settings.
+[tools.python_exec.jail]
+enabled = false
+command_prefix = []
+
+# Structured logging output.
+[logging]
+structured = true
+logfmt_enabled = true
+# Production note: set to "INFO" to reduce verbosity.
+log_level = "DEBUG"
+kv_separator = "="
+record_separator = " "
+
+# Optional Model Context Protocol bridge.
+[tools.mcp]
+enabled = true
+name_prefix = "mcp"
+timeout_seconds = 10
+
+[[tools.mcp.servers]]
+name = "playwright-cli"
+transport = "stdio"
+command = "npx"
+# Notice: if npx is not on PATH (for example with asdf), use "/home/myuser/.asdf/shims/npx".
+args = [
+  # Recommended: pin a version if --output-dir behavior affects you
+  "@playwright/mcp@0.0.64",
+  # Or use "@playwright/mcp@latest",
+
+  # "--headless",
+  "--browser=chrome",
+
+  # Enable screenshots (vision) and PDFs
+  "--caps=vision,pdf",
+
+  # Output directory (screenshots/downloads/session)
+  "--output-dir=./testdata/files/browser",
+
+  # Persist browser state/session under output-dir
+  "--save-session"
+]
+env = {}
+cwd = "."
+enabled_tools = []
+disabled_tools = []

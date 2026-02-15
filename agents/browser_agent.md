@@ -4,7 +4,8 @@ description: Specialist agent for browser automation using Playwright MCP
 enabled: false
 mode: agent
 model_provider: openrouter
-model: x-ai/grok-4.1-fast
+# model: x-ai/grok-4.1-fast
+model: z-ai/glm-5
 reasoning_effort: high
 max_tool_iterations: 25
 mcp_servers:
