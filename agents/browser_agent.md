@@ -3,9 +3,9 @@ name: playwright_mcp_agent
 description: Specialist agent for browser automation using Playwright MCP
 enabled: false
 mode: agent
-model_provider: openai_responses
-model: gpt-5-mini
-reasoning_effort: medium
+model_provider: openrouter
+model: x-ai/grok-4.1-fast
+reasoning_effort: high
 max_tool_iterations: 25
 mcp_servers:
   - playwright-cli

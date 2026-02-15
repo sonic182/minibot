@@ -18,7 +18,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--once", type=str, default=None, help="Send one message and exit. Use '-' to read stdin.")
     parser.add_argument("--chat-id", type=int, default=1)
     parser.add_argument("--user-id", type=int, default=1)
-    parser.add_argument("--timeout-seconds", type=float, default=20.0)
+    parser.add_argument("--timeout-seconds", type=float, default=120.0)
     parser.add_argument("--config", type=str, default=None, help="Optional config.toml path.")
     return parser
 
@@ -32,6 +32,7 @@ async def run(
     config_path: str | None,
 ) -> None:
     console = CompatConsole()
+    effective_timeout_seconds = max(120.0, float(timeout_seconds))
     resolved_config_path = Path(config_path).expanduser() if config_path else None
     AppContainer.configure(resolved_config_path)
     logger = AppContainer.get_logger()
@@ -52,7 +53,14 @@ async def run(
             if not stripped:
                 raise ValueError("empty input for --once")
             await console_service.publish_user_message(stripped)
-            await console_service.wait_for_response(timeout_seconds)
+            responded = await _wait_for_response_or_warn(
+                console_service=console_service,
+                timeout_seconds=effective_timeout_seconds,
+                logger=logger,
+                console=console,
+            )
+            if not responded:
+                return
             return
 
         confirm_exit = False
@@ -72,10 +80,12 @@ async def run(
             if stripped.lower() in {"quit", "exit"}:
                 return
             await console_service.publish_user_message(stripped)
-            await console_service.wait_for_response(timeout_seconds)
-    except asyncio.TimeoutError as exc:
-        logger.error("timed out waiting for console response")
-        raise RuntimeError("timed out waiting for console response") from exc
+            await _wait_for_response_or_warn(
+                console_service=console_service,
+                timeout_seconds=effective_timeout_seconds,
+                logger=logger,
+                console=console,
+            )
     finally:
         await console_service.stop()
         await dispatcher.stop()
@@ -95,6 +105,25 @@ def main(argv: Optional[list[str]] = None) -> None:
         )
     except KeyboardInterrupt:
         return
+
+
+async def _wait_for_response_or_warn(
+    *,
+    console_service: ConsoleService,
+    timeout_seconds: float,
+    logger: logging.Logger,
+    console: CompatConsole,
+) -> bool:
+    try:
+        await console_service.wait_for_response(timeout_seconds)
+        return True
+    except asyncio.TimeoutError:
+        logger.warning("timed out waiting for console response", extra={"timeout_seconds": timeout_seconds})
+        console.print(
+            f"[yellow]Timeout getting response after {int(timeout_seconds)}s. "
+            "The request may still be running; try again in a moment.[/]"
+        )
+        return False
 
 
 if __name__ == "__main__":

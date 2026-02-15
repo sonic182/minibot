@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from pathlib import Path
@@ -22,6 +23,9 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
         def get_logger(cls):
             class _Logger:
                 def error(self, *_args, **_kwargs) -> None:
+                    return None
+
+                def warning(self, *_args, **_kwargs) -> None:
                     return None
 
             return _Logger()
@@ -78,7 +82,7 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
     assert calls["published_text"] == "hello"
     assert calls["chat_id"] == 42
     assert calls["user_id"] == 7
-    assert calls["timeout"] == 3.5
+    assert calls["timeout"] == 120.0
     assert calls["dispatcher_started"] is True
     assert calls["dispatcher_stopped"] is True
     assert calls["service_started"] is True
@@ -100,6 +104,9 @@ async def test_console_run_once_reads_stdin_when_dash(monkeypatch: pytest.Monkey
         def get_logger(cls):
             class _Logger:
                 def error(self, *_args, **_kwargs) -> None:
+                    return None
+
+                def warning(self, *_args, **_kwargs) -> None:
                     return None
 
             return _Logger()
@@ -176,6 +183,9 @@ async def test_console_repl_requires_double_ctrl_c_to_exit(monkeypatch: pytest.M
                 def error(self, *_args, **_kwargs) -> None:
                     return None
 
+                def warning(self, *_args, **_kwargs) -> None:
+                    return None
+
             return _Logger()
 
         @classmethod
@@ -237,6 +247,83 @@ async def test_console_repl_requires_double_ctrl_c_to_exit(monkeypatch: pytest.M
 
     assert printed
     assert "Press Ctrl+C again to exit" in printed[-1]
+
+
+@pytest.mark.asyncio
+async def test_console_run_once_timeout_shows_warning_without_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app import console as console_module
+
+    printed: list[str] = []
+
+    class _FakeConsole:
+        def print(self, value) -> None:
+            printed.append(str(value))
+
+    class _FakeContainer:
+        @classmethod
+        def configure(cls, config_path=None) -> None:
+            del config_path
+
+        @classmethod
+        def get_logger(cls):
+            class _Logger:
+                def error(self, *_args, **_kwargs) -> None:
+                    return None
+
+                def warning(self, *_args, **_kwargs) -> None:
+                    return None
+
+            return _Logger()
+
+        @classmethod
+        def get_event_bus(cls):
+            return object()
+
+        @classmethod
+        async def initialize_storage(cls) -> None:
+            return None
+
+    class _FakeDispatcher:
+        def __init__(self, event_bus) -> None:
+            del event_bus
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    class _FakeConsoleService:
+        def __init__(self, event_bus, *, chat_id, user_id, console) -> None:
+            del event_bus, chat_id, user_id, console
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+        async def publish_user_message(self, text: str) -> None:
+            del text
+
+        async def wait_for_response(self, timeout_seconds: float):
+            del timeout_seconds
+            raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(console_module, "AppContainer", _FakeContainer)
+    monkeypatch.setattr(console_module, "Dispatcher", _FakeDispatcher)
+    monkeypatch.setattr(console_module, "ConsoleService", _FakeConsoleService)
+    monkeypatch.setattr(console_module, "CompatConsole", _FakeConsole)
+
+    await console_module.run(
+        once="hello",
+        chat_id=1,
+        user_id=1,
+        timeout_seconds=1.0,
+        config_path=None,
+    )
+
+    assert any("Timeout getting response after 120s" in text for text in printed)
 
 
 def test_configure_console_file_only_logging_removes_stream_handlers(
