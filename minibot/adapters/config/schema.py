@@ -126,8 +126,6 @@ class AgentDefinitionConfig(BaseModel):
 
 class SupervisorAgentConfig(BaseModel):
     name: str = "supervisor"
-    allowed_delegate_agents: List[str] = Field(default_factory=list)
-    system_prompt_append: str = ""
     tools_allow: List[str] = Field(default_factory=list)
     tools_deny: List[str] = Field(default_factory=list)
 
@@ -138,13 +136,10 @@ class SupervisorAgentConfig(BaseModel):
         return self
 
 
-class AgentsConfig(BaseModel):
-    enabled: bool = False
+class OrchestrationConfig(BaseModel):
     directory: str = "./agents"
-    max_delegation_depth: PositiveInt = 2
     default_timeout_seconds: PositiveInt = 90
     tool_ownership_mode: Literal["shared", "exclusive"] = "shared"
-    include_agent_trace_in_metadata: bool = True
     supervisor: SupervisorAgentConfig = SupervisorAgentConfig()
 
 
@@ -305,7 +300,7 @@ class Settings(BaseModel):
     )
     providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
     llm: LLMMConfig = LLMMConfig()
-    agents: AgentsConfig = AgentsConfig()
+    orchestration: OrchestrationConfig = OrchestrationConfig()
     memory: MemoryConfig = MemoryConfig()
     tools: ToolsConfig = ToolsConfig()
     scheduler: SchedulerConfig = SchedulerConfig()

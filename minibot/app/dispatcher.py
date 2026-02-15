@@ -6,7 +6,6 @@ import logging
 from typing import Optional
 
 from minibot.adapters.container import AppContainer
-from minibot.app.agent_orchestrator import AgentOrchestrator
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
 from minibot.app.tool_capabilities import supervisor_tool_view
@@ -23,33 +22,26 @@ class Dispatcher:
         settings = AppContainer.get_settings()
         prompt_service = AppContainer.get_scheduled_prompt_service()
         memory_backend = AppContainer.get_memory_backend()
+        agent_registry = AppContainer.get_agent_registry()
+        llm_factory = AppContainer.get_llm_factory()
         tools = build_enabled_tools(
             settings,
             memory_backend,
             AppContainer.get_kv_memory_backend(),
             prompt_service,
             event_bus,
+            agent_registry,
+            llm_factory,
         )
-        agent_registry = AppContainer.get_agent_registry()
         supervisor_tools_view = supervisor_tool_view(
             tools=tools,
-            agents_config=settings.agents,
+            orchestration_config=settings.orchestration,
             agent_specs=agent_registry.all(),
         )
-        try:
-            orchestrator = AgentOrchestrator(
-                settings=settings,
-                llm_factory=AppContainer.get_llm_factory(),
-                registry=agent_registry,
-                tools=tools,
-            )
-        except RuntimeError:
-            orchestrator = None
         self._handler = LLMMessageHandler(
             memory=memory_backend,
             llm_client=AppContainer.get_llm_client(),
             tools=supervisor_tools_view.tools,
-            agent_orchestrator=orchestrator,
             default_owner_id=settings.tools.kv_memory.default_owner_id,
             max_history_messages=settings.memory.max_history_messages,
             max_history_tokens=settings.memory.max_history_tokens,

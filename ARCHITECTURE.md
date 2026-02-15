@@ -2,8 +2,13 @@
 
 This document describes the architecture that exists in the current repository.
 
-MiniBot is an asyncio daemon that receives Telegram updates, publishes inbound events to an internal event bus,
-routes messages through the LLM pipeline, and emits outbound responses back to the channel adapter.
+MiniBot is an asyncio application with two runtime entrypoints:
+
+- daemon mode (`minibot.app.daemon`) for Telegram,
+- interactive CLI mode (`minibot.app.console`) for local console conversations.
+
+Both entrypoints publish inbound events to an internal event bus, route messages through the LLM pipeline,
+and emit outbound responses back to the active channel adapter.
 
 ## Guiding Principles
 
@@ -27,14 +32,22 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 ├── docker-compose.yml
 ├── minibot/
 │   ├── app/
+│   │   ├── agent_definitions_loader.py
+│   │   ├── agent_policies.py
+│   │   ├── agent_registry.py
 │   │   ├── agent_runtime.py
+│   │   ├── console.py
 │   │   ├── daemon.py
 │   │   ├── dispatcher.py
 │   │   ├── event_bus.py
+│   │   ├── llm_client_factory.py
 │   │   ├── scheduler_service.py
+│   │   ├── tool_capabilities.py
 │   │   └── handlers/
 │   │       └── llm_handler.py
 │   ├── core/
+│   │   ├── agent_runtime.py
+│   │   ├── agents.py
 │   │   ├── channels.py
 │   │   ├── events.py
 │   │   ├── jobs.py
@@ -49,10 +62,14 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 │   │   │   └── setup.py
 │   │   ├── mcp/
 │   │   │   └── client.py
+│   │   ├── files/
+│   │   │   └── local_storage.py
 │   │   ├── memory/
 │   │   │   ├── sqlalchemy.py
 │   │   │   └── kv_sqlalchemy.py
 │   │   ├── messaging/
+│   │   │   ├── console/
+│   │   │   │   └── service.py
 │   │   │   └── telegram/
 │   │   │       └── service.py
 │   │   └── scheduler/
@@ -60,17 +77,24 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 │   ├── llm/
 │   │   ├── provider_factory.py
 │   │   └── tools/
+│   │       ├── arg_utils.py
+│   │       ├── agent_delegate.py
 │   │       ├── base.py
 │   │       ├── factory.py
 │   │       ├── calculator.py
 │   │       ├── chat_memory.py
+│   │       ├── file_storage.py
 │   │       ├── http_client.py
-│   │       ├── kv.py
 │   │       ├── mcp_bridge.py
 │   │       ├── python_exec.py
+│   │       ├── schema_utils.py
 │   │       ├── scheduler.py
-│   │       └── time.py
+│   │       ├── time.py
+│   │       └── user_memory.py
 │   └── shared/
+│       ├── console_compat.py
+│       ├── parse_utils.py
+│       ├── path_utils.py
 │       ├── prompt_loader.py
 │       └── utils.py
 └── tests/
@@ -79,18 +103,61 @@ routes messages through the LLM pipeline, and emits outbound responses back to t
 
 ## Runtime Flow
 
-1. `minibot.app.daemon` boots settings, logging, memory, tool bindings, Telegram service, dispatcher, and scheduled prompt service.
-2. Telegram adapter receives inbound updates and maps them into `ChannelMessage` payloads.
-3. Adapter publishes `MessageEvent` into `app.event_bus.EventBus`.
+1. Entry point (`minibot.app.daemon` or `minibot.app.console`) boots settings, logging, memory, tools, and dispatcher.
+2. Channel adapter (`TelegramService` or `ConsoleService`) maps input into `ChannelMessage` and publishes `MessageEvent`.
+3. `MessageEvent` is published into `app.event_bus.EventBus`.
 4. `app.dispatcher.Dispatcher` consumes `MessageEvent` and invokes `LLMMessageHandler`.
-5. Handler loads conversation history, composes an effective system prompt (`llm.system_prompt` + optional channel prompt from `llm.prompts_dir/channels/<channel>.md`), executes directive-aware tool-capable generation through `app.agent_runtime.AgentRuntime`, and returns `ChannelResponse`.
-6. Dispatcher publishes `OutboundEvent` unless `metadata.should_reply` is false.
-7. Telegram adapter consumes outbound responses and sends text to Telegram (with chunking for long messages).
+5. `Dispatcher` builds supervisor tool visibility first (`app.tool_capabilities.supervisor_tool_view`):
+   - optional supervisor allow/deny tool policy,
+   - optional exclusive ownership mode that hides agent-owned tools from supervisor.
+6. Handler loads history, composes system prompt fragments, and builds tool context.
+7. Supervisor (`minibot`) runs in `AgentRuntime` with full tool loop.
+8. Delegation is tool-driven:
+   - supervisor may call `invoke_agent`,
+   - `invoke_agent` resolves specialist by name, applies agent tool policy, and runs specialist runtime with ephemeral in-turn state,
+   - result returns to supervisor as tool output, then supervisor composes final answer.
+9. Handler returns `ChannelResponse` with metadata (`primary_agent`, optional `agent_trace`, `delegation_fallback_used`, token trace).
+10. Dispatcher publishes `OutboundEvent` unless `metadata.should_reply` is false.
+11. Active channel adapter consumes outbound response and renders it to user (Telegram send or console print).
 
 This design keeps channel I/O, model orchestration, and persistence decoupled while preserving a single async event spine.
 
+## Console Agent Invocation Flow (Example)
+
+Example request and agent invocation flow when using `minibot-console`.
+
+```mermaid
+flowchart TD
+    U[User in terminal] --> C[minibot-console]
+    C --> CS[ConsoleService.publish_user_message]
+    CS --> EB[(EventBus)]
+    EB --> D[Dispatcher]
+    D --> STV[supervisor_tool_view]
+    D --> H[LLMMessageHandler.handle]
+
+    STV --> H
+    H --> SUP[Supervisor AgentRuntime]
+    SUP --> DEC{Need specialist?}
+    DEC -->|no| FINAL[Supervisor final answer]
+    DEC -->|yes| IA[invoke_agent tool]
+    IA --> AR[AgentRegistry lookup]
+    AR --> S[Specialist AgentRuntime]
+    S --> TP[Apply per-agent tool policy<br/>tools_allow/tools_deny/mcp_servers]
+    TP --> T[Specialist tool calls + output]
+    T --> SUP
+    FINAL --> H
+
+    H --> RESP[ChannelResponse<br/>metadata: primary_agent, delegation_fallback_used, agent_trace]
+    RESP --> D
+    D --> EB2[(OutboundEvent)]
+    EB2 --> C
+    C --> U2[Rendered response in terminal]
+```
+
 ## Core Domain Contracts
 
+- `core/agents.py`: agent definitions (`AgentSpec`) and delegation payload (`DelegationDecision`).
+- `core/agent_runtime.py`: runtime state/message/part model (`AgentState`, `AgentMessage`, `MessagePart`, limits/directives).
 - `core/channels.py`: inbound/outbound DTOs (`ChannelMessage`, `ChannelResponse`) and message metadata; includes attachment payloads for multimodal inputs.
 - `core/events.py`: event types (`MessageEvent`, `OutboundEvent`, base event envelope).
 - `core/memory.py`: transcript and KV memory protocols.
@@ -99,10 +166,16 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
 ## Application Layer
 
 - `app/event_bus.py`: in-process async pub/sub over `asyncio.Queue` with subscription iterators.
-- `app/dispatcher.py`: main event consumer; invokes handler pipeline and controls reply suppression through metadata.
+- `app/dispatcher.py`: main event consumer; builds enabled tools, applies supervisor tool visibility policy, invokes handler pipeline, controls reply suppression.
+- `app/agent_definitions_loader.py`: loads specialist definitions from Markdown files with YAML-like frontmatter.
+- `app/agent_registry.py`: in-memory registry for discovered `AgentSpec` entries.
+- `app/agent_policies.py`: enforces per-agent tool scoping (`tools_allow`, `tools_deny`, MCP server allowlist).
+- `app/tool_capabilities.py`: computes supervisor-visible tools and capability summaries for prompts/tool policies.
 - `app/handlers/llm_handler.py`:
   - assembles model input from text plus attachments,
   - composes per-channel system prompt by loading prompt fragments from `shared/prompt_loader.py`,
+  - runs supervisor runtime/tool loop,
+  - consumes delegated results from `invoke_agent` tool outputs,
   - enforces provider constraints for multimodal support,
   - stores transcript history safely (attachment summaries only, not raw blobs),
   - parses structured model output (`answer`, `should_answer_to_user`).
@@ -111,7 +184,31 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
   - maintains runtime `AgentState` (`messages`, `meta`),
   - renders managed-file directive parts into provider multimodal payloads,
   - enforces loop limits (`max_steps`, `max_tool_calls`, timeout) and directive trust policy.
+- `app/llm_client_factory.py`: builds/caches default and per-agent LLM clients, resolving credentials from `[providers.<name>]`.
 - `app/scheduler_service.py`: scheduled prompt orchestration (`schedule`, `list`, `cancel`, `delete`, polling loop, retry/recurrence handling, event publishing).
+- `app/console.py`: interactive `minibot-console` runner on top of `ConsoleService` + dispatcher.
+
+## Agent Architecture (Current)
+
+- Agent definitions live in `agents/*.md`:
+  - frontmatter describes identity/routing/runtime policy (`name`, `description`, `model_provider`, `model`, `max_tool_iterations`, `tools_allow`, `tools_deny`, `mcp_servers`),
+  - Markdown body becomes the specialist system prompt.
+- `AppContainer` always loads those files at boot and builds `AgentRegistry`; disabled agents are filtered by frontmatter `enabled: false`.
+- `Dispatcher` computes supervisor tool exposure via `tool_ownership_mode`:
+  - `shared`: supervisor keeps tools after supervisor allow/deny policy,
+  - `exclusive`: tools available to specialists are hidden from supervisor.
+- Delegation is executed by `invoke_agent` tool:
+  1. validate requested specialist name,
+  2. instantiate specialist client (provider/model overrides supported),
+  3. filter tools by specialist policy,
+  4. run specialist runtime with ephemeral in-turn state (no delegated SQLite transcript),
+  5. return tool result to supervisor for final answer synthesis.
+- Metadata emitted includes execution trace (`primary_agent`, `delegation_fallback_used`, `agent_trace`).
+- Recursive delegation is blocked for specialists by removing `invoke_agent` from specialist tool scope.
+
+Current notes:
+
+- Agent subsystem is always available; there is no global enable/disable switch.
 
 ## Infrastructure Adapters
 
@@ -123,6 +220,7 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
 - Logging:
   - `adapters/logging/setup.py` configures structured logfmt-friendly logging.
 - Messaging:
+  - `adapters/messaging/console/service.py` handles local console I/O with EventBus publish/subscribe semantics.
   - `adapters/messaging/telegram/service.py` handles Telegram authorization, inbound text/media extraction, outbound message sending, and long-message chunking.
 - Files:
   - `adapters/files/local_storage.py` handles managed workspace path-safe list/write/read operations.
@@ -139,12 +237,13 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
 - `llm/provider_factory.py`: provider/client abstraction around `sonic182/llm-async`, including tool execution loops and provider capability branching.
 - `llm/tools/factory.py`: builds enabled tool bindings from settings.
 - `llm/tools/*`: concrete tool schemas + handlers:
+  - agent delegation (`list_agents`, `invoke_agent`),
   - chat memory management,
   - calculator,
   - HTTP client,
-  - KV memory,
+  - user/KV memory,
   - Python execution,
-  - file tools (`list_files`, `create_file`, `send_file`, `self_insert_artifact`),
+  - file storage/workspace tools (`list_files`, `create_file`, `move_file`, `delete_file`, `send_file`, `self_insert_artifact`),
   - scheduler controls (`schedule_prompt`, `cancel_scheduled_prompt`, `list_scheduled_prompts`, `delete_scheduled_prompt`),
   - time helpers.
 
@@ -203,10 +302,14 @@ Main sections:
 - `[channels.telegram]` (auth allowlists, mode, media limits)
 - `[llm]`
   - `llm.prompts_dir` points to channel prompt packs (default `./prompts`)
+- `[orchestration]` (definitions directory, delegated runtime timeout defaults, supervisor policy)
+- `[orchestration.supervisor]` (supervisor tool allow/deny)
 - `[memory]`
 - `[scheduler.prompts]`
 - `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `time`, `mcp`)
 - `[logging]`
+
+Agent definition files under `./agents` are part of the effective config surface.
 
 ## Testing Strategy
 
@@ -218,16 +321,16 @@ Main sections:
 
 Current architecture supports:
 
-- one active channel adapter (Telegram),
+- daemon Telegram channel and interactive console channel,
 - one daemon process with in-process event bus,
 - SQLite-backed persistence for memory and scheduled prompts,
-- tool-augmented LLM interactions.
+- tool-augmented LLM interactions,
+- supervisor-driven tool-based delegation (`invoke_agent`) with per-agent tool scoping.
 
 Natural extension points already in place:
 
 - add new messaging adapters under `adapters/messaging/`,
 - add alternative persistence adapters behind existing protocols,
 - add richer control-plane interfaces (HTTP/WebSocket) without rewriting core dispatch flow,
-- evolve scheduled prompts into broader task orchestration while preserving event bus contracts.
-│   │   ├── files/
-│   │   │   └── local_storage.py
+- evolve scheduled prompts into broader task orchestration while preserving event bus contracts,
+- extend single-hop delegation into deeper orchestration if/when recursive delegation is introduced.

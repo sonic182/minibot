@@ -8,7 +8,6 @@ from typing import cast
 
 import json
 
-from minibot.app.agent_orchestrator import AgentOrchestrator
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole, RuntimeLimits
 from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
@@ -37,7 +36,6 @@ class LLMMessageHandler:
         memory: MemoryBackend,
         llm_client: LLMClient,
         tools: Sequence[ToolBinding] | None = None,
-        agent_orchestrator: AgentOrchestrator | None = None,
         default_owner_id: str | None = None,
         max_history_messages: int | None = None,
         max_history_tokens: int | None = None,
@@ -47,7 +45,6 @@ class LLMMessageHandler:
         self._memory = memory
         self._llm_client = llm_client
         self._tools = list(tools or [])
-        self._agent_orchestrator = agent_orchestrator
         self._default_owner_id = default_owner_id
         self._max_history_messages = max_history_messages
         self._max_history_tokens = max_history_tokens
@@ -225,147 +222,95 @@ class LLMMessageHandler:
         )
         prompt_cache_key = _prompt_cache_key(message)
         system_prompt = self._compose_system_prompt(message.channel)
-        primary_agent = "supervisor"
+        primary_agent = "minibot"
         agent_trace: list[dict[str, Any]] = []
         delegation_fallback_used = False
-        routing_strategy = "supervisor_tools"
-        routing_reason = "default"
         tool_required_intent = False
         suggested_tool: str | None = None
         suggested_path: str | None = None
         tool_messages_count: int | None = None
         try:
-            delegated_handled = False
-            if self._agent_orchestrator is not None:
-                plan = await self._agent_orchestrator.plan(
+            if self._runtime is None:
+                generation = await self._llm_client.generate(
+                    history,
+                    model_text,
+                    user_content=model_user_content,
+                    tools=self._tools,
+                    tool_context=tool_context,
+                    response_schema=self._response_schema(),
+                    prompt_cache_key=prompt_cache_key,
+                    previous_response_id=None,
+                    system_prompt_override=system_prompt,
+                )
+                turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+                render, should_reply = self._extract_answer(generation.payload)
+            else:
+                state = self._build_agent_state(
                     history=history,
                     user_text=model_text,
+                    user_content=model_user_content,
+                    system_prompt=system_prompt,
+                )
+                generation = await self._runtime.run(
+                    state=state,
+                    tool_context=tool_context,
+                    response_schema=self._response_schema(),
                     prompt_cache_key=prompt_cache_key,
                 )
-                routing_strategy = plan.strategy
-                routing_reason = plan.reason
-                agent_trace.append(
-                    {
-                        "agent": "supervisor",
-                        "decision": "planned",
-                        "strategy": plan.strategy,
-                        "target": plan.agent_name,
-                        "reason": plan.reason,
-                    }
-                )
-                if plan.strategy == "delegate_agent":
-                    delegated = await self._agent_orchestrator.maybe_delegate(
+                turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+                tool_messages_count = self._count_tool_messages_in_state(generation.state)
+                agent_trace, delegation_fallback_used = self._extract_agent_trace(generation.state)
+                if tool_messages_count == 0:
+                    (
+                        tool_required_intent,
+                        suggested_tool,
+                        suggested_path,
+                        classifier_tokens,
+                    ) = await self._decide_tool_requirement(
+                        session_id=session_id,
+                        history=history,
+                        user_text=model_text,
+                        prompt_cache_key=prompt_cache_key,
+                    )
+                    turn_total_tokens += classifier_tokens
+                if tool_required_intent and tool_messages_count == 0:
+                    self._logger.debug(
+                        "tool-required request returned without tool calls; retrying with stricter instruction",
+                        extra={"chat_id": message.chat_id, "channel": message.channel},
+                    )
+                    retry_system_prompt = (
+                        f"{system_prompt}\n\n"
+                        "Tool policy reminder: this request requires using tools before final answer. "
+                        "Call the relevant tool now, then provide the final answer from tool output. "
+                        "Do not answer with intent statements like 'I will check'."
+                    )
+                    retry_state = self._build_agent_state(
                         history=history,
                         user_text=model_text,
                         user_content=model_user_content,
-                        tool_context=tool_context,
-                        response_schema=self._response_schema(),
-                        prompt_cache_key=prompt_cache_key,
-                        plan=plan,
-                    )
-                    if delegated is not None:
-                        turn_total_tokens += self._track_token_usage(session_id, delegated.total_tokens)
-                        agent_trace.extend(delegated.agent_trace)
-                        delegation_fallback_used = delegated.fallback_used
-                        if delegated.payload is not None:
-                            primary_agent = delegated.primary_agent
-                            render, should_reply = self._extract_answer(delegated.payload)
-                            delegated_handled = True
-                elif plan.strategy == "direct_response":
-                    generation = await self._llm_client.generate(
-                        history,
-                        model_text,
-                        user_content=model_user_content,
-                        tools=[],
-                        tool_context=tool_context,
-                        response_schema=self._response_schema(),
-                        prompt_cache_key=prompt_cache_key,
-                        previous_response_id=None,
-                        system_prompt_override=system_prompt,
-                    )
-                    turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-                    render, should_reply = self._extract_answer(generation.payload)
-                    delegated_handled = True
-            if not delegated_handled:
-                if self._runtime is None:
-                    generation = await self._llm_client.generate(
-                        history,
-                        model_text,
-                        user_content=model_user_content,
-                        tools=self._tools,
-                        tool_context=tool_context,
-                        response_schema=self._response_schema(),
-                        prompt_cache_key=prompt_cache_key,
-                        previous_response_id=None,
-                        system_prompt_override=system_prompt,
-                    )
-                    turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-                    render, should_reply = self._extract_answer(generation.payload)
-                else:
-                    state = self._build_agent_state(
-                        history=history,
-                        user_text=model_text,
-                        user_content=model_user_content,
-                        system_prompt=system_prompt,
+                        system_prompt=retry_system_prompt,
                     )
                     generation = await self._runtime.run(
-                        state=state,
+                        state=retry_state,
                         tool_context=tool_context,
                         response_schema=self._response_schema(),
                         prompt_cache_key=prompt_cache_key,
                     )
-                    turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+                    turn_total_tokens += self._track_token_usage(
+                        session_id,
+                        getattr(generation, "total_tokens", None),
+                    )
                     tool_messages_count = self._count_tool_messages_in_state(generation.state)
-                    if tool_messages_count == 0:
-                        (
-                            tool_required_intent,
-                            suggested_tool,
-                            suggested_path,
-                            classifier_tokens,
-                        ) = await self._decide_tool_requirement(
-                            session_id=session_id,
-                            history=history,
-                            user_text=model_text,
-                            prompt_cache_key=prompt_cache_key,
-                        )
-                        turn_total_tokens += classifier_tokens
-                    if tool_required_intent and tool_messages_count == 0:
-                        self._logger.debug(
-                            "tool-required request returned without tool calls; retrying with stricter instruction",
-                            extra={"chat_id": message.chat_id, "channel": message.channel},
-                        )
-                        retry_system_prompt = (
-                            f"{system_prompt}\n\n"
-                            "Tool policy reminder: this request requires using tools before final answer. "
-                            "Call the relevant tool now, then provide the final answer from tool output. "
-                            "Do not answer with intent statements like 'I will check'."
-                        )
-                        retry_state = self._build_agent_state(
-                            history=history,
-                            user_text=model_text,
-                            user_content=model_user_content,
-                            system_prompt=retry_system_prompt,
-                        )
-                        generation = await self._runtime.run(
-                            state=retry_state,
-                            tool_context=tool_context,
-                            response_schema=self._response_schema(),
-                            prompt_cache_key=prompt_cache_key,
-                        )
-                        turn_total_tokens += self._track_token_usage(
-                            session_id,
-                            getattr(generation, "total_tokens", None),
-                        )
-                        tool_messages_count = self._count_tool_messages_in_state(generation.state)
-                        self._logger.debug(
-                            "tool-required retry completed",
-                            extra={
-                                "chat_id": message.chat_id,
-                                "channel": message.channel,
-                                "tool_messages": tool_messages_count,
-                            },
-                        )
-                    render, should_reply = self._extract_answer(generation.payload)
+                    agent_trace, delegation_fallback_used = self._extract_agent_trace(generation.state)
+                    self._logger.debug(
+                        "tool-required retry completed",
+                        extra={
+                            "chat_id": message.chat_id,
+                            "channel": message.channel,
+                            "tool_messages": tool_messages_count,
+                        },
+                    )
+                render, should_reply = self._extract_answer(generation.payload)
 
             if tool_required_intent and tool_messages_count == 0:
                 direct_tool_message = await self._attempt_direct_file_delete(
@@ -419,9 +364,10 @@ class LLMMessageHandler:
         answer = render.text
         await self._memory.append_history(session_id, "assistant", answer)
         await self._enforce_history_limit(session_id)
+        compact_prompt_cache_key = prompt_cache_key or f"{session_id}:runtime"
         compaction_result = await self._compact_history_if_needed(
             session_id,
-            prompt_cache_key=prompt_cache_key,
+            prompt_cache_key=compact_prompt_cache_key,
             system_prompt=system_prompt,
             notify=self._notify_compaction_updates,
         )
@@ -433,8 +379,6 @@ class LLMMessageHandler:
         if agent_trace:
             metadata["agent_trace"] = agent_trace
         metadata["delegation_fallback_used"] = delegation_fallback_used
-        metadata["routing_strategy"] = routing_strategy
-        metadata["routing_reason"] = routing_reason
         if compaction_result.updates:
             metadata["compaction_updates"] = compaction_result.updates
         metadata["token_trace"] = self._build_token_trace(
@@ -1158,6 +1102,34 @@ class LLMMessageHandler:
     @staticmethod
     def _count_tool_messages_in_state(state: AgentState) -> int:
         return sum(1 for message in state.messages if message.role == "tool")
+
+    @staticmethod
+    def _extract_agent_trace(state: AgentState) -> tuple[list[dict[str, Any]], bool]:
+        trace: list[dict[str, Any]] = []
+        fallback_used = False
+        for message in state.messages:
+            if message.role != "tool" or message.name != "invoke_agent":
+                continue
+            if not message.content:
+                continue
+            part = message.content[0]
+            if part.type != "json" or not isinstance(part.value, dict):
+                continue
+            agent = str(part.value.get("agent") or "")
+            ok = bool(part.value.get("ok", False))
+            error = part.value.get("error")
+            if not ok:
+                fallback_used = True
+            trace_entry: dict[str, Any] = {
+                "agent": "minibot",
+                "decision": "invoke_agent",
+                "target": agent or None,
+                "ok": ok,
+            }
+            if isinstance(error, str) and error.strip():
+                trace_entry["error"] = error
+            trace.append(trace_entry)
+        return trace, fallback_used
 
     async def _attempt_direct_file_delete(
         self,

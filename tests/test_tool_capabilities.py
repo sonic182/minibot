@@ -4,7 +4,7 @@ from pathlib import Path
 
 from llm_async.models import Tool
 
-from minibot.adapters.config.schema import AgentsConfig, SupervisorAgentConfig
+from minibot.adapters.config.schema import OrchestrationConfig, SupervisorAgentConfig
 from minibot.app.tool_capabilities import summarize_agent_capabilities, supervisor_tool_view
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
@@ -30,13 +30,12 @@ def test_supervisor_tool_view_exclusive_hides_agent_owned_tools() -> None:
         source_path=Path("worker.md"),
         tools_allow=["calculate_*"],
     )
-    config = AgentsConfig(
-        enabled=True,
+    config = OrchestrationConfig(
         tool_ownership_mode="exclusive",
         supervisor=SupervisorAgentConfig(tools_allow=["current_*", "calculate_*"]),
     )
 
-    view = supervisor_tool_view(tools=tools, agents_config=config, agent_specs=[spec])
+    view = supervisor_tool_view(tools=tools, orchestration_config=config, agent_specs=[spec])
 
     assert [binding.tool.name for binding in view.tools] == ["current_datetime"]
     assert view.hidden_tool_names == ["calculate_expression"]

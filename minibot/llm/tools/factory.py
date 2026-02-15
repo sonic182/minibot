@@ -8,7 +8,10 @@ from minibot.adapters.mcp.client import MCPClient
 from minibot.adapters.config.schema import Settings
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.app.event_bus import EventBus
+from minibot.app.agent_registry import AgentRegistry
+from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.llm.tools.base import ToolBinding
+from minibot.llm.tools.agent_delegate import AgentDelegateTool
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.file_storage import FileStorageTool
@@ -29,6 +32,8 @@ def build_enabled_tools(
     kv_memory: KeyValueMemory | None,
     prompt_scheduler: ScheduledPromptService | None = None,
     event_bus: EventBus | None = None,
+    agent_registry: AgentRegistry | None = None,
+    llm_factory: LLMClientFactory | None = None,
 ) -> list[ToolBinding]:
     tools: list[ToolBinding] = []
     managed_storage: LocalFileStorage | None = None
@@ -98,4 +103,12 @@ def build_enabled_tools(
                 tools.extend(bridge.build_bindings())
             except Exception as exc:  # noqa: BLE001
                 logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
+    if agent_registry is not None and llm_factory is not None and not agent_registry.is_empty():
+        delegate_tool = AgentDelegateTool(
+            registry=agent_registry,
+            llm_factory=llm_factory,
+            tools=tools,
+            default_timeout_seconds=settings.orchestration.default_timeout_seconds,
+        )
+        tools.extend(delegate_tool.bindings())
     return tools

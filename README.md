@@ -92,7 +92,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
 - `[llm]`: configures default model/provider behavior for supervisor and agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir`). Request params are only sent when present in `config.toml`.
 - `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
-- `[agents]`: enables file-defined agents from `./agents/*.md` (frontmatter + prompt body) and delegation settings. `tool_ownership_mode` controls whether tools are shared (`shared`) or exclusively owned by specialist agents (`exclusive`).
+- `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`) or exclusively owned by specialist agents (`exclusive`).
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; `max_history_tokens` triggers compaction once cumulative generation usage crosses the threshold; `notify_compaction_updates` controls whether compaction status messages are sent to end users.
 - `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
 - `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, and pagination defaults. Enable it only when you need tool-based memory storage.
@@ -264,6 +264,7 @@ Focus only on workspace file workflows.
 
 Useful patterns and behavior:
 
+- `enabled` can be set per-agent in frontmatter to include/exclude a specialist.
 - `tools_allow` and `tools_deny` are mutually exclusive. Defining both is an agent config error.
 - Wildcards are supported (`fnmatch`), for example:
   - `tools_allow: ["mcp_playwright-cli__*"]`
@@ -272,9 +273,9 @@ Useful patterns and behavior:
 - If `mcp_servers` is set, all tools from those MCP servers are exposed (and tools from other MCP servers are excluded).
 - In `tools_allow` mode, exposed tools are: allowed local tools + allowed MCP-server tools.
 - In `tools_deny` mode, exposed tools are: all local tools except denied + allowed MCP-server tools.
-- Use `[agents.supervisor].allowed_delegate_agents` in `config.toml` to restrict which agents can be selected by routing.
-- Use `[agents.supervisor].tools_allow`/`tools_deny` to restrict the supervisor toolset.
-- With `[agents].tool_ownership_mode = "exclusive"`, tools assigned to specialist agents are removed from supervisor runtime and remain available only through delegation.
+- Supervisor delegates through tool calls (`list_agents`, `invoke_agent`) and waits for tool results before finalizing responses.
+- Use `[orchestration.supervisor].tools_allow`/`tools_deny` to restrict the supervisor toolset.
+- With `[orchestration].tool_ownership_mode = "exclusive"`, tools assigned to specialist agents are removed from supervisor runtime and remain available only through delegation.
 - Keep secrets out of agent files. Put credentials in `[providers.<provider>]`.
 - Some models reject parameters like `temperature`; if you see provider `HTTP 400` for unsupported parameters, remove that field from the agent frontmatter (or from global `[llm]` defaults).
 

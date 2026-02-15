@@ -45,10 +45,7 @@ class AppContainer:
             cls._kv_memory_backend = None
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
-        if cls._settings.agents.enabled:
-            cls._agent_registry = AgentRegistry(load_agent_specs(cls._settings.agents.directory))
-        else:
-            cls._agent_registry = AgentRegistry([])
+        cls._agent_registry = AgentRegistry(load_agent_specs(cls._settings.orchestration.directory))
         prompts_config = cls._settings.scheduler.prompts
         if prompts_config.enabled:
             cls._prompt_store = SQLAlchemyScheduledPromptStore(prompts_config)

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatch
 from typing import Sequence
 
-from minibot.adapters.config.schema import AgentsConfig, SupervisorAgentConfig
+from minibot.adapters.config.schema import OrchestrationConfig, SupervisorAgentConfig
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
@@ -19,11 +19,11 @@ class SupervisorToolView:
 def supervisor_tool_view(
     *,
     tools: Sequence[ToolBinding],
-    agents_config: AgentsConfig,
+    orchestration_config: OrchestrationConfig,
     agent_specs: Sequence[AgentSpec],
 ) -> SupervisorToolView:
-    supervisor_tools = _apply_supervisor_policy(list(tools), agents_config.supervisor)
-    if agents_config.tool_ownership_mode != "exclusive":
+    supervisor_tools = _apply_supervisor_policy(list(tools), orchestration_config.supervisor)
+    if orchestration_config.tool_ownership_mode != "exclusive":
         return SupervisorToolView(tools=supervisor_tools, hidden_tool_names=[])
 
     reserved_tool_names: set[str] = set()

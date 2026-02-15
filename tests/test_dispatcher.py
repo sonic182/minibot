@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import pytest
 
 from minibot.app.event_bus import EventBus
+from minibot.app.agent_registry import AgentRegistry
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 
@@ -31,14 +32,19 @@ class _FakeSettings:
     class _Runtime:
         agent_timeout_seconds = 120
 
-    class _Agents:
-        enabled = False
+    class _Orchestration:
+        class _Supervisor:
+            tools_allow: list[str] = []
+            tools_deny: list[str] = []
+
         default_timeout_seconds = 90
+        tool_ownership_mode = "shared"
+        supervisor = _Supervisor()
 
     tools = _Tools()
     memory = _Memory()
     runtime = _Runtime()
-    agents = _Agents()
+    orchestration = _Orchestration()
 
 
 def _message_event(text: str) -> MessageEvent:
@@ -100,6 +106,8 @@ async def test_dispatcher_publishes_outbound_reply(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -138,6 +146,8 @@ async def test_dispatcher_skips_outbound_when_handler_marks_silent(monkeypatch: 
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -176,6 +186,8 @@ async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -236,6 +248,8 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
 
     bus = EventBus()
     subscription = bus.subscribe()

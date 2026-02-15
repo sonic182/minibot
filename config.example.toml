@@ -56,19 +56,14 @@ base_url = ""
 api_key = ""
 base_url = ""
 
-[agents]
-enabled = true
+[orchestration]
 directory = "./agents"
-max_delegation_depth = 2
 default_timeout_seconds = 90
 tool_ownership_mode = "exclusive"
-include_agent_trace_in_metadata = true
 
-[agents.supervisor]
+[orchestration.supervisor]
 name = "supervisor"
-allowed_delegate_agents = ["playwright_mcp_agent", "workspace_manager_agent"]
-system_prompt_append = ""
-tools_allow = ["current_*", "calculate_*", "http_*"]
+tools_allow = ["current_*", "calculate_*", "http_*", "invoke_agent"]
 
 # Optional request params. Omit keys to avoid sending them.
 # temperature = 0.2
@@ -263,30 +258,3 @@ timeout_seconds = 10
 # cwd = "."
 # enabled_tools = []
 # disabled_tools = []
-
-[[tools.mcp.servers]]
-name = "playwright-cli"
-transport = "stdio"
-command = "npx"
-# Notice: if npx is not on PATH (for example with asdf), use "/home/myuser/.asdf/shims/npx".
-args = [
-  # Recommended: pin a version if --output-dir behavior affects you
-  "@playwright/mcp@0.0.64",
-  # Or use "@playwright/mcp@latest",
-
-  # "--headless",
-  "--browser=chromium",
-
-  # Enable screenshots (vision) and PDFs
-  "--caps=vision,pdf",
-
-  # Output directory (screenshots/downloads/session)
-  "--output-dir=./data/files/browser",
-
-  # Persist browser state/session under output-dir
-  "--save-session"
-]
-env = {}
-cwd = "."
-enabled_tools = []
-disabled_tools = []

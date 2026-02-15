@@ -24,16 +24,15 @@ def _reset_container() -> None:
     AppContainer._prompt_service = None
 
 
-def _write_config(tmp_path: Path, provider: str = "openai", agents_enabled: bool = False) -> Path:
+def _write_config(tmp_path: Path, provider: str = "openai", with_agents: bool = False) -> Path:
     config_path = tmp_path / "config.toml"
-    agents_lines = ""
-    if agents_enabled:
-        agents_lines = (
-            "\n[agents]\n"
-            "enabled = true\n"
+    orchestration_lines = ""
+    if with_agents:
+        orchestration_lines = (
+            "\n[orchestration]\n"
             f'directory = "{tmp_path / "agents"}"\n'
-            "max_delegation_depth = 2\n"
             "default_timeout_seconds = 90\n"
+            'tool_ownership_mode = "shared"\n'
         )
     sqlite_url = f"sqlite+aiosqlite:///{(tmp_path / 'test_console_minibot.db').as_posix()}"
     config_path.write_text(
@@ -62,7 +61,7 @@ def _write_config(tmp_path: Path, provider: str = "openai", agents_enabled: bool
                 "enabled = false",
             ]
         )
-        + agents_lines
+        + orchestration_lines
         + "\n",
         encoding="utf-8",
     )
@@ -109,7 +108,7 @@ async def test_console_functional_openai_chat_completion_flow(tmp_path: Path) ->
         }
     ]
     factory = ScriptedLLMFactory(default_client=default_client)
-    config_path = _write_config(tmp_path, provider="openai", agents_enabled=False)
+    config_path = _write_config(tmp_path, provider="openai", with_agents=False)
 
     response = await _run_console_turn(
         config_path=config_path,
@@ -135,7 +134,7 @@ async def test_console_functional_openai_responses_flow(tmp_path: Path) -> None:
         }
     ]
     factory = ScriptedLLMFactory(default_client=default_client)
-    config_path = _write_config(tmp_path, provider="openai_responses", agents_enabled=False)
+    config_path = _write_config(tmp_path, provider="openai_responses", with_agents=False)
 
     response = await _run_console_turn(
         config_path=config_path,
@@ -169,17 +168,22 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
     )
 
     default_client = ScriptedLLMClient(provider="openai")
-    default_client.generate_steps = [
+    default_client.runtime_steps = [
         {
-            "payload": {
-                "strategy": "delegate_agent",
+            "content": "delegating",
+            "tool_name": "invoke_agent",
+            "arguments": {
                 "agent_name": "worker",
-                "reason": "test",
-                "requires_tool_execution": False,
+                "task": "answer delegated task",
             },
-            "response_id": "router-1",
+            "response_id": "supervisor-1",
             "total_tokens": 8,
-        }
+        },
+        {
+            "content": '{"answer":{"kind":"text","content":"delegated response"},"should_answer_to_user":true}',
+            "response_id": "supervisor-2",
+            "total_tokens": 8,
+        },
     ]
     worker_client = ScriptedLLMClient(provider="openai")
     worker_client.runtime_steps = [
@@ -191,7 +195,7 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
     ]
     factory = ScriptedLLMFactory(default_client=default_client, agent_clients={"worker": worker_client})
 
-    config_path = _write_config(tmp_path, provider="openai", agents_enabled=True)
+    config_path = _write_config(tmp_path, provider="openai", with_agents=True)
     response = await _run_console_turn(
         config_path=config_path,
         llm_factory=factory,
@@ -201,5 +205,5 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
     )
 
     assert response.response.text == "delegated response"
-    assert response.response.metadata["primary_agent"] == "worker"
+    assert response.response.metadata["primary_agent"] == "minibot"
     assert isinstance(response.response.metadata.get("agent_trace"), list)
