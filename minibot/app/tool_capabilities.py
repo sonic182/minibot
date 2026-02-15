@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from typing import Sequence
 
 from minibot.adapters.config.schema import MainAgentConfig, OrchestrationConfig
 from minibot.app.agent_policies import filter_tools_for_agent
+from minibot.app.mcp_tool_name import is_mcp_tool_name
+from minibot.app.tool_policy_utils import apply_allow_deny, normalize_patterns
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
 
@@ -30,7 +31,7 @@ def main_agent_tool_view(
     for spec in agent_specs:
         for binding in filter_tools_for_agent(main_agent_tools, spec):
             tool_name = binding.tool.name
-            if orchestration_config.tool_ownership_mode == "exclusive_mcp" and not _is_mcp_tool_name(tool_name):
+            if orchestration_config.tool_ownership_mode == "exclusive_mcp" and not is_mcp_tool_name(tool_name):
                 continue
             reserved_tool_names.add(tool_name)
 
@@ -54,18 +55,9 @@ def summarize_agent_capabilities(spec: AgentSpec) -> str:
 
 
 def _apply_main_agent_policy(tools: list[ToolBinding], main_agent: MainAgentConfig) -> list[ToolBinding]:
-    allow_patterns = [item.strip() for item in main_agent.tools_allow if item.strip()]
-    deny_patterns = [item.strip() for item in main_agent.tools_deny if item.strip()]
-    if allow_patterns:
-        return [binding for binding in tools if _matches_any(binding.tool.name, allow_patterns)]
-    if deny_patterns:
-        return [binding for binding in tools if not _matches_any(binding.tool.name, deny_patterns)]
-    return tools
-
-
-def _matches_any(name: str, patterns: Sequence[str]) -> bool:
-    return any(fnmatch(name, pattern) for pattern in patterns)
-
-
-def _is_mcp_tool_name(name: str) -> bool:
-    return name.startswith("mcp_") and "__" in name
+    return apply_allow_deny(
+        tools,
+        name_of=lambda binding: binding.tool.name,
+        allow_patterns=normalize_patterns(main_agent.tools_allow),
+        deny_patterns=normalize_patterns(main_agent.tools_deny),
+    )

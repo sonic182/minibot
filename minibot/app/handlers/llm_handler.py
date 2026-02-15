@@ -9,12 +9,13 @@ from typing import cast
 import json
 
 from minibot.app.agent_runtime import AgentRuntime
-from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole, RuntimeLimits
+from minibot.app.runtime_limits import build_runtime_limits
+from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole
 from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
-from minibot.shared.parse_utils import parse_json_maybe_python_object
+from minibot.shared.assistant_response import assistant_response_schema, coerce_should_answer, payload_to_object
 from minibot.shared.path_utils import normalize_path_separators
 from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
 from minibot.shared.utils import session_id_for, session_id_from_parts
@@ -53,16 +54,10 @@ class LLMMessageHandler:
         self._session_total_tokens: dict[str, int] = {}
         self._prompts_dir = self._llm_prompts_dir()
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
-        max_tool_iterations_getter = getattr(self._llm_client, "max_tool_iterations", None)
-        max_tool_iterations = 8
-        if callable(max_tool_iterations_getter):
-            maybe_value = max_tool_iterations_getter()
-            if isinstance(maybe_value, int) and maybe_value > 0:
-                max_tool_iterations = maybe_value
-        runtime_limits = RuntimeLimits(
-            max_steps=max_tool_iterations,
-            max_tool_calls=max(12, max_tool_iterations * 2),
-            timeout_seconds=max(120, int(agent_timeout_seconds)),
+        runtime_limits = build_runtime_limits(
+            llm_client=self._llm_client,
+            timeout_seconds=agent_timeout_seconds,
+            min_timeout_seconds=120,
         )
         managed_files_root = self._managed_files_root_from_tools()
         if self._supports_agent_runtime():
@@ -723,48 +718,7 @@ class LLMMessageHandler:
         return ", ".join([f"file:{item.filename}" for item in incoming_files])
 
     def _response_schema(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "answer": {
-                    "type": "object",
-                    "properties": {
-                        "kind": {
-                            "type": "string",
-                            "enum": ["text", "html", "markdown_v2"],
-                            "description": (
-                                "Strictly declare the actual output format you are returning in answer.content. "
-                                "If answer.content is HTML, set kind=html. If MarkdownV2, set kind=markdown_v2. "
-                                "If plain text, set kind=text. Do not default to text when using formatting."
-                                "This kind controls formatting in the channel renderer."
-                            ),
-                        },
-                        "content": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": (
-                                "Main reply body. For html, use Telegram-supported inline tags only; "
-                                "do not output full HTML documents with doctype/head/body/style/script/div/p/br. "
-                                "Use newline characters instead of <br>."
-                            ),
-                        },
-                        "meta": {
-                            "type": "object",
-                            "properties": {
-                                "disable_link_preview": {"type": "boolean"},
-                            },
-                            "required": [],
-                            "additionalProperties": False,
-                        },
-                    },
-                    "required": ["kind", "content"],
-                    "additionalProperties": False,
-                },
-                "should_answer_to_user": {"type": "boolean"},
-            },
-            "required": ["answer", "should_answer_to_user"],
-            "additionalProperties": False,
-        }
+        return assistant_response_schema(kinds=["text", "html", "markdown_v2"], include_meta=True)
 
     async def _enforce_history_limit(self, session_id: str) -> None:
         if self._max_history_messages is None:
@@ -888,11 +842,12 @@ class LLMMessageHandler:
             )
 
     def _extract_answer(self, payload: Any) -> tuple[RenderableResponse, bool]:
-        if isinstance(payload, dict):
-            answer = payload.get("answer")
-            should = payload.get("should_answer_to_user")
+        payload_obj = payload_to_object(payload)
+        if payload_obj is not None:
+            answer = payload_obj.get("answer")
+            should = payload_obj.get("should_answer_to_user")
             render = self._render_from_payload(answer)
-            should_flag = self._coerce_should_answer(should)
+            should_flag = coerce_should_answer(should)
             if render is not None and should_flag is not None:
                 self._logger.debug(
                     "structured output extracted from dict payload",
@@ -905,60 +860,22 @@ class LLMMessageHandler:
                     extra={"kind": render.kind},
                 )
                 return render, True
-            result = payload.get("result")
+            result = payload_obj.get("result")
             if isinstance(result, str):
                 return self._plain_render(result), True
-            timestamp = payload.get("timestamp")
+            timestamp = payload_obj.get("timestamp")
             if isinstance(timestamp, str):
                 return self._plain_render(timestamp), True
+            self._logger.debug(
+                "parsed payload looked structured but failed validation",
+                extra={
+                    "parsed_keys": sorted(str(key) for key in payload_obj.keys()),
+                    "should_type": type(should).__name__,
+                },
+            )
         if isinstance(payload, str):
-            parsed = parse_json_maybe_python_object(payload)
-            if isinstance(parsed, dict):
-                answer = parsed.get("answer")
-                should = parsed.get("should_answer_to_user")
-                render = self._render_from_payload(answer)
-                should_flag = self._coerce_should_answer(should)
-                if render is not None and should_flag is not None:
-                    self._logger.debug(
-                        "structured output extracted from parsed string payload",
-                        extra={"kind": render.kind, "has_answer_object": isinstance(answer, dict)},
-                    )
-                    return render, should_flag
-                if render is not None and should is None:
-                    self._logger.debug(
-                        "structured output missing should_answer_to_user in parsed payload; defaulting to true",
-                        extra={"kind": render.kind},
-                    )
-                    return render, True
-                result = parsed.get("result")
-                if isinstance(result, str):
-                    return self._plain_render(result), True
-                timestamp = parsed.get("timestamp")
-                if isinstance(timestamp, str):
-                    return self._plain_render(timestamp), True
-                self._logger.debug(
-                    "parsed payload looked structured but failed validation",
-                    extra={
-                        "parsed_keys": sorted(str(key) for key in parsed.keys()),
-                        "should_type": type(should).__name__,
-                    },
-                )
             return self._plain_render(payload), True
         return self._plain_render(str(payload)), True
-
-    @staticmethod
-    def _coerce_should_answer(value: Any) -> bool | None:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"true", "1", "yes", "y"}:
-                return True
-            if normalized in {"false", "0", "no", "n"}:
-                return False
-        if isinstance(value, int) and value in {0, 1}:
-            return bool(value)
-        return None
 
     def _render_from_payload(self, value: Any) -> RenderableResponse | None:
         if isinstance(value, str):

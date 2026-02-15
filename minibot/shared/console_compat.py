@@ -33,12 +33,6 @@ class CompatConsole:
         sys.stdout.flush()
 
 
-def render_markdown(text: str) -> Any:
-    if RichMarkdown is not None:
-        return RichMarkdown(text)
-    return text
-
-
 def format_assistant_output(kind: str, text: str) -> Any:
     if RichPanel is None:
         return f"assistant: {text}"

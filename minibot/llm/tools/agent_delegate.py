@@ -10,12 +10,18 @@ from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.llm_client_factory import LLMClientFactory
-from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
+from minibot.app.runtime_limits import build_runtime_limits
+from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.llm.tools.schema_utils import attachment_array_schema, empty_object_schema, strict_object, string_field
-from minibot.shared.parse_utils import parse_json_maybe_python_object
+from minibot.llm.tools.schema_utils import empty_object_schema, strict_object, string_field
+from minibot.shared.assistant_response import (
+    assistant_response_schema,
+    coerce_should_answer,
+    payload_to_object,
+    validate_attachments,
+)
 
 
 @dataclass(frozen=True)
@@ -108,14 +114,13 @@ class AgentDelegateTool:
 
         llm_client = self._llm_factory.create_for_agent(spec)
         scoped_tools = self._scoped_tools(spec)
-        max_tool_iterations = _max_tool_iterations(llm_client)
         runtime = AgentRuntime(
             llm_client=llm_client,
             tools=scoped_tools,
-            limits=RuntimeLimits(
-                max_steps=max(1, max_tool_iterations),
-                max_tool_calls=max(12, max_tool_iterations * 2),
-                timeout_seconds=max(30, int(self._default_timeout_seconds)),
+            limits=build_runtime_limits(
+                llm_client=llm_client,
+                timeout_seconds=self._default_timeout_seconds,
+                min_timeout_seconds=30,
             ),
             allowed_append_message_tools=["self_insert_artifact"],
             allow_system_inserts=False,
@@ -277,89 +282,20 @@ class AgentDelegateTool:
         return sum(1 for message in state.messages if message.role == "tool")
 
 
-def _max_tool_iterations(llm_client: Any) -> int:
-    max_tool_iterations_getter = getattr(llm_client, "max_tool_iterations", None)
-    if callable(max_tool_iterations_getter):
-        maybe_iterations = max_tool_iterations_getter()
-        if isinstance(maybe_iterations, int) and maybe_iterations > 0:
-            return maybe_iterations
-    return 8
-
-
 def _agent_response_schema() -> dict[str, Any]:
-    return {
-        "type": "object",
-        "properties": {
-            "answer": {
-                "type": "object",
-                "properties": {
-                    "kind": {"type": "string", "enum": ["text", "html", "markdown", "json"]},
-                    "content": {"type": "string"},
-                },
-                "required": ["kind", "content"],
-                "additionalProperties": False,
-            },
-            "should_answer_to_user": {"type": "boolean"},
-            "attachments": attachment_array_schema(),
-        },
-        "required": ["answer", "should_answer_to_user"],
-        "additionalProperties": False,
-    }
-
-
-def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw_attachments, list):
-        return []
-
-    validated: list[dict[str, Any]] = []
-    for item in raw_attachments:
-        if not isinstance(item, dict):
-            continue
-
-        path = item.get("path")
-        file_type = item.get("type")
-
-        if not isinstance(path, str) or not path.strip():
-            continue
-        if not isinstance(file_type, str) or not file_type.strip():
-            continue
-
-        attachment = {
-            "path": path.strip(),
-            "type": file_type.strip(),
-        }
-
-        caption = item.get("caption")
-        if isinstance(caption, str) and caption.strip():
-            attachment["caption"] = caption.strip()
-
-        validated.append(attachment)
-
-    return validated
+    return assistant_response_schema(kinds=["text", "html", "markdown", "json"], include_attachments=True)
 
 
 def _extract_outcome(payload: Any) -> _DelegationOutcome:
-    if isinstance(payload, str):
-        parsed = parse_json_maybe_python_object(payload)
-        if parsed is not None and parsed is not payload:
-            return _extract_outcome(parsed)
-        return _DelegationOutcome(
-            text=payload,
-            payload=payload,
-            should_answer_to_user=None,
-            valid=False,
-            error_code="unstructured_payload",
-            attachments=[],
-        )
-    if isinstance(payload, dict):
-        answer = payload.get("answer")
-        should = payload.get("should_answer_to_user")
-        should_flag = should if isinstance(should, bool) else None
-        attachments = _validate_attachments(payload.get("attachments"))
+    payload_obj = payload_to_object(payload)
+    if payload_obj is not None:
+        answer = payload_obj.get("answer")
+        should_flag = coerce_should_answer(payload_obj.get("should_answer_to_user"))
+        attachments = validate_attachments(payload_obj.get("attachments"))
         if should_flag is None:
             return _DelegationOutcome(
-                text=str(payload),
-                payload=payload,
+                text=str(payload_obj),
+                payload=payload_obj,
                 should_answer_to_user=None,
                 valid=False,
                 error_code="missing_should_answer_to_user",
@@ -370,23 +306,23 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
             if isinstance(content, str) and content.strip():
                 return _DelegationOutcome(
                     text=content,
-                    payload=payload,
+                    payload=payload_obj,
                     should_answer_to_user=should_flag,
                     valid=True,
                     error_code=None,
                     attachments=attachments,
                 )
             return _DelegationOutcome(
-                text=str(payload),
-                payload=payload,
+                text=str(payload_obj),
+                payload=payload_obj,
                 should_answer_to_user=should_flag,
                 valid=False,
                 error_code="missing_answer_content",
                 attachments=attachments,
             )
         return _DelegationOutcome(
-            text=str(payload),
-            payload=payload,
+            text=str(payload_obj),
+            payload=payload_obj,
             should_answer_to_user=should_flag,
             valid=False,
             error_code="missing_answer_object",
