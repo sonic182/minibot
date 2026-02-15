@@ -14,7 +14,7 @@ from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, Ru
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.llm.tools.schema_utils import empty_object_schema, strict_object, string_field
+from minibot.llm.tools.schema_utils import attachment_array_schema, empty_object_schema, strict_object, string_field
 from minibot.shared.parse_utils import parse_json_maybe_python_object
 
 
@@ -25,6 +25,7 @@ class _DelegationOutcome:
     should_answer_to_user: bool | None
     valid: bool
     error_code: str | None
+    attachments: list[dict[str, Any]]
 
 
 class AgentDelegateTool:
@@ -184,6 +185,15 @@ class AgentDelegateTool:
             outcome = _extract_outcome(generation.payload)
             result_status = _delegation_result_status(outcome)
             ok = result_status == "success"
+            if outcome.attachments:
+                self._logger.debug(
+                    "delegation returned attachments",
+                    extra={
+                        "agent": spec.name,
+                        "attachment_count": len(outcome.attachments),
+                        "attachment_types": [a.get("type") for a in outcome.attachments],
+                    },
+                )
             self._logger.debug(
                 "delegated agent invocation completed",
                 extra={
@@ -207,6 +217,7 @@ class AgentDelegateTool:
                 "tool_messages_count": tool_messages_count,
                 "delegation_attempts": attempts,
                 "total_tokens": total_tokens,
+                "attachments": outcome.attachments,
             }
             if outcome.error_code is not None:
                 response["error_code"] = outcome.error_code
@@ -289,10 +300,42 @@ def _agent_response_schema() -> dict[str, Any]:
                 "additionalProperties": False,
             },
             "should_answer_to_user": {"type": "boolean"},
+            "attachments": attachment_array_schema(),
         },
         "required": ["answer", "should_answer_to_user"],
         "additionalProperties": False,
     }
+
+
+def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_attachments, list):
+        return []
+
+    validated: list[dict[str, Any]] = []
+    for item in raw_attachments:
+        if not isinstance(item, dict):
+            continue
+
+        path = item.get("path")
+        file_type = item.get("type")
+
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if not isinstance(file_type, str) or not file_type.strip():
+            continue
+
+        attachment = {
+            "path": path.strip(),
+            "type": file_type.strip(),
+        }
+
+        caption = item.get("caption")
+        if isinstance(caption, str) and caption.strip():
+            attachment["caption"] = caption.strip()
+
+        validated.append(attachment)
+
+    return validated
 
 
 def _extract_outcome(payload: Any) -> _DelegationOutcome:
@@ -306,11 +349,13 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
             should_answer_to_user=None,
             valid=False,
             error_code="unstructured_payload",
+            attachments=[],
         )
     if isinstance(payload, dict):
         answer = payload.get("answer")
         should = payload.get("should_answer_to_user")
         should_flag = should if isinstance(should, bool) else None
+        attachments = _validate_attachments(payload.get("attachments"))
         if should_flag is None:
             return _DelegationOutcome(
                 text=str(payload),
@@ -318,6 +363,7 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
                 should_answer_to_user=None,
                 valid=False,
                 error_code="missing_should_answer_to_user",
+                attachments=attachments,
             )
         if isinstance(answer, dict):
             content = answer.get("content")
@@ -328,6 +374,7 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
                     should_answer_to_user=should_flag,
                     valid=True,
                     error_code=None,
+                    attachments=attachments,
                 )
             return _DelegationOutcome(
                 text=str(payload),
@@ -335,6 +382,7 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
                 should_answer_to_user=should_flag,
                 valid=False,
                 error_code="missing_answer_content",
+                attachments=attachments,
             )
         return _DelegationOutcome(
             text=str(payload),
@@ -342,6 +390,7 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
             should_answer_to_user=should_flag,
             valid=False,
             error_code="missing_answer_object",
+            attachments=attachments,
         )
     return _DelegationOutcome(
         text=str(payload),
@@ -349,6 +398,7 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
         should_answer_to_user=None,
         valid=False,
         error_code="unstructured_payload",
+        attachments=[],
     )
 
 

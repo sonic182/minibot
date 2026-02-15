@@ -418,3 +418,60 @@ async def test_e2e_console_main_agent_delegates_example_screenshot_and_reports_w
     )
     has_expected_fallback = "could not complete that delegated action reliably" in lowered
     assert has_expected_success_report or has_expected_fallback or has_explicit_unavailable or has_browser_contention
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(importlib.util.find_spec("mcp") is None, reason="mcp package required")
+@pytest.mark.skipif(
+    not _ASDF_NPX_SHIM.exists() and shutil.which("npx") is None,
+    reason="Playwright MCP E2E requires npx",
+)
+@pytest.mark.timeout(30)
+async def test_e2e_console_screenshot_delegation_with_attachments_reports_path(
+    tmp_path: Path,
+) -> None:
+    agents_dir = tmp_path / "agents"
+    _write_browser_agent(agents_dir)
+    config_path = _write_e2e_config(
+        tmp_path=tmp_path,
+        agents_dir=agents_dir,
+        main_agent_tools_allow=["list_agents", "invoke_agent", "current_*", "calculate_*"],
+        tool_ownership_mode="exclusive",
+    )
+
+    response = await _run_console_turn_with_retry(
+        config_path=config_path,
+        text=(
+            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent. "
+            "Task: take a screenshot of https://www.example.com/. "
+            "After receiving the delegation result, report the screenshot file path "
+            "in a user-friendly console message format like 'Screenshot saved at: <path>'. "
+            "Do NOT call send_file since console cannot send files to users."
+        ),
+        attempts=2,
+        wait_timeout_seconds=25.0,
+    )
+
+    assert response.channel == "console"
+    trace = response.metadata.get("agent_trace")
+    assert isinstance(trace, list), "Expected agent_trace in metadata"
+
+    delegation_entry = next((e for e in trace if e.get("target") == "playwright_mcp_agent"), None)
+    assert delegation_entry is not None, "Expected delegation to playwright_mcp_agent"
+    assert delegation_entry.get("ok") is True, "Expected successful delegation"
+
+    lowered = response.text.lower()
+    assert any(keyword in lowered for keyword in ["saved", "screenshot", "captured"]), (
+        "Expected success indicator in response"
+    )
+
+    expected_browser_dir = (tmp_path / "files" / "browser").as_posix().lower()
+    has_path = any(
+        [
+            expected_browser_dir in lowered,
+            "browser/" in lowered,
+            "files/browser" in lowered,
+            ".png" in lowered,
+        ]
+    )
+    assert has_path, "Expected file path in console response"
