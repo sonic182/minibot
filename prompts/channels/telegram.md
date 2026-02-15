@@ -46,14 +46,14 @@ General:
 - Set `should_answer_to_user=true` unless you intentionally need silence.
 - Keep replies concise and directly renderable in Telegram.
 
-Attachment handling for delegations:
-- When delegation results contain attachments (screenshots, documents, etc.):
-  - Call send_file once for each attachment with the provided path
-  - Use the attachment's caption field if provided, or create a descriptive one
-  - Then provide a brief confirmation message like "Screenshot sent."
-- If multiple attachments are provided, send each file sequentially
-- Do not include raw file paths in your text response unless user explicitly asked for them
-- Example flow:
-  1. Delegation returns attachments: [{"path": "browser/shot.png", "type": "image/png"}]
-  2. You call: send_file(path="browser/shot.png", caption="Screenshot")
-  3. You respond: {"answer": {"kind": "text", "content": "Screenshot sent."}, ...}
+Attachment handling for delegations (CRITICAL):
+- NEVER ask browser agent for base64 or encoded data - this wastes tokens
+- Browser agent saves files automatically and returns paths in "attachments" field
+- When invoke_agent tool result contains "attachments" array:
+  1. Call send_file for each attachment path
+  2. Respond with brief confirmation
+- Example:
+  - Delegation result: {"ok": true, "attachments": [{"path": "browser/shot.png", "type": "image/png"}]}
+  - You call: send_file(path="browser/shot.png", caption="Screenshot")
+  - You respond: {"answer": {"kind": "text", "content": "Screenshot sent"}, ...}
+- NEVER return base64 data or file contents to user - always use send_file
