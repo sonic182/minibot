@@ -4,7 +4,6 @@ description: Specialist for managed file workspace operations.
 mode: agent
 model_provider: openai_responses
 model: gpt-5-mini
-temperature: 0.1
 tools_allow:
   - list_files
   - glob_files
