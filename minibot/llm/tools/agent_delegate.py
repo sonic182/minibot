@@ -10,6 +10,7 @@ from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.post_answer_gate import PostAnswerGate
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
@@ -44,6 +45,9 @@ class AgentDelegateTool:
         default_timeout_seconds: int,
         delegated_tool_call_policy: Literal["auto", "always", "never"] = "auto",
         environment_prompt_fragment: str = "",
+        post_answer_gate_enabled: bool = True,
+        post_answer_gate_scope: Literal["main_only", "all_agents"] = "main_only",
+        post_answer_gate_max_retries: int = 1,
     ) -> None:
         self._registry = registry
         self._llm_factory = llm_factory
@@ -51,6 +55,9 @@ class AgentDelegateTool:
         self._default_timeout_seconds = default_timeout_seconds
         self._delegated_tool_call_policy = delegated_tool_call_policy
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
+        self._post_answer_gate_enabled = post_answer_gate_enabled
+        self._post_answer_gate_scope = post_answer_gate_scope
+        self._post_answer_gate_max_retries = post_answer_gate_max_retries
         self._logger = logging.getLogger("minibot.agent_delegate")
 
     def bindings(self) -> list[ToolBinding]:
@@ -146,10 +153,16 @@ class AgentDelegateTool:
             allow_system_inserts=False,
             managed_files_root=None,
         )
+        gate_enabled = self._should_apply_gate()
+        gate: PostAnswerGate | None = None
+        if gate_enabled and scoped_tools:
+            gate = PostAnswerGate(llm_client=llm_client, tools=scoped_tools)
+
         tool_required = self._delegated_tool_call_required(spec)
         attempts = 1
         state = self._build_state(spec=spec, task=task, details=details)
         total_tokens = 0
+        gate_tokens = 0
         try:
             generation = await runtime.run(
                 state=state,
@@ -159,39 +172,96 @@ class AgentDelegateTool:
             )
             total_tokens += int(generation.total_tokens or 0)
             tool_messages_count = self._count_tool_messages(generation.state)
-            if tool_required and tool_messages_count == 0:
-                attempts += 1
-                self._logger.warning(
-                    "delegated agent returned without tool calls; retrying once",
-                    extra={
-                        "agent": spec.name,
-                        "policy": self._delegated_tool_call_policy,
-                    },
-                )
-                retry_state = self._build_state(
-                    spec=spec,
-                    task=task,
-                    details=details,
-                    system_prompt_override=(
-                        f"{spec.system_prompt}\n\n"
-                        "Tool policy reminder: this delegated task requires at least one tool call before "
-                        "your final answer. Execute the necessary tool now, then return the result."
-                    ),
-                )
-                generation = await runtime.run(
-                    state=retry_state,
-                    tool_context=context,
-                    response_schema=_agent_response_schema(),
+            outcome = _extract_outcome(generation.payload)
+
+            should_retry = False
+            retry_reason = ""
+
+            if gate is not None and tool_messages_count == 0:
+                gate_decision = await gate.evaluate(
+                    session_id=f"delegate:{spec.name}",
+                    history=[],
+                    user_text=task,
+                    assistant_response=outcome.text,
+                    state=generation.state,
                     prompt_cache_key=None,
                 )
-                total_tokens += int(generation.total_tokens or 0)
-                tool_messages_count = self._count_tool_messages(generation.state)
-                if tool_messages_count == 0:
-                    self._logger.warning(
-                        "delegated agent failed tool-use requirement",
+                gate_tokens += gate_decision.tokens_used
+                total_tokens += gate_decision.tokens_used
+
+                self._logger.debug(
+                    "delegated agent post-answer gate decision",
+                    extra={
+                        "agent": spec.name,
+                        "action": gate_decision.action,
+                        "reason_code": gate_decision.reason_code,
+                        "requires_tools": gate_decision.requires_tools,
+                        "suggested_tool": gate_decision.suggested_tool,
+                        "gate_tokens": gate_decision.tokens_used,
+                    },
+                )
+
+                if gate_decision.action == "continue_with_tools":
+                    should_retry = True
+                    retry_reason = f"gate:{gate_decision.reason_code}"
+            elif tool_required and tool_messages_count == 0:
+                should_retry = True
+                retry_reason = f"policy:{self._delegated_tool_call_policy}"
+
+            if should_retry and tool_messages_count == 0:
+                retry_count = 0
+                max_retries = self._post_answer_gate_max_retries if gate is not None else 1
+
+                while retry_count < max_retries and tool_messages_count == 0:
+                    attempts += 1
+                    retry_count += 1
+                    self._logger.debug(
+                        "delegated agent retry requested",
                         extra={
                             "agent": spec.name,
-                            "policy": self._delegated_tool_call_policy,
+                            "retry_reason": retry_reason,
+                            "retry_count": retry_count,
+                            "max_retries": max_retries,
+                        },
+                    )
+                    retry_state = self._build_state(
+                        spec=spec,
+                        task=task,
+                        details=details,
+                        system_prompt_override=(
+                            f"{spec.system_prompt}\n\n"
+                            "Tool policy reminder: this delegated task requires at least one tool call before "
+                            "your final answer. Execute the necessary tool now, then return the result."
+                        ),
+                    )
+                    generation = await runtime.run(
+                        state=retry_state,
+                        tool_context=context,
+                        response_schema=_agent_response_schema(),
+                        prompt_cache_key=None,
+                    )
+                    total_tokens += int(generation.total_tokens or 0)
+                    tool_messages_count = self._count_tool_messages(generation.state)
+                    outcome = _extract_outcome(generation.payload)
+
+                    if tool_messages_count > 0:
+                        self._logger.debug(
+                            "delegated agent retry succeeded",
+                            extra={
+                                "agent": spec.name,
+                                "tool_messages": tool_messages_count,
+                                "retry_count": retry_count,
+                            },
+                        )
+                        break
+
+                if tool_messages_count == 0:
+                    self._logger.warning(
+                        "delegated agent failed tool-use requirement after retries",
+                        extra={
+                            "agent": spec.name,
+                            "retry_reason": retry_reason,
+                            "attempts": attempts,
                         },
                     )
                     return {
@@ -204,10 +274,10 @@ class AgentDelegateTool:
                         "tool_messages_count": tool_messages_count,
                         "delegation_attempts": attempts,
                         "total_tokens": total_tokens,
+                        "gate_tokens": gate_tokens,
                         "error_code": "delegated_no_tool_calls",
                         "error": "delegated agent returned without required tool calls",
                     }
-            outcome = _extract_outcome(generation.payload)
             result_status = _delegation_result_status(outcome)
             ok = result_status == "success"
             if outcome.attachments:
@@ -219,18 +289,18 @@ class AgentDelegateTool:
                         "attachment_types": [a.get("type") for a in outcome.attachments],
                     },
                 )
-            self._logger.debug(
-                "delegated agent invocation completed",
-                extra={
-                    "agent": spec.name,
-                    "tool_count": len(scoped_tools),
-                    "total_tokens": total_tokens,
-                    "tool_messages_count": tool_messages_count,
-                    "delegation_attempts": attempts,
-                    "result_status": result_status,
-                    "result_preview": outcome.text[:240],
-                },
-            )
+            log_extra = {
+                "agent": spec.name,
+                "tool_count": len(scoped_tools),
+                "total_tokens": total_tokens,
+                "tool_messages_count": tool_messages_count,
+                "delegation_attempts": attempts,
+                "result_status": result_status,
+                "result_preview": outcome.text[:240],
+            }
+            if gate_tokens > 0:
+                log_extra["gate_tokens"] = gate_tokens
+            self._logger.debug("delegated agent invocation completed", extra=log_extra)
             response: dict[str, Any] = {
                 "ok": ok,
                 "agent": spec.name,
@@ -244,6 +314,8 @@ class AgentDelegateTool:
                 "total_tokens": total_tokens,
                 "attachments": outcome.attachments,
             }
+            if gate_tokens > 0:
+                response["gate_tokens"] = gate_tokens
             if outcome.error_code is not None:
                 response["error_code"] = outcome.error_code
                 response["error"] = f"delegated agent returned {outcome.error_code}"
@@ -304,6 +376,11 @@ class AgentDelegateTool:
             return True
         scoped_tools = self._scoped_tools(spec)
         return len(scoped_tools) > 0
+
+    def _should_apply_gate(self) -> bool:
+        if not self._post_answer_gate_enabled:
+            return False
+        return self._post_answer_gate_scope == "all_agents"
 
     @staticmethod
     def _count_tool_messages(state: AgentState) -> int:

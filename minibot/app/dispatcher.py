@@ -49,6 +49,8 @@ class Dispatcher:
             notify_compaction_updates=settings.memory.notify_compaction_updates,
             agent_timeout_seconds=settings.runtime.agent_timeout_seconds,
             environment_prompt_fragment=build_environment_prompt_fragment(settings),
+            post_answer_gate_enabled=settings.runtime.post_answer_gate.enabled,
+            post_answer_gate_max_retries=settings.runtime.post_answer_gate.max_retries,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
         if settings.tools.mcp.enabled:

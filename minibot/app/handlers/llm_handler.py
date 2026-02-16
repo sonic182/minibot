@@ -9,6 +9,7 @@ from typing import cast
 import json
 
 from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.post_answer_gate import PostAnswerGate
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole
 from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
@@ -43,6 +44,8 @@ class LLMMessageHandler:
         notify_compaction_updates: bool = False,
         agent_timeout_seconds: int = 120,
         environment_prompt_fragment: str = "",
+        post_answer_gate_enabled: bool = True,
+        post_answer_gate_max_retries: int = 1,
     ) -> None:
         self._memory = memory
         self._llm_client = llm_client
@@ -54,6 +57,8 @@ class LLMMessageHandler:
         self._session_total_tokens: dict[str, int] = {}
         self._prompts_dir = self._llm_prompts_dir()
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
+        self._post_answer_gate_enabled = post_answer_gate_enabled
+        self._post_answer_gate_max_retries = post_answer_gate_max_retries
         runtime_limits = build_runtime_limits(
             llm_client=self._llm_client,
             timeout_seconds=agent_timeout_seconds,
@@ -71,6 +76,10 @@ class LLMMessageHandler:
             )
         else:
             self._runtime = None
+        if self._post_answer_gate_enabled and self._tools:
+            self._gate = PostAnswerGate(llm_client=self._llm_client, tools=self._tools)
+        else:
+            self._gate = None
         self._logger = logging.getLogger("minibot.handler")
 
     def _supports_agent_runtime(self) -> bool:
@@ -225,9 +234,6 @@ class LLMMessageHandler:
         agent_trace: list[dict[str, Any]] = []
         delegation_fallback_used = False
         delegation_unresolved = False
-        tool_required_intent = False
-        suggested_tool: str | None = None
-        suggested_path: str | None = None
         tool_messages_count: int | None = None
         try:
             if self._runtime is None:
@@ -262,61 +268,128 @@ class LLMMessageHandler:
                 agent_trace, delegation_fallback_used, delegation_unresolved = self._extract_agent_trace(
                     generation.state
                 )
-                if tool_messages_count == 0:
-                    (
-                        tool_required_intent,
-                        suggested_tool,
-                        suggested_path,
-                        classifier_tokens,
-                    ) = await self._decide_tool_requirement(
+                render, should_reply = self._extract_answer(generation.payload)
+
+                if self._gate is not None and tool_messages_count == 0:
+                    gate_decision = await self._gate.evaluate(
                         session_id=session_id,
                         history=history,
                         user_text=model_text,
+                        assistant_response=render.text,
+                        state=generation.state,
                         prompt_cache_key=prompt_cache_key,
                     )
-                    turn_total_tokens += classifier_tokens
-                if tool_required_intent and tool_messages_count == 0:
+                    turn_total_tokens += gate_decision.tokens_used
                     self._logger.debug(
-                        "tool-required request returned without tool calls; retrying with stricter instruction",
-                        extra={"chat_id": message.chat_id, "channel": message.channel},
-                    )
-                    retry_system_prompt = (
-                        f"{system_prompt}\n\n"
-                        "Tool policy reminder: this request requires using tools before final answer. "
-                        "Call the relevant tool now, then provide the final answer from tool output. "
-                        "Do not answer with intent statements like 'I will check'."
-                    )
-                    retry_state = self._build_agent_state(
-                        history=history,
-                        user_text=model_text,
-                        user_content=model_user_content,
-                        system_prompt=retry_system_prompt,
-                    )
-                    generation = await self._runtime.run(
-                        state=retry_state,
-                        tool_context=tool_context,
-                        response_schema=self._response_schema(),
-                        prompt_cache_key=prompt_cache_key,
-                    )
-                    turn_total_tokens += self._track_token_usage(
-                        session_id,
-                        getattr(generation, "total_tokens", None),
-                    )
-                    tool_messages_count = self._count_tool_messages_in_state(generation.state)
-                    (
-                        agent_trace,
-                        delegation_fallback_used,
-                        delegation_unresolved,
-                    ) = self._extract_agent_trace(generation.state)
-                    self._logger.debug(
-                        "tool-required retry completed",
+                        "post-answer gate decision",
                         extra={
-                            "chat_id": message.chat_id,
-                            "channel": message.channel,
-                            "tool_messages": tool_messages_count,
+                            "action": gate_decision.action,
+                            "reason_code": gate_decision.reason_code,
+                            "requires_tools": gate_decision.requires_tools,
+                            "suggested_tool": gate_decision.suggested_tool,
+                            "unsatisfiable": gate_decision.unsatisfiable,
+                            "gate_tokens": gate_decision.tokens_used,
                         },
                     )
-                render, should_reply = self._extract_answer(generation.payload)
+
+                    if gate_decision.action == "continue_with_tools" and tool_messages_count == 0:
+                        retry_count = 0
+                        while retry_count < self._post_answer_gate_max_retries:
+                            self._logger.debug(
+                                "gate requested continue_with_tools; retrying with stricter instruction",
+                                extra={
+                                    "chat_id": message.chat_id,
+                                    "channel": message.channel,
+                                    "retry_count": retry_count + 1,
+                                },
+                            )
+                            retry_system_prompt = (
+                                f"{system_prompt}\n\n"
+                                "Tool policy reminder: this request requires using tools before final answer. "
+                                "Call the relevant tool now, then provide the final answer from tool output. "
+                                "Do not answer with intent statements like 'I will check'."
+                            )
+                            retry_state = self._build_agent_state(
+                                history=history,
+                                user_text=model_text,
+                                user_content=model_user_content,
+                                system_prompt=retry_system_prompt,
+                            )
+                            generation = await self._runtime.run(
+                                state=retry_state,
+                                tool_context=tool_context,
+                                response_schema=self._response_schema(),
+                                prompt_cache_key=prompt_cache_key,
+                            )
+                            turn_total_tokens += self._track_token_usage(
+                                session_id,
+                                getattr(generation, "total_tokens", None),
+                            )
+                            tool_messages_count = self._count_tool_messages_in_state(generation.state)
+                            (
+                                agent_trace,
+                                delegation_fallback_used,
+                                delegation_unresolved,
+                            ) = self._extract_agent_trace(generation.state)
+                            render, should_reply = self._extract_answer(generation.payload)
+
+                            if tool_messages_count > 0:
+                                self._logger.debug(
+                                    "gate retry succeeded with tool execution",
+                                    extra={
+                                        "chat_id": message.chat_id,
+                                        "channel": message.channel,
+                                        "tool_messages": tool_messages_count,
+                                    },
+                                )
+                                break
+                            retry_count += 1
+
+                        if tool_messages_count == 0:
+                            direct_tool_message = await self._attempt_direct_file_delete(
+                                user_text=message.text,
+                                tool_context=tool_context,
+                                suggested_tool=gate_decision.suggested_tool,
+                                suggested_path=None,
+                            )
+                            if direct_tool_message is not None:
+                                self._logger.info(
+                                    "resolved gate continue_with_tools via direct tool fallback",
+                                    extra={"chat_id": message.chat_id, "channel": message.channel},
+                                )
+                                render = self._plain_render(direct_tool_message)
+                                should_reply = True
+                            else:
+                                self._logger.warning(
+                                    "gate continue_with_tools still unresolved after retries",
+                                    extra={
+                                        "chat_id": message.chat_id,
+                                        "channel": message.channel,
+                                        "reason_code": gate_decision.reason_code,
+                                    },
+                                )
+                                render = self._plain_render(
+                                    "I could not verify or execute that action with tools in this attempt. "
+                                    "Please try again, or ask me to run a specific tool."
+                                )
+                                should_reply = True
+                    elif gate_decision.action == "ask_clarification":
+                        if gate_decision.notes:
+                            render = self._plain_render(gate_decision.notes)
+                        should_reply = True
+                    elif gate_decision.action == "fail_unsolved":
+                        message_text = (
+                            gate_decision.notes
+                            if gate_decision.notes
+                            else "I'm unable to complete that request at this time."
+                        )
+                        render = self._plain_render(message_text)
+                        should_reply = True
+                    elif gate_decision.action == "guardrail_block":
+                        render = self._plain_render(
+                            "I cannot process that request as it may violate safety or policy guidelines."
+                        )
+                        should_reply = True
                 if delegation_unresolved:
                     self._logger.debug(
                         "delegation returned unresolved state; retrying runtime once",
@@ -362,43 +435,6 @@ class LLMMessageHandler:
                             "Please retry, or ask me to run a specific tool step-by-step."
                         )
                         should_reply = True
-
-            if tool_required_intent and tool_messages_count == 0:
-                direct_tool_message = await self._attempt_direct_file_delete(
-                    user_text=message.text,
-                    tool_context=tool_context,
-                    suggested_tool=suggested_tool,
-                    suggested_path=suggested_path,
-                )
-                if direct_tool_message is not None:
-                    self._logger.info(
-                        "resolved tool-required delete request via direct delete_file fallback",
-                        extra={"chat_id": message.chat_id, "channel": message.channel},
-                    )
-                    render = self._plain_render(direct_tool_message)
-                    should_reply = True
-                else:
-                    self._logger.warning(
-                        "tool-required request still unresolved after retries; returning explicit failure message",
-                        extra={
-                            "chat_id": message.chat_id,
-                            "channel": message.channel,
-                            "no_tool_call": True,
-                            "tool_exception_available": False,
-                            "reason": "model_returned_final_without_tool_calls",
-                            "user_text": message.text,
-                        },
-                    )
-                    render = self._plain_render(
-                        "I could not verify or execute that action with tools in this attempt. "
-                        "Please try again, or ask me to run a specific tool."
-                    )
-                if not should_reply:
-                    self._logger.debug(
-                        "overriding should_reply=false for tool-required request without tool outputs",
-                        extra={"chat_id": message.chat_id, "channel": message.channel},
-                    )
-                    should_reply = True
 
             self._logger.debug(
                 "structured output parsed",

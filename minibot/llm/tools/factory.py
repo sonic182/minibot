@@ -118,6 +118,9 @@ def build_enabled_tools(
             default_timeout_seconds=settings.orchestration.default_timeout_seconds,
             delegated_tool_call_policy=settings.orchestration.delegated_tool_call_policy,
             environment_prompt_fragment=environment_prompt_fragment,
+            post_answer_gate_enabled=settings.runtime.post_answer_gate.enabled,
+            post_answer_gate_scope=settings.runtime.post_answer_gate.scope,
+            post_answer_gate_max_retries=settings.runtime.post_answer_gate.max_retries,
         )
         tools.extend(delegate_tool.bindings())
     return tools

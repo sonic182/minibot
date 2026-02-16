@@ -6,6 +6,22 @@ environment = "development"
 # E2E/research-heavy profile: increase agent timeout to reduce long-run failures.
 agent_timeout_seconds = 420
 
+# Post-answer gate configuration.
+# Validates assistant responses to prevent premature/intent-only answers without tool execution.
+# The gate uses structured LLM output to classify responses and decide if tools should be executed first.
+[runtime.post_answer_gate]
+enabled = true
+# Maximum retry attempts when gate detects intent-only responses (e.g., "I will check...").
+max_retries = 1
+# Scope determines which agents are validated by the gate:
+# - "main_only": Only validate main agent responses (recommended for testing; lower cost/latency).
+# - "all_agents": Validate both main agent and delegated specialist agents (comprehensive).
+# Note: Gate only activates when agent has tools available and returns no tool calls.
+scope = "main_only"
+# Optional: override LLM model for gate classifier (uses main LLM by default).
+# Useful to use a faster/cheaper model for classification while keeping powerful model for generation.
+# model = "gpt-4o-mini"
+
 # Telegram adapter settings.
 [channels.telegram]
 enabled = true
@@ -109,7 +125,14 @@ tools_deny = ["mcp*"]
 [memory]
 backend = "sqlite"
 sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
+# Maximum number of messages to keep in history (oldest messages are trimmed).
 max_history_messages = 200
+# Optional: auto-compact conversation history when token usage exceeds this threshold.
+# Compaction summarizes the conversation to reduce context size while preserving key information.
+# Example: 200000 = auto-compact after 200k tokens
+# max_history_tokens = 200000
+# Optional: notify user when compaction runs (sends intermediate "running compaction..." messages).
+# notify_compaction_updates = false
 
 # Scheduled prompt storage and polling.
 [scheduler.prompts]

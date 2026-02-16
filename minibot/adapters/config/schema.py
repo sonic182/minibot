@@ -29,10 +29,18 @@ def _coerce_byte_size(value: Any) -> int:
 ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
 
 
+class PostAnswerGateConfig(BaseModel):
+    enabled: bool = True
+    max_retries: PositiveInt = 1
+    scope: Literal["main_only", "all_agents"] = "main_only"
+    model: str | None = None
+
+
 class RuntimeConfig(BaseModel):
     log_level: str = "INFO"
     environment: str = "development"
     agent_timeout_seconds: int = Field(default=120, ge=120)
+    post_answer_gate: PostAnswerGateConfig = PostAnswerGateConfig()
 
 
 class TelegramChannelConfig(BaseModel):
