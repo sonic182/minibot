@@ -26,8 +26,13 @@ and emit outbound responses back to the active channel adapter.
 ├── TODO.md
 ├── config.example.toml
 ├── prompts/
-│   └── channels/
-│       └── telegram.md
+│   ├── channels/
+│   │   ├── console.md
+│   │   └── telegram.md
+│   ├── compact.md
+│   └── policies/
+│       ├── delegation.md
+│       └── tool_usage.md
 ├── Dockerfile
 ├── docker-compose.yml
 ├── minibot/
@@ -202,9 +207,10 @@ flowchart TD
   - composes per-channel system prompt by loading prompt fragments from `shared/prompt_loader.py`,
   - runs main-agent runtime/tool loop,
   - consumes delegated results from `invoke_agent` tool outputs,
+  - tracks per-turn/session token usage metadata and optional history compaction flow,
   - enforces provider constraints for multimodal support,
   - stores transcript history safely (attachment summaries only, not raw blobs),
-  - parses structured model output (`answer`, `should_answer_to_user`).
+  - parses structured model output (`answer`, `should_answer_to_user`, optional attachments).
 - `app/agent_runtime.py`:
   - owns directive-loop execution (`provider step -> tool calls -> tool output append -> directive apply -> next step`),
   - maintains runtime `AgentState` (`messages`, `meta`),
@@ -268,7 +274,7 @@ Current notes:
 - `llm/provider_factory.py`: provider/client abstraction around `sonic182/llm-async`, including tool execution loops and provider capability branching.
 - `llm/tools/factory.py`: builds enabled tool bindings from settings.
 - `llm/tools/*`: concrete tool schemas + handlers:
-  - agent delegation (`list_agents`, `invoke_agent`),
+  - agent delegation (`list_agents`, `invoke_agent`, `agent_delegate`),
   - chat memory management,
   - calculator,
   - HTTP client,
@@ -313,12 +319,12 @@ The scheduler currently focuses on scheduled prompts (not a generic task DAG eng
 - Attachments are normalized into Responses-style parts:
   - images -> `input_image` (data URL),
   - non-image docs -> `input_file`.
-- Handler sends multimodal content only when provider mode supports it (`openai_responses` path).
-- For non-supporting providers, handler returns a clear user-facing message and avoids invalid provider calls.
+- Handler maps attachments to provider-specific formats for supported providers (`openai_responses`, `openai`, `openrouter`).
+- For non-supporting provider modes, handler returns a clear user-facing message and avoids invalid provider calls.
 
 ## Data and State
 
-- Conversation history: SQLite transcript store (optional max-history trimming).
+- Conversation history: SQLite transcript store (optional max-history trimming and token-threshold compaction).
 - KV notes: optional SQLAlchemy-backed store under tool controls.
 - Scheduled prompts: SQLite prompt store with recurrence + retry metadata.
 - Runtime queue state: in-process, ephemeral, reconstructed on restart from durable stores.
@@ -337,7 +343,7 @@ Main sections:
 - `[orchestration.main_agent]` (main-agent tool allow/deny)
 - `[memory]`
 - `[scheduler.prompts]`
-- `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `time`, `mcp`)
+- `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `time`, `file_storage`, `browser`, `mcp`)
 - `[logging]`
 
 Agent definition files under `./agents` are part of the effective config surface.

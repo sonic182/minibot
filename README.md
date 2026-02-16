@@ -18,7 +18,7 @@ Quickstart (Docker)
 -------------------
 
 1. `cp config.example.toml config.toml`
-2. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
+2. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider credentials under `[providers.<name>]`).
 3. `mkdir -p logs`
 4. `docker compose up --build -d`
 5. `docker compose logs -f minibot`
@@ -26,9 +26,9 @@ Quickstart (Docker)
 Quickstart (Poetry)
 -------------------
 
-1. `poetry install`
+1. `poetry install --all-extras`
 2. `cp config.example.toml config.toml`
-3. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider key).
+3. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider credentials under `[providers.<name>]`).
 4. `poetry run minibot`
 
 Console test channel
@@ -57,6 +57,7 @@ Top features
 - 🤖 Personal assistant, not SaaS: your chats, memory, and scheduled prompts stay in your instance.
 - 🎯 Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
 - 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment.
+- 💻 Local console channel for development/testing with REPL and one-shot modes (`minibot-console`).
 - 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
 - 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
 - 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
@@ -92,7 +93,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
 - `[llm]`: configures default model/provider behavior for the main agent and specialist agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir`). Request params are only sent when present in `config.toml`.
 - `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
-- `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`) or exclusively owned by specialist agents (`exclusive`).
+- `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`), fully specialist-owned (`exclusive`), or only specialist-owned for MCP tools (`exclusive_mcp`).
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; `max_history_tokens` triggers compaction once cumulative generation usage crosses the threshold; `notify_compaction_updates` controls whether compaction status messages are sent to end users.
 - `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
 - `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, and pagination defaults. Enable it only when you need tool-based memory storage.
@@ -497,14 +498,14 @@ Tooling
 
 Tools live under `minibot/llm/tools/` and are exposed to [llm-async] with server-side execution controls.
 
-- 🧠 `chat_history`: inspect/trim chat transcript history for the current session.
-- 🧮 `calculate_expression` + 🕒 `current_datetime`: quick built-in utility tools.
-- 📝 `kv_memory`: save/get/search short notes.
-- 🌐 `http_client`: guarded HTTP/HTTPS fetches via [aiosonic].
-- ⏰ `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`: one-time and recurring reminder scheduling.
+- 🧠 Chat memory tools: action facade `history` (`info`/`trim`) plus granular aliases (`chat_history_info`, `chat_history_trim`).
+- 📝 User memory tools: action facade `memory` (`save`/`get`/`search`/`delete`) plus granular aliases (`user_memory_*`).
+- ⏰ Scheduler tools: action facade `schedule` (`create`/`list`/`cancel`/`delete`) plus granular aliases (`schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`).
+- 🗂️ File tools: action facade `filesystem` (`list`/`glob`/`info`/`write`/`move`/`delete`/`send`) plus granular aliases (`list_files`, `create_file`, `move_file`, `delete_file`, `send_file`).
+- 🧩 `self_insert_artifact`/`artifact_insert`: inject managed files (`tools.file_storage.root_dir` relative path) into runtime directives for in-loop multimodal analysis.
+- 🧮 `calculator` + alias `calculate_expression`, 🕒 `current_datetime`, and 🌐 `http_client` for utility and fetch workflows.
 - 🐍 `python_execute` + `python_environment_info`: optional host Python execution and runtime/package inspection, including optional artifact export into managed files (`save_artifacts=true`) so outputs can be sent with `send_file`.
-- 🗂️ `list_files`, `create_file`, `send_file`: managed workspace file listing/writing/sending.
-- 🧩 `self_insert_artifact`: injects a managed file (`tools.file_storage.root_dir` relative path) into runtime directives so the model can analyze it as multimodal context in-loop.
+- 🤝 Delegation tools: `list_agents`, `invoke_agent`, and compatibility wrapper `agent_delegate`.
 - 🧭 `mcp_*` dynamic tools (optional): tool bindings discovered from configured MCP servers.
 - 🖼️ Telegram media inputs (`photo`/`document`) are supported on `openai_responses`, `openai`, and `openrouter`.
 
