@@ -91,6 +91,7 @@ class LLMMConfig(BaseModel):
     retry_attempts: PositiveInt = 3
     retry_delay_seconds: float = Field(default=2.0, gt=0)
     system_prompt: str = "You are Minibot, a helpful assistant."
+    system_prompt_file: str | None = "./prompts/main_agent_system.md"
     prompts_dir: str = "./prompts"
     reasoning_effort: str | None = None
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()

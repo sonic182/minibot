@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -192,6 +193,76 @@ async def test_generate_uses_system_prompt_override(monkeypatch: pytest.MonkeyPa
     call = client._provider.calls[-1]
     assert call["messages"][0]["role"] == "system"
     assert call["messages"][0]["content"] == "Override prompt"
+
+
+def test_load_system_prompt_from_file(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "system.md"
+    prompt_file.write_text("You are a test assistant from file.", encoding="utf-8")
+
+    config = LLMMConfig(
+        provider="openai",
+        api_key="secret",
+        model="x",
+        system_prompt_file=str(prompt_file),
+    )
+    client = LLMClient(config)
+
+    assert client.system_prompt() == "You are a test assistant from file."
+
+
+def test_load_system_prompt_fallback_to_default(tmp_path: Path) -> None:
+    config = LLMMConfig(
+        provider="openai",
+        api_key="secret",
+        model="x",
+        system_prompt="Custom default prompt",
+        system_prompt_file=None,
+    )
+    client = LLMClient(config)
+
+    assert client.system_prompt() == "Custom default prompt"
+
+
+def test_load_system_prompt_fails_when_file_missing(tmp_path: Path) -> None:
+    config = LLMMConfig(
+        provider="openai",
+        api_key="secret",
+        model="x",
+        system_prompt_file=str(tmp_path / "nonexistent.md"),
+    )
+
+    with pytest.raises(FileNotFoundError, match="system_prompt_file configured but file not found"):
+        LLMClient(config)
+
+
+def test_load_system_prompt_fails_when_file_is_directory(tmp_path: Path) -> None:
+    prompt_dir = tmp_path / "prompts"
+    prompt_dir.mkdir()
+
+    config = LLMMConfig(
+        provider="openai",
+        api_key="secret",
+        model="x",
+        system_prompt_file=str(prompt_dir),
+    )
+
+    with pytest.raises(ValueError, match="system_prompt_file configured but path is not a file"):
+        LLMClient(config)
+
+
+def test_load_system_prompt_fails_when_file_is_empty(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "empty.md"
+    prompt_file.write_text("   \n\n  ", encoding="utf-8")
+
+    config = LLMMConfig(
+        provider="openai",
+        api_key="secret",
+        model="x",
+        system_prompt_file=str(prompt_file),
+    )
+
+    with pytest.raises(ValueError, match="system_prompt_file configured but file is empty"):
+        LLMClient(config)
 
 
 @pytest.mark.asyncio

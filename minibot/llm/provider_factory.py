@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
 
@@ -102,7 +103,7 @@ class LLMClient:
         self._temperature = config.temperature
         self._max_new_tokens = config.max_new_tokens
         self._max_tool_iterations = config.max_tool_iterations
-        self._system_prompt = getattr(config, "system_prompt", "You are Minibot, a helpful assistant.")
+        self._system_prompt = self._load_system_prompt(config)
         self._prompts_dir = getattr(config, "prompts_dir", "./prompts")
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
         self._openrouter_models = list(getattr(getattr(config, "openrouter", None), "models", []) or [])
@@ -405,6 +406,29 @@ class LLMClient:
         if self._provider_name in {"openai", "openrouter"}:
             return "chat_completions"
         return "none"
+
+    @staticmethod
+    def _load_system_prompt(config: LLMMConfig) -> str:
+        prompt_file = getattr(config, "system_prompt_file", None)
+        if prompt_file is not None:
+            normalized = prompt_file.strip() if isinstance(prompt_file, str) else None
+            if normalized:
+                prompt_path = Path(normalized)
+                if not prompt_path.exists():
+                    raise FileNotFoundError(
+                        f"system_prompt_file configured but file not found: {normalized}"
+                    )
+                if not prompt_path.is_file():
+                    raise ValueError(
+                        f"system_prompt_file configured but path is not a file: {normalized}"
+                    )
+                content = prompt_path.read_text(encoding="utf-8").strip()
+                if not content:
+                    raise ValueError(
+                        f"system_prompt_file configured but file is empty: {normalized}"
+                    )
+                return content
+        return getattr(config, "system_prompt", "You are Minibot, a helpful assistant.")
 
     @staticmethod
     def _extract_response_id(response: Any) -> str | None:

@@ -461,11 +461,27 @@ pure while letting adapters evolve independently.
 Prompt Packs
 ------------
 
-MiniBot can inject channel-specific prompt fragments at runtime.
+MiniBot supports versioned, file-based system prompts plus runtime fragment composition.
 
-- Configure root folder with `llm.prompts_dir` (default `./prompts`).
-- Place channel fragments under `prompts/channels/<channel>.md` (for example `prompts/channels/telegram.md`).
-- Handler composes effective system prompt as: base `llm.system_prompt` + channel fragment (+ tool safety addenda).
+### Base System Prompt
+
+- **File-based (default)**: The base prompt is loaded from `./prompts/main_agent_system.md` by default (configurable via `llm.system_prompt_file`).
+- **Inline fallback**: Set `llm.system_prompt_file = null` (or empty string) in `config.toml` to use `llm.system_prompt` instead.
+- **Fail-fast behavior**: If `system_prompt_file` is configured but the file is missing, empty, or not a file, the daemon will fail at startup to prevent running with an unexpected prompt.
+
+### Runtime Fragments
+
+- **Channel-specific additions**: Place channel fragments under `prompts/channels/<channel>.md` (for example `prompts/channels/telegram.md`).
+- **Policy fragments**: Add policy files under `prompts/policies/*.md` for cross-channel rules (loaded in sorted order).
+- **Composition order**: The handler composes the effective system prompt as: base prompt (from file or config) + policy fragments + channel fragment + environment context + tool safety addenda.
+- **Prompts directory**: Configure root folder with `llm.prompts_dir` (default `./prompts`).
+
+### Editing the System Prompt
+
+1. Edit `prompts/main_agent_system.md` in your repository.
+2. Review changes for content, security, tone, and absence of secrets.
+3. Commit changes with a descriptive message (for example `"Update system prompt: clarify tool usage policy"`).
+4. Deploy via Docker/systemd—both setups automatically include the `prompts/` directory.
 
 Incoming Message Flow
 ---------------------

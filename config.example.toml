@@ -34,7 +34,11 @@ sock_connect_timeout_seconds = 10
 sock_read_timeout_seconds = 180
 retry_attempts = 3
 retry_delay_seconds = 2.0
+# Base system prompt (used when system_prompt_file is not configured or set to null)
 system_prompt = "You are Minibot, a helpful assistant."
+# Load system prompt from versioned markdown file (default: "./prompts/main_agent_system.md")
+# Set to null or empty string to use system_prompt instead
+system_prompt_file = "./prompts/main_agent_system.md"
 prompts_dir = "./prompts"
 
 [providers.openai]
