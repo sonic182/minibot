@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Specialist-agent orchestration with file-defined agent specs (`./agents/*.md`), delegation tools (`list_agents`, `invoke_agent`, `agent_delegate`), and per-agent tool scoping for local tools + MCP servers.
+- Console channel support (`minibot-console`) for REPL and one-shot local conversations through the same dispatcher/handler pipeline used by Telegram.
+- Provider credential registry (`[providers.<name>]`) plus per-agent LLM overrides (provider/model/runtime params), including OpenRouter provider-routing and reasoning toggles.
+- Optional token-aware conversation compaction controls (`memory.max_history_tokens`) with token tracing metadata and optional user-facing compaction updates.
+- Unified action-style tool facades (`filesystem`, `history`, `memory`, `schedule`) alongside existing granular tools.
+
+### Changed
+
+- Configuration model now separates provider credentials from `[llm]`, adds `[orchestration]` and `[tools.browser]` blocks, and expands memory controls for history trimming/compaction behavior.
+- Main-agent runtime now supports tool ownership modes (`shared`, `exclusive`, `exclusive_mcp`) so specialist-owned tools can be hidden from the main agent and accessed via delegation.
+- Tool argument parsing and schema handling were standardized across built-in tools with stricter object schemas and shared validation helpers.
+- MCP bridge integration now injects Playwright output-dir defaults, sanitizes `null` payload fields, and improves result shaping/logging for large or binary-heavy responses.
+- LLM runtime metadata now includes richer token/delegation traces for observability and downstream channel handling.
+
+### Fixed
+
+- OpenAI strict function-schema compatibility for tool definitions (including MCP-exposed tools), reducing invalid function-parameter failures.
+- OpenRouter requests now retry without response schemas when JSON-mode/schema errors are returned by incompatible models.
+- MCP stdio transport now handles chunked output and ignores non-JSON lines, improving reliability with noisy MCP server stdout/stderr behavior.
+
 ## [0.0.4] - 2026-02-13
 
 ### Added
