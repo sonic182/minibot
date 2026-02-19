@@ -62,7 +62,7 @@ Top features
 - 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
 - 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
 - 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, optional Python execution, and MCP server bridges.
-- 🗂️ Managed file workspace tools: `list_files`, `create_file`, `send_file`, and `self_insert_artifact` (directive-based artifact insertion).
+- 🗂️ Managed file workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, and `self_insert_artifact` (directive-based artifact insertion).
 - 🌐 Optional browser automation via MCP servers (for example Playwright MCP tools).
 - ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
 - 📊 Structured logfmt logs, request correlation IDs, and a focused test suite (`pytest` + `pytest-asyncio`).
@@ -93,7 +93,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
 - `[llm]`: configures default model/provider behavior for the main agent and specialist agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir`). Request params are only sent when present in `config.toml`.
 - `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
-- `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`), fully specialist-owned (`exclusive`), or only specialist-owned for MCP tools (`exclusive_mcp`).
+- `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`), fully specialist-owned (`exclusive`), or only specialist-owned for MCP tools (`exclusive_mcp`). `main_tool_use_guardrail` enables an optional LLM-based tool-routing classifier per main-agent turn (`"disabled"` by default; set to `"llm_classifier"` to enable).
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; `max_history_tokens` triggers compaction once cumulative generation usage crosses the threshold; `notify_compaction_updates` controls whether compaction status messages are sent to end users.
 - `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
 - `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, and pagination defaults. Enable it only when you need tool-based memory storage.
@@ -217,11 +217,10 @@ model_provider: openai_responses
 model: gpt-5-mini
 temperature: 0.1
 tools_allow:
-  - list_files
-  - create_file
-  - move_file
-  - delete_file
-  - send_file
+  - filesystem
+  - glob_files
+  - read_file
+  - self_insert_artifact
 ---
 
 You manage files in the workspace safely and precisely.
@@ -257,11 +256,9 @@ name: files_agent
 description: Files workspace manager
 mode: agent
 tools_allow:
-  - list_files
-  - create_file
-  - move_file
-  - delete_file
-  - send_file
+  - filesystem
+  - glob_files
+  - read_file
   - self_insert_artifact
 ---
 
@@ -514,14 +511,14 @@ Tooling
 
 Tools live under `minibot/llm/tools/` and are exposed to [llm-async] with server-side execution controls.
 
-- 🧠 Chat memory tools: action facade `history` (`info`/`trim`) plus granular aliases (`chat_history_info`, `chat_history_trim`).
-- 📝 User memory tools: action facade `memory` (`save`/`get`/`search`/`delete`) plus granular aliases (`user_memory_*`).
-- ⏰ Scheduler tools: action facade `schedule` (`create`/`list`/`cancel`/`delete`) plus granular aliases (`schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`).
-- 🗂️ File tools: action facade `filesystem` (`list`/`glob`/`info`/`write`/`move`/`delete`/`send`) plus granular aliases (`list_files`, `create_file`, `move_file`, `delete_file`, `send_file`).
-- 🧩 `self_insert_artifact`/`artifact_insert`: inject managed files (`tools.file_storage.root_dir` relative path) into runtime directives for in-loop multimodal analysis.
+- 🧠 Chat memory tools: `chat_history_info`, `chat_history_trim`.
+- 📝 User memory tools: `memory` action facade (`save`/`get`/`search`/`delete`).
+- ⏰ Scheduler tools: `schedule` action facade (`create`/`list`/`cancel`/`delete`) plus granular aliases (`schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`).
+- 🗂️ File tools: `filesystem` action facade (`list`/`glob`/`info`/`write`/`move`/`delete`/`send`), `glob_files`, `read_file`.
+- 🧩 `self_insert_artifact`: inject managed files (`tools.file_storage.root_dir` relative path) into runtime directives for in-loop multimodal analysis.
 - 🧮 `calculator` + alias `calculate_expression`, 🕒 `current_datetime`, and 🌐 `http_client` for utility and fetch workflows.
-- 🐍 `python_execute` + `python_environment_info`: optional host Python execution and runtime/package inspection, including optional artifact export into managed files (`save_artifacts=true`) so outputs can be sent with `send_file`.
-- 🤝 Delegation tools: `list_agents`, `invoke_agent`, and compatibility wrapper `agent_delegate`.
+- 🐍 `python_execute` + `python_environment_info`: optional host Python execution and runtime/package inspection, including optional artifact export into managed files (`save_artifacts=true`) so outputs can be sent via the `filesystem` tool.
+- 🤝 Delegation tools: `list_agents`, `invoke_agent`.
 - 🧭 `mcp_*` dynamic tools (optional): tool bindings discovered from configured MCP servers.
 - 🖼️ Telegram media inputs (`photo`/`document`) are supported on `openai_responses`, `openai`, and `openrouter`.
 
