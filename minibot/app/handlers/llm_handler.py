@@ -445,6 +445,7 @@ class LLMMessageHandler:
             prompt_cache_key=prompt_cache_key,
         )
         tokens_used += guardrail.tokens_used
+        self._track_token_usage(session_id, guardrail.tokens_used)
 
         if guardrail.resolved_render_text is not None:
             return _AgentRuntimeResult(
@@ -475,22 +476,23 @@ class LLMMessageHandler:
             trace_result = extract_delegation_trace(generation.state)
             agent_trace = trace_result.trace
             delegation_fallback_used = trace_result.fallback_used
+            delegation_unresolved = trace_result.unresolved
             render, should_reply = extract_answer(generation.payload, logger=self._logger)
             if count_tool_messages(generation.state) == 0:
-                render = plain_render(
-                    "I could not verify or execute that action with tools in this attempt. "
-                    "Please try again, or ask me to run a specific tool."
+                return _AgentRuntimeResult(
+                    render=plain_render(
+                        "I could not verify or execute that action with tools in this attempt. "
+                        "Please try again, or ask me to run a specific tool."
+                    ),
+                    should_reply=True,
+                    agent_trace=agent_trace,
+                    delegation_fallback_used=delegation_fallback_used,
+                    tokens_used=tokens_used,
                 )
-                should_reply = True
-            return _AgentRuntimeResult(
-                render=render,
-                should_reply=should_reply,
-                agent_trace=agent_trace,
-                delegation_fallback_used=delegation_fallback_used,
-                tokens_used=tokens_used,
-            )
 
-        render, should_reply = extract_answer(generation.payload, logger=self._logger)
+        else:
+            render, should_reply = extract_answer(generation.payload, logger=self._logger)
+
         if delegation_unresolved:
             retry_state = self._build_agent_state(
                 history=history,

@@ -45,11 +45,9 @@ class LLMClassifierToolUseGuardrail:
         *,
         llm_client: Any,
         tools: Sequence[ToolBinding],
-        track_token_usage: Any,
     ) -> None:
         self._llm_client = llm_client
         self._tools = list(tools)
-        self._track_token_usage = track_token_usage
         self._logger = logging.getLogger("minibot.tool_use_guardrail")
 
     async def apply(
@@ -74,7 +72,6 @@ class LLMClassifierToolUseGuardrail:
             f"User request:\n{user_text}"
         )
         try:
-
             history = [m for m in state.messages if m.role in {"user", "assistant", "tool"}]
             generation = await self._llm_client.generate(
                 history,
@@ -87,7 +84,8 @@ class LLMClassifierToolUseGuardrail:
                 previous_response_id=None,
                 system_prompt_override="You are a strict tool-routing classifier.",
             )
-            tokens = self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+            raw_tokens = getattr(generation, "total_tokens", None)
+            tokens = raw_tokens if isinstance(raw_tokens, int) and raw_tokens > 0 else 0
             payload = generation.payload
             payload_obj: dict[str, Any] | None = None
             if isinstance(payload, dict):

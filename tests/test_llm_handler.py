@@ -712,6 +712,127 @@ async def test_handler_with_guardrail_resolved_render_text_skips_runtime_answer(
 
 
 @pytest.mark.asyncio
+async def test_handler_guardrail_retry_still_enforces_delegation_unresolved_fallback() -> None:
+    from minibot.app.tool_use_guardrail import GuardrailDecision, ToolUseGuardrail
+
+    class _RequireRetryGuardrail:
+        async def apply(self, **_: Any) -> GuardrailDecision:
+            return GuardrailDecision(requires_retry=True, retry_system_prompt_suffix="Use tools")
+
+    memory = StubMemory()
+    client = StubLLMClient(payload="unused", provider="openrouter")
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        tool_use_guardrail=cast(ToolUseGuardrail, _RequireRetryGuardrail()),
+    )
+    first_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"first"},"should_answer_to_user":true}',
+        response_id="r1",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+    )
+    second_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"delegated unresolved"},"should_answer_to_user":false}',
+        response_id="r2",
+        state=AgentState(
+            messages=[
+                AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")]),
+                AgentMessage(
+                    role="tool",
+                    name="invoke_agent",
+                    content=[
+                        MessagePart(
+                            type="json",
+                            value={
+                                "agent": "workspace_manager",
+                                "ok": True,
+                                "result_status": "not_user_answerable",
+                                "should_answer_to_user": False,
+                            },
+                        )
+                    ],
+                ),
+            ]
+        ),
+    )
+    third_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"resolved after bounded retry"},"should_answer_to_user":true}',
+        response_id="r3",
+        state=AgentState(
+            messages=[
+                AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")]),
+                AgentMessage(
+                    role="tool",
+                    name="invoke_agent",
+                    content=[
+                        MessagePart(
+                            type="json",
+                            value={
+                                "agent": "workspace_manager",
+                                "ok": True,
+                                "result_status": "success",
+                                "should_answer_to_user": True,
+                            },
+                        )
+                    ],
+                ),
+            ]
+        ),
+    )
+    runtime = StubRuntime([first_result, second_result, third_result])
+    handler._runtime = runtime  # type: ignore[attr-defined]
+
+    response = await handler.handle(_message_event("do something"))
+
+    assert len(runtime.calls) == 3
+    assert response.text == "resolved after bounded retry"
+    assert response.metadata.get("should_reply") is True
+
+
+@pytest.mark.asyncio
+async def test_handler_counts_guardrail_tokens_in_session_compaction_accounting() -> None:
+    from minibot.app.tool_use_guardrail import GuardrailDecision, ToolUseGuardrail
+
+    class _TokenOnlyGuardrail:
+        async def apply(self, **_: Any) -> GuardrailDecision:
+            return GuardrailDecision(requires_retry=False, tokens_used=60)
+
+    memory = StubMemory()
+    client = StubLLMClient({"answer": "compact summary", "should_answer_to_user": True}, provider="openrouter")
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        max_history_tokens=50,
+        notify_compaction_updates=True,
+        tool_use_guardrail=cast(ToolUseGuardrail, _TokenOnlyGuardrail()),
+    )
+    runtime = StubRuntime(
+        [
+            RuntimeResult(
+                payload='{"answer":{"kind":"text","content":"runtime answer"},"should_answer_to_user":true}',
+                response_id="r1",
+                state=AgentState(
+                    messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]
+                ),
+            )
+        ]
+    )
+    handler._runtime = runtime  # type: ignore[attr-defined]
+
+    response = await handler.handle(_message_event("trigger compaction"))
+
+    token_trace = response.metadata.get("token_trace")
+    assert isinstance(token_trace, dict)
+    assert token_trace.get("compaction_performed") is True
+    assert token_trace.get("session_total_tokens_before_compaction") == 60
+    assert response.metadata.get("compaction_updates") == [
+        "running compaction...",
+        "done compacting",
+        "compact summary",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_handler_injects_channel_prompt_fragment(tmp_path: Path) -> None:
     prompts_dir = tmp_path / "prompts"
     telegram_prompt = prompts_dir / "channels" / "telegram.md"

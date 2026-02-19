@@ -46,7 +46,6 @@ class Dispatcher:
             tool_use_guardrail: NoopToolUseGuardrail | LLMClassifierToolUseGuardrail = LLMClassifierToolUseGuardrail(
                 llm_client=llm_client,
                 tools=main_agent_tools_view.tools,
-                track_token_usage=lambda session_id, tokens: tokens or 0,
             )
         else:
             tool_use_guardrail = NoopToolUseGuardrail()
