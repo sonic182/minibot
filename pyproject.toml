@@ -38,6 +38,7 @@ aiosqlite = "^0.22.1"
 logfmter = "^0.0.11"
 rich = "^14.2.0"
 mcp = {version = ">=1.0.0,<2.0.0", optional = true}
+telegramify-markdown = "^0.5.4"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"

@@ -1245,6 +1245,18 @@ files = [
 ]
 
 [[package]]
+name = "mistletoe"
+version = "1.4.0"
+description = "A fast, extensible Markdown parser in pure Python."
+optional = false
+python-versions = "~=3.5"
+groups = ["main"]
+files = [
+    {file = "mistletoe-1.4.0-py3-none-any.whl", hash = "sha256:44a477803861de1237ba22e375c6b617690a31d2902b47279d1f8f7ed498a794"},
+    {file = "mistletoe-1.4.0.tar.gz", hash = "sha256:1630f906e5e4bbe66fdeb4d29d277e2ea515d642bb18a9b49b136361a9818c9d"},
+]
+
+[[package]]
 name = "multidict"
 version = "6.7.1"
 description = "multidict implementation"
@@ -2289,6 +2301,25 @@ typing-extensions = {version = ">=4.10.0", markers = "python_version < \"3.13\""
 full = ["httpx (>=0.27.0,<0.29.0)", "itsdangerous", "jinja2", "python-multipart (>=0.0.18)", "pyyaml"]
 
 [[package]]
+name = "telegramify-markdown"
+version = "0.5.4"
+description = "Makes it easy to send Markdown in Telegram MarkdownV2 style"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "telegramify_markdown-0.5.4-py3-none-any.whl", hash = "sha256:7c806e12b6c7045d7723e064a0ff25afcb16c92c0d95385b61a57b8c53a430d3"},
+    {file = "telegramify_markdown-0.5.4.tar.gz", hash = "sha256:c32bd04e5a1c22519c011ccf7350a01b6d162e6cc9a9d89c83eff964d491007e"},
+]
+
+[package.dependencies]
+mistletoe = "1.4.0"
+
+[package.extras]
+mermaid = ["Pillow (>=10.4.0)", "aiohttp (>=3.10.11)"]
+tests = ["mock (>=1.0.1,<4) ; python_version < \"3.4\"", "pytelegrambotapi (>=4.22.0)", "pytest (<6)", "python-dotenv (>=1.0.1)"]
+
+[[package]]
 name = "typing-extensions"
 version = "4.15.0"
 description = "Backported and Experimental Type Hints for Python 3.9+"
@@ -2486,4 +2517,4 @@ mcp = ["mcp"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "56a6daf22dbdd331c43e9b62f94f7a06264985907e08a8782cb7f93c7ddea5b9"
+content-hash = "98eed68690a4c4c6edd8ab987a5d83dcd12795473340a256131754c2e1200f68"

@@ -522,6 +522,7 @@ class LLMMessageHandler:
                 "Requirements:\n"
                 "- Return the same meaning and content, only fix formatting.\n"
                 "- Keep kind as markdown_v2 or html only if valid for Telegram, otherwise use text.\n"
+                "- For markdown_v2, write normal Markdown (do not pre-escape Telegram MarkdownV2).\n"
                 "- Do not use placeholder statements.\n"
                 "- Return structured output only.\n\n"
                 f"Original content:\n{original_content}"

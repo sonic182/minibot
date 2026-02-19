@@ -7,6 +7,7 @@ import logging
 
 import pytest
 
+from minibot.adapters.messaging.telegram import service as telegram_service_module
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.core.channels import ChannelFileResponse, ChannelResponse, RenderableResponse
@@ -294,9 +295,14 @@ async def test_collect_incoming_files_keeps_unique_name_on_collision(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_send_parse_mode_chunks_sets_markdown_mode() -> None:
+async def test_send_parse_mode_chunks_sets_markdown_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     config = TelegramChannelConfig(bot_token="token")
     service = _service(config)
+
+    def _markdownify(value: str) -> str:
+        return f"converted:{value}"
+
+    monkeypatch.setattr(telegram_service_module, "telegram_markdownify", _markdownify)
 
     class _BotStub:
         def __init__(self) -> None:
@@ -316,7 +322,42 @@ async def test_send_parse_mode_chunks_sets_markdown_mode() -> None:
     assert success is True
     assert parse_error is None
     assert len(bot.calls) == 1
+    assert bot.calls[0]["text"] == "converted:*bold*"
     assert bot.calls[0]["parse_mode"].value == "MarkdownV2"
+
+
+@pytest.mark.asyncio
+async def test_send_parse_mode_chunks_falls_back_to_plain_text_when_markdownify_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = TelegramChannelConfig(bot_token="token")
+    service = _service(config)
+
+    def _markdownify(_value: str) -> str:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(telegram_service_module, "telegram_markdownify", _markdownify)
+
+    class _BotStub:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def send_message(self, **kwargs: Any) -> None:
+            self.calls.append(kwargs)
+
+    bot = _BotStub()
+    service._bot = bot  # type: ignore[attr-defined]
+
+    success, parse_error = await service._send_parse_mode_chunks(
+        chat_id=1,
+        render=RenderableResponse(kind="markdown_v2", text="*bold*"),
+    )
+
+    assert success is True
+    assert parse_error is None
+    assert len(bot.calls) == 1
+    assert bot.calls[0]["text"] == "*bold*"
+    assert bot.calls[0]["parse_mode"] is None
 
 
 @pytest.mark.asyncio
