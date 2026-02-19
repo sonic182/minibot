@@ -10,6 +10,7 @@ from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
 from minibot.app.tool_capabilities import main_agent_tool_view
+from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 from minibot.llm.tools.factory import build_enabled_tools
@@ -39,9 +40,19 @@ class Dispatcher:
             orchestration_config=settings.orchestration,
             agent_specs=agent_registry.all(),
         )
+        llm_client = AppContainer.get_llm_client()
+        guardrail_mode = settings.orchestration.main_tool_use_guardrail
+        if guardrail_mode == "llm_classifier":
+            tool_use_guardrail: NoopToolUseGuardrail | LLMClassifierToolUseGuardrail = LLMClassifierToolUseGuardrail(
+                llm_client=llm_client,
+                tools=main_agent_tools_view.tools,
+                track_token_usage=lambda session_id, tokens: tokens or 0,
+            )
+        else:
+            tool_use_guardrail = NoopToolUseGuardrail()
         self._handler = LLMMessageHandler(
             memory=memory_backend,
-            llm_client=AppContainer.get_llm_client(),
+            llm_client=llm_client,
             tools=main_agent_tools_view.tools,
             default_owner_id=settings.tools.kv_memory.default_owner_id,
             max_history_messages=settings.memory.max_history_messages,
@@ -49,6 +60,7 @@ class Dispatcher:
             notify_compaction_updates=settings.memory.notify_compaction_updates,
             agent_timeout_seconds=settings.runtime.agent_timeout_seconds,
             environment_prompt_fragment=build_environment_prompt_fragment(settings),
+            tool_use_guardrail=tool_use_guardrail,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
         if settings.tools.mcp.enabled:

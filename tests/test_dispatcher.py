@@ -43,6 +43,7 @@ class _FakeSettings:
 
         default_timeout_seconds = 90
         tool_ownership_mode = "shared"
+        main_tool_use_guardrail = "disabled"
         main_agent = _MainAgent()
 
     tools = _Tools()
