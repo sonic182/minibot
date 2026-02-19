@@ -61,6 +61,7 @@ class Dispatcher:
             agent_timeout_seconds=settings.runtime.agent_timeout_seconds,
             environment_prompt_fragment=build_environment_prompt_fragment(settings),
             tool_use_guardrail=tool_use_guardrail,
+            managed_files_root=settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
         if settings.tools.mcp.enabled:

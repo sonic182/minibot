@@ -24,9 +24,14 @@ class _FakeSettings:
             enabled = False
             name_prefix = "mcp"
 
+        class _FileStorage:
+            enabled = False
+            root_dir = "./data/files"
+
         kv_memory = _KV()
         browser = _Browser()
         mcp = _MCP()
+        file_storage = _FileStorage()
 
     class _Memory:
         max_history_messages = None

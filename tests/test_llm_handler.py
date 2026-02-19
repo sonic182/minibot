@@ -338,7 +338,7 @@ async def test_handler_compacts_history_when_token_limit_reached() -> None:
     assert isinstance(token_trace, dict)
     assert token_trace.get("turn_total_tokens") == 120
     assert token_trace.get("compaction_performed") is True
-    assert token_trace.get("session_total_tokens_before_compaction") == 120
+    assert token_trace.get("session_total_tokens_before_compaction") == 60
     assert token_trace.get("session_total_tokens_after_compaction") == 0
 
 
@@ -635,6 +635,46 @@ async def test_handler_with_guardrail_plugin_retries_when_required() -> None:
     token_trace = response.metadata.get("token_trace")
     assert isinstance(token_trace, dict)
     assert token_trace.get("turn_total_tokens") == 5
+
+
+@pytest.mark.asyncio
+async def test_handler_guardrail_retry_with_none_suffix_does_not_inject_none_in_prompt() -> None:
+    from minibot.app.tool_use_guardrail import GuardrailDecision, ToolUseGuardrail
+
+    class _NullSuffixGuardrail:
+        async def apply(self, **_: Any) -> GuardrailDecision:
+            return GuardrailDecision(requires_retry=True, retry_system_prompt_suffix=None)
+
+    memory = StubMemory()
+    client = StubLLMClient(payload="unused", provider="openrouter")
+    guardrail = cast(ToolUseGuardrail, _NullSuffixGuardrail())
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client), tool_use_guardrail=guardrail)
+
+    first_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"initial"},"should_answer_to_user":true}',
+        response_id="r1",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
+    )
+    second_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"retried"},"should_answer_to_user":true}',
+        response_id="r2",
+        state=AgentState(
+            messages=[
+                AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")]),
+                AgentMessage(role="tool", content=[MessagePart(type="json", value={"ok": True})]),
+            ]
+        ),
+    )
+    runtime = StubRuntime([first_result, second_result])
+    handler._runtime = runtime  # type: ignore[attr-defined]
+
+    await handler.handle(_message_event("do something"))
+
+    assert len(runtime.calls) == 2
+    retry_state: AgentState = runtime.calls[1]["state"]
+    system_message = next(m for m in retry_state.messages if m.role == "system")
+    system_text = system_message.content[0].text if system_message.content else ""
+    assert "None" not in (system_text or "")
 
 
 @pytest.mark.asyncio

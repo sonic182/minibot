@@ -35,6 +35,15 @@ class _CompactionResult:
     session_total_tokens_after_compaction: int
 
 
+@dataclass(frozen=True)
+class _AgentRuntimeResult:
+    render: Any
+    should_reply: bool
+    agent_trace: list[dict[str, Any]]
+    delegation_fallback_used: bool
+    tokens_used: int
+
+
 class LLMMessageHandler:
     _COMPACTION_USER_REQUEST = "Please compact the current conversation memory."
 
@@ -50,6 +59,7 @@ class LLMMessageHandler:
         agent_timeout_seconds: int = 120,
         environment_prompt_fragment: str = "",
         tool_use_guardrail: ToolUseGuardrail | None = None,
+        managed_files_root: str | None = None,
     ) -> None:
         self._memory = memory
         self._llm_client = llm_client
@@ -67,7 +77,6 @@ class LLMMessageHandler:
             timeout_seconds=agent_timeout_seconds,
             min_timeout_seconds=120,
         )
-        managed_files_root = self._managed_files_root_from_tools()
         if self._supports_agent_runtime():
             self._runtime = AgentRuntime(
                 llm_client=self._llm_client,
@@ -85,17 +94,6 @@ class LLMMessageHandler:
         return callable(getattr(self._llm_client, "complete_once", None)) and callable(
             getattr(self._llm_client, "execute_tool_calls_for_runtime", None)
         )
-
-    def _managed_files_root_from_tools(self) -> str | None:
-        for binding in self._tools:
-            if binding.tool.name != "self_insert_artifact":
-                continue
-            owner = getattr(binding.handler, "__self__", None)
-            storage = getattr(owner, "_storage", None)
-            root = getattr(storage, "root_dir", None)
-            if root is not None:
-                return str(root)
-        return None
 
     def _llm_provider_name(self) -> str | None:
         provider_getter = getattr(self._llm_client, "provider_name", None)
@@ -248,101 +246,22 @@ class LLMMessageHandler:
                 turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
                 render, should_reply = extract_answer(generation.payload, logger=self._logger)
             else:
-                state = self._build_agent_state(
-                    history=history,
-                    user_text=model_text,
-                    user_content=model_user_content,
-                    system_prompt=system_prompt,
-                )
-                generation = await self._runtime.run(
-                    state=state,
-                    tool_context=tool_context,
-                    response_schema=self._response_schema(),
-                    prompt_cache_key=prompt_cache_key,
-                )
-                turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-                tool_messages_count = count_tool_messages(generation.state)
-                trace_result = extract_delegation_trace(generation.state)
-                agent_trace = trace_result.trace
-                delegation_fallback_used = trace_result.fallback_used
-                delegation_unresolved = trace_result.unresolved
-
-                guardrail = await self._tool_use_guardrail.apply(
+                runtime_result = await self._run_with_agent_runtime(
                     session_id=session_id,
-                    user_text=model_text,
-                    tool_context=tool_context,
-                    state=generation.state,
+                    history=history,
+                    model_text=model_text,
+                    model_user_content=model_user_content,
                     system_prompt=system_prompt,
+                    tool_context=tool_context,
                     prompt_cache_key=prompt_cache_key,
+                    chat_id=message.chat_id,
+                    channel=message.channel,
                 )
-                turn_total_tokens += guardrail.tokens_used
-                if guardrail.resolved_render_text is not None:
-                    render = plain_render(guardrail.resolved_render_text)
-                    should_reply = True
-                elif guardrail.requires_retry and tool_messages_count == 0:
-                    retry_state = self._build_agent_state(
-                        history=history,
-                        user_text=model_text,
-                        user_content=model_user_content,
-                        system_prompt=f"{system_prompt}\n\n{guardrail.retry_system_prompt_suffix}",
-                    )
-                    generation = await self._runtime.run(
-                        state=retry_state,
-                        tool_context=tool_context,
-                        response_schema=self._response_schema(),
-                        prompt_cache_key=prompt_cache_key,
-                    )
-                    turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-                    trace_result = extract_delegation_trace(generation.state)
-                    agent_trace = trace_result.trace
-                    delegation_fallback_used = trace_result.fallback_used
-                    delegation_unresolved = trace_result.unresolved
-                    render, should_reply = extract_answer(generation.payload, logger=self._logger)
-                    if count_tool_messages(generation.state) == 0:
-                        render = plain_render(
-                            "I could not verify or execute that action with tools in this attempt. "
-                            "Please try again, or ask me to run a specific tool."
-                        )
-                        should_reply = True
-                else:
-                    render, should_reply = extract_answer(generation.payload, logger=self._logger)
-                    if delegation_unresolved:
-                        retry_state = self._build_agent_state(
-                            history=history,
-                            user_text=model_text,
-                            user_content=model_user_content,
-                            system_prompt=(
-                                f"{system_prompt}\n\n"
-                                "Delegation policy reminder: If invoke_agent result has should_answer_to_user=false "
-                                "or result_status other than success, you must resolve it in this turn. "
-                                "Do one additional concrete tool call or return an explicit failure message to user "
-                                "with should_answer_to_user=true."
-                            ),
-                        )
-                        generation = await self._runtime.run(
-                            state=retry_state,
-                            tool_context=tool_context,
-                            response_schema=self._response_schema(),
-                            prompt_cache_key=prompt_cache_key,
-                        )
-                        turn_total_tokens += self._track_token_usage(
-                            session_id, getattr(generation, "total_tokens", None)
-                        )
-                        trace_result = extract_delegation_trace(generation.state)
-                        agent_trace = trace_result.trace
-                        delegation_fallback_used = trace_result.fallback_used
-                        delegation_unresolved = trace_result.unresolved
-                        render, should_reply = extract_answer(generation.payload, logger=self._logger)
-                        if delegation_unresolved:
-                            self._logger.warning(
-                                "delegation unresolved after bounded retry; returning explicit failure",
-                                extra={"chat_id": message.chat_id, "channel": message.channel},
-                            )
-                            render = plain_render(
-                                "I could not complete that delegated action reliably in this attempt. "
-                                "Please retry, or ask me to run a specific tool step-by-step."
-                            )
-                            should_reply = True
+                turn_total_tokens += runtime_result.tokens_used
+                render = runtime_result.render
+                should_reply = runtime_result.should_reply
+                agent_trace = runtime_result.agent_trace
+                delegation_fallback_used = runtime_result.delegation_fallback_used
 
             self._logger.debug(
                 "structured output parsed",
@@ -408,8 +327,6 @@ class LLMMessageHandler:
             parse_error=parse_error,
             original_content=original_content,
         )
-        await self._memory.append_history(session_id, "user", repair_prompt)
-        await self._enforce_history_limit(session_id)
         generation = await self._llm_client.generate(
             history,
             repair_prompt,
@@ -423,6 +340,7 @@ class LLMMessageHandler:
         )
         turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
         render, _ = extract_answer(generation.payload, logger=self._logger)
+        await self._memory.append_history(session_id, "user", repair_prompt)
         await self._memory.append_history(session_id, "assistant", render.text)
         await self._enforce_history_limit(session_id)
         compaction_result = await self._compact_history_if_needed(
@@ -481,6 +399,142 @@ class LLMMessageHandler:
             f"Original content:\n{original_content}"
         )
 
+    async def _run_with_agent_runtime(
+        self,
+        *,
+        session_id: str,
+        history: list[Any],
+        model_text: str,
+        model_user_content: str | list[dict[str, Any]] | None,
+        system_prompt: str,
+        tool_context: ToolContext,
+        prompt_cache_key: str | None,
+        chat_id: int | None,
+        channel: str | None,
+    ) -> _AgentRuntimeResult:
+        assert self._runtime is not None
+        tokens_used = 0
+        agent_trace: list[dict[str, Any]] = []
+        delegation_fallback_used = False
+
+        state = self._build_agent_state(
+            history=history,
+            user_text=model_text,
+            user_content=model_user_content,
+            system_prompt=system_prompt,
+        )
+        generation = await self._runtime.run(
+            state=state,
+            tool_context=tool_context,
+            response_schema=self._response_schema(),
+            prompt_cache_key=prompt_cache_key,
+        )
+        tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+        tool_messages_count = count_tool_messages(generation.state)
+        trace_result = extract_delegation_trace(generation.state)
+        agent_trace = trace_result.trace
+        delegation_fallback_used = trace_result.fallback_used
+        delegation_unresolved = trace_result.unresolved
+
+        guardrail = await self._tool_use_guardrail.apply(
+            session_id=session_id,
+            user_text=model_text,
+            tool_context=tool_context,
+            state=generation.state,
+            system_prompt=system_prompt,
+            prompt_cache_key=prompt_cache_key,
+        )
+        tokens_used += guardrail.tokens_used
+
+        if guardrail.resolved_render_text is not None:
+            return _AgentRuntimeResult(
+                render=plain_render(guardrail.resolved_render_text),
+                should_reply=True,
+                agent_trace=agent_trace,
+                delegation_fallback_used=delegation_fallback_used,
+                tokens_used=tokens_used,
+            )
+
+        if guardrail.requires_retry and tool_messages_count == 0:
+            retry_system_prompt = system_prompt
+            if guardrail.retry_system_prompt_suffix:
+                retry_system_prompt = f"{system_prompt}\n\n{guardrail.retry_system_prompt_suffix}"
+            retry_state = self._build_agent_state(
+                history=history,
+                user_text=model_text,
+                user_content=model_user_content,
+                system_prompt=retry_system_prompt,
+            )
+            generation = await self._runtime.run(
+                state=retry_state,
+                tool_context=tool_context,
+                response_schema=self._response_schema(),
+                prompt_cache_key=prompt_cache_key,
+            )
+            tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+            trace_result = extract_delegation_trace(generation.state)
+            agent_trace = trace_result.trace
+            delegation_fallback_used = trace_result.fallback_used
+            render, should_reply = extract_answer(generation.payload, logger=self._logger)
+            if count_tool_messages(generation.state) == 0:
+                render = plain_render(
+                    "I could not verify or execute that action with tools in this attempt. "
+                    "Please try again, or ask me to run a specific tool."
+                )
+                should_reply = True
+            return _AgentRuntimeResult(
+                render=render,
+                should_reply=should_reply,
+                agent_trace=agent_trace,
+                delegation_fallback_used=delegation_fallback_used,
+                tokens_used=tokens_used,
+            )
+
+        render, should_reply = extract_answer(generation.payload, logger=self._logger)
+        if delegation_unresolved:
+            retry_state = self._build_agent_state(
+                history=history,
+                user_text=model_text,
+                user_content=model_user_content,
+                system_prompt=(
+                    f"{system_prompt}\n\n"
+                    "Delegation policy reminder: If invoke_agent result has should_answer_to_user=false "
+                    "or result_status other than success, you must resolve it in this turn. "
+                    "Do one additional concrete tool call or return an explicit failure message to user "
+                    "with should_answer_to_user=true."
+                ),
+            )
+            generation = await self._runtime.run(
+                state=retry_state,
+                tool_context=tool_context,
+                response_schema=self._response_schema(),
+                prompt_cache_key=prompt_cache_key,
+            )
+            tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+            trace_result = extract_delegation_trace(generation.state)
+            agent_trace = trace_result.trace
+            delegation_fallback_used = trace_result.fallback_used
+            delegation_unresolved = trace_result.unresolved
+            render, should_reply = extract_answer(generation.payload, logger=self._logger)
+            if delegation_unresolved:
+                self._logger.warning(
+                    "delegation unresolved after bounded retry; returning explicit failure",
+                    extra={"chat_id": chat_id, "channel": channel},
+                )
+                render = plain_render(
+                    "I could not complete that delegated action reliably in this attempt. "
+                    "Please retry, or ask me to run a specific tool step-by-step."
+                )
+                should_reply = True
+
+        return _AgentRuntimeResult(
+            render=render,
+            should_reply=should_reply,
+            agent_trace=agent_trace,
+            delegation_fallback_used=delegation_fallback_used,
+            tokens_used=tokens_used,
+        )
+
     def _build_model_user_input(self, message: ChannelMessage) -> tuple[str, str | list[dict[str, Any]] | None]:
         prompt_text = message.text.strip() if message.text else ""
         incoming_files = incoming_files_from_metadata(message.metadata)
@@ -511,7 +565,7 @@ class LLMMessageHandler:
         ]
         for entry in history:
             role = str(getattr(entry, "role", "user"))
-            if role not in {"system", "user", "assistant", "tool"}:
+            if role not in {"system", "user", "assistant"}:
                 continue
             content = getattr(entry, "content", "")
             messages.append(
@@ -663,8 +717,8 @@ class LLMMessageHandler:
                 previous_response_id=None,
                 system_prompt_override=self._compact_system_prompt(system_prompt),
             )
-            compaction_tokens = self._track_token_usage(session_id, getattr(compact_generation, "total_tokens", None))
             session_before_reset = self._current_session_tokens(session_id)
+            compaction_tokens = self._track_token_usage(session_id, getattr(compact_generation, "total_tokens", None))
             compact_render, _ = extract_answer(compact_generation.payload, logger=self._logger)
             await self._memory.trim_history(session_id, 0)
             await self._memory.append_history(session_id, "user", compaction_user_request)
