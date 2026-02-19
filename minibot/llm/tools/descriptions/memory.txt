@@ -1,5 +1,8 @@
 Long-term user memory for storing and recalling facts, preferences, and context that should persist across conversations.
 
+Interpret "memory" requests as this long-term persistent user memory by default (including equivalent wording in other languages, for example "memoria").
+Only switch to chat-history tools when the user explicitly asks about conversation/chat/messages history.
+
 Use this tool proactively when the user request may depend on previously saved user context and you do not already have that context in the active conversation.
 
 Priority policy:
