@@ -23,8 +23,9 @@ async def kv_memory(tmp_path: Path) -> SQLAlchemyKeyValueMemory:
     return backend
 
 
-def _tool_map(kv_memory: SQLAlchemyKeyValueMemory):
-    return {binding.tool.name: binding for binding in build_kv_tools(kv_memory)}
+def _memory_binding(kv_memory: SQLAlchemyKeyValueMemory):
+    tools = {binding.tool.name: binding for binding in build_kv_tools(kv_memory)}
+    return tools["memory"]
 
 
 async def _invoke(binding, payload, owner: str | None = "team-alpha"):
@@ -34,40 +35,42 @@ async def _invoke(binding, payload, owner: str | None = "team-alpha"):
 
 @pytest.mark.asyncio
 async def test_user_memory_tools_save_get_search(kv_memory: SQLAlchemyKeyValueMemory) -> None:
-    tools = _tool_map(kv_memory)
+    memory = _memory_binding(kv_memory)
+
     save_result = await _invoke(
-        tools["user_memory_save"],
+        memory,
         {
+            "action": "save",
             "title": "Credentials",
             "data": "API Key",
-            "metadata": {"rotated": False},
+            "metadata": '{"rotated": false}',
         },
     )
     assert save_result["owner_id"] == "team-alpha"
 
-    get_result = await _invoke(tools["user_memory_get"], {"entry_id": save_result["id"]})
+    get_result = await _invoke(memory, {"action": "get", "entry_id": save_result["id"]})
     assert get_result["data"] == "API Key"
 
-    search_result = await _invoke(tools["user_memory_search"], {"query": "api", "limit": 5})
+    search_result = await _invoke(memory, {"action": "search", "query": "api", "limit": 5})
     assert search_result["total"] == 1
     assert search_result["entries"][0]["title"] == "Credentials"
 
-    delete_result = await _invoke(tools["user_memory_delete"], {"entry_id": save_result["id"]})
+    delete_result = await _invoke(memory, {"action": "delete", "entry_id": save_result["id"]})
     assert delete_result["deleted"] is True
 
-    after_delete = await _invoke(tools["user_memory_get"], {"entry_id": save_result["id"]})
+    after_delete = await _invoke(memory, {"action": "get", "entry_id": save_result["id"]})
     assert after_delete["message"] == "Entry not found"
 
 
 @pytest.mark.asyncio
 async def test_user_memory_save_requires_owner(kv_memory: SQLAlchemyKeyValueMemory) -> None:
-    tools = _tool_map(kv_memory)
+    memory = _memory_binding(kv_memory)
     with pytest.raises(ValueError):
-        await tools["user_memory_save"].handler({"title": "Doc", "data": "text"}, ToolContext(owner_id=None))
+        await memory.handler({"action": "save", "title": "Doc", "data": "text"}, ToolContext(owner_id=None))
 
 
 @pytest.mark.asyncio
 async def test_user_memory_delete_requires_selector(kv_memory: SQLAlchemyKeyValueMemory) -> None:
-    tools = _tool_map(kv_memory)
+    memory = _memory_binding(kv_memory)
     with pytest.raises(ValueError):
-        await tools["user_memory_delete"].handler({}, ToolContext(owner_id="team-alpha"))
+        await memory.handler({"action": "delete"}, ToolContext(owner_id="team-alpha"))

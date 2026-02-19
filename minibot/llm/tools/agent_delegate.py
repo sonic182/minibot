@@ -15,6 +15,7 @@ from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import empty_object_schema, strict_object, string_field
 from minibot.shared.assistant_response import (
     assistant_response_schema,
@@ -55,47 +56,21 @@ class AgentDelegateTool:
 
     def bindings(self) -> list[ToolBinding]:
         return [
-            ToolBinding(tool=self._agent_delegate_schema(), handler=self._agent_delegate),
             ToolBinding(tool=self._list_agents_schema(), handler=self._list_agents),
             ToolBinding(tool=self._invoke_agent_schema(), handler=self._invoke_agent),
         ]
 
-    def _agent_delegate_schema(self) -> Tool:
-        return Tool(
-            name="agent_delegate",
-            description="Agent delegation operations. Use action=list|invoke.",
-            parameters=strict_object(
-                properties={
-                    "action": {
-                        "type": "string",
-                        "enum": ["list", "invoke"],
-                        "description": "Delegation operation to perform.",
-                    },
-                    "agent_name": string_field("Exact name returned by agent_delegate action=list."),
-                    "task": string_field("Concrete delegated task for the specialist."),
-                    "context": string_field("Optional supporting context for the specialist."),
-                },
-                required=["action"],
-            ),
-        )
-
     def _list_agents_schema(self) -> Tool:
         return Tool(
             name="list_agents",
-            description=(
-                "List available specialist agents that can be invoked by name. "
-                "Use this before invoking a specialist when uncertain about agent names."
-            ),
+            description=load_tool_description("list_agents"),
             parameters=empty_object_schema(),
         )
 
     def _invoke_agent_schema(self) -> Tool:
         return Tool(
             name="invoke_agent",
-            description=(
-                "Invoke a specialist agent to handle a delegated task. "
-                "Wait for its result and then continue with your own final answer."
-            ),
+            description=load_tool_description("invoke_agent"),
             parameters=strict_object(
                 properties={
                     "agent_name": string_field("Exact name returned by list_agents."),
@@ -260,14 +235,6 @@ class AgentDelegateTool:
                 "error": str(exc),
                 "delegation_attempts": attempts,
             }
-
-    async def _agent_delegate(self, payload: dict[str, object], context: ToolContext) -> dict[str, object]:
-        action = optional_str(payload.get("action"), error_message="action must be a string")
-        if action == "list":
-            return await self._list_agents(payload, context)
-        if action == "invoke":
-            return await self._invoke_agent(payload, context)
-        raise ValueError("action must be one of: list, invoke")
 
     def _scoped_tools(self, spec: AgentSpec) -> list[ToolBinding]:
         scoped = filter_tools_for_agent(self._tools, spec)

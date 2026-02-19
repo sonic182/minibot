@@ -1,0 +1,15 @@
+Managed workspace file operations. Use the action field to select the operation:
+
+- action=list: List files and folders under an optional folder path. Returns entries with names, types (file/folder), sizes, and modification times. Use folder to scope the listing; defaults to root.
+
+- action=glob: Find files matching a glob pattern (e.g. **/*.png, notes/**/*.md). Supports * (any chars), ** (recursive directories), ? (single char). Use folder to scope search; limit to cap results.
+
+- action=info: Get metadata for a specific file: size, MIME type, creation/modification times, existence status. Use path to identify the file.
+
+- action=write: Create or overwrite a text file. Requires path (relative, e.g. notes/today.md) and content. Set overwrite=true to replace existing files; omit or set false to prevent accidental overwrites.
+
+- action=move: Move or rename a file within the workspace. Requires source_path and destination_path. Set overwrite=true to replace an existing destination file.
+
+- action=delete: Delete a file or folder. Requires path. Use target=file|folder|any to restrict what can be deleted. Set recursive=true to delete non-empty folders. CAUTION: deletion is permanent.
+
+- action=send: Deliver a file to the user in the active conversation channel (the same chat/session as the current request). Requires path and supports optional caption. Use this when the user asks to receive/download/view a file. Do NOT read file contents first unless the user explicitly asks for analysis/summary. For Telegram: images are sent as photos and other files as documents. For Console: the resolved file path is shown because file transfer is not supported.

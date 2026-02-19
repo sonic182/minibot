@@ -64,7 +64,13 @@ base_url = ""
 [orchestration]
 directory = "./agents"
 default_timeout_seconds = 360
-tool_ownership_mode = "exclusive"
+# Tool ownership mode controls whether specialist-agent claimed tools are hidden from main agent.
+# - "shared": main agent and specialists can both access the same tools.
+# - "exclusive": any tool matched by an enabled specialist's allow/deny policy is hidden from main.
+#   Use this when you want strict tool isolation per specialist.
+# - "exclusive_mcp": only specialist-claimed MCP tools are hidden from main; built-in tools stay shared.
+#   Recommended when browser MCP tools should be specialist-only but main should keep filesystem/memory/etc.
+tool_ownership_mode = "exclusive_mcp"
 # Delegated specialist tool-call policy:
 # - "auto": require at least one tool call when delegated agent has any scoped tools
 # - "always": require at least one tool call for every delegated agent
@@ -73,7 +79,10 @@ delegated_tool_call_policy = "auto"
 
 [orchestration.main_agent]
 name = "minibot"
-# Keep all built-in tools enabled and hide direct MCP tools from main agent.
+# Keep built-in tools enabled and hide direct MCP tools from main agent.
+# Note: with tool_ownership_mode="exclusive", tools claimed by specialists are still hidden from main
+# even if not denied here.
+# Note: with tool_ownership_mode="exclusive_mcp", only claimed MCP tools are hidden from main.
 tools_deny = ["mcp*"]
 
 # Optional request params. Omit keys to avoid sending them.
@@ -110,6 +119,8 @@ tools_deny = ["mcp*"]
 backend = "sqlite"
 sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
 max_history_messages = 200
+max_history_tokens = 140000
+notify_compaction_updates = false
 
 # Scheduled prompt storage and polling.
 [scheduler.prompts]

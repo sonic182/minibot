@@ -8,10 +8,10 @@ from llm_async.models import Tool
 from minibot.core.memory import KeyValueEntry, KeyValueMemory
 from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str, require_owner
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import (
     nullable_string,
     pagination_properties,
-    selector_entry_id_title_properties,
     strict_object,
 )
 from minibot.shared.datetime_utils import parse_optional_iso_datetime_utc
@@ -20,17 +20,13 @@ from minibot.shared.datetime_utils import parse_optional_iso_datetime_utc
 def build_kv_tools(memory: KeyValueMemory) -> list[ToolBinding]:
     return [
         ToolBinding(tool=_memory_tool(), handler=lambda payload, ctx: _memory_action(memory, payload, ctx)),
-        ToolBinding(tool=_save_tool(), handler=lambda payload, ctx: _save_entry(memory, payload, ctx)),
-        ToolBinding(tool=_get_tool(), handler=lambda payload, ctx: _get_entry(memory, payload, ctx)),
-        ToolBinding(tool=_search_tool(), handler=lambda payload, ctx: _search_entries(memory, payload, ctx)),
-        ToolBinding(tool=_delete_tool(), handler=lambda payload, ctx: _delete_entry(memory, payload, ctx)),
     ]
 
 
 def _memory_tool() -> Tool:
     return Tool(
         name="memory",
-        description=("User memory operations for long-term facts and preferences. Use action=save|get|search|delete."),
+        description=load_tool_description("memory"),
         parameters=strict_object(
             properties={
                 "action": {
@@ -74,70 +70,6 @@ async def _memory_action(memory: KeyValueMemory, payload: dict[str, Any], contex
     if action == "delete":
         return await _delete_entry(memory, payload, context)
     raise ValueError("action must be one of: save, get, search, delete")
-
-
-def _save_tool() -> Tool:
-    return Tool(
-        name="user_memory_save",
-        description=(
-            "Save important information about the current user for long-term memory. "
-            "Use this to remember user preferences, personal facts, context, goals, "
-            "or any other information that should persist across different conversations. "
-            "Examples: job title, interests, important dates, contact preferences, project details. "
-            "Do NOT use this for storing conversation messages - use chat_history tools for conversation management."
-        ),
-        parameters=strict_object(
-            properties={
-                "title": {"type": "string", "description": "Short title for the entry", "maxLength": 100},
-                "data": {"type": "string", "description": "Full content"},
-                "metadata": nullable_string("Optional JSON metadata"),
-                "source": nullable_string("Optional source or URL"),
-                "expires_at": nullable_string("ISO datetime when entry expires"),
-            },
-            required=["title", "data", "metadata", "source", "expires_at"],
-        ),
-    )
-
-
-def _get_tool() -> Tool:
-    return Tool(
-        name="user_memory_get",
-        description=(
-            "Retrieve a specific saved user memory entry by its unique ID or title. "
-            "Use this when you need to recall particular information you previously saved about the user. "
-            "This accesses long-term user memory, not conversation history."
-        ),
-        parameters=strict_object(properties=selector_entry_id_title_properties(), required=["entry_id", "title"]),
-    )
-
-
-def _delete_tool() -> Tool:
-    return Tool(
-        name="user_memory_delete",
-        description=(
-            "Delete a specific saved user memory entry by unique ID or title. "
-            "Use this when stored long-term user information is outdated or should be removed."
-        ),
-        parameters=strict_object(properties=selector_entry_id_title_properties(), required=["entry_id", "title"]),
-    )
-
-
-def _search_tool() -> Tool:
-    return Tool(
-        name="user_memory_search",
-        description=(
-            "Search through all saved user memory entries using flexible text matching. "
-            "Use this to find relevant information about the user without knowing the exact entry ID or title. "
-            "This searches long-term user memory, not conversation history."
-        ),
-        parameters=strict_object(
-            properties={
-                "query": nullable_string("Text to search in title/data"),
-                **pagination_properties(),
-            },
-            required=["query", "limit", "offset"],
-        ),
-    )
 
 
 async def _save_entry(

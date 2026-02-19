@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import io
 import logging
 from datetime import datetime, timezone
@@ -19,6 +20,9 @@ from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent, OutboundFormatRepairEvent
 from minibot.shared.path_utils import to_posix_relative
+
+
+telegram_markdownify: Any | None = None
 
 
 class TelegramService:
@@ -282,7 +286,7 @@ class TelegramService:
         if render.kind == "html":
             parse_mode = ParseMode.HTML
         elif render.kind == "markdown_v2":
-            parse_mode = ParseMode.MARKDOWN_V2
+            text_to_send, parse_mode = self._prepare_markdown_v2_payload(chat_id=chat_id, markdown_text=render.text)
 
         chunks = self._chunk_text(text_to_send, self._MAX_MESSAGE_LENGTH)
 
@@ -318,6 +322,39 @@ class TelegramService:
                 )
                 return False, str(exc)
         return True, None
+
+    def _prepare_markdown_v2_payload(self, *, chat_id: int, markdown_text: str) -> tuple[str, ParseMode | None]:
+        markdownify = self._resolve_markdownify()
+        if markdownify is None:
+            self._logger.warning(
+                "telegramify-markdown unavailable; using raw markdown_v2 content",
+                extra={"chat_id": chat_id},
+            )
+            return markdown_text, ParseMode.MARKDOWN_V2
+        try:
+            formatted = markdownify(markdown_text)
+        except Exception:
+            self._logger.exception(
+                "failed to convert markdown with telegramify-markdown; falling back to plain text",
+                extra={"chat_id": chat_id},
+            )
+            return markdown_text, None
+        if not isinstance(formatted, str) or not formatted:
+            self._logger.warning(
+                "telegramify-markdown returned invalid payload; falling back to plain text",
+                extra={"chat_id": chat_id},
+            )
+            return markdown_text, None
+        return formatted, ParseMode.MARKDOWN_V2
+
+    @staticmethod
+    def _resolve_markdownify() -> Any | None:
+        global telegram_markdownify
+        if telegram_markdownify is not None:
+            return telegram_markdownify
+        with contextlib.suppress(Exception):
+            telegram_markdownify = getattr(importlib.import_module("telegramify_markdown"), "markdownify", None)
+        return telegram_markdownify
 
     def _should_trigger_format_repair(
         self,

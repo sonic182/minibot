@@ -330,10 +330,12 @@ async def test_handler_compacts_history_when_token_limit_reached() -> None:
     response = await handler.handle(_message_event("one"))
 
     session_id = session_id_for(_message_event("one").message)
-    assert await memory.count_history(session_id) == 1
-    assert memory._store[session_id][0].role == "assistant"
-    assert client.calls[-1]["args"][1] == "compact"
-    assert response.metadata.get("compaction_updates") == ["running compaction...", "done compacting"]
+    assert await memory.count_history(session_id) == 2
+    assert memory._store[session_id][0].role == "user"
+    assert memory._store[session_id][0].content == "Please compact the current conversation memory."
+    assert memory._store[session_id][1].role == "assistant"
+    assert client.calls[-1]["args"][1] == "Please compact the current conversation memory."
+    assert response.metadata.get("compaction_updates") == ["running compaction...", "done compacting", "ok"]
     token_trace = response.metadata.get("token_trace")
     assert isinstance(token_trace, dict)
     assert token_trace.get("turn_total_tokens") == 120
@@ -729,7 +731,8 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
     client = StubLLMClient(payload="unused", provider="openrouter")
 
     async def _delete_handler(payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
-        if payload.get("path") == "generated/random1.svg":
+        path = payload.get("path")
+        if path == "generated/random1.svg":
             return {
                 "ok": True,
                 "path": "generated/random1.svg",
@@ -739,10 +742,10 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
             }
         return {
             "ok": True,
-            "path": str(payload.get("path") or ""),
+            "path": str(path or ""),
             "deleted": False,
             "deleted_count": 0,
-            "message": f"No file or folder found to delete: {payload.get('path')}",
+            "message": f"No file or folder found to delete: {path}",
         }
 
     handler = LLMMessageHandler(
@@ -751,8 +754,8 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
         tools=[
             ToolBinding(
                 tool=Tool(
-                    name="delete_file",
-                    description="Delete a managed file.",
+                    name="filesystem",
+                    description="Managed workspace file operations.",
                     parameters={"type": "object", "properties": {}, "required": [], "additionalProperties": False},
                 ),
                 handler=_delete_handler,
@@ -774,7 +777,7 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
     handler._runtime = runtime  # type: ignore[attr-defined]
     handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
         Any,
-        lambda **kwargs: _async_tuple(True, "delete_file", "generated/random1.svg", 0),
+        lambda **kwargs: _async_tuple(True, "filesystem", "generated/random1.svg", 0),
     )
 
     response = await handler.handle(_message_event("elimina random1.svg de la carpeta generated"))

@@ -32,6 +32,8 @@ class _CompactionResult:
 
 
 class LLMMessageHandler:
+    _COMPACTION_USER_REQUEST = "Please compact the current conversation memory."
+
     def __init__(
         self,
         memory: MemoryBackend,
@@ -522,6 +524,7 @@ class LLMMessageHandler:
                 "Requirements:\n"
                 "- Return the same meaning and content, only fix formatting.\n"
                 "- Keep kind as markdown_v2 or html only if valid for Telegram, otherwise use text.\n"
+                "- For markdown_v2, write normal Markdown (do not pre-escape Telegram MarkdownV2).\n"
                 "- Do not use placeholder statements.\n"
                 "- Return structured output only.\n\n"
                 f"Original content:\n{original_content}"
@@ -802,10 +805,11 @@ class LLMMessageHandler:
         if notify:
             updates.append("running compaction...")
         compaction_tokens = 0
+        compaction_user_request = self._COMPACTION_USER_REQUEST
         try:
             compact_generation = await self._llm_client.generate(
                 history,
-                "compact",
+                compaction_user_request,
                 user_content=None,
                 tools=[],
                 tool_context=None,
@@ -818,10 +822,12 @@ class LLMMessageHandler:
             session_before_reset = self._current_session_tokens(session_id)
             compact_render, _ = self._extract_answer(compact_generation.payload)
             await self._memory.trim_history(session_id, 0)
+            await self._memory.append_history(session_id, "user", compaction_user_request)
             await self._memory.append_history(session_id, "assistant", compact_render.text)
             self._session_total_tokens[session_id] = 0
             if notify:
                 updates.append("done compacting")
+                updates.append(compact_render.text)
             return _CompactionResult(
                 updates=updates,
                 performed=True,
@@ -1096,9 +1102,9 @@ class LLMMessageHandler:
         suggested_tool: str | None,
         suggested_path: str | None,
     ) -> str | None:
-        if suggested_tool != "delete_file":
+        if suggested_tool not in {"delete_file", "filesystem"}:
             return None
-        binding = next((item for item in self._tools if item.tool.name == "delete_file"), None)
+        binding = next((item for item in self._tools if item.tool.name == "filesystem"), None)
         if binding is None:
             return None
         candidates = self._extract_delete_path_candidates(user_text)
@@ -1113,7 +1119,7 @@ class LLMMessageHandler:
         last_message: str | None = None
         for candidate in candidates:
             try:
-                payload = {"path": candidate}
+                payload = {"action": "delete", "path": candidate}
                 raw_result = await binding.handler(payload, tool_context)
                 if not isinstance(raw_result, dict):
                     continue
@@ -1124,7 +1130,7 @@ class LLMMessageHandler:
                 if message:
                     last_message = message
             except Exception:
-                self._logger.exception("direct delete_file fallback failed", extra={"path": candidate})
+                self._logger.exception("direct filesystem delete fallback failed", extra={"path": candidate})
         return last_message
 
     @staticmethod

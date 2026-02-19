@@ -1,0 +1,18 @@
+Inject a file from the managed workspace into the conversation so the model can read its contents directly.
+
+Use this ONLY when the user explicitly asks you to look at, describe, caption, analyse, or otherwise read a file or image that exists in the workspace. Examples of valid use:
+- "What does this image show?" / "Describe this photo"
+- "Can you read the contents of that PDF?"
+- "Summarise the document I uploaded"
+- "Caption this screenshot"
+
+Do NOT use this for sending a file to the user — use filesystem action=send for that.
+Do NOT use this speculatively or pre-emptively without the user asking you to read/describe a file.
+
+Parameters:
+- as=image: enables vision analysis of images (model must support vision). Only valid for image MIME types.
+- as=file: includes the file for text/document reading.
+- role: which conversation role the injected content appears as (user or system). Defaults to user.
+- text: optional text prepended before the injected file or image part.
+- mime: optional MIME type hint if auto-detection is unreliable.
+- filename: optional display filename for file mode.

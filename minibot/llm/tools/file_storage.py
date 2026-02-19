@@ -15,6 +15,7 @@ from minibot.core.channels import ChannelFileResponse
 from minibot.core.events import OutboundFileEvent
 from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_boolean, nullable_integer, nullable_string, strict_object
 from minibot.shared.path_utils import to_posix_relative
 
@@ -34,21 +35,15 @@ class FileStorageTool:
     def bindings(self) -> list[ToolBinding]:
         return [
             ToolBinding(tool=self._filesystem_schema(), handler=self._filesystem),
-            ToolBinding(tool=self._artifact_insert_schema(), handler=self._self_insert_artifact),
-            ToolBinding(tool=self._list_files_schema(), handler=self._list_files),
             ToolBinding(tool=self._glob_files_schema(), handler=self._glob_files),
-            ToolBinding(tool=self._file_info_schema(), handler=self._file_info),
-            ToolBinding(tool=self._create_file_schema(), handler=self._create_file),
-            ToolBinding(tool=self._move_file_schema(), handler=self._move_file),
-            ToolBinding(tool=self._delete_file_schema(), handler=self._delete_file),
-            ToolBinding(tool=self._send_file_schema(), handler=self._send_file),
+            ToolBinding(tool=self._read_file_schema(), handler=self._read_file),
             ToolBinding(tool=self._self_insert_artifact_schema(), handler=self._self_insert_artifact),
         ]
 
     def _filesystem_schema(self) -> Tool:
         return Tool(
             name="filesystem",
-            description=("Managed workspace file operations. Use action=list|glob|info|write|move|delete|send."),
+            description=load_tool_description("filesystem"),
             parameters=strict_object(
                 properties={
                     "action": {
@@ -88,66 +83,10 @@ class FileStorageTool:
             ),
         )
 
-    def _artifact_insert_schema(self) -> Tool:
-        return Tool(
-            name="artifact_insert",
-            description=(
-                "Insert a managed file artifact into conversation context for multimodal analysis. "
-                "Equivalent to self_insert_artifact."
-            ),
-            parameters=self._self_insert_artifact_schema().parameters,
-        )
-
-    def _list_files_schema(self) -> Tool:
-        return Tool(
-            name="list_files",
-            description=(
-                "List files and folders in the managed workspace. "
-                "Use this to explore available files, verify file existence, or browse folder contents. "
-                "Returns entries with names, types (file/folder), sizes, and modification times."
-            ),
-            parameters=strict_object(
-                properties={
-                    "folder": nullable_string("Optional folder relative to the managed root. Defaults to root.")
-                },
-                required=["folder"],
-            ),
-        )
-
-    def _create_file_schema(self) -> Tool:
-        return Tool(
-            name="create_file",
-            description=(
-                "Create a new text or markdown file in the managed workspace. "
-                "Use this to save notes, create documents, store structured data, or generate text-based content. "
-                "Supports creating files in subdirectories (e.g., 'notes/today.md'). "
-                "Set overwrite=true to replace existing files, or false to prevent accidental overwrites."
-            ),
-            parameters=strict_object(
-                properties={
-                    "path": {
-                        "type": "string",
-                        "description": "Relative file path (for example notes/today.md).",
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Text content to write into the file.",
-                    },
-                    "overwrite": nullable_boolean("Set true to replace existing files."),
-                },
-                required=["path", "content", "overwrite"],
-            ),
-        )
-
     def _glob_files_schema(self) -> Tool:
         return Tool(
             name="glob_files",
-            description=(
-                "Search for files matching a glob pattern in the managed workspace. "
-                "Use this to find specific file types (e.g., '**/*.png' for images, '**/*.md' for markdown), "
-                "locate files by naming pattern (e.g., 'screenshot_*.png'), or discover files in nested directories. "
-                "Supports wildcards: * (any characters), ** (recursive directories), ? (single character)."
-            ),
+            description=load_tool_description("glob_files"),
             parameters=strict_object(
                 properties={
                     "pattern": {
@@ -164,104 +103,20 @@ class FileStorageTool:
             ),
         )
 
-    def _file_info_schema(self) -> Tool:
+    def _read_file_schema(self) -> Tool:
         return Tool(
-            name="file_info",
-            description=(
-                "Get detailed metadata for a specific file in the managed workspace. "
-                "Returns file size, MIME type, creation/modification times, and existence status. "
-                "Use this to check file properties, verify file type, or get precise information before operations."
-            ),
+            name="read_file",
+            description=load_tool_description("read_file"),
             parameters=strict_object(
                 properties={"path": {"type": "string", "description": "Relative file path under managed root."}},
                 required=["path"],
             ),
         )
 
-    def _send_file_schema(self) -> Tool:
-        return Tool(
-            name="send_file",
-            description=(
-                "Send a file from the managed workspace to the user via the current channel (Telegram/Console). "
-                "The file will be delivered to the same chat where the user's message originated. "
-                "Use this to share screenshots, images, documents, or any files generated by tools or agents. "
-                "For Telegram: sends as photo (images) or document (other files). For Console: displays file path. "
-                "Path must be relative to workspace root (e.g., 'browser/screenshot.png', 'notes/summary.txt')."
-            ),
-            parameters=strict_object(
-                properties={
-                    "path": {
-                        "type": "string",
-                        "description": "Relative file path under the managed root.",
-                    },
-                    "caption": nullable_string("Optional caption sent with the file."),
-                },
-                required=["path", "caption"],
-            ),
-        )
-
-    def _move_file_schema(self) -> Tool:
-        return Tool(
-            name="move_file",
-            description=(
-                "Move or rename a file within the managed workspace. "
-                "Use this to reorganize files, rename files for clarity, move files between folders, "
-                "or restructure the workspace organization. Both source and destination must be within workspace. "
-                "Set overwrite=true to replace existing destination files, or false to prevent accidental overwrites."
-            ),
-            parameters=strict_object(
-                properties={
-                    "source_path": {
-                        "type": "string",
-                        "description": "Existing relative file path under managed root.",
-                    },
-                    "destination_path": {
-                        "type": "string",
-                        "description": "Target relative file path under managed root.",
-                    },
-                    "overwrite": nullable_boolean("Set true to replace an existing destination file."),
-                },
-                required=["source_path", "destination_path", "overwrite"],
-            ),
-        )
-
-    def _delete_file_schema(self) -> Tool:
-        return Tool(
-            name="delete_file",
-            description=(
-                "Delete a file or folder from the managed workspace. "
-                "Use this to clean up temporary files, remove outdated content, or maintain workspace hygiene. "
-                "Set target='file' to only delete files, 'folder' to only delete folders, or 'any' for both. "
-                "Set recursive=true to delete non-empty folders and their contents, or false for empty folders only. "
-                "CAUTION: Deletion is permanent and cannot be undone."
-            ),
-            parameters=strict_object(
-                properties={
-                    "path": {
-                        "type": "string",
-                        "description": "Relative path under managed root.",
-                    },
-                    "target": {
-                        **nullable_string("Target kind filter. Use folder to only delete folders."),
-                        "enum": ["any", "file", "folder", None],
-                    },
-                    "recursive": nullable_boolean("Set true to delete non-empty folders recursively."),
-                },
-                required=["path", "target", "recursive"],
-            ),
-        )
-
     def _self_insert_artifact_schema(self) -> Tool:
         return Tool(
             name="self_insert_artifact",
-            description=(
-                "Inject a file from managed workspace into the conversation context for multimodal analysis. "
-                "Use this to analyze images (vision), read documents, or include files in conversation history. "
-                "When as='image': enables vision analysis of images (requires vision-capable model). "
-                "When as='file': includes file metadata for reference. "
-                "The injected content becomes part of conversation context and can be analyzed in messages. "
-                "Path must be relative to workspace root (e.g., 'uploads/photo.jpg', 'browser/screenshot.png')."
-            ),
+            description=load_tool_description("self_insert_artifact"),
             parameters=strict_object(
                 properties={
                     "path": {
@@ -316,6 +171,10 @@ class FileStorageTool:
             "entries": entries,
             "count": len(entries),
         }
+
+    async def _read_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        path = require_non_empty_str(payload, "path")
+        return self._storage.read_text_file(path)
 
     async def _create_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         path = require_non_empty_str(payload, "path")

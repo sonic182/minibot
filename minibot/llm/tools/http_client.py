@@ -130,9 +130,8 @@ def _http_tool_schema() -> Tool:
     return Tool(
         name="http_request",
         description=(
-            "Fetch an HTTP or HTTPS resource using basic methods. "
-            "Returns an object with status, headers, body, truncated, truncated_chars, "
-            "processor_used, and content_type."
+            "Fetch an HTTP or HTTPS resource. "
+            "Returns status, headers, body, truncated, truncated_chars, processor_used, and content_type."
         ),
         parameters=strict_object(
             properties={

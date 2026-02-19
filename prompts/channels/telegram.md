@@ -34,12 +34,10 @@ Telegram HTML rules:
 - If you are not fully sure your HTML is Telegram-valid, prefer `kind="markdown_v2"`.
 
 Telegram MarkdownV2 rules:
-- Escape special characters when needed according to Telegram MarkdownV2 requirements.
-- Keep syntax valid for Telegram parse mode `MarkdownV2`.
-- In normal text, escape these characters with `\`: `_ * [ ] ( ) ~ ` > # + - = | { } . !`
-- Inside inline link target `( ... )`, escape `)` and `\`.
-- Inside `code`/``` blocks, escape `` ` `` and `\`.
-- Use standard Telegram forms like `*bold*`, `_italic_`, `__underline__`, `~strike~`, `||spoiler||`, `[text](url)`.
+- IMPORTANT: Write normal, human-readable Markdown. Do NOT pre-escape for Telegram MarkdownV2.
+- Use standard Markdown naturally (headings, lists, emphasis, links, code blocks).
+- Keep `answer.kind="markdown_v2"` when content is Markdown; channel adapters will convert it safely before sending.
+- Do not add extra backslashes solely for Telegram escaping.
 
 General:
 - `answer.content` must be non-empty.

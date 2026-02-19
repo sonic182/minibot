@@ -1,0 +1,5 @@
+List available specialist agents and their names for delegation.
+
+These agents are specialized for certain task domains. Use this tool whenever you need to discover or confirm which specialist is appropriate for a task.
+
+When delegation may help and you are unsure of the exact agent name or capability, call list_agents first, then select the best match and use invoke_agent.

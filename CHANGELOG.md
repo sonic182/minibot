@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Packaged tool-description resources under `minibot/llm/tools/descriptions/*.txt` plus a cached `description_loader` for loading complex tool guidance from files.
+- New unified `read_file` tool for reading UTF-8 text files from managed storage (with truncation metadata), complementing `filesystem` + `glob_files` workflows.
+
+### Changed
+
+- Tool catalog simplified around unified action tools:
+  - `filesystem` is now the primary file-operation surface (list/glob/info/write/move/delete/send).
+  - `memory` is now the only exposed user-memory tool (sub-tools are internal-only).
+  - `python_exec` and `history` unified wrappers were removed in favor of direct tools (`python_execute`, `python_environment_info`, `chat_history_info`, `chat_history_trim`).
+- Delegation tools were simplified to `list_agents` and `invoke_agent`; the `agent_delegate` wrapper tool was removed.
+- Main system prompt was simplified, with tool descriptions treated as the authoritative source for tool-specific behavior.
+- Memory and delegation guidance was expanded so the model more proactively uses contextual memory lookup and specialist-agent discovery/delegation.
+- Direct delete fallback in `LLMMessageHandler` now routes through `filesystem(action="delete")`.
+
+### Removed
+
+- Exposed granular file tools (`list_files`, `create_file`, `file_info`, `move_file`, `delete_file`, `send_file`) and the alias `artifact_insert` from the public tool surface.
+- Exposed user-memory sub-tools (`user_memory_save`, `user_memory_get`, `user_memory_search`, `user_memory_delete`) and the `agent_delegate` tool.
+
 ## [0.0.5] - 2026-02-16
 
 ### Added

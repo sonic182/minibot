@@ -241,7 +241,7 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
                 text=f"ok:{event.message.text}",
                 metadata={
                     "should_reply": True,
-                    "compaction_updates": ["running compaction...", "done compacting"],
+                    "compaction_updates": ["running compaction...", "done compacting", "compacted summary"],
                 },
             )
 
@@ -261,12 +261,13 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
     await dispatcher.start()
     await bus.publish(_message_event("hello"))
 
-    outbound = await _wait_outbound_messages(subscription, 3)
+    outbound = await _wait_outbound_messages(subscription, 4)
 
     assert [event.response.text for event in outbound] == [
         "ok:hello",
         "running compaction...",
         "done compacting",
+        "compacted summary",
     ]
     await subscription.close()
     await dispatcher.stop()
