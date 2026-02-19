@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-02-20
+
 ### Added
 
 - Packaged tool-description resources under `minibot/llm/tools/descriptions/*.txt` plus a cached `description_loader` for loading complex tool guidance from files.
 - New unified `read_file` tool for reading UTF-8 text files from managed storage (with truncation metadata), complementing `filesystem` + `glob_files` workflows.
+- File-based main-agent system prompt support via `prompts/main_agent_system.md` (`llm.system_prompt_file`), with startup fail-fast validation when configured.
+- Optional main-agent guardrail plugin architecture with `[orchestration].main_tool_use_guardrail` (`"disabled"` by default, `"llm_classifier"` opt-in).
+- Internal handler collaborators for clearer orchestration boundaries: `delegation_trace`, `response_parser`, and `incoming_files_context` modules.
 
 ### Changed
 
@@ -22,11 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Main system prompt was simplified, with tool descriptions treated as the authoritative source for tool-specific behavior.
 - Memory and delegation guidance was expanded so the model more proactively uses contextual memory lookup and specialist-agent discovery/delegation.
 - Direct delete fallback in `LLMMessageHandler` now routes through `filesystem(action="delete")`.
+- Telegram output now accepts normal Markdown and converts it to Telegram MarkdownV2 via `telegramify-markdown` at send time (with plain-text fallback on formatter errors).
+- Compaction flow now preserves exactly two post-compaction memory entries (`user` compaction request + `assistant` summary) and can emit the generated summary in `compaction_updates`.
+- Token trace semantics now distinguish pre-compaction totals from compaction-call usage and include guardrail-classifier token usage in session accounting.
+- `LLMMessageHandler` runtime path was refactored to keep behavior while isolating guardrail/delegation parsing and retry orchestration.
 
 ### Removed
 
 - Exposed granular file tools (`list_files`, `create_file`, `file_info`, `move_file`, `delete_file`, `send_file`) and the alias `artifact_insert` from the public tool surface.
 - Exposed user-memory sub-tools (`user_memory_save`, `user_memory_get`, `user_memory_search`, `user_memory_delete`) and the `agent_delegate` tool.
+
+### Fixed
+
+- Guardrail retry path now preserves delegated unresolved-result handling, so bounded delegation fallback still applies when guardrail retry is active.
+- Guardrail classifier token usage now contributes to session-level token counters used by compaction thresholds and token metadata.
 
 ## [0.0.5] - 2026-02-16
 
@@ -108,7 +122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.0.5..HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.0.6..HEAD
+[0.0.6]: https://github.com/sonic182/minibot/compare/0.0.5..0.0.6
 [0.0.5]: https://github.com/sonic182/minibot/compare/0.0.4..0.0.5
 [0.0.4]: https://github.com/sonic182/minibot/compare/0.0.3..0.0.4
 [0.0.3]: https://github.com/sonic182/minibot/compare/0.0.2..0.0.3
