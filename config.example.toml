@@ -76,6 +76,13 @@ tool_ownership_mode = "exclusive_mcp"
 # - "always": require at least one tool call for every delegated agent
 # - "never": do not enforce delegated tool calls
 delegated_tool_call_policy = "auto"
+# Tool-use guardrail for the main agent.
+# - "disabled": no guardrail — the handler trusts the model's output directly (default, simpler).
+# - "llm_classifier": before returning, runs a secondary LLM call to decide whether the request
+#   required tool use but the model skipped it. If so, retries once with a stricter prompt.
+#   Adds latency and token cost on every runtime turn where no tools were called.
+#   Enable only if you observe the model frequently claiming to act without actually calling tools.
+main_tool_use_guardrail = "disabled"
 
 [orchestration.main_agent]
 name = "minibot"
