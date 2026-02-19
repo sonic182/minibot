@@ -729,7 +729,8 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
     client = StubLLMClient(payload="unused", provider="openrouter")
 
     async def _delete_handler(payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
-        if payload.get("path") == "generated/random1.svg":
+        path = payload.get("path")
+        if path == "generated/random1.svg":
             return {
                 "ok": True,
                 "path": "generated/random1.svg",
@@ -739,10 +740,10 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
             }
         return {
             "ok": True,
-            "path": str(payload.get("path") or ""),
+            "path": str(path or ""),
             "deleted": False,
             "deleted_count": 0,
-            "message": f"No file or folder found to delete: {payload.get('path')}",
+            "message": f"No file or folder found to delete: {path}",
         }
 
     handler = LLMMessageHandler(
@@ -751,8 +752,8 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
         tools=[
             ToolBinding(
                 tool=Tool(
-                    name="delete_file",
-                    description="Delete a managed file.",
+                    name="filesystem",
+                    description="Managed workspace file operations.",
                     parameters={"type": "object", "properties": {}, "required": [], "additionalProperties": False},
                 ),
                 handler=_delete_handler,
@@ -774,7 +775,7 @@ async def test_handler_direct_delete_file_fallback_executes_when_model_skips_too
     handler._runtime = runtime  # type: ignore[attr-defined]
     handler._decide_tool_requirement = cast(  # type: ignore[attr-defined]
         Any,
-        lambda **kwargs: _async_tuple(True, "delete_file", "generated/random1.svg", 0),
+        lambda **kwargs: _async_tuple(True, "filesystem", "generated/random1.svg", 0),
     )
 
     response = await handler.handle(_message_event("elimina random1.svg de la carpeta generated"))

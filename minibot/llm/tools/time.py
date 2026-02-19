@@ -23,10 +23,9 @@ class CurrentTimeTool:
         return Tool(name="datetime_now", description=base.description, parameters=base.parameters)
 
     def _schema(self) -> Tool:
-        description = f"Return the current datetime in UTC (default format {self._default_format})."
         return Tool(
             name="current_datetime",
-            description=description,
+            description="Return the current datetime in UTC.",
             parameters=strict_object(
                 properties={"format": nullable_string("Python strftime format string.")},
                 required=["format"],

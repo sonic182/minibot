@@ -155,7 +155,11 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
     )
     names = {binding.tool.name for binding in tools}
 
-    assert {"user_memory_save", "user_memory_get", "user_memory_search", "user_memory_delete"}.issubset(names)
+    assert "memory" in names
+    assert "user_memory_save" not in names
+    assert "user_memory_get" not in names
+    assert "user_memory_search" not in names
+    assert "user_memory_delete" not in names
     assert "http_request" in names
     assert {
         "schedule_prompt",
@@ -164,15 +168,18 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         "list_scheduled_prompts",
     }.issubset(names)
     assert {
-        "list_files",
+        "filesystem",
         "glob_files",
-        "file_info",
-        "create_file",
-        "move_file",
-        "delete_file",
-        "send_file",
+        "read_file",
         "self_insert_artifact",
     }.issubset(names)
+    assert "list_files" not in names
+    assert "create_file" not in names
+    assert "file_info" not in names
+    assert "move_file" not in names
+    assert "delete_file" not in names
+    assert "send_file" not in names
+    assert "artifact_insert" not in names
     assert "current_datetime" not in names
     assert "calculate_expression" not in names
     assert "python_execute" not in names

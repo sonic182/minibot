@@ -157,11 +157,8 @@ def _write_workspace_agent(agents_dir: Path) -> None:
             "model_provider: openrouter\n"
             "model: openai/gpt-4o-mini\n"
             "tools_allow:\n"
-            "  - list_files\n"
-            "  - create_file\n"
-            "  - file_info\n"
-            "  - move_file\n"
-            "  - delete_file\n"
+            "  - filesystem\n"
+            "  - glob_files\n"
             "---\n\n"
             "You are the workspace file specialist. "
             "Always use file tools to execute file operations, then report exact path and final status."
@@ -487,7 +484,7 @@ async def test_e2e_console_normal_tool_call_workspace_file_workflow(tmp_path: Pa
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["create_file", "file_info", "list_files", "current_*", "calculate_*", "http_*"],
+        main_agent_tools_allow=["filesystem", "glob_files", "current_*", "calculate_*", "http_*"],
         tool_ownership_mode="shared",
     )
 
@@ -615,7 +612,7 @@ async def test_e2e_console_main_agent_delegates_example_screenshot_and_reports_w
             "Use invoke_agent exactly once with agent_name=playwright_mcp_agent. "
             "Task: use browser_run_code once to open https://www.example.com/, take one screenshot, "
             "and return screenshot path plus workspace folder. "
-            "Do not call list_files. "
+            "Do not call filesystem. "
             "If any browser tool fails, stop immediately and return exactly: browser unavailable. "
             "After tool result, do not call invoke_agent again; only return the final answer."
         ),
@@ -670,7 +667,7 @@ async def test_e2e_console_screenshot_delegation_with_attachments_reports_path(
             "Task: take a screenshot of https://www.example.com/. "
             "After receiving the delegation result, report the screenshot file path "
             "in a user-friendly console message format like 'Screenshot saved at: <path>'. "
-            "Do NOT call send_file since console cannot send files to users."
+            "Do NOT use filesystem action=send since console cannot send files to users."
         ),
         attempts=2,
         wait_timeout_seconds=25.0,

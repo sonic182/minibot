@@ -175,6 +175,22 @@ class LocalFileStorage:
             "target_type": "folder",
         }
 
+    def read_text_file(self, path: str, max_bytes: int = 131_072) -> dict[str, str | int | bool]:
+        target = self.resolve_existing_file(path)
+        size = target.stat().st_size
+        raw = target.read_bytes()[:max_bytes]
+        truncated = size > max_bytes
+        try:
+            content = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("file is not valid UTF-8 text") from exc
+        return {
+            "path": self._relative_to_root(target),
+            "content": content,
+            "size_bytes": size,
+            "truncated": truncated,
+        }
+
     def file_info(self, path: str) -> dict[str, str | int | bool]:
         target = self.resolve_existing_file(path)
         stat = target.stat()

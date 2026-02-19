@@ -1,0 +1,1 @@
+Read-only conversation-history diagnostic for the current conversation. Returns history message count and configured max-history cap only. Use only when the user asks about chat history size/status. Also use when deciding whether a history trim is needed. Do not call for normal answering.

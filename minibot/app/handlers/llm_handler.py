@@ -1096,9 +1096,9 @@ class LLMMessageHandler:
         suggested_tool: str | None,
         suggested_path: str | None,
     ) -> str | None:
-        if suggested_tool != "delete_file":
+        if suggested_tool not in {"delete_file", "filesystem"}:
             return None
-        binding = next((item for item in self._tools if item.tool.name == "delete_file"), None)
+        binding = next((item for item in self._tools if item.tool.name == "filesystem"), None)
         if binding is None:
             return None
         candidates = self._extract_delete_path_candidates(user_text)
@@ -1113,7 +1113,7 @@ class LLMMessageHandler:
         last_message: str | None = None
         for candidate in candidates:
             try:
-                payload = {"path": candidate}
+                payload = {"action": "delete", "path": candidate}
                 raw_result = await binding.handler(payload, tool_context)
                 if not isinstance(raw_result, dict):
                     continue
@@ -1124,7 +1124,7 @@ class LLMMessageHandler:
                 if message:
                     last_message = message
             except Exception:
-                self._logger.exception("direct delete_file fallback failed", extra={"path": candidate})
+                self._logger.exception("direct filesystem delete fallback failed", extra={"path": candidate})
         return last_message
 
     @staticmethod

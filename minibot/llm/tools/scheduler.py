@@ -37,7 +37,7 @@ class SchedulePromptTool:
     def _schedule_unified_schema(self) -> Tool:
         return Tool(
             name="schedule",
-            description=("Scheduled prompt management. Use action=create|list|cancel|delete."),
+            description="Scheduled prompt management. Use action=create|list|cancel|delete.",
             parameters=strict_object(
                 properties={
                     "action": {
@@ -162,8 +162,8 @@ class SchedulePromptTool:
         return Tool(
             name="delete_scheduled_prompt",
             description=(
-                "Delete a scheduled prompt job by id for this owner/chat context."
-                " Active jobs are cancelled first and then deleted."
+                "Delete a scheduled prompt job by id for this owner/chat context. "
+                "Active jobs are cancelled first and then deleted."
             ),
             parameters=strict_object(properties={"job_id": job_id_property()}, required=["job_id"]),
         )

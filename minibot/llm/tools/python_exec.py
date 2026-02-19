@@ -37,60 +37,14 @@ class HostPythonExecTool:
 
     def bindings(self) -> list[ToolBinding]:
         return [
-            ToolBinding(tool=self._unified_schema(), handler=self._handle_unified),
             ToolBinding(tool=self._schema(), handler=self._handle),
             ToolBinding(tool=self._environment_schema(), handler=self._handle_environment_info),
         ]
 
-    def _unified_schema(self) -> Tool:
-        return Tool(
-            name="python_exec",
-            description="Python execution and environment inspection. Use action=run|env.",
-            parameters=strict_object(
-                properties={
-                    "action": {
-                        "type": "string",
-                        "enum": ["run", "env"],
-                        "description": "Python operation to perform.",
-                    },
-                    "code": nullable_string("Python source code for action=run."),
-                    "stdin": nullable_string("Optional stdin for action=run."),
-                    "timeout_seconds": nullable_integer(minimum=1, description="Optional timeout for action=run."),
-                    "save_artifacts": nullable_boolean("Artifact export flag for action=run."),
-                    "artifact_globs": {
-                        "type": ["array", "null"],
-                        "items": {"type": "string"},
-                        "description": "Artifact glob patterns for action=run.",
-                    },
-                    "artifact_subdir": nullable_string("Artifact destination subdir for action=run."),
-                    "max_artifacts": nullable_integer(minimum=1, description="Artifact cap for action=run."),
-                    "include_packages": nullable_boolean("Include package list for action=env."),
-                    "limit": nullable_integer(minimum=1, description="Package limit for action=env."),
-                    "name_prefix": nullable_string("Package prefix filter for action=env."),
-                },
-                required=[
-                    "action",
-                    "code",
-                    "stdin",
-                    "timeout_seconds",
-                    "save_artifacts",
-                    "artifact_globs",
-                    "artifact_subdir",
-                    "max_artifacts",
-                    "include_packages",
-                    "limit",
-                    "name_prefix",
-                ],
-            ),
-        )
-
     def _schema(self) -> Tool:
         return Tool(
             name="python_execute",
-            description=(
-                "Execute arbitrary Python code on host backend with configurable timeout and "
-                "best-effort sandbox controls."
-            ),
+            description="Execute arbitrary Python code on the host with configurable timeout and sandbox controls.",
             parameters=strict_object(
                 properties={
                     "code": string_field("Python source code to execute."),
@@ -124,8 +78,9 @@ class HostPythonExecTool:
         return Tool(
             name="python_environment_info",
             description=(
-                "Return details about the configured Python runtime and installed packages available "
-                "to python_execute."
+                "Inspect the Python runtime available to python_execute. "
+                "Returns the Python version, executable path, and sandbox mode. "
+                "Optionally lists installed packages with name/version; supports prefix filtering and pagination."
             ),
             parameters=strict_object(
                 properties={
@@ -342,14 +297,6 @@ class HostPythonExecTool:
         parsed["sandbox_mode"] = execution_result.get("sandbox_mode") or self._config.sandbox_mode
         parsed["python_executable"] = executable
         return parsed
-
-    async def _handle_unified(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        action = payload.get("action")
-        if action == "run":
-            return await self._handle(payload, context)
-        if action == "env":
-            return await self._handle_environment_info(payload, context)
-        raise ValueError("action must be one of: run, env")
 
     def _coerce_timeout(self, value: Any) -> int:
         return int_with_default(

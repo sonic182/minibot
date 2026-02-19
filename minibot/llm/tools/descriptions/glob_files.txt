@@ -1,0 +1,1 @@
+Search for files matching a glob pattern in the managed workspace. Use this to find specific file types (e.g., '**/*.png' for images, '**/*.md' for markdown), locate files by naming pattern (e.g., 'screenshot_*.png'), or discover files in nested directories. Supports wildcards: * (any characters), ** (recursive directories), ? (single character).

@@ -17,8 +17,8 @@ def test_load_agent_specs_accepts_tools_allow(tmp_path: Path) -> None:
             "description: files\n"
             "mode: agent\n"
             "tools_allow:\n"
-            "  - list_files\n"
-            "  - create_file\n"
+            "  - filesystem\n"
+            "  - glob_files\n"
             "---\n\n"
             "You are files agent."
         ),
@@ -28,7 +28,7 @@ def test_load_agent_specs_accepts_tools_allow(tmp_path: Path) -> None:
     specs = load_agent_specs(str(agents_dir))
 
     assert len(specs) == 1
-    assert specs[0].tools_allow == ["list_files", "create_file"]
+    assert specs[0].tools_allow == ["filesystem", "glob_files"]
 
 
 def test_load_agent_specs_rejects_allow_and_deny_together(tmp_path: Path) -> None:
@@ -64,7 +64,7 @@ def test_load_agent_specs_rejects_unknown_frontmatter_keys(tmp_path: Path) -> No
             "description: invalid\n"
             "mode: agent\n"
             "tool_allow:\n"
-            "  - list_files\n"
+            "  - filesystem\n"
             "---\n\n"
             "You are invalid agent."
         ),

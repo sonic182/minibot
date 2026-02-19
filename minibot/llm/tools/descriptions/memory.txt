@@ -1,0 +1,19 @@
+Long-term user memory for storing and recalling facts, preferences, and context that should persist across conversations.
+
+Use this tool proactively when the user request may depend on previously saved user context and you do not already have that context in the active conversation.
+
+Priority policy:
+- If context is likely relevant and missing, check memory before asking the user to repeat information.
+- Do not call memory when the required context is already clear in the current conversation.
+
+Use this to remember things about the user that are worth keeping: job, interests, goals, preferences, important dates, project details, or anything the user asks you to remember. Do NOT use this for conversation transcript storage; chat history is managed by chat_history tools.
+
+Use the action field to select the operation:
+
+- action=save: Store a new memory entry or update an existing one. Requires title (short label, max 100 chars) and data (the content to remember). Optional metadata (JSON object), source, and expires_at (ISO datetime). Use clear, searchable titles.
+
+- action=get: Retrieve a specific entry by entry_id or title when you already know exactly which memory you need.
+
+- action=search: Search across titles and data when you are unsure of exact IDs/titles. Prefer this first for contextual recall. Use a broad query and reasonably high limit when you need to quickly scan many memories.
+
+- action=delete: Remove stale or outdated memory by entry_id or title when user asks to forget something or when replacing incorrect/outdated facts.
