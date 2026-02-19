@@ -330,10 +330,12 @@ async def test_handler_compacts_history_when_token_limit_reached() -> None:
     response = await handler.handle(_message_event("one"))
 
     session_id = session_id_for(_message_event("one").message)
-    assert await memory.count_history(session_id) == 1
-    assert memory._store[session_id][0].role == "assistant"
-    assert client.calls[-1]["args"][1] == "compact"
-    assert response.metadata.get("compaction_updates") == ["running compaction...", "done compacting"]
+    assert await memory.count_history(session_id) == 2
+    assert memory._store[session_id][0].role == "user"
+    assert memory._store[session_id][0].content == "Please compact the current conversation memory."
+    assert memory._store[session_id][1].role == "assistant"
+    assert client.calls[-1]["args"][1] == "Please compact the current conversation memory."
+    assert response.metadata.get("compaction_updates") == ["running compaction...", "done compacting", "ok"]
     token_trace = response.metadata.get("token_trace")
     assert isinstance(token_trace, dict)
     assert token_trace.get("turn_total_tokens") == 120
