@@ -2,18 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import Any, Literal, Sequence
+from typing import Any, Sequence
 from typing import cast
 
 from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.delegation_trace import count_tool_messages, extract_delegation_trace
+from minibot.app.incoming_files_context import (
+    build_history_user_entry,
+    build_incoming_files_text,
+    incoming_files_from_metadata,
+)
 from minibot.app.runtime_limits import build_runtime_limits
+from minibot.app.response_parser import extract_answer, plain_render
 from minibot.app.tool_use_guardrail import NoopToolUseGuardrail, ToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole
-from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
+from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
-from minibot.shared.assistant_response import assistant_response_schema, coerce_should_answer, payload_to_object
+from minibot.shared.assistant_response import assistant_response_schema
 from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
 from minibot.shared.utils import session_id_for, session_id_from_parts
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -189,7 +196,7 @@ class LLMMessageHandler:
                     "media_input_mode": self._media_input_mode(),
                 },
             )
-        await self._memory.append_history(session_id, "user", self._build_history_user_entry(message, model_text))
+        await self._memory.append_history(session_id, "user", build_history_user_entry(message, model_text))
         await self._enforce_history_limit(session_id)
 
         if message.attachments and not self._supports_media_inputs():
@@ -208,7 +215,7 @@ class LLMMessageHandler:
                 channel=message.channel,
                 chat_id=chat_id,
                 text=answer,
-                render=self._plain_render(answer),
+                render=plain_render(answer),
                 metadata=metadata,
             )
 
@@ -239,7 +246,7 @@ class LLMMessageHandler:
                     system_prompt_override=system_prompt,
                 )
                 turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-                render, should_reply = self._extract_answer(generation.payload)
+                render, should_reply = extract_answer(generation.payload, logger=self._logger)
             else:
                 state = self._build_agent_state(
                     history=history,
@@ -254,10 +261,11 @@ class LLMMessageHandler:
                     prompt_cache_key=prompt_cache_key,
                 )
                 turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-                tool_messages_count = self._count_tool_messages_in_state(generation.state)
-                agent_trace, delegation_fallback_used, delegation_unresolved = self._extract_agent_trace(
-                    generation.state
-                )
+                tool_messages_count = count_tool_messages(generation.state)
+                trace_result = extract_delegation_trace(generation.state)
+                agent_trace = trace_result.trace
+                delegation_fallback_used = trace_result.fallback_used
+                delegation_unresolved = trace_result.unresolved
 
                 guardrail = await self._tool_use_guardrail.apply(
                     session_id=session_id,
@@ -269,7 +277,7 @@ class LLMMessageHandler:
                 )
                 turn_total_tokens += guardrail.tokens_used
                 if guardrail.resolved_render_text is not None:
-                    render = self._plain_render(guardrail.resolved_render_text)
+                    render = plain_render(guardrail.resolved_render_text)
                     should_reply = True
                 elif guardrail.requires_retry and tool_messages_count == 0:
                     retry_state = self._build_agent_state(
@@ -285,18 +293,19 @@ class LLMMessageHandler:
                         prompt_cache_key=prompt_cache_key,
                     )
                     turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-                    agent_trace, delegation_fallback_used, delegation_unresolved = self._extract_agent_trace(
-                        generation.state
-                    )
-                    render, should_reply = self._extract_answer(generation.payload)
-                    if self._count_tool_messages_in_state(generation.state) == 0:
-                        render = self._plain_render(
+                    trace_result = extract_delegation_trace(generation.state)
+                    agent_trace = trace_result.trace
+                    delegation_fallback_used = trace_result.fallback_used
+                    delegation_unresolved = trace_result.unresolved
+                    render, should_reply = extract_answer(generation.payload, logger=self._logger)
+                    if count_tool_messages(generation.state) == 0:
+                        render = plain_render(
                             "I could not verify or execute that action with tools in this attempt. "
                             "Please try again, or ask me to run a specific tool."
                         )
                         should_reply = True
                 else:
-                    render, should_reply = self._extract_answer(generation.payload)
+                    render, should_reply = extract_answer(generation.payload, logger=self._logger)
                     if delegation_unresolved:
                         retry_state = self._build_agent_state(
                             history=history,
@@ -319,16 +328,17 @@ class LLMMessageHandler:
                         turn_total_tokens += self._track_token_usage(
                             session_id, getattr(generation, "total_tokens", None)
                         )
-                        agent_trace, delegation_fallback_used, delegation_unresolved = self._extract_agent_trace(
-                            generation.state
-                        )
-                        render, should_reply = self._extract_answer(generation.payload)
+                        trace_result = extract_delegation_trace(generation.state)
+                        agent_trace = trace_result.trace
+                        delegation_fallback_used = trace_result.fallback_used
+                        delegation_unresolved = trace_result.unresolved
+                        render, should_reply = extract_answer(generation.payload, logger=self._logger)
                         if delegation_unresolved:
                             self._logger.warning(
                                 "delegation unresolved after bounded retry; returning explicit failure",
                                 extra={"chat_id": message.chat_id, "channel": message.channel},
                             )
-                            render = self._plain_render(
+                            render = plain_render(
                                 "I could not complete that delegated action reliably in this attempt. "
                                 "Please retry, or ask me to run a specific tool step-by-step."
                             )
@@ -340,7 +350,7 @@ class LLMMessageHandler:
             )
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
-            render = self._plain_render(self._format_runtime_error_message(exc))
+            render = plain_render(self._format_runtime_error_message(exc))
             should_reply = True
         answer = render.text
         await self._memory.append_history(session_id, "assistant", answer)
@@ -412,7 +422,7 @@ class LLMMessageHandler:
             system_prompt_override=system_prompt,
         )
         turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-        render, _ = self._extract_answer(generation.payload)
+        render, _ = extract_answer(generation.payload, logger=self._logger)
         await self._memory.append_history(session_id, "assistant", render.text)
         await self._enforce_history_limit(session_id)
         compaction_result = await self._compact_history_if_needed(
@@ -473,9 +483,9 @@ class LLMMessageHandler:
 
     def _build_model_user_input(self, message: ChannelMessage) -> tuple[str, str | list[dict[str, Any]] | None]:
         prompt_text = message.text.strip() if message.text else ""
-        incoming_files = self._incoming_files_from_metadata(message.metadata)
+        incoming_files = incoming_files_from_metadata(message.metadata)
         if incoming_files and not message.attachments:
-            return self._build_incoming_files_text(prompt_text, incoming_files), None
+            return build_incoming_files_text(prompt_text, incoming_files), None
         if not message.attachments:
             return prompt_text, None
 
@@ -554,100 +564,6 @@ class LLMMessageHandler:
                 },
             }
         return dict(attachment)
-
-    def _build_history_user_entry(self, message: ChannelMessage, model_text: str) -> str:
-        base_text = message.text.strip() if message.text else ""
-        attachment_summary = self._summarize_attachments_for_memory(message.attachments)
-        incoming_files = self._incoming_files_from_metadata(message.metadata)
-        incoming_file_summary = self._summarize_incoming_files_for_memory(incoming_files)
-        if not attachment_summary and not incoming_file_summary:
-            return base_text
-        visible_text = base_text or model_text
-        parts = [item for item in [attachment_summary, incoming_file_summary] if item]
-        summary = ", ".join(parts)
-        if visible_text:
-            return f"{visible_text}\nAttachments: {summary}"
-        return f"Attachments: {summary}"
-
-    def _summarize_attachments_for_memory(self, attachments: Sequence[dict[str, Any]]) -> str:
-        summaries: list[str] = []
-        for attachment in attachments:
-            attachment_type = attachment.get("type")
-            if attachment_type == "input_image":
-                summaries.append("image")
-                continue
-            if attachment_type == "input_file":
-                filename = attachment.get("filename")
-                if isinstance(filename, str) and filename.strip():
-                    summaries.append(f"file:{filename.strip()}")
-                else:
-                    summaries.append("file")
-                continue
-            summaries.append("attachment")
-        return ", ".join(summaries)
-
-    @staticmethod
-    def _incoming_files_from_metadata(metadata: dict[str, Any] | None) -> list[IncomingFileRef]:
-        if not isinstance(metadata, dict):
-            return []
-        raw = metadata.get("incoming_files")
-        if not isinstance(raw, list):
-            return []
-        parsed: list[IncomingFileRef] = []
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            try:
-                parsed.append(IncomingFileRef.model_validate(item))
-            except Exception:
-                continue
-        return parsed
-
-    def _build_incoming_files_text(self, prompt_text: str, incoming_files: Sequence[IncomingFileRef]) -> str:
-        lines = [
-            "Incoming managed files:",
-            *[
-                (
-                    f"- {item.filename} (path={item.path}, mime={item.mime}, size={item.size_bytes} bytes"
-                    f", source={item.source}, caption={item.caption or ''})"
-                )
-                for item in incoming_files
-            ],
-        ]
-        first_path = incoming_files[0].path if incoming_files else ""
-        suggested_destination = self._suggest_persist_destination(first_path)
-        lines.append(
-            "For file-management requests, use the filesystem tool "
-            "(action=move, action=delete, action=send, action=list). "
-            "Do NOT call self_insert_artifact unless user explicitly asks to inspect content."
-        )
-        if suggested_destination:
-            lines.append(
-                "If user asks to save the uploaded file, use filesystem action=move "
-                f"source_path={first_path} destination_path={suggested_destination}."
-            )
-        lines.append("For analysis requests, use self_insert_artifact when inspection is required.")
-        lines.append("If user intent is unclear, ask a clarifying question before acting.")
-        if prompt_text:
-            return f"{prompt_text}\n\n" + "\n".join(lines)
-        return (
-            "The user uploaded file(s) but did not include a clear instruction.\n"
-            + "\n".join(lines)
-            + "\nAsk the user what to do, unless the intent is already obvious."
-        )
-
-    @staticmethod
-    def _suggest_persist_destination(path: str) -> str | None:
-        marker = "uploads/temp/"
-        if path.startswith(marker):
-            return f"uploads/{path[len(marker) :]}"
-        return None
-
-    @staticmethod
-    def _summarize_incoming_files_for_memory(incoming_files: Sequence[IncomingFileRef]) -> str:
-        if not incoming_files:
-            return ""
-        return ", ".join([f"file:{item.filename}" for item in incoming_files])
 
     def _response_schema(self) -> dict[str, Any]:
         return assistant_response_schema(kinds=["text", "html", "markdown_v2"], include_meta=True)
@@ -749,7 +665,7 @@ class LLMMessageHandler:
             )
             compaction_tokens = self._track_token_usage(session_id, getattr(compact_generation, "total_tokens", None))
             session_before_reset = self._current_session_tokens(session_id)
-            compact_render, _ = self._extract_answer(compact_generation.payload)
+            compact_render, _ = extract_answer(compact_generation.payload, logger=self._logger)
             await self._memory.trim_history(session_id, 0)
             await self._memory.append_history(session_id, "user", compaction_user_request)
             await self._memory.append_history(session_id, "assistant", compact_render.text)
@@ -775,178 +691,6 @@ class LLMMessageHandler:
                 session_total_tokens_before_compaction=None,
                 session_total_tokens_after_compaction=self._current_session_tokens(session_id),
             )
-
-    def _extract_answer(self, payload: Any) -> tuple[RenderableResponse, bool]:
-        payload_obj = payload_to_object(payload)
-        if payload_obj is not None:
-            answer = payload_obj.get("answer")
-            should = payload_obj.get("should_answer_to_user")
-            render = self._render_from_payload(answer)
-            should_flag = coerce_should_answer(should)
-            if render is not None and should_flag is not None:
-                self._logger.debug(
-                    "structured output extracted from dict payload",
-                    extra={"kind": render.kind, "has_answer_object": isinstance(answer, dict)},
-                )
-                return render, should_flag
-            if render is not None and should is None:
-                self._logger.debug(
-                    "structured output missing should_answer_to_user; defaulting to true",
-                    extra={"kind": render.kind},
-                )
-                return render, True
-            result = payload_obj.get("result")
-            if isinstance(result, str):
-                return self._plain_render(result), True
-            timestamp = payload_obj.get("timestamp")
-            if isinstance(timestamp, str):
-                return self._plain_render(timestamp), True
-            self._logger.debug(
-                "parsed payload looked structured but failed validation",
-                extra={
-                    "parsed_keys": sorted(str(key) for key in payload_obj.keys()),
-                    "should_type": type(should).__name__,
-                },
-            )
-        if isinstance(payload, str):
-            return self._plain_render(payload), True
-        return self._plain_render(str(payload)), True
-
-    def _render_from_payload(self, value: Any) -> RenderableResponse | None:
-        if isinstance(value, str):
-            self._logger.debug("structured output answer is legacy string; forcing text kind")
-            return self._plain_render(value)
-        if not isinstance(value, dict):
-            return None
-
-        content_value = value.get("content")
-        if not isinstance(content_value, str):
-            legacy_text = value.get("text")
-            if isinstance(legacy_text, str):
-                content_value = legacy_text
-
-        raw_kind = value.get("kind")
-        normalized_kind = self._normalize_render_kind(raw_kind)
-        meta_value = value.get("meta")
-        normalized_meta = meta_value if isinstance(meta_value, dict) else {}
-
-        if isinstance(content_value, str) and normalized_kind is not None:
-            if not isinstance(meta_value, dict) and meta_value is not None:
-                self._logger.debug(
-                    "structured output meta is not an object; coercing to empty object",
-                    extra={"meta_type": type(meta_value).__name__},
-                )
-            render = RenderableResponse(kind=normalized_kind, text=content_value, meta=normalized_meta)
-            self._logger.debug(
-                "structured output answer object normalized",
-                extra={
-                    "kind": render.kind,
-                    "meta_keys": sorted(render.meta.keys()),
-                    "source_keys": sorted(str(key) for key in value.keys()),
-                },
-            )
-            if not render.text.strip():
-                return None
-            return render
-
-        try:
-            render = RenderableResponse.model_validate(value)
-        except Exception as exc:
-            text = content_value
-            if isinstance(text, str):
-                self._logger.debug(
-                    "structured output answer object invalid; using plain text fallback",
-                    extra={
-                        "available_keys": sorted(str(key) for key in value.keys()),
-                        "validation_error": str(exc),
-                        "raw_kind": raw_kind,
-                    },
-                )
-                return self._plain_render(text)
-            return None
-        if not render.text.strip():
-            return None
-        self._logger.debug(
-            "structured output answer object validated",
-            extra={
-                "kind": render.kind,
-                "meta_keys": sorted(render.meta.keys()),
-            },
-        )
-        return render
-
-    @staticmethod
-    def _normalize_render_kind(value: Any) -> Literal["text", "html", "markdown_v2"] | None:
-        if not isinstance(value, str):
-            return None
-        normalized = value.strip().lower()
-        if normalized in {"text", "plain", "plain_text", "plaintext"}:
-            return "text"
-        if normalized in {"html", "htm"}:
-            return "html"
-        if normalized in {"markdown_v2", "markdownv2", "markdown", "md"}:
-            return "markdown_v2"
-        return None
-
-    @staticmethod
-    def _plain_render(text: str) -> RenderableResponse:
-        return RenderableResponse(kind="text", text=text)
-
-    @staticmethod
-    def _count_tool_messages_in_state(state: AgentState) -> int:
-        return sum(1 for message in state.messages if message.role == "tool")
-
-    @staticmethod
-    def _extract_agent_trace(state: AgentState) -> tuple[list[dict[str, Any]], bool, bool]:
-        trace: list[dict[str, Any]] = []
-        fallback_used = False
-        last_result_status: str | None = None
-        last_should_answer: bool | None = None
-        saw_invoke = False
-        for message in state.messages:
-            if message.role != "tool" or message.name != "invoke_agent":
-                continue
-            if not message.content:
-                continue
-            part = message.content[0]
-            if part.type != "json" or not isinstance(part.value, dict):
-                continue
-            saw_invoke = True
-            agent = str(part.value.get("agent") or "")
-            ok = bool(part.value.get("ok", False))
-            error = part.value.get("error")
-            result_status = part.value.get("result_status")
-            delegated_should_answer = part.value.get("should_answer_to_user")
-            if not ok:
-                fallback_used = True
-            if isinstance(result_status, str):
-                last_result_status = result_status
-            else:
-                last_result_status = None
-            if isinstance(delegated_should_answer, bool):
-                last_should_answer = delegated_should_answer
-            else:
-                last_should_answer = None
-            trace_entry: dict[str, Any] = {
-                "agent": "minibot",
-                "decision": "invoke_agent",
-                "target": agent or None,
-                "ok": ok,
-            }
-            if isinstance(result_status, str) and result_status.strip():
-                trace_entry["result_status"] = result_status
-            if isinstance(delegated_should_answer, bool):
-                trace_entry["should_answer_to_user"] = delegated_should_answer
-            if isinstance(error, str) and error.strip():
-                trace_entry["error"] = error
-            trace.append(trace_entry)
-        unresolved = False
-        if saw_invoke:
-            if last_result_status in {"invalid_result", "not_user_answerable"}:
-                unresolved = True
-            if last_should_answer is False:
-                unresolved = True
-        return trace, fallback_used, unresolved
 
     def _format_runtime_error_message(self, exc: Exception) -> str:
         if not self._logger.isEnabledFor(logging.DEBUG):
