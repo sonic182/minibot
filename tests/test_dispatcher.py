@@ -24,9 +24,14 @@ class _FakeSettings:
             enabled = False
             name_prefix = "mcp"
 
+        class _FileStorage:
+            enabled = False
+            root_dir = "./data/files"
+
         kv_memory = _KV()
         browser = _Browser()
         mcp = _MCP()
+        file_storage = _FileStorage()
 
     class _Memory:
         max_history_messages = None
@@ -43,6 +48,7 @@ class _FakeSettings:
 
         default_timeout_seconds = 90
         tool_ownership_mode = "shared"
+        main_tool_use_guardrail = "disabled"
         main_agent = _MainAgent()
 
     tools = _Tools()

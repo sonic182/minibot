@@ -171,6 +171,7 @@ class OrchestrationConfig(BaseModel):
     default_timeout_seconds: PositiveInt = 90
     tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
     delegated_tool_call_policy: Literal["auto", "always", "never"] = "auto"
+    main_tool_use_guardrail: Literal["disabled", "llm_classifier"] = "disabled"
     main_agent: MainAgentConfig = MainAgentConfig()
 
 

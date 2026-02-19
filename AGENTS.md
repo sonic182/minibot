@@ -1,7 +1,7 @@
 # Agent Guidelines for MiniBot
 
 ## ⚠️ IMPORTANT: Git Operations
-**NEVER execute git "write" commands**: Do NOT use `git commit`, `git push`, `git add`, or any git write commands. Only edit files directly via the Edit/Write tools; the user handles commits.
+**NEVER execute git "write" commands**: Do NOT use `git commit`, `git push`, `git add`, or any git write commands (unless user explicitly ask for it). Normally just use edit files directly via the Edit/Write tools; the user handles commits.
 
 ## Build / Run / Lint
 - **Install dependencies**: `poetry install --all-extras` (always include extras so test dependencies are available)

@@ -43,11 +43,19 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── agent_runtime.py
 │   │   ├── console.py
 │   │   ├── daemon.py
+│   │   ├── delegation_trace.py
 │   │   ├── dispatcher.py
+│   │   ├── environment_context.py
 │   │   ├── event_bus.py
+│   │   ├── incoming_files_context.py
 │   │   ├── llm_client_factory.py
+│   │   ├── mcp_tool_name.py
+│   │   ├── response_parser.py
+│   │   ├── runtime_limits.py
 │   │   ├── scheduler_service.py
 │   │   ├── tool_capabilities.py
+│   │   ├── tool_policy_utils.py
+│   │   ├── tool_use_guardrail.py
 │   │   └── handlers/
 │   │       └── llm_handler.py
 │   ├── core/
@@ -63,6 +71,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   │   └── schema.py
 │   │   ├── container/
 │   │   │   └── app_container.py
+│   │   ├── sqlalchemy_utils.py
 │   │   ├── logging/
 │   │   │   └── setup.py
 │   │   ├── mcp/
@@ -82,12 +91,14 @@ and emit outbound responses back to the active channel adapter.
 │   ├── llm/
 │   │   ├── provider_factory.py
 │   │   └── tools/
-│   │       ├── arg_utils.py
+│   │       ├── descriptions/      (tool description .txt files, loaded at runtime)
 │   │       ├── agent_delegate.py
+│   │       ├── arg_utils.py
 │   │       ├── base.py
-│   │       ├── factory.py
 │   │       ├── calculator.py
 │   │       ├── chat_memory.py
+│   │       ├── description_loader.py
+│   │       ├── factory.py
 │   │       ├── file_storage.py
 │   │       ├── http_client.py
 │   │       ├── mcp_bridge.py
@@ -97,7 +108,10 @@ and emit outbound responses back to the active channel adapter.
 │   │       ├── time.py
 │   │       └── user_memory.py
 │   └── shared/
+│       ├── assistant_response.py
 │       ├── console_compat.py
+│       ├── datetime_utils.py
+│       ├── json_schema.py
 │       ├── parse_utils.py
 │       ├── path_utils.py
 │       ├── prompt_loader.py
@@ -202,15 +216,23 @@ flowchart TD
 - `app/agent_registry.py`: in-memory registry for discovered `AgentSpec` entries.
 - `app/agent_policies.py`: enforces per-agent tool scoping (`tools_allow`, `tools_deny`, MCP server allowlist).
 - `app/tool_capabilities.py`: computes main-agent-visible tools and capability summaries for prompts/tool policies.
+- `app/delegation_trace.py`: extracts delegation trace from runtime state (`DelegationTraceResult`, `extract_delegation_trace`, `count_tool_messages`).
+- `app/environment_context.py`: builds the environment context fragment injected into system prompts (e.g. configured output directories).
+- `app/incoming_files_context.py`: assembles incoming-file context for model input and history entries (`build_incoming_files_text`, `build_history_user_entry`, `incoming_files_from_metadata`).
+- `app/mcp_tool_name.py`: utilities for parsing and validating MCP-namespaced tool names (`is_mcp_tool_name`, `extract_mcp_server`).
+- `app/response_parser.py`: parses structured LLM output payloads into render objects (`extract_answer`, `render_from_payload`, `normalize_render_kind`, `plain_render`).
+- `app/runtime_limits.py`: constructs `AgentRuntimeLimits` from config and client capabilities (`build_runtime_limits`).
+- `app/tool_policy_utils.py`: shared `fnmatch`-based tool allow/deny filtering used by agent policies and tool capability views.
+- `app/tool_use_guardrail.py`: `ToolUseGuardrail` protocol with `NoopToolUseGuardrail` (default) and `LLMClassifierToolUseGuardrail` (opt-in via `[orchestration].main_tool_use_guardrail = "llm_classifier"`).
 - `app/handlers/llm_handler.py`:
-  - assembles model input from text plus attachments,
+  - assembles model input from text plus attachments (via `incoming_files_context`),
   - composes per-channel system prompt by loading prompt fragments from `shared/prompt_loader.py`,
-  - runs main-agent runtime/tool loop,
-  - consumes delegated results from `invoke_agent` tool outputs,
+  - runs main-agent runtime/tool loop (delegates to `_run_with_agent_runtime`),
+  - applies optional tool-use guardrail per turn,
   - tracks per-turn/session token usage metadata and optional history compaction flow,
   - enforces provider constraints for multimodal support,
   - stores transcript history safely (attachment summaries only, not raw blobs),
-  - parses structured model output (`answer`, `should_answer_to_user`, optional attachments).
+  - parses structured model output via `response_parser`.
 - `app/agent_runtime.py`:
   - owns directive-loop execution (`provider step -> tool calls -> tool output append -> directive apply -> next step`),
   - maintains runtime `AgentState` (`messages`, `meta`),
@@ -254,6 +276,8 @@ Current notes:
   - `adapters/config/loader.py` resolves TOML + environment placeholders.
 - Container:
   - `adapters/container/app_container.py` wires singleton-style service graph.
+- Shared SQLAlchemy utilities:
+  - `adapters/sqlalchemy_utils.py` provides `resolve_sqlite_storage_path` and `ensure_parent_dir` used by memory and scheduler adapters.
 - Logging:
   - `adapters/logging/setup.py` configures structured logfmt-friendly logging.
 - Messaging:
@@ -273,16 +297,17 @@ Current notes:
 
 - `llm/provider_factory.py`: provider/client abstraction around `sonic182/llm-async`, including tool execution loops and provider capability branching.
 - `llm/tools/factory.py`: builds enabled tool bindings from settings.
+- `llm/tools/description_loader.py`: loads per-tool description strings from the `descriptions/` package at runtime.
 - `llm/tools/*`: concrete tool schemas + handlers:
-  - agent delegation (`list_agents`, `invoke_agent`, `agent_delegate`),
-  - chat memory management,
-  - calculator,
-  - HTTP client,
-  - user/KV memory,
-  - Python execution,
-  - file storage/workspace tools (`list_files`, `create_file`, `move_file`, `delete_file`, `send_file`, `self_insert_artifact`),
-  - scheduler controls (`schedule_prompt`, `cancel_scheduled_prompt`, `list_scheduled_prompts`, `delete_scheduled_prompt`),
-  - time helpers.
+  - agent delegation (`list_agents`, `invoke_agent`),
+  - chat memory management (`chat_history_info`, `chat_history_trim`),
+  - calculator (`calculator`, `calculate_expression`),
+  - HTTP client (`http_client`, `http_request`),
+  - user/KV memory (`memory` action facade),
+  - Python execution (`python_execute`, `python_environment_info`),
+  - file storage/workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `self_insert_artifact`,
+  - scheduler controls (`schedule` action facade, `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`),
+  - time helpers (`current_datetime`, `datetime_now`).
 
 ## MCP Tool Bridge Flow
 
@@ -339,7 +364,7 @@ Main sections:
 - `[channels.telegram]` (auth allowlists, mode, media limits)
 - `[llm]`
   - `llm.prompts_dir` points to channel prompt packs (default `./prompts`)
-- `[orchestration]` (definitions directory, delegated runtime timeout defaults, main-agent policy)
+- `[orchestration]` (definitions directory, delegated runtime timeout defaults, main-agent policy, `main_tool_use_guardrail`: `"disabled"` | `"llm_classifier"`)
 - `[orchestration.main_agent]` (main-agent tool allow/deny)
 - `[memory]`
 - `[scheduler.prompts]`

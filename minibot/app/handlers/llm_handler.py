@@ -2,21 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-import re
-from typing import Any, Literal, Sequence
+from typing import Any, Sequence
 from typing import cast
 
-import json
-
 from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.delegation_trace import count_tool_messages, extract_delegation_trace
+from minibot.app.incoming_files_context import (
+    build_history_user_entry,
+    build_incoming_files_text,
+    incoming_files_from_metadata,
+)
 from minibot.app.runtime_limits import build_runtime_limits
+from minibot.app.response_parser import extract_answer, plain_render
+from minibot.app.tool_use_guardrail import NoopToolUseGuardrail, ToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole
-from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
+from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
-from minibot.shared.assistant_response import assistant_response_schema, coerce_should_answer, payload_to_object
-from minibot.shared.path_utils import normalize_path_separators
+from minibot.shared.assistant_response import assistant_response_schema
 from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
 from minibot.shared.utils import session_id_for, session_id_from_parts
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -29,6 +33,15 @@ class _CompactionResult:
     tokens_used: int
     session_total_tokens_before_compaction: int | None
     session_total_tokens_after_compaction: int
+
+
+@dataclass(frozen=True)
+class _AgentRuntimeResult:
+    render: Any
+    should_reply: bool
+    agent_trace: list[dict[str, Any]]
+    delegation_fallback_used: bool
+    tokens_used: int
 
 
 class LLMMessageHandler:
@@ -45,6 +58,8 @@ class LLMMessageHandler:
         notify_compaction_updates: bool = False,
         agent_timeout_seconds: int = 120,
         environment_prompt_fragment: str = "",
+        tool_use_guardrail: ToolUseGuardrail | None = None,
+        managed_files_root: str | None = None,
     ) -> None:
         self._memory = memory
         self._llm_client = llm_client
@@ -53,6 +68,7 @@ class LLMMessageHandler:
         self._max_history_messages = max_history_messages
         self._max_history_tokens = max_history_tokens
         self._notify_compaction_updates = notify_compaction_updates
+        self._tool_use_guardrail: ToolUseGuardrail = tool_use_guardrail or NoopToolUseGuardrail()
         self._session_total_tokens: dict[str, int] = {}
         self._prompts_dir = self._llm_prompts_dir()
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
@@ -61,7 +77,6 @@ class LLMMessageHandler:
             timeout_seconds=agent_timeout_seconds,
             min_timeout_seconds=120,
         )
-        managed_files_root = self._managed_files_root_from_tools()
         if self._supports_agent_runtime():
             self._runtime = AgentRuntime(
                 llm_client=self._llm_client,
@@ -79,17 +94,6 @@ class LLMMessageHandler:
         return callable(getattr(self._llm_client, "complete_once", None)) and callable(
             getattr(self._llm_client, "execute_tool_calls_for_runtime", None)
         )
-
-    def _managed_files_root_from_tools(self) -> str | None:
-        for binding in self._tools:
-            if binding.tool.name != "self_insert_artifact":
-                continue
-            owner = getattr(binding.handler, "__self__", None)
-            storage = getattr(owner, "_storage", None)
-            root = getattr(storage, "root_dir", None)
-            if root is not None:
-                return str(root)
-        return None
 
     def _llm_provider_name(self) -> str | None:
         provider_getter = getattr(self._llm_client, "provider_name", None)
@@ -167,8 +171,8 @@ class LLMMessageHandler:
                 "When you need to inspect a local workspace file (image/document), call self_insert_artifact first "
                 "to inject it into conversation context before answering file contents. "
                 "For file-management requests (save, move, delete, send, list), do not call self_insert_artifact; "
-                "use file-management tools instead. If the user only uploaded files and gave no clear instruction, "
-                "ask a clarifying question."
+                "use the filesystem tool with the appropriate action instead. "
+                "If the user only uploaded files and gave no clear instruction, ask a clarifying question."
             )
         return "\n\n".join(fragments)
 
@@ -190,7 +194,7 @@ class LLMMessageHandler:
                     "media_input_mode": self._media_input_mode(),
                 },
             )
-        await self._memory.append_history(session_id, "user", self._build_history_user_entry(message, model_text))
+        await self._memory.append_history(session_id, "user", build_history_user_entry(message, model_text))
         await self._enforce_history_limit(session_id)
 
         if message.attachments and not self._supports_media_inputs():
@@ -209,7 +213,7 @@ class LLMMessageHandler:
                 channel=message.channel,
                 chat_id=chat_id,
                 text=answer,
-                render=self._plain_render(answer),
+                render=plain_render(answer),
                 metadata=metadata,
             )
 
@@ -226,11 +230,6 @@ class LLMMessageHandler:
         primary_agent = "minibot"
         agent_trace: list[dict[str, Any]] = []
         delegation_fallback_used = False
-        delegation_unresolved = False
-        tool_required_intent = False
-        suggested_tool: str | None = None
-        suggested_path: str | None = None
-        tool_messages_count: int | None = None
         try:
             if self._runtime is None:
                 generation = await self._llm_client.generate(
@@ -245,174 +244,32 @@ class LLMMessageHandler:
                     system_prompt_override=system_prompt,
                 )
                 turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-                render, should_reply = self._extract_answer(generation.payload)
+                render, should_reply = extract_answer(generation.payload, logger=self._logger)
             else:
-                state = self._build_agent_state(
+                runtime_result = await self._run_with_agent_runtime(
+                    session_id=session_id,
                     history=history,
-                    user_text=model_text,
-                    user_content=model_user_content,
+                    model_text=model_text,
+                    model_user_content=model_user_content,
                     system_prompt=system_prompt,
-                )
-                generation = await self._runtime.run(
-                    state=state,
                     tool_context=tool_context,
-                    response_schema=self._response_schema(),
                     prompt_cache_key=prompt_cache_key,
+                    chat_id=message.chat_id,
+                    channel=message.channel,
                 )
-                turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-                tool_messages_count = self._count_tool_messages_in_state(generation.state)
-                agent_trace, delegation_fallback_used, delegation_unresolved = self._extract_agent_trace(
-                    generation.state
-                )
-                if tool_messages_count == 0:
-                    (
-                        tool_required_intent,
-                        suggested_tool,
-                        suggested_path,
-                        classifier_tokens,
-                    ) = await self._decide_tool_requirement(
-                        session_id=session_id,
-                        history=history,
-                        user_text=model_text,
-                        prompt_cache_key=prompt_cache_key,
-                    )
-                    turn_total_tokens += classifier_tokens
-                if tool_required_intent and tool_messages_count == 0:
-                    self._logger.debug(
-                        "tool-required request returned without tool calls; retrying with stricter instruction",
-                        extra={"chat_id": message.chat_id, "channel": message.channel},
-                    )
-                    retry_system_prompt = (
-                        f"{system_prompt}\n\n"
-                        "Tool policy reminder: this request requires using tools before final answer. "
-                        "Call the relevant tool now, then provide the final answer from tool output. "
-                        "Do not answer with intent statements like 'I will check'."
-                    )
-                    retry_state = self._build_agent_state(
-                        history=history,
-                        user_text=model_text,
-                        user_content=model_user_content,
-                        system_prompt=retry_system_prompt,
-                    )
-                    generation = await self._runtime.run(
-                        state=retry_state,
-                        tool_context=tool_context,
-                        response_schema=self._response_schema(),
-                        prompt_cache_key=prompt_cache_key,
-                    )
-                    turn_total_tokens += self._track_token_usage(
-                        session_id,
-                        getattr(generation, "total_tokens", None),
-                    )
-                    tool_messages_count = self._count_tool_messages_in_state(generation.state)
-                    (
-                        agent_trace,
-                        delegation_fallback_used,
-                        delegation_unresolved,
-                    ) = self._extract_agent_trace(generation.state)
-                    self._logger.debug(
-                        "tool-required retry completed",
-                        extra={
-                            "chat_id": message.chat_id,
-                            "channel": message.channel,
-                            "tool_messages": tool_messages_count,
-                        },
-                    )
-                render, should_reply = self._extract_answer(generation.payload)
-                if delegation_unresolved:
-                    self._logger.debug(
-                        "delegation returned unresolved state; retrying runtime once",
-                        extra={"chat_id": message.chat_id, "channel": message.channel},
-                    )
-                    retry_system_prompt = (
-                        f"{system_prompt}\n\n"
-                        "Delegation policy reminder: If invoke_agent result has should_answer_to_user=false "
-                        "or result_status other than success, you must resolve it in this turn. "
-                        "Do one additional concrete tool call or return an explicit failure message to user "
-                        "with should_answer_to_user=true."
-                    )
-                    retry_state = self._build_agent_state(
-                        history=history,
-                        user_text=model_text,
-                        user_content=model_user_content,
-                        system_prompt=retry_system_prompt,
-                    )
-                    generation = await self._runtime.run(
-                        state=retry_state,
-                        tool_context=tool_context,
-                        response_schema=self._response_schema(),
-                        prompt_cache_key=prompt_cache_key,
-                    )
-                    turn_total_tokens += self._track_token_usage(
-                        session_id,
-                        getattr(generation, "total_tokens", None),
-                    )
-                    tool_messages_count = self._count_tool_messages_in_state(generation.state)
-                    (
-                        agent_trace,
-                        delegation_fallback_used,
-                        delegation_unresolved,
-                    ) = self._extract_agent_trace(generation.state)
-                    render, should_reply = self._extract_answer(generation.payload)
-                    if delegation_unresolved:
-                        self._logger.warning(
-                            "delegation unresolved after bounded retry; returning explicit failure",
-                            extra={"chat_id": message.chat_id, "channel": message.channel},
-                        )
-                        render = self._plain_render(
-                            "I could not complete that delegated action reliably in this attempt. "
-                            "Please retry, or ask me to run a specific tool step-by-step."
-                        )
-                        should_reply = True
-
-            if tool_required_intent and tool_messages_count == 0:
-                direct_tool_message = await self._attempt_direct_file_delete(
-                    user_text=message.text,
-                    tool_context=tool_context,
-                    suggested_tool=suggested_tool,
-                    suggested_path=suggested_path,
-                )
-                if direct_tool_message is not None:
-                    self._logger.info(
-                        "resolved tool-required delete request via direct delete_file fallback",
-                        extra={"chat_id": message.chat_id, "channel": message.channel},
-                    )
-                    render = self._plain_render(direct_tool_message)
-                    should_reply = True
-                else:
-                    self._logger.warning(
-                        "tool-required request still unresolved after retries; returning explicit failure message",
-                        extra={
-                            "chat_id": message.chat_id,
-                            "channel": message.channel,
-                            "no_tool_call": True,
-                            "tool_exception_available": False,
-                            "reason": "model_returned_final_without_tool_calls",
-                            "user_text": message.text,
-                        },
-                    )
-                    render = self._plain_render(
-                        "I could not verify or execute that action with tools in this attempt. "
-                        "Please try again, or ask me to run a specific tool."
-                    )
-                if not should_reply:
-                    self._logger.debug(
-                        "overriding should_reply=false for tool-required request without tool outputs",
-                        extra={"chat_id": message.chat_id, "channel": message.channel},
-                    )
-                    should_reply = True
+                turn_total_tokens += runtime_result.tokens_used
+                render = runtime_result.render
+                should_reply = runtime_result.should_reply
+                agent_trace = runtime_result.agent_trace
+                delegation_fallback_used = runtime_result.delegation_fallback_used
 
             self._logger.debug(
                 "structured output parsed",
-                extra={
-                    "kind": render.kind,
-                    "content_length": len(render.text),
-                    "should_reply": should_reply,
-                },
+                extra={"kind": render.kind, "content_length": len(render.text), "should_reply": should_reply},
             )
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
-            render = self._plain_render(self._format_runtime_error_message(exc))
+            render = plain_render(self._format_runtime_error_message(exc))
             should_reply = True
         answer = render.text
         await self._memory.append_history(session_id, "assistant", answer)
@@ -470,8 +327,6 @@ class LLMMessageHandler:
             parse_error=parse_error,
             original_content=original_content,
         )
-        await self._memory.append_history(session_id, "user", repair_prompt)
-        await self._enforce_history_limit(session_id)
         generation = await self._llm_client.generate(
             history,
             repair_prompt,
@@ -484,7 +339,8 @@ class LLMMessageHandler:
             system_prompt_override=system_prompt,
         )
         turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-        render, _ = self._extract_answer(generation.payload)
+        render, _ = extract_answer(generation.payload, logger=self._logger)
+        await self._memory.append_history(session_id, "user", repair_prompt)
         await self._memory.append_history(session_id, "assistant", render.text)
         await self._enforce_history_limit(session_id)
         compaction_result = await self._compact_history_if_needed(
@@ -543,11 +399,149 @@ class LLMMessageHandler:
             f"Original content:\n{original_content}"
         )
 
+    async def _run_with_agent_runtime(
+        self,
+        *,
+        session_id: str,
+        history: list[Any],
+        model_text: str,
+        model_user_content: str | list[dict[str, Any]] | None,
+        system_prompt: str,
+        tool_context: ToolContext,
+        prompt_cache_key: str | None,
+        chat_id: int | None,
+        channel: str | None,
+    ) -> _AgentRuntimeResult:
+        assert self._runtime is not None
+        tokens_used = 0
+        agent_trace: list[dict[str, Any]] = []
+        delegation_fallback_used = False
+
+        state = self._build_agent_state(
+            history=history,
+            user_text=model_text,
+            user_content=model_user_content,
+            system_prompt=system_prompt,
+        )
+        generation = await self._runtime.run(
+            state=state,
+            tool_context=tool_context,
+            response_schema=self._response_schema(),
+            prompt_cache_key=prompt_cache_key,
+        )
+        tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+        tool_messages_count = count_tool_messages(generation.state)
+        trace_result = extract_delegation_trace(generation.state)
+        agent_trace = trace_result.trace
+        delegation_fallback_used = trace_result.fallback_used
+        delegation_unresolved = trace_result.unresolved
+
+        guardrail = await self._tool_use_guardrail.apply(
+            session_id=session_id,
+            user_text=model_text,
+            tool_context=tool_context,
+            state=generation.state,
+            system_prompt=system_prompt,
+            prompt_cache_key=prompt_cache_key,
+        )
+        tokens_used += guardrail.tokens_used
+        self._track_token_usage(session_id, guardrail.tokens_used)
+
+        if guardrail.resolved_render_text is not None:
+            return _AgentRuntimeResult(
+                render=plain_render(guardrail.resolved_render_text),
+                should_reply=True,
+                agent_trace=agent_trace,
+                delegation_fallback_used=delegation_fallback_used,
+                tokens_used=tokens_used,
+            )
+
+        if guardrail.requires_retry and tool_messages_count == 0:
+            retry_system_prompt = system_prompt
+            if guardrail.retry_system_prompt_suffix:
+                retry_system_prompt = f"{system_prompt}\n\n{guardrail.retry_system_prompt_suffix}"
+            retry_state = self._build_agent_state(
+                history=history,
+                user_text=model_text,
+                user_content=model_user_content,
+                system_prompt=retry_system_prompt,
+            )
+            generation = await self._runtime.run(
+                state=retry_state,
+                tool_context=tool_context,
+                response_schema=self._response_schema(),
+                prompt_cache_key=prompt_cache_key,
+            )
+            tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+            trace_result = extract_delegation_trace(generation.state)
+            agent_trace = trace_result.trace
+            delegation_fallback_used = trace_result.fallback_used
+            delegation_unresolved = trace_result.unresolved
+            render, should_reply = extract_answer(generation.payload, logger=self._logger)
+            if count_tool_messages(generation.state) == 0:
+                return _AgentRuntimeResult(
+                    render=plain_render(
+                        "I could not verify or execute that action with tools in this attempt. "
+                        "Please try again, or ask me to run a specific tool."
+                    ),
+                    should_reply=True,
+                    agent_trace=agent_trace,
+                    delegation_fallback_used=delegation_fallback_used,
+                    tokens_used=tokens_used,
+                )
+
+        else:
+            render, should_reply = extract_answer(generation.payload, logger=self._logger)
+
+        if delegation_unresolved:
+            retry_state = self._build_agent_state(
+                history=history,
+                user_text=model_text,
+                user_content=model_user_content,
+                system_prompt=(
+                    f"{system_prompt}\n\n"
+                    "Delegation policy reminder: If invoke_agent result has should_answer_to_user=false "
+                    "or result_status other than success, you must resolve it in this turn. "
+                    "Do one additional concrete tool call or return an explicit failure message to user "
+                    "with should_answer_to_user=true."
+                ),
+            )
+            generation = await self._runtime.run(
+                state=retry_state,
+                tool_context=tool_context,
+                response_schema=self._response_schema(),
+                prompt_cache_key=prompt_cache_key,
+            )
+            tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
+            trace_result = extract_delegation_trace(generation.state)
+            agent_trace = trace_result.trace
+            delegation_fallback_used = trace_result.fallback_used
+            delegation_unresolved = trace_result.unresolved
+            render, should_reply = extract_answer(generation.payload, logger=self._logger)
+            if delegation_unresolved:
+                self._logger.warning(
+                    "delegation unresolved after bounded retry; returning explicit failure",
+                    extra={"chat_id": chat_id, "channel": channel},
+                )
+                render = plain_render(
+                    "I could not complete that delegated action reliably in this attempt. "
+                    "Please retry, or ask me to run a specific tool step-by-step."
+                )
+                should_reply = True
+
+        return _AgentRuntimeResult(
+            render=render,
+            should_reply=should_reply,
+            agent_trace=agent_trace,
+            delegation_fallback_used=delegation_fallback_used,
+            tokens_used=tokens_used,
+        )
+
     def _build_model_user_input(self, message: ChannelMessage) -> tuple[str, str | list[dict[str, Any]] | None]:
         prompt_text = message.text.strip() if message.text else ""
-        incoming_files = self._incoming_files_from_metadata(message.metadata)
+        incoming_files = incoming_files_from_metadata(message.metadata)
         if incoming_files and not message.attachments:
-            return self._build_incoming_files_text(prompt_text, incoming_files), None
+            return build_incoming_files_text(prompt_text, incoming_files), None
         if not message.attachments:
             return prompt_text, None
 
@@ -573,7 +567,7 @@ class LLMMessageHandler:
         ]
         for entry in history:
             role = str(getattr(entry, "role", "user"))
-            if role not in {"system", "user", "assistant", "tool"}:
+            if role not in {"system", "user", "assistant"}:
                 continue
             content = getattr(entry, "content", "")
             messages.append(
@@ -626,99 +620,6 @@ class LLMMessageHandler:
                 },
             }
         return dict(attachment)
-
-    def _build_history_user_entry(self, message: ChannelMessage, model_text: str) -> str:
-        base_text = message.text.strip() if message.text else ""
-        attachment_summary = self._summarize_attachments_for_memory(message.attachments)
-        incoming_files = self._incoming_files_from_metadata(message.metadata)
-        incoming_file_summary = self._summarize_incoming_files_for_memory(incoming_files)
-        if not attachment_summary and not incoming_file_summary:
-            return base_text
-        visible_text = base_text or model_text
-        parts = [item for item in [attachment_summary, incoming_file_summary] if item]
-        summary = ", ".join(parts)
-        if visible_text:
-            return f"{visible_text}\nAttachments: {summary}"
-        return f"Attachments: {summary}"
-
-    def _summarize_attachments_for_memory(self, attachments: Sequence[dict[str, Any]]) -> str:
-        summaries: list[str] = []
-        for attachment in attachments:
-            attachment_type = attachment.get("type")
-            if attachment_type == "input_image":
-                summaries.append("image")
-                continue
-            if attachment_type == "input_file":
-                filename = attachment.get("filename")
-                if isinstance(filename, str) and filename.strip():
-                    summaries.append(f"file:{filename.strip()}")
-                else:
-                    summaries.append("file")
-                continue
-            summaries.append("attachment")
-        return ", ".join(summaries)
-
-    @staticmethod
-    def _incoming_files_from_metadata(metadata: dict[str, Any] | None) -> list[IncomingFileRef]:
-        if not isinstance(metadata, dict):
-            return []
-        raw = metadata.get("incoming_files")
-        if not isinstance(raw, list):
-            return []
-        parsed: list[IncomingFileRef] = []
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            try:
-                parsed.append(IncomingFileRef.model_validate(item))
-            except Exception:
-                continue
-        return parsed
-
-    def _build_incoming_files_text(self, prompt_text: str, incoming_files: Sequence[IncomingFileRef]) -> str:
-        lines = [
-            "Incoming managed files:",
-            *[
-                (
-                    f"- {item.filename} (path={item.path}, mime={item.mime}, size={item.size_bytes} bytes"
-                    f", source={item.source}, caption={item.caption or ''})"
-                )
-                for item in incoming_files
-            ],
-        ]
-        first_path = incoming_files[0].path if incoming_files else ""
-        suggested_destination = self._suggest_persist_destination(first_path)
-        lines.append(
-            "For file-management requests, prefer move_file/delete_file/send_file/list_files. "
-            "Do NOT call self_insert_artifact unless user explicitly asks to inspect content."
-        )
-        if suggested_destination:
-            lines.append(
-                "If user asks to save the uploaded file, move_file "
-                f"source_path={first_path} destination_path={suggested_destination}."
-            )
-        lines.append("For analysis requests, use self_insert_artifact when inspection is required.")
-        lines.append("If user intent is unclear, ask a clarifying question before acting.")
-        if prompt_text:
-            return f"{prompt_text}\n\n" + "\n".join(lines)
-        return (
-            "The user uploaded file(s) but did not include a clear instruction.\n"
-            + "\n".join(lines)
-            + "\nAsk the user what to do, unless the intent is already obvious."
-        )
-
-    @staticmethod
-    def _suggest_persist_destination(path: str) -> str | None:
-        marker = "uploads/temp/"
-        if path.startswith(marker):
-            return f"uploads/{path[len(marker) :]}"
-        return None
-
-    @staticmethod
-    def _summarize_incoming_files_for_memory(incoming_files: Sequence[IncomingFileRef]) -> str:
-        if not incoming_files:
-            return ""
-        return ", ".join([f"file:{item.filename}" for item in incoming_files])
 
     def _response_schema(self) -> dict[str, Any]:
         return assistant_response_schema(kinds=["text", "html", "markdown_v2"], include_meta=True)
@@ -818,9 +719,9 @@ class LLMMessageHandler:
                 previous_response_id=None,
                 system_prompt_override=self._compact_system_prompt(system_prompt),
             )
-            compaction_tokens = self._track_token_usage(session_id, getattr(compact_generation, "total_tokens", None))
             session_before_reset = self._current_session_tokens(session_id)
-            compact_render, _ = self._extract_answer(compact_generation.payload)
+            compaction_tokens = self._track_token_usage(session_id, getattr(compact_generation, "total_tokens", None))
+            compact_render, _ = extract_answer(compact_generation.payload, logger=self._logger)
             await self._memory.trim_history(session_id, 0)
             await self._memory.append_history(session_id, "user", compaction_user_request)
             await self._memory.append_history(session_id, "assistant", compact_render.text)
@@ -846,324 +747,6 @@ class LLMMessageHandler:
                 session_total_tokens_before_compaction=None,
                 session_total_tokens_after_compaction=self._current_session_tokens(session_id),
             )
-
-    def _extract_answer(self, payload: Any) -> tuple[RenderableResponse, bool]:
-        payload_obj = payload_to_object(payload)
-        if payload_obj is not None:
-            answer = payload_obj.get("answer")
-            should = payload_obj.get("should_answer_to_user")
-            render = self._render_from_payload(answer)
-            should_flag = coerce_should_answer(should)
-            if render is not None and should_flag is not None:
-                self._logger.debug(
-                    "structured output extracted from dict payload",
-                    extra={"kind": render.kind, "has_answer_object": isinstance(answer, dict)},
-                )
-                return render, should_flag
-            if render is not None and should is None:
-                self._logger.debug(
-                    "structured output missing should_answer_to_user; defaulting to true",
-                    extra={"kind": render.kind},
-                )
-                return render, True
-            result = payload_obj.get("result")
-            if isinstance(result, str):
-                return self._plain_render(result), True
-            timestamp = payload_obj.get("timestamp")
-            if isinstance(timestamp, str):
-                return self._plain_render(timestamp), True
-            self._logger.debug(
-                "parsed payload looked structured but failed validation",
-                extra={
-                    "parsed_keys": sorted(str(key) for key in payload_obj.keys()),
-                    "should_type": type(should).__name__,
-                },
-            )
-        if isinstance(payload, str):
-            return self._plain_render(payload), True
-        return self._plain_render(str(payload)), True
-
-    def _render_from_payload(self, value: Any) -> RenderableResponse | None:
-        if isinstance(value, str):
-            self._logger.debug("structured output answer is legacy string; forcing text kind")
-            return self._plain_render(value)
-        if not isinstance(value, dict):
-            return None
-
-        content_value = value.get("content")
-        if not isinstance(content_value, str):
-            legacy_text = value.get("text")
-            if isinstance(legacy_text, str):
-                content_value = legacy_text
-
-        raw_kind = value.get("kind")
-        normalized_kind = self._normalize_render_kind(raw_kind)
-        meta_value = value.get("meta")
-        normalized_meta = meta_value if isinstance(meta_value, dict) else {}
-
-        if isinstance(content_value, str) and normalized_kind is not None:
-            if not isinstance(meta_value, dict) and meta_value is not None:
-                self._logger.debug(
-                    "structured output meta is not an object; coercing to empty object",
-                    extra={"meta_type": type(meta_value).__name__},
-                )
-            render = RenderableResponse(kind=normalized_kind, text=content_value, meta=normalized_meta)
-            self._logger.debug(
-                "structured output answer object normalized",
-                extra={
-                    "kind": render.kind,
-                    "meta_keys": sorted(render.meta.keys()),
-                    "source_keys": sorted(str(key) for key in value.keys()),
-                },
-            )
-            if not render.text.strip():
-                return None
-            return render
-
-        try:
-            render = RenderableResponse.model_validate(value)
-        except Exception as exc:
-            text = content_value
-            if isinstance(text, str):
-                self._logger.debug(
-                    "structured output answer object invalid; using plain text fallback",
-                    extra={
-                        "available_keys": sorted(str(key) for key in value.keys()),
-                        "validation_error": str(exc),
-                        "raw_kind": raw_kind,
-                    },
-                )
-                return self._plain_render(text)
-            return None
-        if not render.text.strip():
-            return None
-        self._logger.debug(
-            "structured output answer object validated",
-            extra={
-                "kind": render.kind,
-                "meta_keys": sorted(render.meta.keys()),
-            },
-        )
-        return render
-
-    @staticmethod
-    def _normalize_render_kind(value: Any) -> Literal["text", "html", "markdown_v2"] | None:
-        if not isinstance(value, str):
-            return None
-        normalized = value.strip().lower()
-        if normalized in {"text", "plain", "plain_text", "plaintext"}:
-            return "text"
-        if normalized in {"html", "htm"}:
-            return "html"
-        if normalized in {"markdown_v2", "markdownv2", "markdown", "md"}:
-            return "markdown_v2"
-        return None
-
-    @staticmethod
-    def _plain_render(text: str) -> RenderableResponse:
-        return RenderableResponse(kind="text", text=text)
-
-    async def _decide_tool_requirement(
-        self,
-        *,
-        session_id: str,
-        history: Sequence[Any],
-        user_text: str,
-        prompt_cache_key: str | None,
-    ) -> tuple[bool, str | None, str | None, int]:
-        if not self._tools:
-            return False, None, None, 0
-        tool_names = [binding.tool.name for binding in self._tools]
-        classifier_prompt = (
-            "Decide whether the user's request requires executing at least one tool before answering. "
-            "Use the available tool names exactly as given. "
-            "Return structured output only.\n\n"
-            f"Available tools: {', '.join(tool_names)}\n"
-            f"User request:\n{user_text}"
-        )
-        try:
-            generation = await self._llm_client.generate(
-                history,
-                classifier_prompt,
-                user_content=None,
-                tools=[],
-                tool_context=None,
-                response_schema=self._tool_requirement_schema(),
-                prompt_cache_key=f"{prompt_cache_key}:tool-requirement" if prompt_cache_key else None,
-                previous_response_id=None,
-                system_prompt_override="You are a strict tool-routing classifier.",
-            )
-            classifier_tokens = self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-            payload = generation.payload
-            payload_obj: dict[str, Any] | None = None
-            if isinstance(payload, dict):
-                payload_obj = payload
-            elif isinstance(payload, str):
-                stripped = payload.strip()
-                if stripped:
-                    parsed = json.loads(stripped)
-                    if isinstance(parsed, dict):
-                        payload_obj = parsed
-            if not payload_obj:
-                return False, None, None, classifier_tokens
-            raw_required = payload_obj.get("requires_tools", False)
-            requires_tools = bool(raw_required)
-            raw_tool = payload_obj.get("suggested_tool")
-            suggested_tool = raw_tool if isinstance(raw_tool, str) and raw_tool in tool_names else None
-            raw_path = payload_obj.get("path")
-            suggested_path = raw_path.strip() if isinstance(raw_path, str) and raw_path.strip() else None
-            self._logger.debug(
-                "tool requirement decision computed",
-                extra={
-                    "requires_tools": requires_tools,
-                    "suggested_tool": suggested_tool,
-                    "suggested_path": suggested_path,
-                },
-            )
-            return requires_tools, suggested_tool, suggested_path, classifier_tokens
-        except Exception:
-            self._logger.exception("tool requirement decision failed")
-            return False, None, None, 0
-
-    @staticmethod
-    def _tool_requirement_schema() -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "requires_tools": {"type": "boolean"},
-                "suggested_tool": {"type": ["string", "null"]},
-                "path": {"type": ["string", "null"]},
-            },
-            "required": ["requires_tools", "suggested_tool", "path"],
-            "additionalProperties": False,
-        }
-
-    @staticmethod
-    def _count_tool_messages_in_state(state: AgentState) -> int:
-        return sum(1 for message in state.messages if message.role == "tool")
-
-    @staticmethod
-    def _extract_agent_trace(state: AgentState) -> tuple[list[dict[str, Any]], bool, bool]:
-        trace: list[dict[str, Any]] = []
-        fallback_used = False
-        last_result_status: str | None = None
-        last_should_answer: bool | None = None
-        saw_invoke = False
-        for message in state.messages:
-            if message.role != "tool" or message.name != "invoke_agent":
-                continue
-            if not message.content:
-                continue
-            part = message.content[0]
-            if part.type != "json" or not isinstance(part.value, dict):
-                continue
-            saw_invoke = True
-            agent = str(part.value.get("agent") or "")
-            ok = bool(part.value.get("ok", False))
-            error = part.value.get("error")
-            result_status = part.value.get("result_status")
-            delegated_should_answer = part.value.get("should_answer_to_user")
-            if not ok:
-                fallback_used = True
-            if isinstance(result_status, str):
-                last_result_status = result_status
-            else:
-                last_result_status = None
-            if isinstance(delegated_should_answer, bool):
-                last_should_answer = delegated_should_answer
-            else:
-                last_should_answer = None
-            trace_entry: dict[str, Any] = {
-                "agent": "minibot",
-                "decision": "invoke_agent",
-                "target": agent or None,
-                "ok": ok,
-            }
-            if isinstance(result_status, str) and result_status.strip():
-                trace_entry["result_status"] = result_status
-            if isinstance(delegated_should_answer, bool):
-                trace_entry["should_answer_to_user"] = delegated_should_answer
-            if isinstance(error, str) and error.strip():
-                trace_entry["error"] = error
-            trace.append(trace_entry)
-        unresolved = False
-        if saw_invoke:
-            if last_result_status in {"invalid_result", "not_user_answerable"}:
-                unresolved = True
-            if last_should_answer is False:
-                unresolved = True
-        return trace, fallback_used, unresolved
-
-    async def _attempt_direct_file_delete(
-        self,
-        *,
-        user_text: str,
-        tool_context: ToolContext,
-        suggested_tool: str | None,
-        suggested_path: str | None,
-    ) -> str | None:
-        if suggested_tool not in {"delete_file", "filesystem"}:
-            return None
-        binding = next((item for item in self._tools if item.tool.name == "filesystem"), None)
-        if binding is None:
-            return None
-        candidates = self._extract_delete_path_candidates(user_text)
-        if suggested_path is not None and suggested_path not in candidates:
-            candidates.insert(0, suggested_path)
-        if not candidates:
-            return None
-        self._logger.debug(
-            "attempting direct delete_file fallback",
-            extra={"candidate_count": len(candidates), "candidates": candidates[:5]},
-        )
-        last_message: str | None = None
-        for candidate in candidates:
-            try:
-                payload = {"action": "delete", "path": candidate}
-                raw_result = await binding.handler(payload, tool_context)
-                if not isinstance(raw_result, dict):
-                    continue
-                message = str(raw_result.get("message") or "")
-                deleted_count = int(raw_result.get("deleted_count") or 0)
-                if deleted_count > 0:
-                    return message or f"Deleted file successfully: {candidate}"
-                if message:
-                    last_message = message
-            except Exception:
-                self._logger.exception("direct filesystem delete fallback failed", extra={"path": candidate})
-        return last_message
-
-    @staticmethod
-    def _extract_delete_path_candidates(text: str) -> list[str]:
-        candidates: list[str] = []
-
-        def _normalize(path_value: str) -> str | None:
-            value = path_value.strip().strip('"').strip("'")
-            if not value:
-                return None
-            if value.startswith("./"):
-                value = value[2:]
-            return normalize_path_separators(value)
-
-        quoted = re.findall(r"['\"]([^'\"]+)['\"]", text)
-        for item in quoted:
-            normalized = _normalize(item)
-            if normalized and normalized not in candidates:
-                candidates.append(normalized)
-
-        inline_paths = re.findall(r"(?:\.?/?[a-zA-Z0-9_-]+/)+[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]{1,10}", text)
-        for item in inline_paths:
-            normalized = _normalize(item)
-            if normalized and normalized not in candidates:
-                candidates.append(normalized)
-
-        filename_match = re.search(r"([a-zA-Z0-9_.-]+\.[a-zA-Z0-9]{1,10})", text)
-        if filename_match:
-            filename = _normalize(filename_match.group(1))
-            if filename and filename not in candidates:
-                candidates.append(filename)
-
-        return candidates
 
     def _format_runtime_error_message(self, exc: Exception) -> str:
         if not self._logger.isEnabledFor(logging.DEBUG):
