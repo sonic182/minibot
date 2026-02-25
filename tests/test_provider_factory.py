@@ -54,10 +54,37 @@ class _FakeProvider:
         self.client_kwargs = client_kwargs or {}
         self.http2 = http2
         self.calls: list[dict[str, Any]] = []
+        self.requests: list[dict[str, Any]] = []
 
     async def acomplete(self, **kwargs: Any) -> _FakeResponse:
         self.calls.append(kwargs)
         return _FakeResponse(main_response=_FakeMessage(content="ok", tool_calls=None), original={"id": "resp-1"})
+
+    async def request(
+        self,
+        method: str,
+        path: str,
+        json_data: dict[str, Any] | None = None,
+        **_: Any,
+    ) -> dict[str, Any]:
+        self.requests.append(
+            {
+                "method": method,
+                "path": path,
+                "json_data": json_data or {},
+            }
+        )
+        return {
+            "id": "cmp-1",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "compacted"}],
+                }
+            ],
+            "usage": {"total_tokens": 9},
+        }
 
 
 @pytest.mark.asyncio
@@ -679,6 +706,64 @@ async def test_generate_omits_prompt_cache_when_disabled(monkeypatch: pytest.Mon
     call = client._provider.calls[-1]
     assert "prompt_cache_key" not in call
     assert "prompt_cache_retention" not in call
+
+
+@pytest.mark.asyncio
+async def test_compact_response_calls_responses_compact_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _FakeResponsesProvider(_FakeProvider):
+        pass
+
+    monkeypatch.setattr(provider_factory, "OpenAIResponsesProvider", _FakeResponsesProvider)
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _FakeResponsesProvider)
+    client = LLMClient(LLMMConfig(provider="openai_responses", api_key="secret", model="gpt-5-mini"))
+
+    compacted = await client.compact_response(previous_response_id="resp-1", prompt_cache_key="session-1")
+
+    req = client._provider.requests[-1]
+    assert req["method"] == "POST"
+    assert req["path"] == "/responses/compact"
+    assert req["json_data"]["model"] == "gpt-5-mini"
+    assert req["json_data"]["previous_response_id"] == "resp-1"
+    assert req["json_data"]["prompt_cache_key"] == "session-1"
+    assert compacted.response_id == "cmp-1"
+    assert compacted.total_tokens == 9
+
+
+@pytest.mark.asyncio
+async def test_compact_response_omits_prompt_cache_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _FakeResponsesProvider(_FakeProvider):
+        pass
+
+    monkeypatch.setattr(provider_factory, "OpenAIResponsesProvider", _FakeResponsesProvider)
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _FakeResponsesProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai_responses",
+            api_key="secret",
+            model="gpt-5-mini",
+            prompt_cache_enabled=False,
+        )
+    )
+
+    await client.compact_response(previous_response_id="resp-1", prompt_cache_key="session-1")
+
+    req = client._provider.requests[-1]
+    assert "prompt_cache_key" not in req["json_data"]
+
+
+@pytest.mark.asyncio
+async def test_compact_response_rejects_non_responses_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _FakeProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="gpt-5-mini"))
+
+    with pytest.raises(RuntimeError):
+        await client.compact_response(previous_response_id="resp-1")
 
 
 def test_parse_tool_call_accepts_python_dict_string() -> None:

@@ -107,6 +107,16 @@ class StubLLMClient:
         self.total_tokens = total_tokens
         self._responses_state_mode = responses_state_mode
         self._prompt_cache_enabled = prompt_cache_enabled
+        self.compact_calls: list[dict[str, Any]] = []
+        self.compact_response_id = "cmp-1"
+        self.compact_output: list[dict[str, Any]] = [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "ok"}],
+            }
+        ]
+        self.compact_total_tokens: int | None = total_tokens
 
     async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
         self.calls.append({"args": args, "kwargs": kwargs})
@@ -136,6 +146,26 @@ class StubLLMClient:
 
     def prompt_cache_enabled(self) -> bool:
         return self._prompt_cache_enabled
+
+    async def compact_response(
+        self,
+        *,
+        previous_response_id: str,
+        prompt_cache_key: str | None = None,
+    ) -> Any:
+        from minibot.llm.provider_factory import LLMCompaction
+
+        self.compact_calls.append(
+            {
+                "previous_response_id": previous_response_id,
+                "prompt_cache_key": prompt_cache_key,
+            }
+        )
+        return LLMCompaction(
+            response_id=self.compact_response_id,
+            output=self.compact_output,
+            total_tokens=self.compact_total_tokens,
+        )
 
 
 class FailingLLMClient(StubLLMClient):
@@ -401,6 +431,51 @@ async def test_handler_compacts_history_when_token_limit_reached() -> None:
     assert token_trace.get("compaction_performed") is True
     assert token_trace.get("session_total_tokens_before_compaction") == 60
     assert token_trace.get("session_total_tokens_after_compaction") == 0
+
+
+@pytest.mark.asyncio
+async def test_handler_uses_responses_compaction_endpoint_in_previous_id_mode() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(
+        {"answer": "ok", "should_answer_to_user": True},
+        response_id="resp-1",
+        is_responses=True,
+        provider="openai_responses",
+        total_tokens=60,
+        responses_state_mode="previous_response_id",
+    )
+    client.compact_response_id = "cmp-42"
+    client.compact_output = [
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "compacted via endpoint"}],
+        }
+    ]
+    client.compact_total_tokens = 7
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        max_history_tokens=50,
+        notify_compaction_updates=True,
+    )
+
+    response = await handler.handle(_message_event("one"))
+
+    assert len(client.compact_calls) == 1
+    assert client.compact_calls[0]["previous_response_id"] == "resp-1"
+    assert client.calls[-1]["args"][1] == "one"
+    session_id = session_id_for(_message_event("one").message)
+    assert handler._session_previous_response_ids[session_id] == "cmp-42"  # type: ignore[attr-defined]
+    assert memory._store[session_id][1].content == "compacted via endpoint"
+    assert response.metadata.get("compaction_updates") == [
+        "running compaction...",
+        "done compacting",
+        "compacted via endpoint",
+    ]
+    token_trace = response.metadata.get("token_trace")
+    assert isinstance(token_trace, dict)
+    assert token_trace.get("turn_total_tokens") == 67
 
 
 @pytest.mark.asyncio

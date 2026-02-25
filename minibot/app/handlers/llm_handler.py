@@ -704,6 +704,30 @@ class LLMMessageHandler:
             "Do not include preamble."
         )
 
+    def _should_use_responses_compaction_endpoint(self, session_id: str) -> bool:
+        if not self._llm_client.is_responses_provider():
+            return False
+        if self._responses_state_mode() != "previous_response_id":
+            return False
+        return session_id in self._session_previous_response_ids
+
+    @staticmethod
+    def _extract_compaction_text(items: Sequence[dict[str, Any]]) -> str:
+        parts: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for entry in content:
+                if not isinstance(entry, dict):
+                    continue
+                text = entry.get("text")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+        return "".join(parts).strip()
+
     async def _compact_history_if_needed(
         self,
         session_id: str,
@@ -746,6 +770,36 @@ class LLMMessageHandler:
         compaction_tokens = 0
         compaction_user_request = self._COMPACTION_USER_REQUEST
         try:
+            if self._should_use_responses_compaction_endpoint(session_id):
+                try:
+                    compacted = await self._llm_client.compact_response(
+                        previous_response_id=self._session_previous_response_ids[session_id],
+                        prompt_cache_key=f"{prompt_cache_key}:compact",
+                    )
+                    compaction_text = self._extract_compaction_text(compacted.output) or "Conversation compacted."
+                    session_before_reset = self._current_session_tokens(session_id)
+                    compaction_tokens = self._track_token_usage(session_id, compacted.total_tokens)
+                    await self._memory.trim_history(session_id, 0)
+                    await self._memory.append_history(session_id, "user", compaction_user_request)
+                    await self._memory.append_history(session_id, "assistant", compaction_text)
+                    self._session_total_tokens[session_id] = 0
+                    self._session_previous_response_ids[session_id] = compacted.response_id
+                    if notify:
+                        updates.append("done compacting")
+                        updates.append(compaction_text)
+                    return _CompactionResult(
+                        updates=updates,
+                        performed=True,
+                        tokens_used=compaction_tokens,
+                        session_total_tokens_before_compaction=session_before_reset,
+                        session_total_tokens_after_compaction=0,
+                    )
+                except Exception as exc:
+                    self._logger.warning(
+                        "responses compact endpoint failed; falling back to summary compaction",
+                        extra={"error": str(exc)},
+                    )
+
             compact_generation = await self._llm_client.generate(
                 history,
                 compaction_user_request,

@@ -73,6 +73,13 @@ class ToolExecutionRecord:
     result: ToolResult
 
 
+@dataclass
+class LLMCompaction:
+    response_id: str
+    output: list[dict[str, Any]]
+    total_tokens: int | None = None
+
+
 class LLMClient:
     def __init__(self, config: LLMMConfig) -> None:
         configured_provider = config.provider.lower()
@@ -262,6 +269,33 @@ class LLMClient:
 
     def prompt_cache_enabled(self) -> bool:
         return self._prompt_cache_enabled
+
+    async def compact_response(
+        self,
+        *,
+        previous_response_id: str,
+        prompt_cache_key: str | None = None,
+    ) -> LLMCompaction:
+        if not self._is_responses_provider:
+            raise RuntimeError("compaction endpoint is available only for openai_responses provider")
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "previous_response_id": previous_response_id,
+        }
+        if prompt_cache_key and self._prompt_cache_enabled:
+            payload["prompt_cache_key"] = prompt_cache_key
+        raw = await self._provider.request("POST", "/responses/compact", json_data=payload)
+        response_id = raw.get("id") if isinstance(raw.get("id"), str) else ""
+        if not response_id:
+            raise RuntimeError("responses compact endpoint returned payload without id")
+        output = raw.get("output")
+        normalized_output = output if isinstance(output, list) else []
+        total_tokens = self._extract_total_tokens_from_payload(raw)
+        return LLMCompaction(
+            response_id=response_id,
+            output=normalized_output,
+            total_tokens=total_tokens,
+        )
 
     async def complete_once(
         self,
@@ -460,6 +494,10 @@ class LLMClient:
         original = getattr(response, "original", None)
         if not isinstance(original, dict):
             return None
+        return LLMClient._extract_total_tokens_from_payload(original)
+
+    @staticmethod
+    def _extract_total_tokens_from_payload(original: dict[str, Any]) -> int | None:
         usage = original.get("usage")
         if not isinstance(usage, dict):
             return None
