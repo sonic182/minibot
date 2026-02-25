@@ -30,6 +30,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── console.md
 │   │   └── telegram.md
 │   ├── compact.md
+│   ├── main_agent_system.md
 │   └── policies/
 │       ├── delegation.md
 │       └── tool_usage.md
@@ -57,7 +58,14 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── tool_policy_utils.py
 │   │   ├── tool_use_guardrail.py
 │   │   └── handlers/
-│   │       └── llm_handler.py
+│   │       ├── llm_handler.py
+│   │       └── services/
+│   │           ├── compaction_service.py
+│   │           ├── input_service.py
+│   │           ├── metadata_service.py
+│   │           ├── prompt_service.py
+│   │           ├── runtime_service.py
+│   │           └── session_state_service.py
 │   ├── core/
 │   │   ├── agent_runtime.py
 │   │   ├── agents.py
@@ -90,6 +98,17 @@ and emit outbound responses back to the active channel adapter.
 │   │       └── sqlalchemy_prompt_store.py
 │   ├── llm/
 │   │   ├── provider_factory.py
+│   │   ├── services/
+│   │   │   ├── client_bootstrap.py
+│   │   │   ├── compaction.py
+│   │   │   ├── models.py
+│   │   │   ├── provider_registry.py
+│   │   │   ├── request_builder.py
+│   │   │   ├── schema_fallback.py
+│   │   │   ├── schema_policy.py
+│   │   │   ├── tool_executor.py
+│   │   │   ├── tool_loop_guard.py
+│   │   │   └── usage_parser.py
 │   │   └── tools/
 │   │       ├── descriptions/      (tool description .txt files, loaded at runtime)
 │   │       ├── agent_delegate.py
@@ -115,6 +134,7 @@ and emit outbound responses back to the active channel adapter.
 │       ├── parse_utils.py
 │       ├── path_utils.py
 │       ├── prompt_loader.py
+│       ├── retries.py
 │       └── utils.py
 └── tests/
     └── ... (mirrors runtime modules)
@@ -224,15 +244,14 @@ flowchart TD
 - `app/runtime_limits.py`: constructs `AgentRuntimeLimits` from config and client capabilities (`build_runtime_limits`).
 - `app/tool_policy_utils.py`: shared `fnmatch`-based tool allow/deny filtering used by agent policies and tool capability views.
 - `app/tool_use_guardrail.py`: `ToolUseGuardrail` protocol with `NoopToolUseGuardrail` (default) and `LLMClassifierToolUseGuardrail` (opt-in via `[orchestration].main_tool_use_guardrail = "llm_classifier"`).
-- `app/handlers/llm_handler.py`:
-  - assembles model input from text plus attachments (via `incoming_files_context`),
-  - composes per-channel system prompt by loading prompt fragments from `shared/prompt_loader.py`,
-  - runs main-agent runtime/tool loop (delegates to `_run_with_agent_runtime`),
-  - applies optional tool-use guardrail per turn,
-  - tracks per-turn/session token usage metadata and optional history compaction flow,
-  - enforces provider constraints for multimodal support,
-  - stores transcript history safely (attachment summaries only, not raw blobs),
-  - parses structured model output via `response_parser`.
+- `app/handlers/llm_handler.py`: top-level request flow coordinator for history persistence, runtime execution, format repair, and response metadata assembly.
+- `app/handlers/services/*`: extracted collaborators used by `LLMMessageHandler`:
+  - `input_service.py`: multimodal input shaping (`responses` vs chat-completions compatible parts),
+  - `prompt_service.py`: base prompt + policy/channel fragments + environment/tool guidance composition,
+  - `runtime_service.py`: main runtime execution, guardrail retry path, and delegation fallback handling,
+  - `compaction_service.py`: token-pressure checks and compaction strategy (Responses compact endpoint or summary fallback),
+  - `session_state_service.py`: per-session token counters and `previous_response_id` tracking,
+  - `metadata_service.py`: provider/model metadata extraction for outbound responses.
 - `app/agent_runtime.py`:
   - owns directive-loop execution (`provider step -> tool calls -> tool output append -> directive apply -> next step`),
   - maintains runtime `AgentState` (`messages`, `meta`),
@@ -295,7 +314,12 @@ Current notes:
 
 ## LLM Layer
 
-- `llm/provider_factory.py`: provider/client abstraction around `sonic182/llm-async`, including tool execution loops and provider capability branching.
+- `llm/provider_factory.py`: high-level `LLMClient` that orchestrates generate/step flows and delegates request assembly, schema fallback, tool execution, and usage parsing to `llm/services/*`.
+- `llm/services/client_bootstrap.py`: provider construction, timeout/retry wiring, provider selection, and system-prompt loading (including HTTP/2 disablement for `http://` base URLs).
+- `llm/services/request_builder.py`: canonical request kwargs/message assembly for `generate` and runtime `complete_once` calls.
+- `llm/services/schema_policy.py` + `schema_fallback.py`: strict schema preparation and compatibility fallback behavior when providers reject schema mode.
+- `llm/services/tool_executor.py` + `tool_loop_guard.py`: tool call execution and repeated-loop safeguards/fallback payloads.
+- `llm/services/usage_parser.py` + `models.py`: usage/response parsing and typed return models (`LLMGeneration`, `LLMCompletionStep`, `LLMCompaction`).
 - `llm/tools/factory.py`: builds enabled tool bindings from settings.
 - `llm/tools/description_loader.py`: loads per-tool description strings from the `descriptions/` package at runtime.
 - `llm/tools/*`: concrete tool schemas + handlers:

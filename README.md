@@ -1,7 +1,7 @@
 MiniBot 🤖
 =======
 
-[![PyPI version](https://img.shields.io/pypi/v/minibot)](https://pypi.org/project/minibot/0.0.1/)
+[![PyPI version](https://img.shields.io/pypi/v/minibot)](https://pypi.org/project/minibot/)
 
 Your personal AI assistant for Telegram - self-hosted, auditable, and intentionally opinionated.
 
@@ -492,10 +492,10 @@ MiniBot follows a lightweight hexagonal layout described in detail in `ARCHITECT
 `minibot/` split into:
 
 - `core/` – Domain entities and protocols (channel DTOs, memory contracts, future job models).
-- `app/` – Application services such as the daemon, dispatcher, handlers, and event bus that orchestrate domain + adapters.
+- `app/` – Application services such as the daemon, dispatcher, event bus, and handler sub-services (`handlers/services/*`) that orchestrate domain + adapters.
 - `adapters/` – Infrastructure edges (config, messaging, logging, memory, scheduler persistence) wired through the
   DI container.
-- `llm/` – Thin wrappers around [llm-async] providers plus `llm/tools/`, which defines tool schemas/handlers that expose bot capabilities (KV memory, scheduler controls, utilities) to the model.
+- `llm/` – Provider integration (`provider_factory.py`) plus internal request/runtime services (`llm/services/*`) and `llm/tools/` schemas/handlers that expose bot capabilities.
 - `shared/` – Cross-cutting utilities.
 
 Tests under `tests/` mirror this structure so every layer has a corresponding suite. This “mini hex” keeps the domain
@@ -571,7 +571,9 @@ Tools live under `minibot/llm/tools/` and are exposed to [llm-async] with server
 Conversation context:
 
 - Uses persisted conversation history with optional message trimming (`max_history_messages`) and optional token-threshold compaction (`max_history_tokens`).
-- In OpenAI Responses mode, turns are rebuilt from stored history (no `previous_response_id` reuse).
+- In OpenAI Responses mode, state handling is configurable:
+  - Main agent follows `llm.main_responses_state_mode` (default: `full_messages`).
+  - Specialist agents follow `llm.agent_responses_state_mode` (default: `previous_response_id`).
 
 Roadmap / Todos
 ---------------
