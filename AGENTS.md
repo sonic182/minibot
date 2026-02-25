@@ -22,7 +22,7 @@
 
 ## Code Style
 - **Line length**: 119 characters.
-- **Python version**: 3.12–3.13 (`pyproject.toml` constraint: `>=3.12,<3.14`) with explicit type hints (Pydantic models, protocols, etc.).
+- **Python version**: 3.12–3.14 (`pyproject.toml` constraint: `>=3.12,<3.15`) with explicit type hints (Pydantic models, protocols, etc.).
 - **Imports**: group as standard library → third-party → local.
 - **Naming**: `snake_case` for functions/variables, `PascalCase` for classes.
 - **Async-first**: favor `asyncio`-compatible async/await patterns for I/O-bound code.
