@@ -19,6 +19,7 @@ from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
 from minibot.core.agent_runtime import ToolResult
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.shared.retries import AsyncRetriesService, RetryPolicy
 from minibot.shared.parse_utils import parse_json_maybe_python_object, parse_json_with_fenced_fallback
 from minibot.shared.json_schema import to_openai_strict_schema
 from minibot.shared.utils import humanize_token_count
@@ -117,6 +118,10 @@ class LLMClient:
         self._responses_state_mode = getattr(config, "responses_state_mode", "full_messages")
         self._prompt_cache_enabled = bool(getattr(config, "prompt_cache_enabled", True))
         self._prompt_cache_retention = getattr(config, "prompt_cache_retention", None)
+        self._compaction_retry_attempts = 3
+        self._compaction_retry_base_delay_seconds = float(config.retry_delay_seconds)
+        self._compaction_retry_max_delay_seconds = min(self._compaction_retry_base_delay_seconds * 4, 10.0)
+        self._retries_service = AsyncRetriesService()
         self._openrouter_models = list(getattr(getattr(config, "openrouter", None), "models", []) or [])
         self._openrouter_provider = self._build_openrouter_provider_payload(config)
         self._openrouter_reasoning_enabled = self._resolve_openrouter_reasoning_enabled(config)
@@ -284,7 +289,32 @@ class LLMClient:
         }
         if prompt_cache_key and self._prompt_cache_enabled:
             payload["prompt_cache_key"] = prompt_cache_key
-        raw = await self._provider.request("POST", "/responses/compact", json_data=payload)
+
+        retry_policy = RetryPolicy(
+            max_attempts=self._compaction_retry_attempts,
+            base_delay_seconds=self._compaction_retry_base_delay_seconds,
+            max_delay_seconds=self._compaction_retry_max_delay_seconds,
+            backoff_factor=2.0,
+            jitter=False,
+            retry_exceptions=(Exception,),
+        )
+
+        def _on_retry(exc: Exception, attempt: int, delay: float) -> None:
+            self._logger.warning(
+                "responses compact request failed; retrying",
+                extra={
+                    "attempt": attempt,
+                    "next_delay_seconds": round(delay, 3),
+                    "model": self._model,
+                    "error": str(exc),
+                },
+            )
+
+        raw = await self._retries_service.run(
+            lambda: self._provider.request("POST", "/responses/compact", json_data=payload),
+            policy=retry_policy,
+            on_retry=_on_retry,
+        )
         response_id = raw.get("id") if isinstance(raw.get("id"), str) else ""
         if not response_id:
             raise RuntimeError("responses compact endpoint returned payload without id")

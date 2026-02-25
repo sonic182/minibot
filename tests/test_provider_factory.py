@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -764,6 +765,134 @@ async def test_compact_response_rejects_non_responses_provider(monkeypatch: pyte
 
     with pytest.raises(RuntimeError):
         await client.compact_response(previous_response_id="resp-1")
+
+
+@pytest.mark.asyncio
+async def test_compact_response_retries_and_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _FlakyResponsesProvider(_FakeProvider):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._request_attempt = 0
+
+        async def request(
+            self,
+            method: str,
+            path: str,
+            json_data: dict[str, Any] | None = None,
+            **_: Any,
+        ) -> dict[str, Any]:
+            self._request_attempt += 1
+            self.requests.append(
+                {
+                    "method": method,
+                    "path": path,
+                    "json_data": json_data or {},
+                    "attempt": self._request_attempt,
+                }
+            )
+            if self._request_attempt <= 2:
+                raise RuntimeError("temporary failure")
+            return {
+                "id": "cmp-1",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "compacted"}]}],
+                "usage": {"total_tokens": 9},
+            }
+
+    slept: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(provider_factory, "OpenAIResponsesProvider", _FlakyResponsesProvider)
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _FlakyResponsesProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai_responses",
+            api_key="secret",
+            model="gpt-5-mini",
+            retry_delay_seconds=0.25,
+        )
+    )
+
+    compacted = await client.compact_response(previous_response_id="resp-1")
+
+    assert compacted.response_id == "cmp-1"
+    assert len(client._provider.requests) == 3
+    assert slept == [0.25, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_compact_response_retries_and_fails_when_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _AlwaysFailResponsesProvider(_FakeProvider):
+        async def request(
+            self,
+            method: str,
+            path: str,
+            json_data: dict[str, Any] | None = None,
+            **_: Any,
+        ) -> dict[str, Any]:
+            self.requests.append({"method": method, "path": path, "json_data": json_data or {}})
+            raise RuntimeError("temporary failure")
+
+    slept: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(provider_factory, "OpenAIResponsesProvider", _AlwaysFailResponsesProvider)
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _AlwaysFailResponsesProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai_responses",
+            api_key="secret",
+            model="gpt-5-mini",
+            retry_delay_seconds=0.25,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="temporary failure"):
+        await client.compact_response(previous_response_id="resp-1")
+
+    assert len(client._provider.requests) == 3
+    assert slept == [0.25, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_compact_response_does_not_retry_invalid_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _InvalidPayloadResponsesProvider(_FakeProvider):
+        async def request(
+            self,
+            method: str,
+            path: str,
+            json_data: dict[str, Any] | None = None,
+            **_: Any,
+        ) -> dict[str, Any]:
+            self.requests.append({"method": method, "path": path, "json_data": json_data or {}})
+            return {"output": [], "usage": {"total_tokens": 1}}
+
+    slept: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(provider_factory, "OpenAIResponsesProvider", _InvalidPayloadResponsesProvider)
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _InvalidPayloadResponsesProvider)
+    client = LLMClient(LLMMConfig(provider="openai_responses", api_key="secret", model="gpt-5-mini"))
+
+    with pytest.raises(RuntimeError, match="without id"):
+        await client.compact_response(previous_response_id="resp-1")
+
+    assert len(client._provider.requests) == 1
+    assert slept == []
 
 
 def test_parse_tool_call_accepts_python_dict_string() -> None:

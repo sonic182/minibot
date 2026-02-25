@@ -479,6 +479,54 @@ async def test_handler_uses_responses_compaction_endpoint_in_previous_id_mode() 
 
 
 @pytest.mark.asyncio
+async def test_handler_fallback_compaction_updates_previous_response_id() -> None:
+    class _FallbackCompactionClient(StubLLMClient):
+        def __init__(self) -> None:
+            super().__init__(
+                {"answer": "ok", "should_answer_to_user": True},
+                response_id="resp-1",
+                is_responses=True,
+                provider="openai_responses",
+                total_tokens=60,
+                responses_state_mode="previous_response_id",
+            )
+            self._generate_calls = 0
+
+        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+            self.calls.append({"args": args, "kwargs": kwargs})
+            self._generate_calls += 1
+            if self._generate_calls == 1:
+                return LLMGeneration(self.payload, "resp-1", total_tokens=self.total_tokens)
+            return LLMGeneration(self.payload, "cmp-fallback", total_tokens=5)
+
+        async def compact_response(
+            self,
+            *,
+            previous_response_id: str,
+            prompt_cache_key: str | None = None,
+        ) -> Any:
+            _ = previous_response_id, prompt_cache_key
+            raise RuntimeError("compact endpoint unavailable")
+
+    memory = StubMemory()
+    client = _FallbackCompactionClient()
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        max_history_tokens=50,
+        notify_compaction_updates=True,
+    )
+
+    response = await handler.handle(_message_event("one"))
+
+    session_id = session_id_for(_message_event("one").message)
+    assert handler._session_previous_response_ids[session_id] == "cmp-fallback"  # type: ignore[attr-defined]
+    assert response.metadata.get("compaction_updates") == ["running compaction...", "done compacting", "ok"]
+    assert len(client.calls) == 2
+    assert client.calls[1]["kwargs"].get("previous_response_id") is None
+
+
+@pytest.mark.asyncio
 async def test_handler_uses_compact_prompt_from_prompts_dir(tmp_path: Path) -> None:
     (tmp_path / "compact.md").write_text("compact with these rules", encoding="utf-8")
     memory = StubMemory()

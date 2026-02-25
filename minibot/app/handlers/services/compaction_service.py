@@ -136,6 +136,12 @@ class HistoryCompactionService:
             await self._memory.append_history(session_id, "user", self._compaction_user_request)
             await self._memory.append_history(session_id, "assistant", compact_render.text)
             self._session_state.session_total_tokens[session_id] = 0
+            if responses_state_mode == "previous_response_id":
+                fallback_response_id = getattr(compact_generation, "response_id", None)
+                if isinstance(fallback_response_id, str) and fallback_response_id:
+                    self._session_state.set_previous_response_id(session_id, fallback_response_id)
+                else:
+                    self._session_state.clear_previous_response_id(session_id)
             if notify:
                 updates.append("done compacting")
                 updates.append(compact_render.text)

@@ -21,7 +21,7 @@ from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.channels import ChannelMessage
 from minibot.core.memory import MemoryEntry
 from minibot.core.memory import MemoryBackend
-from minibot.llm.provider_factory import LLMClient, LLMCompaction
+from minibot.llm.provider_factory import LLMClient, LLMCompaction, LLMGeneration
 from minibot.llm.tools.base import ToolContext
 
 
@@ -229,6 +229,106 @@ async def test_compaction_service_uses_responses_endpoint_when_available() -> No
     assert client.compact_calls[0]["previous_response_id"] == "resp-previous"
     assert state.get_previous_response_id("s1") == "cmp-1"
     assert memory._store["s1"][1].content == "compacted text"
+
+
+@pytest.mark.asyncio
+async def test_compaction_service_fallback_summary_updates_previous_response_id() -> None:
+    class _FallbackClient(_StubClient):
+        async def compact_response(self, *, previous_response_id: str, prompt_cache_key: str | None) -> LLMCompaction:
+            _ = previous_response_id, prompt_cache_key
+            raise RuntimeError("compact endpoint unavailable")
+
+        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+            _ = args, kwargs
+            return LLMGeneration(
+                {"answer": {"kind": "text", "content": "summary via fallback"}, "should_answer_to_user": True},
+                response_id="cmp-fallback",
+                total_tokens=7,
+            )
+
+    client = _FallbackClient()
+    memory = _StubMemory()
+    state = SessionStateService()
+    state.track_tokens("s1", 20)
+    state.set_previous_response_id("s1", "resp-previous")
+    await memory.append_history("s1", "user", "hi")
+    prompt_service = PromptService(
+        llm_client=cast(LLMClient, client),
+        tools=[],
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+    )
+    service = HistoryCompactionService(
+        memory=cast(MemoryBackend, memory),
+        llm_client=cast(LLMClient, client),
+        session_state=state,
+        prompt_service=prompt_service,
+        logger=logging.getLogger("test"),
+        max_history_tokens=10,
+        compaction_user_request="Please compact the current conversation memory.",
+    )
+
+    result = await service.compact_history_if_needed(
+        "s1",
+        prompt_cache_key="telegram:1",
+        system_prompt="system",
+        notify=True,
+        responses_state_mode="previous_response_id",
+    )
+
+    assert result.performed is True
+    assert state.get_previous_response_id("s1") == "cmp-fallback"
+    assert memory._store["s1"][1].content == "summary via fallback"
+
+
+@pytest.mark.asyncio
+async def test_compaction_service_fallback_summary_clears_previous_response_id_when_missing() -> None:
+    class _FallbackClientNoResponseId(_StubClient):
+        async def compact_response(self, *, previous_response_id: str, prompt_cache_key: str | None) -> LLMCompaction:
+            _ = previous_response_id, prompt_cache_key
+            raise RuntimeError("compact endpoint unavailable")
+
+        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+            _ = args, kwargs
+            return LLMGeneration(
+                {"answer": {"kind": "text", "content": "summary via fallback"}, "should_answer_to_user": True},
+                response_id=None,
+                total_tokens=7,
+            )
+
+    client = _FallbackClientNoResponseId()
+    memory = _StubMemory()
+    state = SessionStateService()
+    state.track_tokens("s1", 20)
+    state.set_previous_response_id("s1", "resp-previous")
+    await memory.append_history("s1", "user", "hi")
+    prompt_service = PromptService(
+        llm_client=cast(LLMClient, client),
+        tools=[],
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+    )
+    service = HistoryCompactionService(
+        memory=cast(MemoryBackend, memory),
+        llm_client=cast(LLMClient, client),
+        session_state=state,
+        prompt_service=prompt_service,
+        logger=logging.getLogger("test"),
+        max_history_tokens=10,
+        compaction_user_request="Please compact the current conversation memory.",
+    )
+
+    result = await service.compact_history_if_needed(
+        "s1",
+        prompt_cache_key="telegram:1",
+        system_prompt="system",
+        notify=True,
+        responses_state_mode="previous_response_id",
+    )
+
+    assert result.performed is True
+    assert state.get_previous_response_id("s1") is None
+    assert memory._store["s1"][1].content == "summary via fallback"
 
 
 @pytest.mark.asyncio
