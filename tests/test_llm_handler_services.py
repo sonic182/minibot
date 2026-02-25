@@ -193,6 +193,26 @@ def test_session_state_service_tracks_tokens_and_previous_response_id() -> None:
     assert trace["turn_total_tokens"] == 12
 
 
+def test_session_state_service_tracks_usage_snapshot() -> None:
+    state = SessionStateService()
+
+    state.track_usage(
+        "s1",
+        input_tokens=120,
+        output_tokens=18,
+        total_tokens=138,
+        cached_input_tokens=40,
+        reasoning_output_tokens=7,
+    )
+
+    usage_trace = state.latest_usage_trace("s1")
+    assert usage_trace["input_tokens"] == 120
+    assert usage_trace["output_tokens"] == 18
+    assert usage_trace["total_tokens"] == 138
+    assert usage_trace["cached_input_tokens"] == 40
+    assert usage_trace["reasoning_output_tokens"] == 7
+
+
 @pytest.mark.asyncio
 async def test_compaction_service_uses_responses_endpoint_when_available() -> None:
     client = _StubClient()
@@ -229,6 +249,50 @@ async def test_compaction_service_uses_responses_endpoint_when_available() -> No
     assert client.compact_calls[0]["previous_response_id"] == "resp-previous"
     assert state.get_previous_response_id("s1") == "cmp-1"
     assert memory._store["s1"][1].content == "compacted text"
+
+
+@pytest.mark.asyncio
+async def test_compaction_service_uses_latest_input_tokens_for_responses_threshold() -> None:
+    client = _StubClient()
+    memory = _StubMemory()
+    state = SessionStateService()
+    state.track_tokens("s1", 20)
+    state.track_usage(
+        "s1",
+        input_tokens=120,
+        output_tokens=12,
+        total_tokens=132,
+        cached_input_tokens=None,
+        reasoning_output_tokens=None,
+    )
+    state.set_previous_response_id("s1", "resp-previous")
+    await memory.append_history("s1", "user", "hi")
+    prompt_service = PromptService(
+        llm_client=cast(LLMClient, client),
+        tools=[],
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+    )
+    service = HistoryCompactionService(
+        memory=cast(MemoryBackend, memory),
+        llm_client=cast(LLMClient, client),
+        session_state=state,
+        prompt_service=prompt_service,
+        logger=logging.getLogger("test"),
+        max_history_tokens=100,
+        compaction_user_request="Please compact the current conversation memory.",
+    )
+
+    result = await service.compact_history_if_needed(
+        "s1",
+        prompt_cache_key="telegram:1",
+        system_prompt="system",
+        notify=True,
+        responses_state_mode="previous_response_id",
+    )
+
+    assert result.performed is True
+    assert client.compact_calls[0]["previous_response_id"] == "resp-previous"
 
 
 @pytest.mark.asyncio

@@ -57,6 +57,12 @@ class LLMGeneration:
     payload: Any
     response_id: str | None = None
     total_tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_output_tokens: int | None = None
+    status: str | None = None
+    incomplete_reason: str | None = None
 
 
 @dataclass
@@ -177,8 +183,18 @@ class LLMClient:
             extra_kwargs["prompt_cache_retention"] = self._prompt_cache_retention
         if self._is_responses_provider and self._reasoning_effort:
             extra_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
+        if self._is_responses_provider:
+            extra_kwargs["instructions"] = system_prompt
 
         total_tokens_used = 0
+        input_tokens_used = 0
+        output_tokens_used = 0
+        cached_input_tokens_used = 0
+        reasoning_output_tokens_used = 0
+        saw_input_tokens = False
+        saw_output_tokens = False
+        saw_cached_input_tokens = False
+        saw_reasoning_output_tokens = False
 
         while True:
             call_kwargs: dict[str, Any] = {
@@ -189,16 +205,33 @@ class LLMClient:
             }
             if self._temperature is not None:
                 call_kwargs["temperature"] = self._temperature
-            resolved_max_tokens = self._resolved_max_tokens()
-            if resolved_max_tokens is not None:
-                call_kwargs["max_tokens"] = resolved_max_tokens
+            if self._is_responses_provider:
+                if self._max_new_tokens is not None:
+                    call_kwargs["max_output_tokens"] = self._max_new_tokens
+            else:
+                resolved_max_tokens = self._resolved_max_tokens()
+                if resolved_max_tokens is not None:
+                    call_kwargs["max_tokens"] = resolved_max_tokens
             call_kwargs.update(self._openrouter_kwargs())
             call_kwargs.update(extra_kwargs)
 
             response = await self._complete_with_schema_fallback(call_kwargs)
+            usage = self._extract_usage_from_response(response)
             usage_tokens = self._extract_total_tokens(response)
             if usage_tokens is not None:
                 total_tokens_used += usage_tokens
+            if usage.input_tokens is not None:
+                input_tokens_used += usage.input_tokens
+                saw_input_tokens = True
+            if usage.output_tokens is not None:
+                output_tokens_used += usage.output_tokens
+                saw_output_tokens = True
+            if usage.cached_input_tokens is not None:
+                cached_input_tokens_used += usage.cached_input_tokens
+                saw_cached_input_tokens = True
+            if usage.reasoning_output_tokens is not None:
+                reasoning_output_tokens_used += usage.reasoning_output_tokens
+                saw_reasoning_output_tokens = True
             message = response.main_response
             if not message:
                 raise RuntimeError("LLM did not return a completion")
@@ -209,18 +242,82 @@ class LLMClient:
                     "step_tokens": humanize_token_count(usage_tokens) if isinstance(usage_tokens, int) else "0",
                     "cumulative_tokens": humanize_token_count(total_tokens_used),
                     "provider": self.provider_name(),
+                    "response_status": usage.status,
+                    "incomplete_reason": usage.incomplete_reason,
+                    "applied_max_output_tokens": self._max_new_tokens if self._is_responses_provider else None,
                 },
             )
             if not message.tool_calls or not tool_map:
                 payload = message.content
                 response_id = self._extract_response_id(response)
+                status = usage.status
+                incomplete_reason = usage.incomplete_reason
+                if (
+                    self._is_responses_provider
+                    and response_id
+                    and self._should_auto_continue_incomplete(usage)
+                ):
+                    continuation = await self._continue_incomplete_response(
+                        previous_response_id=response_id,
+                        prompt_cache_key=prompt_cache_key,
+                        system_prompt=system_prompt,
+                        response_schema=strict_response_schema,
+                    )
+                    continuation_payload = (
+                        continuation.payload
+                        if isinstance(continuation.payload, str)
+                        else str(continuation.payload)
+                    )
+                    if isinstance(payload, str):
+                        payload = f"{payload}{continuation_payload}"
+                    else:
+                        payload = f"{payload}{continuation_payload}"
+                    if continuation.total_tokens is not None:
+                        total_tokens_used += continuation.total_tokens
+                    if continuation.input_tokens is not None:
+                        input_tokens_used += continuation.input_tokens
+                        saw_input_tokens = True
+                    if continuation.output_tokens is not None:
+                        output_tokens_used += continuation.output_tokens
+                        saw_output_tokens = True
+                    if continuation.cached_input_tokens is not None:
+                        cached_input_tokens_used += continuation.cached_input_tokens
+                        saw_cached_input_tokens = True
+                    if continuation.reasoning_output_tokens is not None:
+                        reasoning_output_tokens_used += continuation.reasoning_output_tokens
+                        saw_reasoning_output_tokens = True
+                    response_id = continuation.response_id or response_id
+                    status = continuation.status
+                    incomplete_reason = continuation.incomplete_reason
                 if response_schema and isinstance(payload, str):
                     try:
                         parsed = self._parse_structured_payload(payload)
-                        return LLMGeneration(parsed, response_id, total_tokens=total_tokens_used or None)
+                        return LLMGeneration(
+                            parsed,
+                            response_id,
+                            total_tokens=total_tokens_used or None,
+                            input_tokens=input_tokens_used if saw_input_tokens else None,
+                            output_tokens=output_tokens_used if saw_output_tokens else None,
+                            cached_input_tokens=cached_input_tokens_used if saw_cached_input_tokens else None,
+                            reasoning_output_tokens=(
+                                reasoning_output_tokens_used if saw_reasoning_output_tokens else None
+                            ),
+                            status=status,
+                            incomplete_reason=incomplete_reason,
+                        )
                     except Exception:
                         self._logger.warning("failed to parse structured response; falling back to text")
-                return LLMGeneration(payload, response_id, total_tokens=total_tokens_used or None)
+                return LLMGeneration(
+                    payload,
+                    response_id,
+                    total_tokens=total_tokens_used or None,
+                    input_tokens=input_tokens_used if saw_input_tokens else None,
+                    output_tokens=output_tokens_used if saw_output_tokens else None,
+                    cached_input_tokens=cached_input_tokens_used if saw_cached_input_tokens else None,
+                    reasoning_output_tokens=reasoning_output_tokens_used if saw_reasoning_output_tokens else None,
+                    status=status,
+                    incomplete_reason=incomplete_reason,
+                )
             tool_messages = await self._execute_tool_calls(
                 message.tool_calls,
                 tool_map,
@@ -347,9 +444,16 @@ class LLMClient:
         }
         if self._temperature is not None:
             call_kwargs["temperature"] = self._temperature
-        resolved_max_tokens = self._resolved_max_tokens()
-        if resolved_max_tokens is not None:
-            call_kwargs["max_tokens"] = resolved_max_tokens
+        if self._is_responses_provider:
+            if self._max_new_tokens is not None:
+                call_kwargs["max_output_tokens"] = self._max_new_tokens
+            instructions = self._extract_system_instructions(messages)
+            if instructions:
+                call_kwargs["instructions"] = instructions
+        else:
+            resolved_max_tokens = self._resolved_max_tokens()
+            if resolved_max_tokens is not None:
+                call_kwargs["max_tokens"] = resolved_max_tokens
         call_kwargs.update(self._openrouter_kwargs())
         if prompt_cache_key and self._is_responses_provider and self._prompt_cache_enabled:
             call_kwargs["prompt_cache_key"] = prompt_cache_key
@@ -377,6 +481,59 @@ class LLMClient:
             message=message,
             response_id=self._extract_response_id(response),
             total_tokens=usage_tokens,
+        )
+
+    async def _continue_incomplete_response(
+        self,
+        *,
+        previous_response_id: str,
+        prompt_cache_key: str | None,
+        system_prompt: str,
+        response_schema: dict[str, Any] | None,
+    ) -> LLMGeneration:
+        call_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Continue exactly where you left off. Do not repeat.",
+                }
+            ],
+            "tools": None,
+            "response_schema": response_schema,
+            "previous_response_id": previous_response_id,
+            "instructions": system_prompt,
+        }
+        if self._temperature is not None:
+            call_kwargs["temperature"] = self._temperature
+        if self._max_new_tokens is not None:
+            call_kwargs["max_output_tokens"] = self._max_new_tokens
+        if prompt_cache_key and self._prompt_cache_enabled:
+            call_kwargs["prompt_cache_key"] = prompt_cache_key
+        if self._prompt_cache_enabled and self._prompt_cache_retention:
+            call_kwargs["prompt_cache_retention"] = self._prompt_cache_retention
+        if self._reasoning_effort:
+            call_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
+
+        self._logger.warning(
+            "responses output incomplete; attempting one continuation",
+            extra={"model": self._model, "response_id": previous_response_id},
+        )
+        response = await self._complete_with_schema_fallback(call_kwargs)
+        message = response.main_response
+        if not message:
+            raise RuntimeError("LLM did not return a continuation completion")
+        usage = self._extract_usage_from_response(response)
+        return LLMGeneration(
+            payload=message.content,
+            response_id=self._extract_response_id(response),
+            total_tokens=usage.total_tokens,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+            reasoning_output_tokens=usage.reasoning_output_tokens,
+            status=usage.status,
+            incomplete_reason=usage.incomplete_reason,
         )
 
     async def execute_tool_calls_for_runtime(
@@ -527,22 +684,15 @@ class LLMClient:
         return LLMClient._extract_total_tokens_from_payload(original)
 
     @staticmethod
+    def _extract_usage_from_response(response: Any) -> _UsageSnapshot:
+        original = getattr(response, "original", None)
+        if not isinstance(original, dict):
+            return _UsageSnapshot()
+        return LLMClient._extract_usage_from_payload(original)
+
+    @staticmethod
     def _extract_total_tokens_from_payload(original: dict[str, Any]) -> int | None:
-        usage = original.get("usage")
-        if not isinstance(usage, dict):
-            return None
-        total_tokens = usage.get("total_tokens")
-        if isinstance(total_tokens, int):
-            return total_tokens
-        input_tokens = usage.get("input_tokens")
-        output_tokens = usage.get("output_tokens")
-        if isinstance(input_tokens, int) and isinstance(output_tokens, int):
-            return input_tokens + output_tokens
-        prompt_tokens = usage.get("prompt_tokens")
-        completion_tokens = usage.get("completion_tokens")
-        if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-            return prompt_tokens + completion_tokens
-        return None
+        return LLMClient._extract_usage_from_payload(original).total_tokens
 
     async def _execute_tool_calls(
         self,
@@ -884,3 +1034,99 @@ class LLMClient:
     @staticmethod
     def _parse_structured_payload(payload: str) -> Any:
         return parse_json_with_fenced_fallback(payload)
+
+    @staticmethod
+    def _extract_system_instructions(messages: Sequence[dict[str, Any]]) -> str | None:
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") != "system":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+        return None
+
+    @staticmethod
+    def _extract_usage_from_payload(original: dict[str, Any]) -> _UsageSnapshot:
+        usage = original.get("usage")
+        if not isinstance(usage, dict):
+            return _UsageSnapshot(
+                status=_opt_str(original.get("status")),
+                incomplete_reason=_incomplete_reason(original),
+            )
+        total_tokens = _opt_int(usage.get("total_tokens"))
+        input_tokens = _opt_int(usage.get("input_tokens"))
+        output_tokens = _opt_int(usage.get("output_tokens"))
+        if total_tokens is None and input_tokens is not None and output_tokens is not None:
+            total_tokens = input_tokens + output_tokens
+        if total_tokens is None:
+            prompt_tokens = _opt_int(usage.get("prompt_tokens"))
+            completion_tokens = _opt_int(usage.get("completion_tokens"))
+            if prompt_tokens is not None and completion_tokens is not None:
+                total_tokens = prompt_tokens + completion_tokens
+            if input_tokens is None:
+                input_tokens = prompt_tokens
+            if output_tokens is None:
+                output_tokens = completion_tokens
+
+        cached_input_tokens = None
+        input_details = usage.get("input_tokens_details")
+        if isinstance(input_details, dict):
+            cached_input_tokens = _opt_int(input_details.get("cached_tokens"))
+
+        reasoning_output_tokens = None
+        output_details = usage.get("output_tokens_details")
+        if isinstance(output_details, dict):
+            reasoning_output_tokens = _opt_int(output_details.get("reasoning_tokens"))
+
+        return _UsageSnapshot(
+            total_tokens=total_tokens,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_input_tokens=cached_input_tokens,
+            reasoning_output_tokens=reasoning_output_tokens,
+            status=_opt_str(original.get("status")),
+            incomplete_reason=_incomplete_reason(original),
+        )
+
+    @staticmethod
+    def _should_auto_continue_incomplete(usage: _UsageSnapshot) -> bool:
+        if usage.status != "incomplete":
+            return False
+        reason = (usage.incomplete_reason or "").strip().lower()
+        if not reason:
+            return False
+        return reason in {"max_output_tokens", "max_tokens"} or "max_output" in reason
+
+
+@dataclass(frozen=True)
+class _UsageSnapshot:
+    total_tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_output_tokens: int | None = None
+    status: str | None = None
+    incomplete_reason: str | None = None
+
+
+def _opt_int(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _opt_str(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _incomplete_reason(original: dict[str, Any]) -> str | None:
+    details = original.get("incomplete_details")
+    if isinstance(details, dict):
+        reason = details.get("reason")
+        if isinstance(reason, str) and reason:
+            return reason
+    return None

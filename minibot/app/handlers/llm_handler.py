@@ -235,6 +235,14 @@ class LLMMessageHandler:
                     previous_response_id=previous_response_id,
                     system_prompt_override=system_prompt,
                 )
+                self._session_state.track_usage(
+                    session_id,
+                    input_tokens=getattr(generation, "input_tokens", None),
+                    output_tokens=getattr(generation, "output_tokens", None),
+                    total_tokens=getattr(generation, "total_tokens", None),
+                    cached_input_tokens=getattr(generation, "cached_input_tokens", None),
+                    reasoning_output_tokens=getattr(generation, "reasoning_output_tokens", None),
+                )
                 turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
                 render, should_reply = extract_answer(generation.payload, logger=self._logger)
                 if use_previous_response_id and generation.response_id:
@@ -297,6 +305,9 @@ class LLMMessageHandler:
             session_total_tokens_after_compaction=compaction_result.session_total_tokens_after_compaction,
             compaction_performed=compaction_result.performed,
         )
+        usage_trace = self._session_state.latest_usage_trace(session_id)
+        if any(value is not None for value in usage_trace.values()):
+            metadata["usage_trace"] = usage_trace
         return ChannelResponse(
             channel=message.channel,
             chat_id=chat_id,

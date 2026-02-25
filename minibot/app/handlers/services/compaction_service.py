@@ -59,18 +59,22 @@ class HistoryCompactionService:
                 session_total_tokens_before_compaction=None,
                 session_total_tokens_after_compaction=self._session_state.current_tokens(session_id),
             )
-        total_tokens = self._session_state.current_tokens(session_id)
-        if total_tokens < self._max_history_tokens:
+        pressure_tokens = self._session_state.current_tokens(session_id)
+        if self._llm_client.is_responses_provider():
+            latest_input_tokens = self._session_state.latest_input_tokens(session_id)
+            if latest_input_tokens is not None:
+                pressure_tokens = latest_input_tokens
+        if pressure_tokens < self._max_history_tokens:
             return CompactionResult(
                 updates=updates,
                 performed=False,
                 tokens_used=0,
                 session_total_tokens_before_compaction=None,
-                session_total_tokens_after_compaction=total_tokens,
+                session_total_tokens_after_compaction=pressure_tokens,
             )
         history = list(await self._memory.get_history(session_id))
         if not history:
-            session_before_reset = total_tokens
+            session_before_reset = pressure_tokens
             self._session_state.session_total_tokens[session_id] = 0
             return CompactionResult(
                 updates=updates,

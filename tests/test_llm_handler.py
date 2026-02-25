@@ -94,6 +94,10 @@ class StubLLMClient:
         system_prompt: str = "You are Minibot, a helpful assistant.",
         prompts_dir: str = "./prompts",
         total_tokens: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cached_input_tokens: int | None = None,
+        reasoning_output_tokens: int | None = None,
         responses_state_mode: str = "full_messages",
         prompt_cache_enabled: bool = True,
     ) -> None:
@@ -105,6 +109,10 @@ class StubLLMClient:
         self._system_prompt = system_prompt
         self._prompts_dir = prompts_dir
         self.total_tokens = total_tokens
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.cached_input_tokens = cached_input_tokens
+        self.reasoning_output_tokens = reasoning_output_tokens
         self._responses_state_mode = responses_state_mode
         self._prompt_cache_enabled = prompt_cache_enabled
         self.compact_calls: list[dict[str, Any]] = []
@@ -120,7 +128,15 @@ class StubLLMClient:
 
     async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
         self.calls.append({"args": args, "kwargs": kwargs})
-        return LLMGeneration(self.payload, self.response_id, total_tokens=self.total_tokens)
+        return LLMGeneration(
+            self.payload,
+            self.response_id,
+            total_tokens=self.total_tokens,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            cached_input_tokens=self.cached_input_tokens,
+            reasoning_output_tokens=self.reasoning_output_tokens,
+        )
 
     def is_responses_provider(self) -> bool:
         return self._is_responses
@@ -219,6 +235,33 @@ async def test_handler_returns_structured_answer() -> None:
     call = stub_client.calls[-1]
     assert call["kwargs"].get("prompt_cache_key") == "telegram:1"
     assert call["kwargs"].get("previous_response_id") is None
+
+
+@pytest.mark.asyncio
+async def test_handler_includes_usage_trace_metadata() -> None:
+    memory = StubMemory()
+    stub_client = StubLLMClient(
+        {"answer": "hello", "should_answer_to_user": True},
+        is_responses=True,
+        provider="openai_responses",
+        total_tokens=33,
+        input_tokens=21,
+        output_tokens=12,
+        cached_input_tokens=8,
+        reasoning_output_tokens=3,
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, stub_client))
+
+    response = await handler.handle(_message_event("ping"))
+
+    usage_trace = response.metadata.get("usage_trace")
+    assert usage_trace == {
+        "input_tokens": 21,
+        "output_tokens": 12,
+        "total_tokens": 33,
+        "cached_input_tokens": 8,
+        "reasoning_output_tokens": 3,
+    }
 
 
 @pytest.mark.asyncio
