@@ -94,6 +94,8 @@ class StubLLMClient:
         system_prompt: str = "You are Minibot, a helpful assistant.",
         prompts_dir: str = "./prompts",
         total_tokens: int | None = None,
+        responses_state_mode: str = "full_messages",
+        prompt_cache_enabled: bool = True,
     ) -> None:
         self.payload = payload
         self.response_id = response_id
@@ -103,6 +105,8 @@ class StubLLMClient:
         self._system_prompt = system_prompt
         self._prompts_dir = prompts_dir
         self.total_tokens = total_tokens
+        self._responses_state_mode = responses_state_mode
+        self._prompt_cache_enabled = prompt_cache_enabled
 
     async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
         self.calls.append({"args": args, "kwargs": kwargs})
@@ -126,6 +130,12 @@ class StubLLMClient:
 
     def prompts_dir(self) -> str:
         return self._prompts_dir
+
+    def responses_state_mode(self) -> str:
+        return self._responses_state_mode
+
+    def prompt_cache_enabled(self) -> bool:
+        return self._prompt_cache_enabled
 
 
 class FailingLLMClient(StubLLMClient):
@@ -279,6 +289,57 @@ async def test_handler_does_not_reuse_previous_response_id() -> None:
     stub_client.response_id = "resp-2"
     await handler.handle(_message_event("ping"))
     assert stub_client.calls[-1]["kwargs"].get("previous_response_id") is None
+
+
+@pytest.mark.asyncio
+async def test_handler_reuses_previous_response_id_when_mode_enabled() -> None:
+    memory = StubMemory()
+    stub_client = StubLLMClient(
+        {"answer": "hello", "should_answer_to_user": True},
+        response_id="resp-1",
+        is_responses=True,
+        provider="openai_responses",
+        responses_state_mode="previous_response_id",
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, stub_client))
+
+    await handler.handle(_message_event("ping"))
+    stub_client.response_id = "resp-2"
+    await handler.handle(_message_event("ping"))
+
+    assert stub_client.calls[-1]["kwargs"].get("previous_response_id") == "resp-1"
+
+
+@pytest.mark.asyncio
+async def test_handler_disables_prompt_cache_when_client_turns_it_off() -> None:
+    memory = StubMemory()
+    stub_client = StubLLMClient(
+        {"answer": "hello", "should_answer_to_user": True},
+        response_id="resp-1",
+        is_responses=True,
+        provider="openai_responses",
+        prompt_cache_enabled=False,
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, stub_client))
+
+    await handler.handle(_message_event("ping"))
+
+    assert stub_client.calls[-1]["kwargs"].get("prompt_cache_key") is None
+
+
+@pytest.mark.asyncio
+async def test_handler_uses_fallback_prompt_cache_key_without_chat_or_user() -> None:
+    handler, stub_client, _ = _handler(
+        {"answer": "hello", "should_answer_to_user": True},
+        responses_provider=True,
+        response_id="resp-1",
+    )
+
+    await handler.handle(MessageEvent(message=_message(text="ping")))
+
+    key = stub_client.calls[-1]["kwargs"].get("prompt_cache_key")
+    assert isinstance(key, str)
+    assert key.startswith("telegram:")
 
 
 @pytest.mark.asyncio

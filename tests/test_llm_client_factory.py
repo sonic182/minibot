@@ -213,3 +213,31 @@ def test_create_for_agent_openrouter_provider_overrides_merge_global(monkeypatch
     assert created_configs[0].openrouter.provider.order == ["openai", "anthropic"]
     assert created_configs[0].openrouter.provider.only == ["anthropic"]
     assert created_configs[0].openrouter.provider.sort == "price"
+
+
+def test_factory_applies_distinct_responses_state_modes_for_main_and_agents(monkeypatch) -> None:
+    settings = Settings(
+        llm=LLMMConfig(
+            provider="openai_responses",
+            api_key="key",
+            model="gpt-5-mini",
+            main_responses_state_mode="full_messages",
+            agent_responses_state_mode="previous_response_id",
+        )
+    )
+    factory = LLMClientFactory(settings)
+
+    created_configs: list[LLMMConfig] = []
+
+    class _FakeClient:
+        def __init__(self, config: LLMMConfig) -> None:
+            created_configs.append(config.model_copy(deep=True))
+
+    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+
+    factory.create_default()
+    factory.create_for_agent(_agent_spec(name="worker"))
+
+    assert len(created_configs) == 2
+    assert created_configs[0].responses_state_mode == "full_messages"
+    assert created_configs[1].responses_state_mode == "previous_response_id"

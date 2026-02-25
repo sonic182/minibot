@@ -39,6 +39,7 @@ class _CompactionResult:
 class _AgentRuntimeResult:
     render: Any
     should_reply: bool
+    response_id: str | None
     agent_trace: list[dict[str, Any]]
     delegation_fallback_used: bool
     tokens_used: int
@@ -70,6 +71,7 @@ class LLMMessageHandler:
         self._notify_compaction_updates = notify_compaction_updates
         self._tool_use_guardrail: ToolUseGuardrail = tool_use_guardrail or NoopToolUseGuardrail()
         self._session_total_tokens: dict[str, int] = {}
+        self._session_previous_response_ids: dict[str, str] = {}
         self._prompts_dir = self._llm_prompts_dir()
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
         runtime_limits = build_runtime_limits(
@@ -139,6 +141,20 @@ class LLMMessageHandler:
             if isinstance(value, str) and value:
                 return value
         return "./prompts"
+
+    def _responses_state_mode(self) -> str:
+        mode_getter = getattr(self._llm_client, "responses_state_mode", None)
+        if callable(mode_getter):
+            mode = mode_getter()
+            if mode in {"full_messages", "previous_response_id"}:
+                return mode
+        return "full_messages"
+
+    def _prompt_cache_enabled(self) -> bool:
+        enabled_getter = getattr(self._llm_client, "prompt_cache_enabled", None)
+        if callable(enabled_getter):
+            return bool(enabled_getter())
+        return True
 
     def _compose_system_prompt(self, channel: str | None) -> str:
         system_prompt_getter = getattr(self._llm_client, "system_prompt", None)
@@ -219,13 +235,20 @@ class LLMMessageHandler:
 
         history = list(await self._memory.get_history(session_id))
         owner_id = resolve_owner_id(message, self._default_owner_id)
+        responses_state_mode = self._responses_state_mode()
+        use_previous_response_id = (
+            self._llm_client.is_responses_provider() and responses_state_mode == "previous_response_id"
+        )
+        previous_response_id = (
+            self._session_previous_response_ids.get(session_id) if use_previous_response_id else None
+        )
         tool_context = ToolContext(
             owner_id=owner_id,
             channel=message.channel,
             chat_id=message.chat_id,
             user_id=message.user_id,
         )
-        prompt_cache_key = _prompt_cache_key(message)
+        prompt_cache_key = _prompt_cache_key(message) if self._prompt_cache_enabled() else None
         system_prompt = self._compose_system_prompt(message.channel)
         primary_agent = "minibot"
         agent_trace: list[dict[str, Any]] = []
@@ -240,11 +263,13 @@ class LLMMessageHandler:
                     tool_context=tool_context,
                     response_schema=self._response_schema(),
                     prompt_cache_key=prompt_cache_key,
-                    previous_response_id=None,
+                    previous_response_id=previous_response_id,
                     system_prompt_override=system_prompt,
                 )
                 turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
                 render, should_reply = extract_answer(generation.payload, logger=self._logger)
+                if use_previous_response_id and generation.response_id:
+                    self._session_previous_response_ids[session_id] = generation.response_id
             else:
                 runtime_result = await self._run_with_agent_runtime(
                     session_id=session_id,
@@ -254,6 +279,7 @@ class LLMMessageHandler:
                     system_prompt=system_prompt,
                     tool_context=tool_context,
                     prompt_cache_key=prompt_cache_key,
+                    previous_response_id=previous_response_id,
                     chat_id=message.chat_id,
                     channel=message.channel,
                 )
@@ -262,6 +288,11 @@ class LLMMessageHandler:
                 should_reply = runtime_result.should_reply
                 agent_trace = runtime_result.agent_trace
                 delegation_fallback_used = runtime_result.delegation_fallback_used
+                if use_previous_response_id and runtime_result.response_id:
+                    self._session_previous_response_ids[session_id] = runtime_result.response_id
+
+            if not use_previous_response_id:
+                self._session_previous_response_ids.pop(session_id, None)
 
             self._logger.debug(
                 "structured output parsed",
@@ -409,6 +440,7 @@ class LLMMessageHandler:
         system_prompt: str,
         tool_context: ToolContext,
         prompt_cache_key: str | None,
+        previous_response_id: str | None,
         chat_id: int | None,
         channel: str | None,
     ) -> _AgentRuntimeResult:
@@ -428,6 +460,7 @@ class LLMMessageHandler:
             tool_context=tool_context,
             response_schema=self._response_schema(),
             prompt_cache_key=prompt_cache_key,
+            initial_previous_response_id=previous_response_id,
         )
         tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
         tool_messages_count = count_tool_messages(generation.state)
@@ -451,6 +484,7 @@ class LLMMessageHandler:
             return _AgentRuntimeResult(
                 render=plain_render(guardrail.resolved_render_text),
                 should_reply=True,
+                response_id=generation.response_id,
                 agent_trace=agent_trace,
                 delegation_fallback_used=delegation_fallback_used,
                 tokens_used=tokens_used,
@@ -471,6 +505,7 @@ class LLMMessageHandler:
                 tool_context=tool_context,
                 response_schema=self._response_schema(),
                 prompt_cache_key=prompt_cache_key,
+                initial_previous_response_id=generation.response_id,
             )
             tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
             trace_result = extract_delegation_trace(generation.state)
@@ -485,6 +520,7 @@ class LLMMessageHandler:
                         "Please try again, or ask me to run a specific tool."
                     ),
                     should_reply=True,
+                    response_id=generation.response_id,
                     agent_trace=agent_trace,
                     delegation_fallback_used=delegation_fallback_used,
                     tokens_used=tokens_used,
@@ -511,6 +547,7 @@ class LLMMessageHandler:
                 tool_context=tool_context,
                 response_schema=self._response_schema(),
                 prompt_cache_key=prompt_cache_key,
+                initial_previous_response_id=generation.response_id,
             )
             tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
             trace_result = extract_delegation_trace(generation.state)
@@ -532,6 +569,7 @@ class LLMMessageHandler:
         return _AgentRuntimeResult(
             render=render,
             should_reply=should_reply,
+            response_id=generation.response_id,
             agent_trace=agent_trace,
             delegation_fallback_used=delegation_fallback_used,
             tokens_used=tokens_used,
@@ -774,4 +812,7 @@ def _prompt_cache_key(message: ChannelMessage) -> str | None:
     if message.channel and (message.user_id is not None or message.chat_id is not None):
         suffix = message.user_id if message.user_id is not None else message.chat_id
         return f"{message.channel}:{suffix}"
-    return None
+    session_key = session_id_for(message)
+    if message.channel:
+        return f"{message.channel}:{session_key}"
+    return session_key

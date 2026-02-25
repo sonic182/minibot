@@ -94,6 +94,7 @@ class LLMClient:
             "api_key": config.api_key,
             "retry_config": retry_config,
             "client_kwargs": {"connector": connector},
+            "http2": config.http2,
         }
         if config.base_url:
             provider_kwargs["base_url"] = config.base_url
@@ -106,6 +107,9 @@ class LLMClient:
         self._system_prompt = self._load_system_prompt(config)
         self._prompts_dir = getattr(config, "prompts_dir", "./prompts")
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
+        self._responses_state_mode = getattr(config, "responses_state_mode", "full_messages")
+        self._prompt_cache_enabled = bool(getattr(config, "prompt_cache_enabled", True))
+        self._prompt_cache_retention = getattr(config, "prompt_cache_retention", None)
         self._openrouter_models = list(getattr(getattr(config, "openrouter", None), "models", []) or [])
         self._openrouter_provider = self._build_openrouter_provider_payload(config)
         self._openrouter_reasoning_enabled = self._resolve_openrouter_reasoning_enabled(config)
@@ -153,10 +157,12 @@ class LLMClient:
         strict_response_schema = response_schema
         if isinstance(response_schema, dict) and self._should_apply_openai_strict_schema(self._model):
             strict_response_schema = to_openai_strict_schema(response_schema)
-        if prompt_cache_key and self._is_responses_provider:
+        if prompt_cache_key and self._is_responses_provider and self._prompt_cache_enabled:
             extra_kwargs["prompt_cache_key"] = prompt_cache_key
         if previous_response_id and self._is_responses_provider:
             extra_kwargs["previous_response_id"] = previous_response_id
+        if self._is_responses_provider and self._prompt_cache_enabled and self._prompt_cache_retention:
+            extra_kwargs["prompt_cache_retention"] = self._prompt_cache_retention
         if self._is_responses_provider and self._reasoning_effort:
             extra_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
 
@@ -249,6 +255,14 @@ class LLMClient:
     def is_responses_provider(self) -> bool:
         return self._is_responses_provider
 
+    def responses_state_mode(self) -> str:
+        if self._responses_state_mode in {"full_messages", "previous_response_id"}:
+            return self._responses_state_mode
+        return "full_messages"
+
+    def prompt_cache_enabled(self) -> bool:
+        return self._prompt_cache_enabled
+
     async def complete_once(
         self,
         messages: Sequence[dict[str, Any]],
@@ -273,10 +287,12 @@ class LLMClient:
         if resolved_max_tokens is not None:
             call_kwargs["max_tokens"] = resolved_max_tokens
         call_kwargs.update(self._openrouter_kwargs())
-        if prompt_cache_key and self._is_responses_provider:
+        if prompt_cache_key and self._is_responses_provider and self._prompt_cache_enabled:
             call_kwargs["prompt_cache_key"] = prompt_cache_key
         if previous_response_id and self._is_responses_provider:
             call_kwargs["previous_response_id"] = previous_response_id
+        if self._is_responses_provider and self._prompt_cache_enabled and self._prompt_cache_retention:
+            call_kwargs["prompt_cache_retention"] = self._prompt_cache_retention
         if self._is_responses_provider and self._reasoning_effort:
             call_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
 

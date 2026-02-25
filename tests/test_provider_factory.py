@@ -620,6 +620,67 @@ def test_provider_uses_configured_transport_timeouts_and_retry(monkeypatch: pyte
     assert provider.retry_config.jitter is False
 
 
+def test_provider_passes_http2_to_provider_constructor(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai", _FakeProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x", http2=True))
+
+    assert client._provider.http2 is True
+
+
+@pytest.mark.asyncio
+async def test_generate_sends_prompt_cache_retention_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _FakeResponsesProvider(_FakeProvider):
+        pass
+
+    monkeypatch.setattr(provider_factory, "OpenAIResponsesProvider", _FakeResponsesProvider)
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _FakeResponsesProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai_responses",
+            api_key="secret",
+            model="gpt-5-mini",
+            prompt_cache_retention="24h",
+            prompt_cache_enabled=True,
+        )
+    )
+
+    await client.generate([], "hello", prompt_cache_key="session-1")
+
+    call = client._provider.calls[-1]
+    assert call["prompt_cache_key"] == "session-1"
+    assert call["prompt_cache_retention"] == "24h"
+
+
+@pytest.mark.asyncio
+async def test_generate_omits_prompt_cache_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm import provider_factory
+
+    class _FakeResponsesProvider(_FakeProvider):
+        pass
+
+    monkeypatch.setattr(provider_factory, "OpenAIResponsesProvider", _FakeResponsesProvider)
+    monkeypatch.setitem(provider_factory.LLM_PROVIDERS, "openai_responses", _FakeResponsesProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai_responses",
+            api_key="secret",
+            model="gpt-5-mini",
+            prompt_cache_enabled=False,
+            prompt_cache_retention="24h",
+        )
+    )
+
+    await client.generate([], "hello", prompt_cache_key="session-1")
+
+    call = client._provider.calls[-1]
+    assert "prompt_cache_key" not in call
+    assert "prompt_cache_retention" not in call
+
+
 def test_parse_tool_call_accepts_python_dict_string() -> None:
     client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
     call = _FakeToolCall(
