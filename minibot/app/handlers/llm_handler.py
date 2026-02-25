@@ -330,6 +330,13 @@ class LLMMessageHandler:
         turn_total_tokens = 0
         history = list(await self._memory.get_history(session_id))
         system_prompt = self._compose_system_prompt(channel)
+        responses_state_mode = self._responses_state_mode()
+        use_previous_response_id = (
+            self._llm_client.is_responses_provider() and responses_state_mode == "previous_response_id"
+        )
+        previous_response_id = (
+            self._session_previous_response_ids.get(session_id) if use_previous_response_id else None
+        )
         original_kind = response.render.kind if response.render is not None else "text"
         original_content = response.render.text if response.render is not None else response.text
         repair_prompt = self._build_format_repair_prompt(
@@ -346,9 +353,11 @@ class LLMMessageHandler:
             tool_context=None,
             response_schema=self._response_schema(),
             prompt_cache_key=f"{channel}:{chat_id}:format-repair",
-            previous_response_id=None,
+            previous_response_id=previous_response_id,
             system_prompt_override=system_prompt,
         )
+        if use_previous_response_id and generation.response_id:
+            self._session_previous_response_ids[session_id] = generation.response_id
         turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
         render, _ = extract_answer(generation.payload, logger=self._logger)
         await self._memory.append_history(session_id, "user", repair_prompt)

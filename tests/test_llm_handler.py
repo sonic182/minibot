@@ -1146,3 +1146,38 @@ async def test_repair_response_appends_retry_prompt_and_answer_to_history() -> N
     token_trace = repaired.metadata.get("token_trace")
     assert isinstance(token_trace, dict)
     assert token_trace.get("accounting_scope") == "all_turn_calls"
+
+
+@pytest.mark.asyncio
+async def test_repair_response_reuses_and_refreshes_previous_response_id_when_mode_enabled() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(
+        {
+            "answer": {"kind": "markdown_v2", "content": "*fixed*"},
+            "should_answer_to_user": True,
+        },
+        response_id="resp-repair",
+        is_responses=True,
+        provider="openai_responses",
+        responses_state_mode="previous_response_id",
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+    session_id = session_id_for(_message(channel="telegram", chat_id=1, user_id=1))
+    handler._session_previous_response_ids[session_id] = "resp-before"  # type: ignore[attr-defined]
+
+    await handler.repair_format_response(
+        response=ChannelResponse(
+            channel="telegram",
+            chat_id=1,
+            text="bad",
+            render=RenderableResponse(kind="markdown_v2", text="bad"),
+        ),
+        parse_error="can't parse entities",
+        channel="telegram",
+        chat_id=1,
+        user_id=1,
+        attempt=1,
+    )
+
+    assert client.calls[-1]["kwargs"].get("previous_response_id") == "resp-before"
+    assert handler._session_previous_response_ids[session_id] == "resp-repair"  # type: ignore[attr-defined]
