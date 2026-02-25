@@ -1,124 +1,59 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-import json
-from pathlib import Path
-import re
-from typing import Any, Mapping, Sequence
-
 import logging
-import aiosonic
+from typing import Any, Sequence
 
 from llm_async.models.tool_call import ToolCall
-from llm_async.models import Tool
-from llm_async.providers import ClaudeProvider, GoogleProvider, OpenAIProvider, OpenRouterProvider
-from llm_async.providers.openai_responses import OpenAIResponsesProvider
-from llm_async.utils.retry import RetryConfig
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
-from minibot.core.agent_runtime import ToolResult
+from minibot.llm.services.client_bootstrap import (
+    build_openrouter_provider_payload,
+    create_provider,
+    load_system_prompt,
+    resolve_openrouter_reasoning_enabled,
+)
+from minibot.llm.services.compaction import compact_response as compact_response_via_service
+from minibot.llm.services.compaction import continue_incomplete_response
+from minibot.llm.services.models import LLMCompaction, LLMCompletionStep, LLMGeneration, ToolExecutionRecord
+from minibot.llm.services.provider_registry import is_responses_provider_instance
+from minibot.llm.services.request_builder import (
+    RequestContext,
+    build_complete_once_call_kwargs,
+    build_generate_extra_kwargs,
+    build_generate_step_call_kwargs,
+    build_messages,
+)
+from minibot.llm.services.schema_fallback import complete_with_schema_fallback
+from minibot.llm.services.schema_policy import normalize_response_schema, prepare_tool_specs
+from minibot.llm.services.tool_executor import execute_tool_calls, execute_tool_calls_for_runtime, tool_name_from_call
+from minibot.llm.services.tool_loop_guard import (
+    MAX_REPEATED_TOOL_ITERATIONS,
+    assistant_message_for_followup,
+    tool_iteration_signature,
+    tool_loop_fallback_payload,
+)
+from minibot.llm.services.usage_parser import (
+    UsageAccumulator,
+    extract_response_id,
+    extract_total_tokens,
+    extract_usage_from_response,
+    parse_structured_payload,
+    should_auto_continue_incomplete,
+)
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.shared.retries import AsyncRetriesService, RetryPolicy
-from minibot.shared.parse_utils import parse_json_maybe_python_object, parse_json_with_fenced_fallback
-from minibot.shared.json_schema import to_openai_strict_schema
+from minibot.shared.retries import AsyncRetriesService
 from minibot.shared.utils import humanize_token_count
-
-
-LLM_PROVIDERS = {
-    "openai": OpenAIProvider,
-    "claude": ClaudeProvider,
-    "google": GoogleProvider,
-    "openrouter": OpenRouterProvider,
-    "openai_responses": OpenAIResponsesProvider,
-}
-
-_MAX_REPEATED_TOOL_ITERATIONS = 3
-_MAX_LOG_ARGUMENT_STRING_CHARS = 300
-_MAX_LOG_ARGUMENT_COLLECTION_ITEMS = 20
-_SENSITIVE_ARGUMENT_KEY_PARTS = (
-    "api_key",
-    "apikey",
-    "token",
-    "secret",
-    "password",
-    "passwd",
-    "authorization",
-    "cookie",
-)
-_OPENAI_STRICT_MODEL_PATTERNS = (
-    re.compile(r"^openai(?:/.*)?"),
-    re.compile(r"^gpt-.*"),
-)
-
-
-@dataclass
-class LLMGeneration:
-    payload: Any
-    response_id: str | None = None
-    total_tokens: int | None = None
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    cached_input_tokens: int | None = None
-    reasoning_output_tokens: int | None = None
-    status: str | None = None
-    incomplete_reason: str | None = None
-
-
-@dataclass
-class LLMCompletionStep:
-    message: Any
-    response_id: str | None
-    total_tokens: int | None = None
-
-
-@dataclass
-class ToolExecutionRecord:
-    tool_name: str
-    call_id: str
-    message_payload: dict[str, Any]
-    result: ToolResult
-
-
-@dataclass
-class LLMCompaction:
-    response_id: str
-    output: list[dict[str, Any]]
-    total_tokens: int | None = None
 
 
 class LLMClient:
     def __init__(self, config: LLMMConfig) -> None:
-        configured_provider = config.provider.lower()
-        provider_cls = LLM_PROVIDERS.get(configured_provider, OpenAIProvider)
-        timeouts = aiosonic.Timeouts(
-            sock_connect=float(config.sock_connect_timeout_seconds),
-            sock_read=float(config.sock_read_timeout_seconds),
-            request_timeout=float(config.request_timeout_seconds),
-        )
-        connector = aiosonic.TCPConnector(timeouts=timeouts)
-        retry_config = RetryConfig(
-            max_attempts=config.retry_attempts + 1,
-            base_delay=float(config.retry_delay_seconds),
-            max_delay=float(config.retry_delay_seconds),
-            backoff_factor=1.0,
-            jitter=False,
-        )
-        provider_kwargs: dict[str, Any] = {
-            "api_key": config.api_key,
-            "retry_config": retry_config,
-            "client_kwargs": {"connector": connector},
-            "http2": config.http2,
-        }
-        if config.base_url:
-            provider_kwargs["base_url"] = config.base_url
-        self._provider = provider_cls(**provider_kwargs)
-        self._provider_name = configured_provider if configured_provider in LLM_PROVIDERS else "openai"
+        self._provider, self._provider_name = create_provider(config)
         self._model = config.model
         self._temperature = config.temperature
         self._max_new_tokens = config.max_new_tokens
         self._max_tool_iterations = config.max_tool_iterations
-        self._system_prompt = self._load_system_prompt(config)
+        self._system_prompt = load_system_prompt(config)
         self._prompts_dir = getattr(config, "prompts_dir", "./prompts")
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
         self._responses_state_mode = getattr(config, "responses_state_mode", "full_messages")
@@ -128,11 +63,11 @@ class LLMClient:
         self._compaction_retry_base_delay_seconds = float(config.retry_delay_seconds)
         self._compaction_retry_max_delay_seconds = min(self._compaction_retry_base_delay_seconds * 4, 10.0)
         self._retries_service = AsyncRetriesService()
-        self._openrouter_models = list(getattr(getattr(config, "openrouter", None), "models", []) or [])
-        self._openrouter_provider = self._build_openrouter_provider_payload(config)
-        self._openrouter_reasoning_enabled = self._resolve_openrouter_reasoning_enabled(config)
-        self._openrouter_plugins = list(getattr(getattr(config, "openrouter", None), "plugins", []) or [])
-        self._is_responses_provider = isinstance(self._provider, OpenAIResponsesProvider)
+        self._openrouter_models = tuple(getattr(getattr(config, "openrouter", None), "models", []) or [])
+        self._openrouter_provider = build_openrouter_provider_payload(config)
+        self._openrouter_reasoning_enabled = resolve_openrouter_reasoning_enabled(config)
+        self._openrouter_plugins = tuple(getattr(getattr(config, "openrouter", None), "plugins", []) or [])
+        self._is_responses_provider = is_responses_provider_instance(self._provider)
         self._logger = logging.getLogger("minibot.llm")
 
     async def generate(
@@ -148,14 +83,12 @@ class LLMClient:
         system_prompt_override: str | None = None,
     ) -> LLMGeneration:
         system_prompt = system_prompt_override or self._system_prompt
-        messages = [
-            {"role": "system", "content": system_prompt},
-        ]
-        messages.extend({"role": entry.role, "content": entry.content} for entry in history)
-        final_user_content: str | list[dict[str, Any]] = user_message
-        if user_content is not None:
-            final_user_content = user_content
-        messages.append({"role": "user", "content": final_user_content})
+        messages = build_messages(
+            history=history,
+            user_message=user_message,
+            user_content=user_content,
+            system_prompt=system_prompt,
+        )
 
         if not self._provider.api_key:
             self._logger.warning("LLM provider key missing, falling back to echo", extra={"component": "llm"})
@@ -163,75 +96,36 @@ class LLMClient:
 
         conversation = list(messages)
         tool_bindings = list(tools or [])
-        tool_specs = self._prepare_tool_specs(tool_bindings)
-        tool_map = {binding.tool.name: binding for binding in tool_bindings}
+        tool_specs = prepare_tool_specs(tool_bindings, self._model)
         context = tool_context or ToolContext()
         iterations = 0
         last_tool_messages: list[dict[str, Any]] = []
         recent_tool_names: list[str] = []
         last_iteration_signature: str | None = None
         repeated_iteration_count = 0
-        extra_kwargs: dict[str, Any] = {}
-        strict_response_schema = response_schema
-        if isinstance(response_schema, dict) and self._should_apply_openai_strict_schema(self._model):
-            strict_response_schema = to_openai_strict_schema(response_schema)
-        if prompt_cache_key and self._is_responses_provider and self._prompt_cache_enabled:
-            extra_kwargs["prompt_cache_key"] = prompt_cache_key
-        if previous_response_id and self._is_responses_provider:
-            extra_kwargs["previous_response_id"] = previous_response_id
-        if self._is_responses_provider and self._prompt_cache_enabled and self._prompt_cache_retention:
-            extra_kwargs["prompt_cache_retention"] = self._prompt_cache_retention
-        if self._is_responses_provider and self._reasoning_effort:
-            extra_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
-        if self._is_responses_provider:
-            extra_kwargs["instructions"] = system_prompt
-
-        total_tokens_used = 0
-        input_tokens_used = 0
-        output_tokens_used = 0
-        cached_input_tokens_used = 0
-        reasoning_output_tokens_used = 0
-        saw_input_tokens = False
-        saw_output_tokens = False
-        saw_cached_input_tokens = False
-        saw_reasoning_output_tokens = False
+        strict_response_schema = normalize_response_schema(response_schema, self._model)
+        request_ctx = self._request_context()
+        extra_kwargs = build_generate_extra_kwargs(
+            ctx=request_ctx,
+            prompt_cache_key=prompt_cache_key,
+            previous_response_id=previous_response_id,
+            system_prompt=system_prompt,
+        )
+        usage_accumulator = UsageAccumulator()
 
         while True:
-            call_kwargs: dict[str, Any] = {
-                "model": self._model,
-                "messages": conversation,
-                "tools": tool_specs,
-                "response_schema": strict_response_schema,
-            }
-            if self._temperature is not None:
-                call_kwargs["temperature"] = self._temperature
-            if self._is_responses_provider:
-                if self._max_new_tokens is not None:
-                    call_kwargs["max_output_tokens"] = self._max_new_tokens
-            else:
-                resolved_max_tokens = self._resolved_max_tokens()
-                if resolved_max_tokens is not None:
-                    call_kwargs["max_tokens"] = resolved_max_tokens
-            call_kwargs.update(self._openrouter_kwargs())
-            call_kwargs.update(extra_kwargs)
-
+            call_kwargs = build_generate_step_call_kwargs(
+                ctx=request_ctx,
+                conversation=conversation,
+                tool_specs=tool_specs,
+                strict_response_schema=strict_response_schema,
+                extra_kwargs=extra_kwargs,
+            )
             response = await self._complete_with_schema_fallback(call_kwargs)
-            usage = self._extract_usage_from_response(response)
-            usage_tokens = self._extract_total_tokens(response)
-            if usage_tokens is not None:
-                total_tokens_used += usage_tokens
-            if usage.input_tokens is not None:
-                input_tokens_used += usage.input_tokens
-                saw_input_tokens = True
-            if usage.output_tokens is not None:
-                output_tokens_used += usage.output_tokens
-                saw_output_tokens = True
-            if usage.cached_input_tokens is not None:
-                cached_input_tokens_used += usage.cached_input_tokens
-                saw_cached_input_tokens = True
-            if usage.reasoning_output_tokens is not None:
-                reasoning_output_tokens_used += usage.reasoning_output_tokens
-                saw_reasoning_output_tokens = True
+            usage = extract_usage_from_response(response)
+            usage_tokens = extract_total_tokens(response)
+            usage_accumulator.add_step(usage, usage_tokens)
+
             message = response.main_response
             if not message:
                 raise RuntimeError("LLM did not return a completion")
@@ -240,99 +134,70 @@ class LLMClient:
                 extra={
                     "tool_calls": len(getattr(message, "tool_calls", None) or []),
                     "step_tokens": humanize_token_count(usage_tokens) if isinstance(usage_tokens, int) else "0",
-                    "cumulative_tokens": humanize_token_count(total_tokens_used),
+                    "cumulative_tokens": humanize_token_count(usage_accumulator.total_tokens_used),
                     "provider": self.provider_name(),
                     "response_status": usage.status,
                     "incomplete_reason": usage.incomplete_reason,
                     "applied_max_output_tokens": self._max_new_tokens if self._is_responses_provider else None,
                 },
             )
-            if not message.tool_calls or not tool_map:
+            if not message.tool_calls or not tool_bindings:
                 payload = message.content
-                response_id = self._extract_response_id(response)
+                response_id = extract_response_id(response)
                 status = usage.status
                 incomplete_reason = usage.incomplete_reason
-                if (
-                    self._is_responses_provider
-                    and response_id
-                    and self._should_auto_continue_incomplete(usage)
-                ):
-                    continuation = await self._continue_incomplete_response(
+                if self._is_responses_provider and response_id and should_auto_continue_incomplete(usage):
+                    continuation = await continue_incomplete_response(
+                        complete_with_schema_fallback=self._complete_with_schema_fallback,
+                        ctx=request_ctx,
                         previous_response_id=response_id,
                         prompt_cache_key=prompt_cache_key,
                         system_prompt=system_prompt,
                         response_schema=strict_response_schema,
+                        logger=self._logger,
                     )
                     continuation_payload = (
-                        continuation.payload
-                        if isinstance(continuation.payload, str)
-                        else str(continuation.payload)
+                        continuation.payload if isinstance(continuation.payload, str) else str(continuation.payload)
                     )
-                    if isinstance(payload, str):
-                        payload = f"{payload}{continuation_payload}"
-                    else:
-                        payload = f"{payload}{continuation_payload}"
-                    if continuation.total_tokens is not None:
-                        total_tokens_used += continuation.total_tokens
-                    if continuation.input_tokens is not None:
-                        input_tokens_used += continuation.input_tokens
-                        saw_input_tokens = True
-                    if continuation.output_tokens is not None:
-                        output_tokens_used += continuation.output_tokens
-                        saw_output_tokens = True
-                    if continuation.cached_input_tokens is not None:
-                        cached_input_tokens_used += continuation.cached_input_tokens
-                        saw_cached_input_tokens = True
-                    if continuation.reasoning_output_tokens is not None:
-                        reasoning_output_tokens_used += continuation.reasoning_output_tokens
-                        saw_reasoning_output_tokens = True
+                    payload = f"{payload}{continuation_payload}"
+                    usage_accumulator.add_generation(continuation)
                     response_id = continuation.response_id or response_id
                     status = continuation.status
                     incomplete_reason = continuation.incomplete_reason
                 if response_schema and isinstance(payload, str):
                     try:
-                        parsed = self._parse_structured_payload(payload)
-                        return LLMGeneration(
-                            parsed,
-                            response_id,
-                            total_tokens=total_tokens_used or None,
-                            input_tokens=input_tokens_used if saw_input_tokens else None,
-                            output_tokens=output_tokens_used if saw_output_tokens else None,
-                            cached_input_tokens=cached_input_tokens_used if saw_cached_input_tokens else None,
-                            reasoning_output_tokens=(
-                                reasoning_output_tokens_used if saw_reasoning_output_tokens else None
-                            ),
+                        parsed = parse_structured_payload(payload)
+                        return usage_accumulator.build_generation(
+                            payload=parsed,
+                            response_id=response_id,
                             status=status,
                             incomplete_reason=incomplete_reason,
                         )
                     except Exception:
                         self._logger.warning("failed to parse structured response; falling back to text")
-                return LLMGeneration(
-                    payload,
-                    response_id,
-                    total_tokens=total_tokens_used or None,
-                    input_tokens=input_tokens_used if saw_input_tokens else None,
-                    output_tokens=output_tokens_used if saw_output_tokens else None,
-                    cached_input_tokens=cached_input_tokens_used if saw_cached_input_tokens else None,
-                    reasoning_output_tokens=reasoning_output_tokens_used if saw_reasoning_output_tokens else None,
+                return usage_accumulator.build_generation(
+                    payload=payload,
+                    response_id=response_id,
                     status=status,
                     incomplete_reason=incomplete_reason,
                 )
-            tool_messages = await self._execute_tool_calls(
+
+            tool_messages = await execute_tool_calls(
                 message.tool_calls,
-                tool_map,
+                tool_bindings,
                 context,
                 responses_mode=self._is_responses_provider,
+                logger=self._logger,
             )
-            iteration_signature = self._tool_iteration_signature(message.tool_calls, tool_messages)
+            iteration_signature = tool_iteration_signature(message.tool_calls, tool_messages)
             if iteration_signature and iteration_signature == last_iteration_signature:
                 repeated_iteration_count += 1
             else:
                 repeated_iteration_count = 1
             last_iteration_signature = iteration_signature
             last_tool_messages = tool_messages
-            recent_tool_names.extend(self._tool_name_from_call(call) for call in message.tool_calls)
-            if repeated_iteration_count >= _MAX_REPEATED_TOOL_ITERATIONS:
+            recent_tool_names.extend(tool_name_from_call(call) for call in message.tool_calls)
+            if repeated_iteration_count >= MAX_REPEATED_TOOL_ITERATIONS:
                 self._logger.warning(
                     "tool loop repeated identical outputs; returning fallback",
                     extra={
@@ -340,16 +205,20 @@ class LLMClient:
                         "repeated_count": repeated_iteration_count,
                     },
                 )
-                response_id = self._extract_response_id(response)
-                payload = self._tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
-                return LLMGeneration(payload, response_id, total_tokens=total_tokens_used or None)
+                response_id = extract_response_id(response)
+                payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
+                return LLMGeneration(
+                    payload,
+                    response_id,
+                    total_tokens=usage_accumulator.total_tokens_used or None,
+                )
             if self._is_responses_provider:
-                response_id = self._extract_response_id(response)
+                response_id = extract_response_id(response)
                 if response_id:
                     extra_kwargs["previous_response_id"] = response_id
                 conversation = tool_messages
             else:
-                conversation.append(self._assistant_message_for_followup(message))
+                conversation.append(assistant_message_for_followup(message))
                 conversation.extend(tool_messages)
             iterations += 1
             if iterations >= self._max_tool_iterations:
@@ -357,9 +226,13 @@ class LLMClient:
                     "tool call loop exceeded maximum iterations; returning fallback",
                     extra={"tool_names": recent_tool_names[-10:]},
                 )
-                response_id = self._extract_response_id(response)
-                payload = self._tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
-                return LLMGeneration(payload, response_id, total_tokens=total_tokens_used or None)
+                response_id = extract_response_id(response)
+                payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
+                return LLMGeneration(
+                    payload,
+                    response_id,
+                    total_tokens=usage_accumulator.total_tokens_used or None,
+                )
 
     def is_responses_provider(self) -> bool:
         return self._is_responses_provider
@@ -378,50 +251,18 @@ class LLMClient:
         previous_response_id: str,
         prompt_cache_key: str | None = None,
     ) -> LLMCompaction:
-        if not self._is_responses_provider:
-            raise RuntimeError("compaction endpoint is available only for openai_responses provider")
-        payload: dict[str, Any] = {
-            "model": self._model,
-            "previous_response_id": previous_response_id,
-        }
-        if prompt_cache_key and self._prompt_cache_enabled:
-            payload["prompt_cache_key"] = prompt_cache_key
-
-        retry_policy = RetryPolicy(
-            max_attempts=self._compaction_retry_attempts,
-            base_delay_seconds=self._compaction_retry_base_delay_seconds,
-            max_delay_seconds=self._compaction_retry_max_delay_seconds,
-            backoff_factor=2.0,
-            jitter=False,
-            retry_exceptions=(Exception,),
-        )
-
-        def _on_retry(exc: Exception, attempt: int, delay: float) -> None:
-            self._logger.warning(
-                "responses compact request failed; retrying",
-                extra={
-                    "attempt": attempt,
-                    "next_delay_seconds": round(delay, 3),
-                    "model": self._model,
-                    "error": str(exc),
-                },
-            )
-
-        raw = await self._retries_service.run(
-            lambda: self._provider.request("POST", "/responses/compact", json_data=payload),
-            policy=retry_policy,
-            on_retry=_on_retry,
-        )
-        response_id = raw.get("id") if isinstance(raw.get("id"), str) else ""
-        if not response_id:
-            raise RuntimeError("responses compact endpoint returned payload without id")
-        output = raw.get("output")
-        normalized_output = output if isinstance(output, list) else []
-        total_tokens = self._extract_total_tokens_from_payload(raw)
-        return LLMCompaction(
-            response_id=response_id,
-            output=normalized_output,
-            total_tokens=total_tokens,
+        return await compact_response_via_service(
+            provider=self._provider,
+            is_responses_provider=self._is_responses_provider,
+            model=self._model,
+            prompt_cache_enabled=self._prompt_cache_enabled,
+            previous_response_id=previous_response_id,
+            prompt_cache_key=prompt_cache_key,
+            retries_service=self._retries_service,
+            retry_attempts=self._compaction_retry_attempts,
+            retry_base_delay_seconds=self._compaction_retry_base_delay_seconds,
+            retry_max_delay_seconds=self._compaction_retry_max_delay_seconds,
+            logger=self._logger,
         )
 
     async def complete_once(
@@ -432,43 +273,23 @@ class LLMClient:
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
     ) -> LLMCompletionStep:
-        tool_specs = self._prepare_tool_specs(tools or [])
-        strict_response_schema = response_schema
-        if isinstance(response_schema, dict) and self._should_apply_openai_strict_schema(self._model):
-            strict_response_schema = to_openai_strict_schema(response_schema)
-        call_kwargs: dict[str, Any] = {
-            "model": self._model,
-            "messages": list(messages),
-            "tools": tool_specs,
-            "response_schema": strict_response_schema,
-        }
-        if self._temperature is not None:
-            call_kwargs["temperature"] = self._temperature
-        if self._is_responses_provider:
-            if self._max_new_tokens is not None:
-                call_kwargs["max_output_tokens"] = self._max_new_tokens
-            instructions = self._extract_system_instructions(messages)
-            if instructions:
-                call_kwargs["instructions"] = instructions
-        else:
-            resolved_max_tokens = self._resolved_max_tokens()
-            if resolved_max_tokens is not None:
-                call_kwargs["max_tokens"] = resolved_max_tokens
-        call_kwargs.update(self._openrouter_kwargs())
-        if prompt_cache_key and self._is_responses_provider and self._prompt_cache_enabled:
-            call_kwargs["prompt_cache_key"] = prompt_cache_key
-        if previous_response_id and self._is_responses_provider:
-            call_kwargs["previous_response_id"] = previous_response_id
-        if self._is_responses_provider and self._prompt_cache_enabled and self._prompt_cache_retention:
-            call_kwargs["prompt_cache_retention"] = self._prompt_cache_retention
-        if self._is_responses_provider and self._reasoning_effort:
-            call_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
+        strict_response_schema = normalize_response_schema(response_schema, self._model)
+        tool_specs = prepare_tool_specs(tools or [], self._model)
+        request_ctx = self._request_context()
+        call_kwargs = build_complete_once_call_kwargs(
+            ctx=request_ctx,
+            messages=messages,
+            tool_specs=tool_specs,
+            strict_response_schema=strict_response_schema,
+            prompt_cache_key=prompt_cache_key,
+            previous_response_id=previous_response_id,
+        )
 
         response = await self._complete_with_schema_fallback(call_kwargs)
         message = response.main_response
         if not message:
             raise RuntimeError("LLM did not return a completion")
-        usage_tokens = self._extract_total_tokens(response)
+        usage_tokens = extract_total_tokens(response)
         self._logger.debug(
             "llm runtime completion step received",
             extra={
@@ -479,61 +300,8 @@ class LLMClient:
         )
         return LLMCompletionStep(
             message=message,
-            response_id=self._extract_response_id(response),
+            response_id=extract_response_id(response),
             total_tokens=usage_tokens,
-        )
-
-    async def _continue_incomplete_response(
-        self,
-        *,
-        previous_response_id: str,
-        prompt_cache_key: str | None,
-        system_prompt: str,
-        response_schema: dict[str, Any] | None,
-    ) -> LLMGeneration:
-        call_kwargs: dict[str, Any] = {
-            "model": self._model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Continue exactly where you left off. Do not repeat.",
-                }
-            ],
-            "tools": None,
-            "response_schema": response_schema,
-            "previous_response_id": previous_response_id,
-            "instructions": system_prompt,
-        }
-        if self._temperature is not None:
-            call_kwargs["temperature"] = self._temperature
-        if self._max_new_tokens is not None:
-            call_kwargs["max_output_tokens"] = self._max_new_tokens
-        if prompt_cache_key and self._prompt_cache_enabled:
-            call_kwargs["prompt_cache_key"] = prompt_cache_key
-        if self._prompt_cache_enabled and self._prompt_cache_retention:
-            call_kwargs["prompt_cache_retention"] = self._prompt_cache_retention
-        if self._reasoning_effort:
-            call_kwargs.setdefault("reasoning", {"effort": self._reasoning_effort})
-
-        self._logger.warning(
-            "responses output incomplete; attempting one continuation",
-            extra={"model": self._model, "response_id": previous_response_id},
-        )
-        response = await self._complete_with_schema_fallback(call_kwargs)
-        message = response.main_response
-        if not message:
-            raise RuntimeError("LLM did not return a continuation completion")
-        usage = self._extract_usage_from_response(response)
-        return LLMGeneration(
-            payload=message.content,
-            response_id=self._extract_response_id(response),
-            total_tokens=usage.total_tokens,
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            cached_input_tokens=usage.cached_input_tokens,
-            reasoning_output_tokens=usage.reasoning_output_tokens,
-            status=usage.status,
-            incomplete_reason=usage.incomplete_reason,
         )
 
     async def execute_tool_calls_for_runtime(
@@ -543,81 +311,13 @@ class LLMClient:
         context: ToolContext,
         responses_mode: bool = False,
     ) -> list[ToolExecutionRecord]:
-        tool_map = {binding.tool.name: binding for binding in tools}
-        records: list[ToolExecutionRecord] = []
-        for call in tool_calls:
-            call_id = call.id
-            if responses_mode and isinstance(call.input, dict):
-                input_call_id = call.input.get("call_id")
-                if isinstance(input_call_id, str) and input_call_id:
-                    call_id = input_call_id
-            tool_name = self._tool_name_from_call(call)
-            try:
-                tool_name, arguments = self._parse_tool_call(call)
-                binding = tool_map.get(tool_name)
-                if not binding:
-                    raise ValueError(f"tool {tool_name} is not registered")
-                self._logger.debug(
-                    "executing tool",
-                    extra={
-                        "tool": tool_name,
-                        "call_id": call_id,
-                        "owner_id": context.owner_id,
-                        "argument_keys": sorted(arguments.keys()),
-                        "arguments": self._sanitize_tool_arguments_for_log(arguments),
-                    },
-                )
-                raw_result = await binding.handler(arguments, context)
-                result = self._normalize_tool_result(raw_result)
-                self._logger.debug(
-                    "tool execution completed",
-                    extra={
-                        "tool": tool_name,
-                        "call_id": call_id,
-                        "owner_id": context.owner_id,
-                    },
-                )
-            except Exception as exc:
-                error_code = "tool_execution_failed"
-                if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
-                    error_code = "invalid_tool_arguments"
-                self._logger.exception(
-                    "tool execution failed",
-                    extra={
-                        "tool": tool_name,
-                        "owner_id": context.owner_id,
-                    },
-                )
-                result = ToolResult(
-                    content={
-                        "ok": False,
-                        "tool": tool_name,
-                        "error_code": error_code,
-                        "error": str(exc),
-                    }
-                )
-            if responses_mode:
-                payload = {
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": self._stringify_result(result.content),
-                }
-            else:
-                payload = {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "name": tool_name,
-                    "content": self._stringify_result(result.content),
-                }
-            records.append(
-                ToolExecutionRecord(
-                    tool_name=tool_name,
-                    call_id=call_id,
-                    message_payload=payload,
-                    result=result,
-                )
-            )
-        return records
+        return await execute_tool_calls_for_runtime(
+            tool_calls,
+            tools,
+            context,
+            responses_mode=responses_mode,
+            logger=self._logger,
+        )
 
     def provider_name(self) -> str:
         return self._provider_name
@@ -644,489 +344,28 @@ class LLMClient:
             return "chat_completions"
         return "none"
 
-    @staticmethod
-    def _load_system_prompt(config: LLMMConfig) -> str:
-        prompt_file = getattr(config, "system_prompt_file", None)
-        if prompt_file is not None:
-            normalized = prompt_file.strip() if isinstance(prompt_file, str) else None
-            if normalized:
-                prompt_path = Path(normalized)
-                if not prompt_path.exists():
-                    raise FileNotFoundError(
-                        f"system_prompt_file configured but file not found: {normalized}"
-                    )
-                if not prompt_path.is_file():
-                    raise ValueError(
-                        f"system_prompt_file configured but path is not a file: {normalized}"
-                    )
-                content = prompt_path.read_text(encoding="utf-8").strip()
-                if not content:
-                    raise ValueError(
-                        f"system_prompt_file configured but file is empty: {normalized}"
-                    )
-                return content
-        return getattr(config, "system_prompt", "You are Minibot, a helpful assistant.")
-
-    @staticmethod
-    def _extract_response_id(response: Any) -> str | None:
-        original = getattr(response, "original", None)
-        if isinstance(original, dict):
-            resp_id = original.get("id")
-            if isinstance(resp_id, str):
-                return resp_id
-        return None
-
-    @staticmethod
-    def _extract_total_tokens(response: Any) -> int | None:
-        original = getattr(response, "original", None)
-        if not isinstance(original, dict):
-            return None
-        return LLMClient._extract_total_tokens_from_payload(original)
-
-    @staticmethod
-    def _extract_usage_from_response(response: Any) -> _UsageSnapshot:
-        original = getattr(response, "original", None)
-        if not isinstance(original, dict):
-            return _UsageSnapshot()
-        return LLMClient._extract_usage_from_payload(original)
-
-    @staticmethod
-    def _extract_total_tokens_from_payload(original: dict[str, Any]) -> int | None:
-        return LLMClient._extract_usage_from_payload(original).total_tokens
-
-    async def _execute_tool_calls(
-        self,
-        tool_calls: Sequence[ToolCall],
-        tool_map: Mapping[str, ToolBinding],
-        context: ToolContext,
-        responses_mode: bool = False,
-    ) -> list[dict[str, Any]]:
-        records = await self.execute_tool_calls_for_runtime(
-            tool_calls,
-            list(tool_map.values()),
-            context,
-            responses_mode=responses_mode,
-        )
-        return [record.message_payload for record in records]
-
-    @staticmethod
-    def _normalize_tool_result(result: Any) -> ToolResult:
-        if isinstance(result, ToolResult):
-            return result
-        return ToolResult(content=result)
-
-    @staticmethod
-    def _tool_name_from_call(call: ToolCall) -> str:
-        if call.function:
-            function_name = call.function.get("name")
-            if isinstance(function_name, str) and function_name:
-                return function_name
-        if call.name:
-            return call.name
-        return "unknown_tool"
-
-    def _parse_tool_call(self, call: ToolCall) -> tuple[str, dict[str, Any]]:
-        if call.function:
-            func_name = call.function.get("name")
-            arguments = call.function.get("arguments")
-            if isinstance(arguments, str):
-                arguments_payload = arguments.strip()
-                if not arguments_payload:
-                    arguments_dict = {}
-                else:
-                    try:
-                        arguments_dict = self._decode_tool_arguments(arguments_payload)
-                    except ValueError as exc:
-                        preview = arguments_payload.replace("\n", " ")
-                        if len(preview) > 220:
-                            preview = f"{preview[:220]}..."
-                        raise ValueError(
-                            f"Tool call arguments must be a valid JSON object. Received arguments preview: {preview}"
-                        ) from exc
-            else:
-                arguments_dict = dict(arguments or {})
-        elif call.name:
-            func_name = call.name
-            arguments_dict = dict(call.input or {})
-        else:
-            raise ValueError("Tool call missing function metadata")
-        if not func_name:
-            raise ValueError("Tool call missing name")
-        if not isinstance(arguments_dict, dict):
-            raise ValueError("Tool call arguments must be an object")
-        return func_name, arguments_dict
-
-    @staticmethod
-    def _decode_tool_arguments(arguments_payload: str) -> dict[str, Any]:
-        candidates = [arguments_payload]
-        stripped = arguments_payload.strip()
-        if stripped.startswith("```"):
-            lines = stripped.splitlines()
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            fenced = "\n".join(lines).strip()
-            if fenced:
-                candidates.append(fenced)
-        repaired_candidates: list[str] = []
-        for candidate in candidates:
-            text = candidate.strip()
-            if text.startswith("{"):
-                missing = text.count("{") - text.count("}")
-                if missing > 0:
-                    repaired_candidates.append(text + ("}" * missing))
-        candidates.extend(repaired_candidates)
-        for candidate in candidates:
-            parsed = parse_json_maybe_python_object(candidate)
-            if parsed is None:
-                continue
-            if isinstance(parsed, dict):
-                return dict(parsed)
-        raise ValueError("Tool call arguments must be valid JSON")
-
-    def _stringify_result(self, result: Any) -> str:
-        if isinstance(result, str):
-            return result
-        if isinstance(result, (list, dict)):
-            return json.dumps(result, ensure_ascii=True, default=str)
-        return str(result)
-
-    @staticmethod
-    def _sanitize_tool_arguments_for_log(arguments: Mapping[str, Any]) -> dict[str, Any]:
-        sanitized: dict[str, Any] = {}
-        for key, value in arguments.items():
-            key_text = str(key)
-            if LLMClient._is_sensitive_argument_key(key_text):
-                sanitized[key_text] = "***"
-                continue
-            sanitized[key_text] = LLMClient._sanitize_tool_argument_value(value)
-        return sanitized
-
-    @staticmethod
-    def _sanitize_tool_argument_value(value: Any) -> Any:
-        if value is None:
-            return None
-        if isinstance(value, (bool, int, float)):
-            return value
-        if isinstance(value, str):
-            if len(value) <= _MAX_LOG_ARGUMENT_STRING_CHARS:
-                return value
-            return f"{value[:_MAX_LOG_ARGUMENT_STRING_CHARS]}..."
-        if isinstance(value, list):
-            capped = value[:_MAX_LOG_ARGUMENT_COLLECTION_ITEMS]
-            sanitized_list = [LLMClient._sanitize_tool_argument_value(item) for item in capped]
-            if len(value) > _MAX_LOG_ARGUMENT_COLLECTION_ITEMS:
-                sanitized_list.append(f"...(+{len(value) - _MAX_LOG_ARGUMENT_COLLECTION_ITEMS} items)")
-            return sanitized_list
-        if isinstance(value, dict):
-            capped_items = list(value.items())[:_MAX_LOG_ARGUMENT_COLLECTION_ITEMS]
-            sanitized_dict: dict[str, Any] = {}
-            for item_key, item_value in capped_items:
-                item_key_text = str(item_key)
-                if LLMClient._is_sensitive_argument_key(item_key_text):
-                    sanitized_dict[item_key_text] = "***"
-                else:
-                    sanitized_dict[item_key_text] = LLMClient._sanitize_tool_argument_value(item_value)
-            if len(value) > _MAX_LOG_ARGUMENT_COLLECTION_ITEMS:
-                sanitized_dict["..."] = f"+{len(value) - _MAX_LOG_ARGUMENT_COLLECTION_ITEMS} keys"
-            return sanitized_dict
-        return str(value)
-
-    def _prepare_tool_specs(self, tool_bindings: Sequence[ToolBinding]) -> list[Tool] | None:
-        if not tool_bindings:
-            return None
-        if not self._should_apply_openai_strict_schema(self._model):
-            return [binding.tool for binding in tool_bindings]
-        strict_tools: list[Tool] = []
-        for binding in tool_bindings:
-            parameters = binding.tool.parameters
-            if isinstance(parameters, dict):
-                parameters = to_openai_strict_schema(parameters)
-            strict_tools.append(
-                Tool(
-                    name=binding.tool.name,
-                    description=binding.tool.description,
-                    parameters=parameters,
-                )
-            )
-        return strict_tools
-
-    @staticmethod
-    def _is_sensitive_argument_key(key: str) -> bool:
-        normalized = key.strip().lower().replace("-", "_")
-        if not normalized:
-            return False
-        return any(part in normalized for part in _SENSITIVE_ARGUMENT_KEY_PARTS)
-
-    @staticmethod
-    def _should_apply_openai_strict_schema(model_name: str | None) -> bool:
-        if not isinstance(model_name, str) or not model_name:
-            return False
-        return any(pattern.match(model_name) for pattern in _OPENAI_STRICT_MODEL_PATTERNS)
-
-    @staticmethod
-    def _build_openrouter_provider_payload(config: LLMMConfig) -> dict[str, Any]:
-        provider_cfg = getattr(getattr(config, "openrouter", None), "provider", None)
-        if provider_cfg is None:
-            return {}
-
-        payload: dict[str, Any] = dict(getattr(provider_cfg, "provider_extra", {}) or {})
-        typed_fields = (
-            "order",
-            "allow_fallbacks",
-            "require_parameters",
-            "data_collection",
-            "zdr",
-            "enforce_distillable_text",
-            "only",
-            "ignore",
-            "quantizations",
-            "sort",
-            "preferred_min_throughput",
-            "preferred_max_latency",
-            "max_price",
-        )
-        for field_name in typed_fields:
-            value = getattr(provider_cfg, field_name, None)
-            if value is not None:
-                payload[field_name] = value
-        return payload
-
-    @staticmethod
-    def _resolve_openrouter_reasoning_enabled(config: LLMMConfig) -> bool | None:
-        openrouter_cfg = getattr(config, "openrouter", None)
-        if openrouter_cfg is None:
-            return None
-        value = getattr(openrouter_cfg, "reasoning_enabled", None)
-        if isinstance(value, bool):
-            return value
-        return None
-
-    def _openrouter_kwargs(self) -> dict[str, Any]:
-        if self._provider_name != "openrouter":
-            return {}
-        kwargs: dict[str, Any] = {}
-        if self._openrouter_models:
-            kwargs["models"] = self._openrouter_models
-        if self._openrouter_provider:
-            kwargs["provider"] = self._openrouter_provider
-        if self._openrouter_reasoning_enabled is True:
-            kwargs["reasoning"] = {"enabled": True}
-        if self._openrouter_plugins:
-            kwargs["plugins"] = self._openrouter_plugins
-        return kwargs
-
     async def _complete_with_schema_fallback(self, call_kwargs: dict[str, Any]) -> Any:
-        try:
-            return await self._provider.acomplete(**call_kwargs)
-        except Exception as exc:
-            if not self._should_retry_without_response_schema(call_kwargs, exc):
-                raise
-            retry_kwargs = dict(call_kwargs)
-            retry_kwargs["response_schema"] = None
-            self._logger.warning(
-                "retrying openrouter request without response_schema",
-                extra={"model": self._model, "provider": self.provider_name()},
-            )
-            return await self._provider.acomplete(**retry_kwargs)
-
-    def _should_retry_without_response_schema(self, call_kwargs: dict[str, Any], exc: Exception) -> bool:
-        if self._provider_name != "openrouter":
-            return False
-        if call_kwargs.get("response_schema") is None:
-            return False
-        message = str(exc).lower()
-        if "json mode is not supported" in message:
-            return True
-        if '"code":20024' in message:
-            return True
-        return False
-
-    def _resolved_max_tokens(self) -> int | None:
-        if self._is_responses_provider:
-            return None
-        if self._provider_name == "openrouter":
-            if self._max_new_tokens is None:
-                return 4096
-            return min(self._max_new_tokens, 32768)
-        if self._max_new_tokens is not None:
-            return self._max_new_tokens
-        return None
-
-    @staticmethod
-    def _assistant_message_for_followup(message: Any) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "role": getattr(message, "role", "assistant") or "assistant",
-            "content": getattr(message, "content", "") or "",
-        }
-        tool_calls = getattr(message, "tool_calls", None)
-        if tool_calls:
-            payload["tool_calls"] = [LLMClient._tool_call_to_payload(call) for call in tool_calls]
-        return payload
-
-    @staticmethod
-    def _tool_call_to_payload(call: ToolCall) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "id": call.id,
-            "type": call.type,
-        }
-        if call.function is not None:
-            payload["function"] = call.function
-        if call.name is not None:
-            payload["name"] = call.name
-        if call.input is not None:
-            payload["input"] = call.input
-        return payload
-
-    def _tool_loop_fallback_payload(
-        self,
-        tool_messages: Sequence[dict[str, Any]],
-        tool_names: Sequence[str],
-        response_schema: dict[str, Any] | None,
-    ) -> Any:
-        summary = self._summarize_tool_outputs(tool_messages)
-        tools_used = ", ".join(tool_names[-4:]) if tool_names else "tools"
-        answer = (
-            "I executed tool calls but hit an internal tool-loop safeguard before finalizing. "
-            f"Recent tools: {tools_used}. Last tool output: {summary}"
-        )
-        if response_schema:
-            return {
-                "answer": answer,
-                "should_answer_to_user": True,
-            }
-        return answer
-
-    def _summarize_tool_outputs(self, tool_messages: Sequence[dict[str, Any]]) -> str:
-        if not tool_messages:
-            return "no tool output available"
-        last = tool_messages[-1]
-        output = last.get("output") if isinstance(last, dict) else None
-        if output is None and isinstance(last, dict):
-            output = last.get("content")
-        if isinstance(output, str):
-            return output[:400]
-        return self._stringify_result(output)[:400]
-
-    def _tool_iteration_signature(
-        self,
-        tool_calls: Sequence[ToolCall],
-        tool_messages: Sequence[dict[str, Any]],
-    ) -> str:
-        parts: list[str] = []
-        for index, call in enumerate(tool_calls):
-            name = self._tool_name_from_call(call)
-            output = ""
-            if index < len(tool_messages):
-                message = tool_messages[index]
-                if isinstance(message, dict):
-                    output_value = message.get("output")
-                    if output_value is None:
-                        output_value = message.get("content")
-                    if isinstance(output_value, str):
-                        output = output_value[:240]
-                    else:
-                        output = self._stringify_result(output_value)[:240]
-            parts.append(f"{name}:{output}")
-        return "|".join(parts)
-
-    @staticmethod
-    def _parse_structured_payload(payload: str) -> Any:
-        return parse_json_with_fenced_fallback(payload)
-
-    @staticmethod
-    def _extract_system_instructions(messages: Sequence[dict[str, Any]]) -> str | None:
-        for message in messages:
-            if not isinstance(message, dict):
-                continue
-            if message.get("role") != "system":
-                continue
-            content = message.get("content")
-            if isinstance(content, str) and content.strip():
-                return content
-        return None
-
-    @staticmethod
-    def _extract_usage_from_payload(original: dict[str, Any]) -> _UsageSnapshot:
-        usage = original.get("usage")
-        if not isinstance(usage, dict):
-            return _UsageSnapshot(
-                status=_opt_str(original.get("status")),
-                incomplete_reason=_incomplete_reason(original),
-            )
-        total_tokens = _opt_int(usage.get("total_tokens"))
-        input_tokens = _opt_int(usage.get("input_tokens"))
-        output_tokens = _opt_int(usage.get("output_tokens"))
-        if total_tokens is None and input_tokens is not None and output_tokens is not None:
-            total_tokens = input_tokens + output_tokens
-        if total_tokens is None:
-            prompt_tokens = _opt_int(usage.get("prompt_tokens"))
-            completion_tokens = _opt_int(usage.get("completion_tokens"))
-            if prompt_tokens is not None and completion_tokens is not None:
-                total_tokens = prompt_tokens + completion_tokens
-            if input_tokens is None:
-                input_tokens = prompt_tokens
-            if output_tokens is None:
-                output_tokens = completion_tokens
-
-        cached_input_tokens = None
-        input_details = usage.get("input_tokens_details")
-        if isinstance(input_details, dict):
-            cached_input_tokens = _opt_int(input_details.get("cached_tokens"))
-
-        reasoning_output_tokens = None
-        output_details = usage.get("output_tokens_details")
-        if isinstance(output_details, dict):
-            reasoning_output_tokens = _opt_int(output_details.get("reasoning_tokens"))
-
-        return _UsageSnapshot(
-            total_tokens=total_tokens,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_input_tokens=cached_input_tokens,
-            reasoning_output_tokens=reasoning_output_tokens,
-            status=_opt_str(original.get("status")),
-            incomplete_reason=_incomplete_reason(original),
+        return await complete_with_schema_fallback(
+            provider=self._provider,
+            call_kwargs=call_kwargs,
+            provider_name=self._provider_name,
+            model=self._model,
+            provider_display_name=self.provider_name(),
+            logger=self._logger,
         )
 
-    @staticmethod
-    def _should_auto_continue_incomplete(usage: _UsageSnapshot) -> bool:
-        if usage.status != "incomplete":
-            return False
-        reason = (usage.incomplete_reason or "").strip().lower()
-        if not reason:
-            return False
-        return reason in {"max_output_tokens", "max_tokens"} or "max_output" in reason
-
-
-@dataclass(frozen=True)
-class _UsageSnapshot:
-    total_tokens: int | None = None
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    cached_input_tokens: int | None = None
-    reasoning_output_tokens: int | None = None
-    status: str | None = None
-    incomplete_reason: str | None = None
-
-
-def _opt_int(value: Any) -> int | None:
-    if isinstance(value, int):
-        return value
-    return None
-
-
-def _opt_str(value: Any) -> str | None:
-    if isinstance(value, str) and value:
-        return value
-    return None
-
-
-def _incomplete_reason(original: dict[str, Any]) -> str | None:
-    details = original.get("incomplete_details")
-    if isinstance(details, dict):
-        reason = details.get("reason")
-        if isinstance(reason, str) and reason:
-            return reason
-    return None
+    def _request_context(self) -> RequestContext:
+        return RequestContext(
+            model=self._model,
+            provider_name=self._provider_name,
+            is_responses_provider=self._is_responses_provider,
+            temperature=self._temperature,
+            max_new_tokens=self._max_new_tokens,
+            prompt_cache_enabled=self._prompt_cache_enabled,
+            prompt_cache_retention=self._prompt_cache_retention,
+            reasoning_effort=self._reasoning_effort,
+            openrouter_models=self._openrouter_models,
+            openrouter_provider=self._openrouter_provider,
+            openrouter_reasoning_enabled=self._openrouter_reasoning_enabled,
+            openrouter_plugins=self._openrouter_plugins,
+        )

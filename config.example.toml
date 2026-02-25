@@ -28,6 +28,7 @@ allowed_document_mime_types = []
 provider = "openai_responses"
 base_url = ""
 model = "gpt-5-mini"
+# Enable HTTP/2 for provider HTTP clients when supported (recommended for OpenAI Responses).
 http2 = true
 max_tool_iterations = 60
 request_timeout_seconds = 180
