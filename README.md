@@ -40,6 +40,52 @@ Use the built-in console channel to send/receive messages through the same dispa
 - One-shot mode: `poetry run minibot-console --once "hello"`
 - Read one-shot input from stdin: `echo "hello" | poetry run minibot-console --once -`
 
+Using Ollama via OpenAI-Compatible API
+--------------------------------------
+
+MiniBot can use Ollama through Ollama's OpenAI-compatible endpoints with either:
+
+- `llm.provider = "openai"` (Chat Completions style)
+- `llm.provider = "openai_responses"` (Responses style, compatibility depends on Ollama/model support)
+
+1. Start Ollama and pull a model:
+   - `ollama serve`
+   - `ollama pull qwen3.5:35b`
+2. Set your MiniBot provider and model in `config.toml`.
+3. Point provider `base_url` to Ollama's OpenAI-compatible path (`/v1`).
+4. Set a non-empty `api_key` value in `[providers.openai]` / `[providers.openai_responses]` (for example `"dummy"`). MiniBot falls back to echo mode when this key is empty.
+
+Example using `openai` provider:
+
+```toml
+[llm]
+provider = "openai"
+model = "qwen3.5:35b"
+
+[providers.openai]
+api_key = "dummy"
+base_url = "http://localhost:11434/v1"
+```
+
+Example using `openai_responses` provider:
+
+```toml
+[llm]
+provider = "openai_responses"
+model = "qwen3.5:35b"
+
+[providers.openai_responses]
+api_key = "dummy"
+base_url = "http://localhost:11434/v1"
+```
+
+Notes:
+
+- Use `/v1` as the base path.
+- Trailing slash in `base_url` is normalized by MiniBot, so both `/v1` and `/v1/` work.
+- When `base_url` uses `http://`, MiniBot automatically disables HTTP/2 for compatibility.
+- If a model/provider combination fails under `openai_responses`, switch to `openai` first.
+
 Up & Running with Telegram
 ---------------------------
 

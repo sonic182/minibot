@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import aiosonic
 from llm_async.utils.retry import RetryConfig
@@ -13,6 +14,7 @@ from minibot.llm.services.provider_registry import resolve_provider_class
 def create_provider(config: LLMMConfig) -> tuple[Any, str]:
     configured_provider = config.provider.lower()
     provider_cls, provider_name = resolve_provider_class(configured_provider)
+    normalized_base_url = config.base_url.rstrip("/") if config.base_url else None
 
     timeouts = aiosonic.Timeouts(
         sock_connect=float(config.sock_connect_timeout_seconds),
@@ -27,14 +29,19 @@ def create_provider(config: LLMMConfig) -> tuple[Any, str]:
         backoff_factor=1.0,
         jitter=False,
     )
+    effective_http2 = config.http2
+    if normalized_base_url:
+        parsed_base_url = urlparse(normalized_base_url)
+        if parsed_base_url.scheme.lower() == "http":
+            effective_http2 = False
     provider_kwargs: dict[str, Any] = {
         "api_key": config.api_key,
         "retry_config": retry_config,
         "client_kwargs": {"connector": connector},
-        "http2": config.http2,
+        "http2": effective_http2,
     }
-    if config.base_url:
-        provider_kwargs["base_url"] = config.base_url
+    if normalized_base_url:
+        provider_kwargs["base_url"] = normalized_base_url
 
     return provider_cls(**provider_kwargs), provider_name
 
