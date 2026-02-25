@@ -17,6 +17,7 @@ from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import empty_object_schema, strict_object, string_field
+from minibot.shared.utils import session_identifier
 from minibot.shared.assistant_response import (
     assistant_response_schema,
     coerce_should_answer,
@@ -125,13 +126,20 @@ class AgentDelegateTool:
         attempts = 1
         state = self._build_state(spec=spec, task=task, details=details)
         total_tokens = 0
+        previous_response_id: str | None = None
+        prompt_cache_key = _agent_prompt_cache_key(llm_client=llm_client, context=context, agent_name=spec.name)
+        state_mode_getter = getattr(llm_client, "responses_state_mode", None)
+        use_previous_response_id = callable(state_mode_getter) and state_mode_getter() == "previous_response_id"
         try:
             generation = await runtime.run(
                 state=state,
                 tool_context=context,
                 response_schema=_agent_response_schema(),
-                prompt_cache_key=None,
+                prompt_cache_key=prompt_cache_key,
+                initial_previous_response_id=previous_response_id,
             )
+            if use_previous_response_id:
+                previous_response_id = generation.response_id
             total_tokens += int(generation.total_tokens or 0)
             tool_messages_count = self._count_tool_messages(generation.state)
             if tool_required and tool_messages_count == 0:
@@ -157,8 +165,11 @@ class AgentDelegateTool:
                     state=retry_state,
                     tool_context=context,
                     response_schema=_agent_response_schema(),
-                    prompt_cache_key=None,
+                    prompt_cache_key=prompt_cache_key,
+                    initial_previous_response_id=previous_response_id,
                 )
+                if use_previous_response_id:
+                    previous_response_id = generation.response_id
                 total_tokens += int(generation.total_tokens or 0)
                 tool_messages_count = self._count_tool_messages(generation.state)
                 if tool_messages_count == 0:
@@ -343,3 +354,12 @@ def _delegation_result_status(outcome: _DelegationOutcome) -> str:
     if outcome.should_answer_to_user is False:
         return "not_user_answerable"
     return "success"
+
+
+def _agent_prompt_cache_key(*, llm_client: Any, context: ToolContext, agent_name: str) -> str | None:
+    enabled_getter = getattr(llm_client, "prompt_cache_enabled", None)
+    if callable(enabled_getter) and not bool(enabled_getter()):
+        return None
+    channel = context.channel or "agent"
+    session_id = session_identifier(channel, context.chat_id, context.user_id)
+    return f"{session_id}:agent:{agent_name}"

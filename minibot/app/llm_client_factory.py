@@ -14,6 +14,7 @@ class LLMClientFactory:
 
     def create_default(self) -> LLMClient:
         config = self._resolved_config(self._settings.llm, provider_override=None)
+        config.responses_state_mode = config.main_responses_state_mode
         key = self._cache_key(config)
         cached = self._cache.get(key)
         if cached is not None:
@@ -24,6 +25,7 @@ class LLMClientFactory:
 
     def create_for_agent(self, spec: AgentSpec) -> LLMClient:
         config = self._settings.llm.model_copy(deep=True)
+        config.responses_state_mode = config.agent_responses_state_mode
         if spec.model_provider:
             config.provider = spec.model_provider
         if spec.model:
@@ -82,10 +84,14 @@ class LLMClientFactory:
         return (
             config.provider.lower().strip(),
             config.model,
+            config.http2,
             config.temperature,
             config.max_new_tokens,
             config.reasoning_effort,
             config.max_tool_iterations,
+            config.responses_state_mode,
+            config.prompt_cache_enabled,
+            config.prompt_cache_retention,
             config.request_timeout_seconds,
             config.sock_connect_timeout_seconds,
             config.sock_read_timeout_seconds,

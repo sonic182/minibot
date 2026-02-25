@@ -52,10 +52,11 @@ class AgentRuntime:
         tool_context: ToolContext,
         response_schema: dict[str, Any] | None = None,
         prompt_cache_key: str | None = None,
+        initial_previous_response_id: str | None = None,
     ) -> RuntimeResult:
         tool_calls_count = 0
         step = 0
-        previous_response_id: str | None = None
+        previous_response_id: str | None = initial_previous_response_id
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
 

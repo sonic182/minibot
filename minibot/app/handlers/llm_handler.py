@@ -3,31 +3,35 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 from typing import Any, Sequence
-from typing import cast
 
 from minibot.app.agent_runtime import AgentRuntime
-from minibot.app.delegation_trace import count_tool_messages, extract_delegation_trace
 from minibot.app.incoming_files_context import (
     build_history_user_entry,
-    build_incoming_files_text,
-    incoming_files_from_metadata,
+)
+from minibot.app.handlers.services import (
+    AgentRuntimeResult,
+    CompactionResult,
+    HistoryCompactionService,
+    PromptService,
+    ResponseMetadataService,
+    RuntimeOrchestrationService,
+    SessionStateService,
+    UserInputService,
 )
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.response_parser import extract_answer, plain_render
 from minibot.app.tool_use_guardrail import NoopToolUseGuardrail, ToolUseGuardrail
-from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole
 from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
 from minibot.shared.assistant_response import assistant_response_schema
-from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
 from minibot.shared.utils import session_id_for, session_id_from_parts
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
 @dataclass(frozen=True)
-class _CompactionResult:
+class _CompactionResult(CompactionResult):
     updates: list[str]
     performed: bool
     tokens_used: int
@@ -36,9 +40,10 @@ class _CompactionResult:
 
 
 @dataclass(frozen=True)
-class _AgentRuntimeResult:
+class _AgentRuntimeResult(AgentRuntimeResult):
     render: Any
     should_reply: bool
+    response_id: str | None
     agent_trace: list[dict[str, Any]]
     delegation_fallback_used: bool
     tokens_used: int
@@ -69,9 +74,19 @@ class LLMMessageHandler:
         self._max_history_tokens = max_history_tokens
         self._notify_compaction_updates = notify_compaction_updates
         self._tool_use_guardrail: ToolUseGuardrail = tool_use_guardrail or NoopToolUseGuardrail()
-        self._session_total_tokens: dict[str, int] = {}
-        self._prompts_dir = self._llm_prompts_dir()
-        self._environment_prompt_fragment = environment_prompt_fragment.strip()
+        self._logger = logging.getLogger("minibot.handler")
+        self._session_state = SessionStateService()
+        self._session_total_tokens = self._session_state.session_total_tokens
+        self._session_previous_response_ids = self._session_state.session_previous_response_ids
+        self._metadata_service = ResponseMetadataService(llm_client=self._llm_client)
+        self._input_service = UserInputService(llm_client=self._llm_client)
+        self._prompt_service = PromptService(
+            llm_client=self._llm_client,
+            tools=self._tools,
+            environment_prompt_fragment=environment_prompt_fragment,
+            logger=self._logger,
+        )
+        self._prompts_dir = self._prompt_service.prompts_dir
         runtime_limits = build_runtime_limits(
             llm_client=self._llm_client,
             timeout_seconds=agent_timeout_seconds,
@@ -86,9 +101,25 @@ class LLMMessageHandler:
                 allow_system_inserts=False,
                 managed_files_root=managed_files_root,
             )
+            self._runtime_service = RuntimeOrchestrationService(
+                runtime=self._runtime,
+                llm_client=self._llm_client,
+                guardrail=self._tool_use_guardrail,
+                session_state=self._session_state,
+                logger=self._logger,
+            )
         else:
             self._runtime = None
-        self._logger = logging.getLogger("minibot.handler")
+            self._runtime_service = None
+        self._compaction_service = HistoryCompactionService(
+            memory=self._memory,
+            llm_client=self._llm_client,
+            session_state=self._session_state,
+            prompt_service=self._prompt_service,
+            logger=self._logger,
+            max_history_tokens=self._max_history_tokens,
+            compaction_user_request=self._COMPACTION_USER_REQUEST,
+        )
 
     def _supports_agent_runtime(self) -> bool:
         return callable(getattr(self._llm_client, "complete_once", None)) and callable(
@@ -96,85 +127,39 @@ class LLMMessageHandler:
         )
 
     def _llm_provider_name(self) -> str | None:
-        provider_getter = getattr(self._llm_client, "provider_name", None)
-        if callable(provider_getter):
-            provider = provider_getter()
-            if isinstance(provider, str) and provider:
-                return provider
-        return None
+        return self._metadata_service.provider_name()
 
     def _llm_model_name(self) -> str | None:
-        model_getter = getattr(self._llm_client, "model_name", None)
-        if callable(model_getter):
-            model = model_getter()
-            if isinstance(model, str) and model:
-                return model
-        return None
+        return self._metadata_service.model_name()
 
     def _response_metadata(self, should_reply: bool) -> dict[str, Any]:
-        return {
-            "should_reply": should_reply,
-            "llm_provider": self._llm_provider_name(),
-            "llm_model": self._llm_model_name(),
-        }
+        return self._metadata_service.response_metadata(should_reply)
 
     def _supports_media_inputs(self) -> bool:
-        supports_getter = getattr(self._llm_client, "supports_media_inputs", None)
-        if callable(supports_getter):
-            return bool(supports_getter())
-        return self._llm_client.is_responses_provider()
+        return self._input_service.supports_media_inputs()
 
     def _media_input_mode(self) -> str:
-        mode_getter = getattr(self._llm_client, "media_input_mode", None)
-        if callable(mode_getter):
-            mode = mode_getter()
-            if isinstance(mode, str) and mode:
-                return mode
-        return "responses" if self._llm_client.is_responses_provider() else "none"
+        return self._input_service.media_input_mode()
 
     def _llm_prompts_dir(self) -> str:
-        prompts_dir_getter = getattr(self._llm_client, "prompts_dir", None)
-        if callable(prompts_dir_getter):
-            value = prompts_dir_getter()
-            if isinstance(value, str) and value:
-                return value
-        return "./prompts"
+        return self._prompt_service.prompts_dir
+
+    def _responses_state_mode(self) -> str:
+        mode_getter = getattr(self._llm_client, "responses_state_mode", None)
+        if callable(mode_getter):
+            mode = mode_getter()
+            if mode in {"full_messages", "previous_response_id"}:
+                return mode
+        return "full_messages"
+
+    def _prompt_cache_enabled(self) -> bool:
+        enabled_getter = getattr(self._llm_client, "prompt_cache_enabled", None)
+        if callable(enabled_getter):
+            return bool(enabled_getter())
+        return True
 
     def _compose_system_prompt(self, channel: str | None) -> str:
-        system_prompt_getter = getattr(self._llm_client, "system_prompt", None)
-        base_prompt = "You are Minibot, a helpful assistant."
-        if callable(system_prompt_getter):
-            maybe_prompt = system_prompt_getter()
-            if isinstance(maybe_prompt, str) and maybe_prompt:
-                base_prompt = maybe_prompt
-
-        fragments = [base_prompt]
-        fragments.extend(load_policy_prompts(self._prompts_dir))
-        channel_prompt = load_channel_prompt(self._prompts_dir, channel)
-        if channel_prompt:
-            fragments.append(channel_prompt)
-        if self._environment_prompt_fragment:
-            fragments.append(self._environment_prompt_fragment)
-        self._logger.debug(
-            "composed system prompt",
-            extra={
-                "channel": channel,
-                "prompts_dir": self._prompts_dir,
-                "channel_prompt_loaded": bool(channel_prompt),
-                "fragment_count": len(fragments),
-                "prompt_preview": "\n\n".join(fragments)[:200],
-            },
-        )
-
-        if any(binding.tool.name == "self_insert_artifact" for binding in self._tools):
-            fragments.append(
-                "When you need to inspect a local workspace file (image/document), call self_insert_artifact first "
-                "to inject it into conversation context before answering file contents. "
-                "For file-management requests (save, move, delete, send, list), do not call self_insert_artifact; "
-                "use the filesystem tool with the appropriate action instead. "
-                "If the user only uploaded files and gave no clear instruction, ask a clarifying question."
-            )
-        return "\n\n".join(fragments)
+        return self._prompt_service.compose_system_prompt(channel)
 
     async def handle(self, event: MessageEvent) -> ChannelResponse:
         message = event.message
@@ -219,13 +204,20 @@ class LLMMessageHandler:
 
         history = list(await self._memory.get_history(session_id))
         owner_id = resolve_owner_id(message, self._default_owner_id)
+        responses_state_mode = self._responses_state_mode()
+        use_previous_response_id = (
+            self._llm_client.is_responses_provider() and responses_state_mode == "previous_response_id"
+        )
+        previous_response_id = (
+            self._session_previous_response_ids.get(session_id) if use_previous_response_id else None
+        )
         tool_context = ToolContext(
             owner_id=owner_id,
             channel=message.channel,
             chat_id=message.chat_id,
             user_id=message.user_id,
         )
-        prompt_cache_key = _prompt_cache_key(message)
+        prompt_cache_key = _prompt_cache_key(message) if self._prompt_cache_enabled() else None
         system_prompt = self._compose_system_prompt(message.channel)
         primary_agent = "minibot"
         agent_trace: list[dict[str, Any]] = []
@@ -240,11 +232,21 @@ class LLMMessageHandler:
                     tool_context=tool_context,
                     response_schema=self._response_schema(),
                     prompt_cache_key=prompt_cache_key,
-                    previous_response_id=None,
+                    previous_response_id=previous_response_id,
                     system_prompt_override=system_prompt,
+                )
+                self._session_state.track_usage(
+                    session_id,
+                    input_tokens=getattr(generation, "input_tokens", None),
+                    output_tokens=getattr(generation, "output_tokens", None),
+                    total_tokens=getattr(generation, "total_tokens", None),
+                    cached_input_tokens=getattr(generation, "cached_input_tokens", None),
+                    reasoning_output_tokens=getattr(generation, "reasoning_output_tokens", None),
                 )
                 turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
                 render, should_reply = extract_answer(generation.payload, logger=self._logger)
+                if use_previous_response_id and generation.response_id:
+                    self._session_previous_response_ids[session_id] = generation.response_id
             else:
                 runtime_result = await self._run_with_agent_runtime(
                     session_id=session_id,
@@ -254,6 +256,7 @@ class LLMMessageHandler:
                     system_prompt=system_prompt,
                     tool_context=tool_context,
                     prompt_cache_key=prompt_cache_key,
+                    previous_response_id=previous_response_id,
                     chat_id=message.chat_id,
                     channel=message.channel,
                 )
@@ -262,6 +265,11 @@ class LLMMessageHandler:
                 should_reply = runtime_result.should_reply
                 agent_trace = runtime_result.agent_trace
                 delegation_fallback_used = runtime_result.delegation_fallback_used
+                if use_previous_response_id and runtime_result.response_id:
+                    self._session_previous_response_ids[session_id] = runtime_result.response_id
+
+            if not use_previous_response_id:
+                self._session_previous_response_ids.pop(session_id, None)
 
             self._logger.debug(
                 "structured output parsed",
@@ -297,6 +305,9 @@ class LLMMessageHandler:
             session_total_tokens_after_compaction=compaction_result.session_total_tokens_after_compaction,
             compaction_performed=compaction_result.performed,
         )
+        usage_trace = self._session_state.latest_usage_trace(session_id)
+        if any(value is not None for value in usage_trace.values()):
+            metadata["usage_trace"] = usage_trace
         return ChannelResponse(
             channel=message.channel,
             chat_id=chat_id,
@@ -319,6 +330,13 @@ class LLMMessageHandler:
         turn_total_tokens = 0
         history = list(await self._memory.get_history(session_id))
         system_prompt = self._compose_system_prompt(channel)
+        responses_state_mode = self._responses_state_mode()
+        use_previous_response_id = (
+            self._llm_client.is_responses_provider() and responses_state_mode == "previous_response_id"
+        )
+        previous_response_id = (
+            self._session_previous_response_ids.get(session_id) if use_previous_response_id else None
+        )
         original_kind = response.render.kind if response.render is not None else "text"
         original_content = response.render.text if response.render is not None else response.text
         repair_prompt = self._build_format_repair_prompt(
@@ -335,9 +353,11 @@ class LLMMessageHandler:
             tool_context=None,
             response_schema=self._response_schema(),
             prompt_cache_key=f"{channel}:{chat_id}:format-repair",
-            previous_response_id=None,
+            previous_response_id=previous_response_id,
             system_prompt_override=system_prompt,
         )
+        if use_previous_response_id and generation.response_id:
+            self._session_previous_response_ids[session_id] = generation.response_id
         turn_total_tokens += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
         render, _ = extract_answer(generation.payload, logger=self._logger)
         await self._memory.append_history(session_id, "user", repair_prompt)
@@ -371,32 +391,11 @@ class LLMMessageHandler:
     def _build_format_repair_prompt(
         *, channel: str, original_kind: str, parse_error: str, original_content: str
     ) -> str:
-        if channel == "telegram":
-            return (
-                "We tried to send a formatted response to Telegram but got a formatting parse error. "
-                "Rewrite the same answer with valid Telegram-compatible formatting.\n\n"
-                f"Original kind: {original_kind}\n"
-                f"Telegram error: {parse_error}\n\n"
-                "Requirements:\n"
-                "- Return the same meaning and content, only fix formatting.\n"
-                "- Keep kind as markdown_v2 or html only if valid for Telegram, otherwise use text.\n"
-                "- For markdown_v2, write normal Markdown (do not pre-escape Telegram MarkdownV2).\n"
-                "- Do not use placeholder statements.\n"
-                "- Return structured output only.\n\n"
-                f"Original content:\n{original_content}"
-            )
-        return (
-            "We tried to send a formatted response to the target channel and got a formatting parse error. "
-            "Rewrite the same answer with valid channel-compatible formatting.\n\n"
-            f"Channel: {channel}\n"
-            f"Original kind: {original_kind}\n"
-            f"Parse error: {parse_error}\n\n"
-            "Requirements:\n"
-            "- Return the same meaning and content, only fix formatting.\n"
-            "- Keep kind aligned with valid formatting for this channel, otherwise use text.\n"
-            "- Do not use placeholder statements.\n"
-            "- Return structured output only.\n\n"
-            f"Original content:\n{original_content}"
+        return PromptService.build_format_repair_prompt(
+            channel=channel,
+            original_kind=original_kind,
+            parse_error=parse_error,
+            original_content=original_content,
         )
 
     async def _run_with_agent_runtime(
@@ -409,217 +408,46 @@ class LLMMessageHandler:
         system_prompt: str,
         tool_context: ToolContext,
         prompt_cache_key: str | None,
+        previous_response_id: str | None,
         chat_id: int | None,
         channel: str | None,
     ) -> _AgentRuntimeResult:
-        assert self._runtime is not None
-        tokens_used = 0
-        agent_trace: list[dict[str, Any]] = []
-        delegation_fallback_used = False
-
-        state = self._build_agent_state(
-            history=history,
-            user_text=model_text,
-            user_content=model_user_content,
-            system_prompt=system_prompt,
-        )
-        generation = await self._runtime.run(
-            state=state,
-            tool_context=tool_context,
-            response_schema=self._response_schema(),
-            prompt_cache_key=prompt_cache_key,
-        )
-        tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-        tool_messages_count = count_tool_messages(generation.state)
-        trace_result = extract_delegation_trace(generation.state)
-        agent_trace = trace_result.trace
-        delegation_fallback_used = trace_result.fallback_used
-        delegation_unresolved = trace_result.unresolved
-
-        guardrail = await self._tool_use_guardrail.apply(
+        if self._runtime is None:
+            raise RuntimeError("agent runtime is not available")
+        runtime_service_runtime = getattr(self._runtime_service, "_runtime", None)
+        if self._runtime_service is None or runtime_service_runtime is not self._runtime:
+            self._runtime_service = RuntimeOrchestrationService(
+                runtime=self._runtime,
+                llm_client=self._llm_client,
+                guardrail=self._tool_use_guardrail,
+                session_state=self._session_state,
+                logger=self._logger,
+            )
+        assert self._runtime_service is not None
+        result = await self._runtime_service.run_with_agent_runtime(
             session_id=session_id,
-            user_text=model_text,
-            tool_context=tool_context,
-            state=generation.state,
+            history=history,
+            model_text=model_text,
+            model_user_content=model_user_content,
             system_prompt=system_prompt,
+            tool_context=tool_context,
             prompt_cache_key=prompt_cache_key,
+            previous_response_id=previous_response_id,
+            chat_id=chat_id,
+            channel=channel,
+            response_schema=self._response_schema(),
         )
-        tokens_used += guardrail.tokens_used
-        self._track_token_usage(session_id, guardrail.tokens_used)
-
-        if guardrail.resolved_render_text is not None:
-            return _AgentRuntimeResult(
-                render=plain_render(guardrail.resolved_render_text),
-                should_reply=True,
-                agent_trace=agent_trace,
-                delegation_fallback_used=delegation_fallback_used,
-                tokens_used=tokens_used,
-            )
-
-        if guardrail.requires_retry and tool_messages_count == 0:
-            retry_system_prompt = system_prompt
-            if guardrail.retry_system_prompt_suffix:
-                retry_system_prompt = f"{system_prompt}\n\n{guardrail.retry_system_prompt_suffix}"
-            retry_state = self._build_agent_state(
-                history=history,
-                user_text=model_text,
-                user_content=model_user_content,
-                system_prompt=retry_system_prompt,
-            )
-            generation = await self._runtime.run(
-                state=retry_state,
-                tool_context=tool_context,
-                response_schema=self._response_schema(),
-                prompt_cache_key=prompt_cache_key,
-            )
-            tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-            trace_result = extract_delegation_trace(generation.state)
-            agent_trace = trace_result.trace
-            delegation_fallback_used = trace_result.fallback_used
-            delegation_unresolved = trace_result.unresolved
-            render, should_reply = extract_answer(generation.payload, logger=self._logger)
-            if count_tool_messages(generation.state) == 0:
-                return _AgentRuntimeResult(
-                    render=plain_render(
-                        "I could not verify or execute that action with tools in this attempt. "
-                        "Please try again, or ask me to run a specific tool."
-                    ),
-                    should_reply=True,
-                    agent_trace=agent_trace,
-                    delegation_fallback_used=delegation_fallback_used,
-                    tokens_used=tokens_used,
-                )
-
-        else:
-            render, should_reply = extract_answer(generation.payload, logger=self._logger)
-
-        if delegation_unresolved:
-            retry_state = self._build_agent_state(
-                history=history,
-                user_text=model_text,
-                user_content=model_user_content,
-                system_prompt=(
-                    f"{system_prompt}\n\n"
-                    "Delegation policy reminder: If invoke_agent result has should_answer_to_user=false "
-                    "or result_status other than success, you must resolve it in this turn. "
-                    "Do one additional concrete tool call or return an explicit failure message to user "
-                    "with should_answer_to_user=true."
-                ),
-            )
-            generation = await self._runtime.run(
-                state=retry_state,
-                tool_context=tool_context,
-                response_schema=self._response_schema(),
-                prompt_cache_key=prompt_cache_key,
-            )
-            tokens_used += self._track_token_usage(session_id, getattr(generation, "total_tokens", None))
-            trace_result = extract_delegation_trace(generation.state)
-            agent_trace = trace_result.trace
-            delegation_fallback_used = trace_result.fallback_used
-            delegation_unresolved = trace_result.unresolved
-            render, should_reply = extract_answer(generation.payload, logger=self._logger)
-            if delegation_unresolved:
-                self._logger.warning(
-                    "delegation unresolved after bounded retry; returning explicit failure",
-                    extra={"chat_id": chat_id, "channel": channel},
-                )
-                render = plain_render(
-                    "I could not complete that delegated action reliably in this attempt. "
-                    "Please retry, or ask me to run a specific tool step-by-step."
-                )
-                should_reply = True
-
         return _AgentRuntimeResult(
-            render=render,
-            should_reply=should_reply,
-            agent_trace=agent_trace,
-            delegation_fallback_used=delegation_fallback_used,
-            tokens_used=tokens_used,
+            render=result.render,
+            should_reply=result.should_reply,
+            response_id=result.response_id,
+            agent_trace=result.agent_trace,
+            delegation_fallback_used=result.delegation_fallback_used,
+            tokens_used=result.tokens_used,
         )
 
     def _build_model_user_input(self, message: ChannelMessage) -> tuple[str, str | list[dict[str, Any]] | None]:
-        prompt_text = message.text.strip() if message.text else ""
-        incoming_files = incoming_files_from_metadata(message.metadata)
-        if incoming_files and not message.attachments:
-            return build_incoming_files_text(prompt_text, incoming_files), None
-        if not message.attachments:
-            return prompt_text, None
-
-        resolved_prompt = prompt_text or "Please analyze the attached media and summarize the key information."
-        mode = self._media_input_mode()
-        parts: list[dict[str, Any]] = []
-        if mode == "chat_completions":
-            parts.append({"type": "text", "text": resolved_prompt})
-        else:
-            parts.append({"type": "input_text", "text": resolved_prompt})
-        parts.extend(self._transform_attachments_for_mode(message.attachments, mode))
-        return resolved_prompt, parts
-
-    def _build_agent_state(
-        self,
-        history: Sequence[Any],
-        user_text: str,
-        user_content: str | list[dict[str, Any]] | None,
-        system_prompt: str,
-    ) -> AgentState:
-        messages: list[AgentMessage] = [
-            AgentMessage(role="system", content=[MessagePart(type="text", text=system_prompt)])
-        ]
-        for entry in history:
-            role = str(getattr(entry, "role", "user"))
-            if role not in {"system", "user", "assistant"}:
-                continue
-            content = getattr(entry, "content", "")
-            messages.append(
-                AgentMessage(
-                    role=cast(MessageRole, role),
-                    content=[MessagePart(type="text", text=str(content))],
-                )
-            )
-
-        if user_content is None:
-            messages.append(AgentMessage(role="user", content=[MessagePart(type="text", text=user_text)]))
-        elif isinstance(user_content, str):
-            messages.append(AgentMessage(role="user", content=[MessagePart(type="text", text=user_content)]))
-        else:
-            messages.append(
-                AgentMessage(
-                    role="user",
-                    content=[MessagePart(type="text", text=user_text)],
-                    raw_content=user_content,
-                )
-            )
-        return AgentState(messages=messages)
-
-    def _transform_attachments_for_mode(
-        self,
-        attachments: Sequence[dict[str, Any]],
-        mode: str,
-    ) -> list[dict[str, Any]]:
-        if mode == "chat_completions":
-            return [self._to_chat_completions_attachment(attachment) for attachment in attachments]
-        return [dict(attachment) for attachment in attachments]
-
-    @staticmethod
-    def _to_chat_completions_attachment(attachment: dict[str, Any]) -> dict[str, Any]:
-        attachment_type = attachment.get("type")
-        if attachment_type == "input_image":
-            image_url = attachment.get("image_url")
-            return {
-                "type": "image_url",
-                "image_url": {
-                    "url": image_url,
-                },
-            }
-        if attachment_type == "input_file":
-            return {
-                "type": "file",
-                "file": {
-                    "filename": attachment.get("filename"),
-                    "file_data": attachment.get("file_data"),
-                },
-            }
-        return dict(attachment)
+        return self._input_service.build_model_user_input(message)
 
     def _response_schema(self) -> dict[str, Any]:
         return assistant_response_schema(kinds=["text", "html", "markdown_v2"], include_meta=True)
@@ -630,13 +458,10 @@ class LLMMessageHandler:
         await self._memory.trim_history(session_id, self._max_history_messages)
 
     def _track_token_usage(self, session_id: str, tokens: int | None) -> int:
-        if tokens is None or tokens <= 0:
-            return 0
-        self._session_total_tokens[session_id] = self._session_total_tokens.get(session_id, 0) + tokens
-        return tokens
+        return self._session_state.track_tokens(session_id, tokens)
 
     def _current_session_tokens(self, session_id: str) -> int:
-        return self._session_total_tokens.get(session_id, 0)
+        return self._session_state.current_tokens(session_id)
 
     @staticmethod
     def _build_token_trace(
@@ -646,25 +471,15 @@ class LLMMessageHandler:
         session_total_tokens_after_compaction: int,
         compaction_performed: bool,
     ) -> dict[str, Any]:
-        return {
-            "turn_total_tokens": max(0, int(turn_total_tokens)),
-            "session_total_tokens": max(0, int(session_total_tokens_after_compaction)),
-            "session_total_tokens_before_compaction": session_total_tokens_before_compaction,
-            "session_total_tokens_after_compaction": max(0, int(session_total_tokens_after_compaction)),
-            "compaction_performed": compaction_performed,
-            "accounting_scope": "all_turn_calls",
-        }
+        return SessionStateService.build_token_trace(
+            turn_total_tokens=turn_total_tokens,
+            session_total_tokens_before_compaction=session_total_tokens_before_compaction,
+            session_total_tokens_after_compaction=session_total_tokens_after_compaction,
+            compaction_performed=compaction_performed,
+        )
 
     def _compact_system_prompt(self, system_prompt: str) -> str:
-        compact_prompt = load_compact_prompt(self._prompts_dir)
-        if compact_prompt:
-            return f"{system_prompt}\n\n{compact_prompt}"
-        return (
-            f"{system_prompt}\n\n"
-            "You are compacting conversation memory. Return a concise but complete summary of the "
-            "conversation so far, preserving user goals, constraints, and pending tasks. "
-            "Do not include preamble."
-        )
+        return self._prompt_service.compact_system_prompt(system_prompt)
 
     async def _compact_history_if_needed(
         self,
@@ -674,79 +489,20 @@ class LLMMessageHandler:
         system_prompt: str,
         notify: bool,
     ) -> _CompactionResult:
-        updates: list[str] = []
-        if self._max_history_tokens is None:
-            return _CompactionResult(
-                updates=updates,
-                performed=False,
-                tokens_used=0,
-                session_total_tokens_before_compaction=None,
-                session_total_tokens_after_compaction=self._current_session_tokens(session_id),
-            )
-        total_tokens = self._session_total_tokens.get(session_id, 0)
-        if total_tokens < self._max_history_tokens:
-            return _CompactionResult(
-                updates=updates,
-                performed=False,
-                tokens_used=0,
-                session_total_tokens_before_compaction=None,
-                session_total_tokens_after_compaction=total_tokens,
-            )
-        history = list(await self._memory.get_history(session_id))
-        if not history:
-            session_before_reset = total_tokens
-            self._session_total_tokens[session_id] = 0
-            return _CompactionResult(
-                updates=updates,
-                performed=False,
-                tokens_used=0,
-                session_total_tokens_before_compaction=session_before_reset,
-                session_total_tokens_after_compaction=0,
-            )
-        if notify:
-            updates.append("running compaction...")
-        compaction_tokens = 0
-        compaction_user_request = self._COMPACTION_USER_REQUEST
-        try:
-            compact_generation = await self._llm_client.generate(
-                history,
-                compaction_user_request,
-                user_content=None,
-                tools=[],
-                tool_context=None,
-                response_schema=None,
-                prompt_cache_key=f"{prompt_cache_key}:compact",
-                previous_response_id=None,
-                system_prompt_override=self._compact_system_prompt(system_prompt),
-            )
-            session_before_reset = self._current_session_tokens(session_id)
-            compaction_tokens = self._track_token_usage(session_id, getattr(compact_generation, "total_tokens", None))
-            compact_render, _ = extract_answer(compact_generation.payload, logger=self._logger)
-            await self._memory.trim_history(session_id, 0)
-            await self._memory.append_history(session_id, "user", compaction_user_request)
-            await self._memory.append_history(session_id, "assistant", compact_render.text)
-            self._session_total_tokens[session_id] = 0
-            if notify:
-                updates.append("done compacting")
-                updates.append(compact_render.text)
-            return _CompactionResult(
-                updates=updates,
-                performed=True,
-                tokens_used=compaction_tokens,
-                session_total_tokens_before_compaction=session_before_reset,
-                session_total_tokens_after_compaction=0,
-            )
-        except Exception as exc:
-            self._logger.exception("history compaction failed", exc_info=exc)
-            if notify:
-                updates.append("error compacting")
-            return _CompactionResult(
-                updates=updates,
-                performed=False,
-                tokens_used=compaction_tokens,
-                session_total_tokens_before_compaction=None,
-                session_total_tokens_after_compaction=self._current_session_tokens(session_id),
-            )
+        result = await self._compaction_service.compact_history_if_needed(
+            session_id,
+            prompt_cache_key=prompt_cache_key,
+            system_prompt=system_prompt,
+            notify=notify,
+            responses_state_mode=self._responses_state_mode(),
+        )
+        return _CompactionResult(
+            updates=result.updates,
+            performed=result.performed,
+            tokens_used=result.tokens_used,
+            session_total_tokens_before_compaction=result.session_total_tokens_before_compaction,
+            session_total_tokens_after_compaction=result.session_total_tokens_after_compaction,
+        )
 
     def _format_runtime_error_message(self, exc: Exception) -> str:
         if not self._logger.isEnabledFor(logging.DEBUG):
@@ -774,4 +530,7 @@ def _prompt_cache_key(message: ChannelMessage) -> str | None:
     if message.channel and (message.user_id is not None or message.chat_id is not None):
         suffix = message.user_id if message.user_id is not None else message.chat_id
         return f"{message.channel}:{suffix}"
-    return None
+    session_key = session_id_for(message)
+    if message.channel:
+        return f"{message.channel}:{session_key}"
+    return session_key

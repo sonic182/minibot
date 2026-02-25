@@ -28,12 +28,23 @@ allowed_document_mime_types = []
 provider = "openai_responses"
 base_url = ""
 model = "gpt-5-mini"
+# Enable HTTP/2 for provider HTTP clients when supported (recommended for OpenAI Responses).
+http2 = true
 max_tool_iterations = 60
 request_timeout_seconds = 180
 sock_connect_timeout_seconds = 10
 sock_read_timeout_seconds = 180
 retry_attempts = 3
 retry_delay_seconds = 2.0
+# Responses API state mode for the main agent.
+# full_messages: resend full conversation each turn (default/safer behavior).
+main_responses_state_mode = "full_messages"
+# Responses API state mode for delegated/specialist agents.
+# previous_response_id: continue server-side state for lower latency/token usage.
+agent_responses_state_mode = "previous_response_id"
+prompt_cache_enabled = true
+# Optional retention hint for OpenAI Responses prompt cache.
+# prompt_cache_retention = "24h"
 # Base system prompt (used when system_prompt_file is not configured or set to null)
 system_prompt = "You are Minibot, a helpful assistant."
 # Load system prompt from versioned markdown file (default: "./prompts/main_agent_system.md")

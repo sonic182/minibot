@@ -94,6 +94,12 @@ class StubLLMClient:
         system_prompt: str = "You are Minibot, a helpful assistant.",
         prompts_dir: str = "./prompts",
         total_tokens: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cached_input_tokens: int | None = None,
+        reasoning_output_tokens: int | None = None,
+        responses_state_mode: str = "full_messages",
+        prompt_cache_enabled: bool = True,
     ) -> None:
         self.payload = payload
         self.response_id = response_id
@@ -103,10 +109,34 @@ class StubLLMClient:
         self._system_prompt = system_prompt
         self._prompts_dir = prompts_dir
         self.total_tokens = total_tokens
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.cached_input_tokens = cached_input_tokens
+        self.reasoning_output_tokens = reasoning_output_tokens
+        self._responses_state_mode = responses_state_mode
+        self._prompt_cache_enabled = prompt_cache_enabled
+        self.compact_calls: list[dict[str, Any]] = []
+        self.compact_response_id = "cmp-1"
+        self.compact_output: list[dict[str, Any]] = [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "ok"}],
+            }
+        ]
+        self.compact_total_tokens: int | None = total_tokens
 
     async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
         self.calls.append({"args": args, "kwargs": kwargs})
-        return LLMGeneration(self.payload, self.response_id, total_tokens=self.total_tokens)
+        return LLMGeneration(
+            self.payload,
+            self.response_id,
+            total_tokens=self.total_tokens,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            cached_input_tokens=self.cached_input_tokens,
+            reasoning_output_tokens=self.reasoning_output_tokens,
+        )
 
     def is_responses_provider(self) -> bool:
         return self._is_responses
@@ -126,6 +156,32 @@ class StubLLMClient:
 
     def prompts_dir(self) -> str:
         return self._prompts_dir
+
+    def responses_state_mode(self) -> str:
+        return self._responses_state_mode
+
+    def prompt_cache_enabled(self) -> bool:
+        return self._prompt_cache_enabled
+
+    async def compact_response(
+        self,
+        *,
+        previous_response_id: str,
+        prompt_cache_key: str | None = None,
+    ) -> Any:
+        from minibot.llm.provider_factory import LLMCompaction
+
+        self.compact_calls.append(
+            {
+                "previous_response_id": previous_response_id,
+                "prompt_cache_key": prompt_cache_key,
+            }
+        )
+        return LLMCompaction(
+            response_id=self.compact_response_id,
+            output=self.compact_output,
+            total_tokens=self.compact_total_tokens,
+        )
 
 
 class FailingLLMClient(StubLLMClient):
@@ -179,6 +235,33 @@ async def test_handler_returns_structured_answer() -> None:
     call = stub_client.calls[-1]
     assert call["kwargs"].get("prompt_cache_key") == "telegram:1"
     assert call["kwargs"].get("previous_response_id") is None
+
+
+@pytest.mark.asyncio
+async def test_handler_includes_usage_trace_metadata() -> None:
+    memory = StubMemory()
+    stub_client = StubLLMClient(
+        {"answer": "hello", "should_answer_to_user": True},
+        is_responses=True,
+        provider="openai_responses",
+        total_tokens=33,
+        input_tokens=21,
+        output_tokens=12,
+        cached_input_tokens=8,
+        reasoning_output_tokens=3,
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, stub_client))
+
+    response = await handler.handle(_message_event("ping"))
+
+    usage_trace = response.metadata.get("usage_trace")
+    assert usage_trace == {
+        "input_tokens": 21,
+        "output_tokens": 12,
+        "total_tokens": 33,
+        "cached_input_tokens": 8,
+        "reasoning_output_tokens": 3,
+    }
 
 
 @pytest.mark.asyncio
@@ -282,6 +365,57 @@ async def test_handler_does_not_reuse_previous_response_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handler_reuses_previous_response_id_when_mode_enabled() -> None:
+    memory = StubMemory()
+    stub_client = StubLLMClient(
+        {"answer": "hello", "should_answer_to_user": True},
+        response_id="resp-1",
+        is_responses=True,
+        provider="openai_responses",
+        responses_state_mode="previous_response_id",
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, stub_client))
+
+    await handler.handle(_message_event("ping"))
+    stub_client.response_id = "resp-2"
+    await handler.handle(_message_event("ping"))
+
+    assert stub_client.calls[-1]["kwargs"].get("previous_response_id") == "resp-1"
+
+
+@pytest.mark.asyncio
+async def test_handler_disables_prompt_cache_when_client_turns_it_off() -> None:
+    memory = StubMemory()
+    stub_client = StubLLMClient(
+        {"answer": "hello", "should_answer_to_user": True},
+        response_id="resp-1",
+        is_responses=True,
+        provider="openai_responses",
+        prompt_cache_enabled=False,
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, stub_client))
+
+    await handler.handle(_message_event("ping"))
+
+    assert stub_client.calls[-1]["kwargs"].get("prompt_cache_key") is None
+
+
+@pytest.mark.asyncio
+async def test_handler_uses_fallback_prompt_cache_key_without_chat_or_user() -> None:
+    handler, stub_client, _ = _handler(
+        {"answer": "hello", "should_answer_to_user": True},
+        responses_provider=True,
+        response_id="resp-1",
+    )
+
+    await handler.handle(MessageEvent(message=_message(text="ping")))
+
+    key = stub_client.calls[-1]["kwargs"].get("prompt_cache_key")
+    assert isinstance(key, str)
+    assert key.startswith("telegram:")
+
+
+@pytest.mark.asyncio
 async def test_handler_falls_back_for_plain_text() -> None:
     handler, _, _ = _handler("plain text")
     response = await handler.handle(_message_event("ping"))
@@ -340,6 +474,99 @@ async def test_handler_compacts_history_when_token_limit_reached() -> None:
     assert token_trace.get("compaction_performed") is True
     assert token_trace.get("session_total_tokens_before_compaction") == 60
     assert token_trace.get("session_total_tokens_after_compaction") == 0
+
+
+@pytest.mark.asyncio
+async def test_handler_uses_responses_compaction_endpoint_in_previous_id_mode() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(
+        {"answer": "ok", "should_answer_to_user": True},
+        response_id="resp-1",
+        is_responses=True,
+        provider="openai_responses",
+        total_tokens=60,
+        responses_state_mode="previous_response_id",
+    )
+    client.compact_response_id = "cmp-42"
+    client.compact_output = [
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "compacted via endpoint"}],
+        }
+    ]
+    client.compact_total_tokens = 7
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        max_history_tokens=50,
+        notify_compaction_updates=True,
+    )
+
+    response = await handler.handle(_message_event("one"))
+
+    assert len(client.compact_calls) == 1
+    assert client.compact_calls[0]["previous_response_id"] == "resp-1"
+    assert client.calls[-1]["args"][1] == "one"
+    session_id = session_id_for(_message_event("one").message)
+    assert handler._session_previous_response_ids[session_id] == "cmp-42"  # type: ignore[attr-defined]
+    assert memory._store[session_id][1].content == "compacted via endpoint"
+    assert response.metadata.get("compaction_updates") == [
+        "running compaction...",
+        "done compacting",
+        "compacted via endpoint",
+    ]
+    token_trace = response.metadata.get("token_trace")
+    assert isinstance(token_trace, dict)
+    assert token_trace.get("turn_total_tokens") == 67
+
+
+@pytest.mark.asyncio
+async def test_handler_fallback_compaction_updates_previous_response_id() -> None:
+    class _FallbackCompactionClient(StubLLMClient):
+        def __init__(self) -> None:
+            super().__init__(
+                {"answer": "ok", "should_answer_to_user": True},
+                response_id="resp-1",
+                is_responses=True,
+                provider="openai_responses",
+                total_tokens=60,
+                responses_state_mode="previous_response_id",
+            )
+            self._generate_calls = 0
+
+        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+            self.calls.append({"args": args, "kwargs": kwargs})
+            self._generate_calls += 1
+            if self._generate_calls == 1:
+                return LLMGeneration(self.payload, "resp-1", total_tokens=self.total_tokens)
+            return LLMGeneration(self.payload, "cmp-fallback", total_tokens=5)
+
+        async def compact_response(
+            self,
+            *,
+            previous_response_id: str,
+            prompt_cache_key: str | None = None,
+        ) -> Any:
+            _ = previous_response_id, prompt_cache_key
+            raise RuntimeError("compact endpoint unavailable")
+
+    memory = StubMemory()
+    client = _FallbackCompactionClient()
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        max_history_tokens=50,
+        notify_compaction_updates=True,
+    )
+
+    response = await handler.handle(_message_event("one"))
+
+    session_id = session_id_for(_message_event("one").message)
+    assert handler._session_previous_response_ids[session_id] == "cmp-fallback"  # type: ignore[attr-defined]
+    assert response.metadata.get("compaction_updates") == ["running compaction...", "done compacting", "ok"]
+    assert len(client.calls) == 2
+    assert client.calls[1]["kwargs"].get("previous_response_id") is None
 
 
 @pytest.mark.asyncio
@@ -919,3 +1146,38 @@ async def test_repair_response_appends_retry_prompt_and_answer_to_history() -> N
     token_trace = repaired.metadata.get("token_trace")
     assert isinstance(token_trace, dict)
     assert token_trace.get("accounting_scope") == "all_turn_calls"
+
+
+@pytest.mark.asyncio
+async def test_repair_response_reuses_and_refreshes_previous_response_id_when_mode_enabled() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(
+        {
+            "answer": {"kind": "markdown_v2", "content": "*fixed*"},
+            "should_answer_to_user": True,
+        },
+        response_id="resp-repair",
+        is_responses=True,
+        provider="openai_responses",
+        responses_state_mode="previous_response_id",
+    )
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client))
+    session_id = session_id_for(_message(channel="telegram", chat_id=1, user_id=1))
+    handler._session_previous_response_ids[session_id] = "resp-before"  # type: ignore[attr-defined]
+
+    await handler.repair_format_response(
+        response=ChannelResponse(
+            channel="telegram",
+            chat_id=1,
+            text="bad",
+            render=RenderableResponse(kind="markdown_v2", text="bad"),
+        ),
+        parse_error="can't parse entities",
+        channel="telegram",
+        chat_id=1,
+        user_id=1,
+        attempt=1,
+    )
+
+    assert client.calls[-1]["kwargs"].get("previous_response_id") == "resp-before"
+    assert handler._session_previous_response_ids[session_id] == "resp-repair"  # type: ignore[attr-defined]

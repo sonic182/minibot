@@ -82,6 +82,7 @@ class LLMMConfig(BaseModel):
     api_key: str = ""
     base_url: str | None = None
     model: str = "gpt-4o-mini"
+    http2: bool = False
     temperature: float | None = None
     max_new_tokens: PositiveInt | None = None
     max_tool_iterations: PositiveInt = 15
@@ -94,6 +95,11 @@ class LLMMConfig(BaseModel):
     system_prompt_file: str | None = "./prompts/main_agent_system.md"
     prompts_dir: str = "./prompts"
     reasoning_effort: str | None = None
+    main_responses_state_mode: Literal["full_messages", "previous_response_id"] = "full_messages"
+    agent_responses_state_mode: Literal["full_messages", "previous_response_id"] = "previous_response_id"
+    responses_state_mode: Literal["full_messages", "previous_response_id"] = "full_messages"
+    prompt_cache_enabled: bool = True
+    prompt_cache_retention: Literal["in-memory", "24h"] | None = None
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
 
 
