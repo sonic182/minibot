@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-02-25
+
+### Added
+
+- Internal service modules for handler/runtime orchestration (`minibot.app.handlers.services.*`) and LLM request assembly/execution (`minibot.llm.services.*`) to separate state, compaction, tool-loop, schema, and usage concerns.
+- Shared async retry helper at `minibot/shared/retries.py` reused by LLM/bootstrap paths.
+
+### Changed
+
+- Refactored `LLMMessageHandler` and surrounding runtime wiring to delegate state/metadata/input/prompt/runtime/compaction responsibilities to focused services while preserving behavior.
+- Responses API state and compaction flow were tightened for clearer memory routing and more consistent compaction prompting/tool-usage guidance.
+- Provider/client bootstrap path now applies transport behavior based on endpoint scheme, with HTTP/2 used only for HTTPS-capable endpoints.
+
+### Fixed
+
+- Local/non-HTTPS LLM endpoints (for example Ollama over plain HTTP) now avoid forced HTTP/2, reducing bootstrap/connection failures.
+
 ## [0.0.6] - 2026-02-20
 
 ### Added
@@ -122,7 +139,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.0.6..HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.0.7..HEAD
+[0.0.7]: https://github.com/sonic182/minibot/compare/0.0.6..0.0.7
 [0.0.6]: https://github.com/sonic182/minibot/compare/0.0.5..0.0.6
 [0.0.5]: https://github.com/sonic182/minibot/compare/0.0.4..0.0.5
 [0.0.4]: https://github.com/sonic182/minibot/compare/0.0.3..0.0.4
