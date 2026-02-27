@@ -31,7 +31,7 @@ def _memory_tool() -> Tool:
             properties={
                 "action": {
                     "type": "string",
-                    "enum": ["save", "get", "search", "delete"],
+                    "enum": ["save", "get", "search", "delete", "list_titles"],
                     "description": "Memory operation to perform.",
                 },
                 "entry_id": nullable_string("Entry id for get/delete."),
@@ -69,7 +69,9 @@ async def _memory_action(memory: KeyValueMemory, payload: dict[str, Any], contex
         return await _search_entries(memory, payload, context)
     if action == "delete":
         return await _delete_entry(memory, payload, context)
-    raise ValueError("action must be one of: save, get, search, delete")
+    if action == "list_titles":
+        return await _list_titles(memory, payload, context)
+    raise ValueError("action must be one of: save, get, search, delete, list_titles")
 
 
 async def _save_entry(
@@ -106,7 +108,12 @@ async def _get_entry(
         raise ValueError("entry_id or title is required")
     entry = await memory.get_entry(owner_id=owner_id, entry_id=entry_id, title=title)
     if not entry:
-        return {"message": "Entry not found", "owner_id": owner_id}
+        response: dict[str, Any] = {"message": "Entry not found", "owner_id": owner_id}
+        if title:
+            suggestions = await _suggest_titles(memory, owner_id, title)
+            if suggestions:
+                response["suggested_titles"] = suggestions
+        return response
     return _entry_payload(entry)
 
 
@@ -160,6 +167,115 @@ async def _delete_entry(
         "entry_id": entry_id,
         "title": title,
     }
+
+
+async def _list_titles(
+    memory: KeyValueMemory,
+    payload: dict[str, Any],
+    context: ToolContext,
+) -> dict[str, Any]:
+    owner_id = require_owner(context)
+    limit_value = optional_int(
+        payload.get("limit"),
+        field="limit",
+        allow_float=True,
+        allow_string=True,
+        reject_bool=False,
+        type_error="Expected integer value",
+    )
+    offset_value = optional_int(
+        payload.get("offset"),
+        field="offset",
+        allow_float=True,
+        allow_string=True,
+        reject_bool=False,
+        type_error="Expected integer value",
+    )
+    query = optional_str(payload.get("query"))
+    requested_limit = limit_value or 200
+    requested_offset = offset_value or 0
+    entries, total = await _collect_entries_window(
+        memory=memory,
+        owner_id=owner_id,
+        offset=requested_offset,
+        limit=requested_limit,
+    )
+    if query:
+        normalized_query = query.strip().lower()
+        entries = [entry for entry in entries if normalized_query in entry.title.lower()]
+    titles = [
+        {
+            "id": entry.id,
+            "title": entry.title,
+            "updated_at": entry.updated_at.isoformat(),
+            "source": entry.source,
+        }
+        for entry in entries
+    ]
+    return {
+        "owner_id": owner_id,
+        "total": len(titles) if query else total,
+        "limit": requested_limit,
+        "offset": requested_offset,
+        "titles": titles,
+    }
+
+
+async def _suggest_titles(memory: KeyValueMemory, owner_id: str, title: str) -> list[str]:
+    entries, _ = await _collect_entries_window(memory=memory, owner_id=owner_id, offset=0, limit=200)
+    normalized_title = title.strip().lower()
+    if not normalized_title:
+        return []
+    terms = [term for term in normalized_title.split() if term]
+    scored: list[tuple[int, str]] = []
+    for entry in entries:
+        entry_title = entry.title.strip()
+        if not entry_title:
+            continue
+        normalized_entry_title = entry_title.lower()
+        score = 0
+        if normalized_entry_title == normalized_title:
+            score += 100
+        if normalized_title in normalized_entry_title:
+            score += 20
+        if normalized_entry_title.startswith(normalized_title):
+            score += 10
+        score += sum(1 for term in terms if term and term in normalized_entry_title)
+        if score > 0:
+            scored.append((score, entry_title))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    seen: set[str] = set()
+    suggestions: list[str] = []
+    for _, candidate in scored:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        suggestions.append(candidate)
+        if len(suggestions) >= 5:
+            break
+    return suggestions
+
+
+async def _collect_entries_window(
+    memory: KeyValueMemory,
+    owner_id: str,
+    offset: int,
+    limit: int,
+) -> tuple[list[KeyValueEntry], int]:
+    entries: list[KeyValueEntry] = []
+    total = 0
+    next_offset = max(offset, 0)
+    while len(entries) < limit:
+        page = await memory.list_entries(owner_id=owner_id, limit=limit - len(entries), offset=next_offset)
+        total = page.total
+        page_entries = list(page.entries)
+        if not page_entries:
+            break
+        entries.extend(page_entries)
+        next_offset += len(page_entries)
+        if next_offset >= total:
+            break
+    return entries, total
 
 
 def _entry_payload(entry: KeyValueEntry) -> dict[str, Any]:
