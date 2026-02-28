@@ -62,6 +62,15 @@ async def test_kv_memory_update_and_search(kv_memory: SQLAlchemyKeyValueMemory) 
 
 
 @pytest.mark.asyncio
+async def test_kv_memory_search_uses_relaxed_fts_fallback(kv_memory: SQLAlchemyKeyValueMemory) -> None:
+    await kv_memory.save_entry(owner_id="tenant", title="Device", data="MacBook Pro M3")
+
+    result = await kv_memory.search_entries(owner_id="tenant", query="macbook unknown", limit=5, offset=0)
+    assert result.total == 1
+    assert result.entries[0].title == "Device"
+
+
+@pytest.mark.asyncio
 async def test_kv_memory_delete_entry(kv_memory: SQLAlchemyKeyValueMemory) -> None:
     entry = await kv_memory.save_entry(owner_id="tenant", title="Temporary", data="Keep")
 

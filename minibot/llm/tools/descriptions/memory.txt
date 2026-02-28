@@ -19,4 +19,6 @@ Use the action field to select the operation:
 
 - action=search: Search across titles and data when you are unsure of exact IDs/titles. Prefer this first for contextual recall. Use a broad query and reasonably high limit when you need to quickly scan many memories.
 
+- action=list_titles: List lightweight memory titles (id, title, updated_at, source) so you can quickly discover candidate entries before get/search. Prefer this when exact title is unknown and the title list is small enough to scan.
+
 - action=delete: Remove stale or outdated memory by entry_id or title when user asks to forget something or when replacing incorrect/outdated facts.

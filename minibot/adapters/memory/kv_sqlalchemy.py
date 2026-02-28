@@ -226,15 +226,27 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
 
         async with self._session_factory() as session:
             if normalized_query and self._fts_enabled:
-                fts_result = await self._query_entries_fts(
+                strict_fts_result = await self._query_entries_fts(
                     session,
                     owner_id=owner_id,
                     query=normalized_query,
                     limit=resolved_limit,
                     offset=resolved_offset,
+                    token_joiner="AND",
                 )
-                if fts_result is not None:
-                    return fts_result
+                if strict_fts_result is not None and strict_fts_result.total > 0:
+                    return strict_fts_result
+
+                relaxed_fts_result = await self._query_entries_fts(
+                    session,
+                    owner_id=owner_id,
+                    query=normalized_query,
+                    limit=resolved_limit,
+                    offset=resolved_offset,
+                    token_joiner="OR",
+                )
+                if relaxed_fts_result is not None and relaxed_fts_result.total > 0:
+                    return relaxed_fts_result
 
             if normalized_query:
                 normalized = f"%{normalized_query.lower()}%"
@@ -308,8 +320,9 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
         query: str,
         limit: int,
         offset: int,
+        token_joiner: str,
     ) -> KeyValueSearchResult | None:
-        match_query = self._to_fts_match_query(query)
+        match_query = self._to_fts_match_query(query, token_joiner=token_joiner)
         if not match_query:
             return None
 
@@ -375,12 +388,13 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
                 return parsed
         return {}
 
-    def _to_fts_match_query(self, query: str) -> str:
+    def _to_fts_match_query(self, query: str, token_joiner: str) -> str:
         tokens = [token for token in query.split() if token]
         if not tokens:
             return ""
         normalized_tokens = [token.replace('"', "").replace("'", "") for token in tokens]
-        return " AND ".join(f"{token}*" for token in normalized_tokens if token)
+        joiner = " AND " if token_joiner.upper() == "AND" else " OR "
+        return joiner.join(f"{token}*" for token in normalized_tokens if token)
 
     def _resolve_limit(self, limit: int | None) -> int:
         requested = limit or self._config.default_limit
