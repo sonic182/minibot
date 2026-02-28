@@ -24,6 +24,7 @@ and emit outbound responses back to the active channel adapter.
 ├── ARCHITECTURE.md
 ├── README.md
 ├── TODO.md
+├── agents/              (specialist agent definition markdown files)
 ├── config.example.toml
 ├── prompts/
 │   ├── channels/
@@ -361,6 +362,7 @@ The scheduler currently focuses on scheduled prompts (not a generic task DAG eng
 - Service leases due jobs, dispatches them through the event bus, retries failures with backoff, and supports interval recurrence.
 - Scope checks enforce owner/channel/chat/user constraints for cancel/delete/list operations.
 - Deletion is explicit user-triggered behavior; active jobs are cancelled before hard delete.
+- There is no first-class scheduler notification suppression flag yet (for example `notify_user=false`); outbound reply suppression still depends on normal handler response metadata.
 
 ## Multimodal Input Path (Telegram -> LLM)
 

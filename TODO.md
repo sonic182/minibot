@@ -23,7 +23,13 @@ Reference `ARCHITECTURE.md` for full design context; each stage below narrows th
 - [x] Introduce scheduled prompt service for delayed/recurrent jobs, plus bot tools for schedule/list/cancel/delete flows.
 - [x] Route scheduled prompt dispatch through the event bus as `MessageEvent` for normal handler processing.
 - [ ] Add explicit scheduled-prompt notification policy (for example `notify_user=false`) so runs can update state/tools without outbound channel replies.
-- [ ] Expand tests to cover persistence crash recovery and notification-suppression flows.
+- [x] Add scheduler persistence coverage for lease timeout/re-acquire and retry/resume behavior.
+- [ ] Expand tests to cover notification-suppression flows end to end.
+
+## Already Implemented (Roadmap Catch-up)
+- [x] Add interactive console runtime/channel (`minibot.app.console` + console messaging adapter) alongside daemon mode.
+- [x] Add multi-agent delegation architecture (agent definitions, registry, per-agent tool policy, runtime delegation trace).
+- [x] Add MCP tool bridge and expanded tool ecosystem (filesystem, python execution, browser-related MCP integration).
 
 ## Stage 3 – Advanced Persistence & Additional Channels
 - [ ] Generalize scheduled-prompt persistence into broader task execution storage and optional Redis/queue integrations; support migrations/alembic.
