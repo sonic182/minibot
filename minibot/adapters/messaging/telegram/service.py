@@ -267,15 +267,15 @@ class TelegramService:
         if response.render is None:
             return RenderableResponse(kind="text", text=response.text)
         render = response.render
-        if render.kind not in {"text", "html", "markdown_v2"}:
+        if render.kind not in {"text", "html", "markdown"}:
             return RenderableResponse(kind="text", text=render.text)
         return render
 
     async def _send_render_chunks(self, chat_id: int, render: RenderableResponse) -> tuple[bool, str | None]:
         if render.kind == "html":
             self._logger.debug("telegram renderer applying html parse mode", extra={"chat_id": chat_id})
-        elif render.kind == "markdown_v2":
-            self._logger.debug("telegram renderer applying markdown_v2 parse mode", extra={"chat_id": chat_id})
+        elif render.kind == "markdown":
+            self._logger.debug("telegram renderer applying markdown parse mode", extra={"chat_id": chat_id})
         else:
             self._logger.debug("telegram renderer applying plain text mode", extra={"chat_id": chat_id})
         return await self._send_parse_mode_chunks(chat_id=chat_id, render=render)
@@ -285,8 +285,8 @@ class TelegramService:
         parse_mode: ParseMode | None = None
         if render.kind == "html":
             parse_mode = ParseMode.HTML
-        elif render.kind == "markdown_v2":
-            text_to_send, parse_mode = self._prepare_markdown_v2_payload(chat_id=chat_id, markdown_text=render.text)
+        elif render.kind == "markdown":
+            text_to_send, parse_mode = self._prepare_markdown_payload(chat_id=chat_id, markdown_text=render.text)
 
         chunks = self._chunk_text(text_to_send, self._MAX_MESSAGE_LENGTH)
 
@@ -323,11 +323,11 @@ class TelegramService:
                 return False, str(exc)
         return True, None
 
-    def _prepare_markdown_v2_payload(self, *, chat_id: int, markdown_text: str) -> tuple[str, ParseMode | None]:
+    def _prepare_markdown_payload(self, *, chat_id: int, markdown_text: str) -> tuple[str, ParseMode | None]:
         markdownify = self._resolve_markdownify()
         if markdownify is None:
             self._logger.warning(
-                "telegramify-markdown unavailable; using raw markdown_v2 content",
+                "telegramify-markdown unavailable; using raw markdown content",
                 extra={"chat_id": chat_id},
             )
             return markdown_text, ParseMode.MARKDOWN_V2
@@ -365,7 +365,7 @@ class TelegramService:
     ) -> bool:
         if not self._config.format_repair_enabled:
             return False
-        if render.kind not in {"html", "markdown_v2"}:
+        if render.kind not in {"html", "markdown"}:
             return False
         if not parse_error or "can't parse entities" not in parse_error.lower():
             return False

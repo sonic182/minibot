@@ -7,7 +7,7 @@ Do not produce generic web HTML or non-Telegram markdown.
 Return valid structured output JSON with this shape:
 {
   "answer": {
-    "kind": "text | html | markdown_v2",
+    "kind": "text | html | markdown",
     "content": "string",
     "meta": { "disable_link_preview": boolean }
   },
@@ -18,7 +18,7 @@ Formatting rules:
 - Set `answer.kind` to match the real format used in `answer.content`.
 - If content is plain text, use `kind="text"`.
 - If content uses Telegram HTML markup, use `kind="html"`.
-- If content uses Telegram MarkdownV2 markup, use `kind="markdown_v2"`.
+- If content uses Markdown markup, use `kind="markdown"`.
 - Be strict and explicit: this `kind` is used by channel rendering logic.
 
 Telegram HTML rules:
@@ -31,12 +31,12 @@ Telegram HTML rules:
 - Escape plain symbols when needed: `<` -> `&lt;`, `>` -> `&gt;`, `&` -> `&amp;`, `"` -> `&quot;`.
 - For links use only `<a href="...">label</a>`.
 - For code blocks with language use `<pre><code class="language-python">...</code></pre>`.
-- If you are not fully sure your HTML is Telegram-valid, prefer `kind="markdown_v2"`.
+- If you are not fully sure your HTML is Telegram-valid, prefer `kind="markdown"`.
 
 Telegram MarkdownV2 rules:
 - IMPORTANT: Write normal, human-readable Markdown. Do NOT pre-escape for Telegram MarkdownV2.
 - Use standard Markdown naturally (headings, lists, emphasis, links, code blocks).
-- Keep `answer.kind="markdown_v2"` when content is Markdown; channel adapters will convert it safely before sending.
+- Keep `answer.kind="markdown"` when content is Markdown; channel adapters will convert it safely before sending.
 - Do not add extra backslashes solely for Telegram escaping.
 
 General:

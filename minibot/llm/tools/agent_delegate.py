@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Sequence
 
 from llm_async.models import Tool
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.agent_registry import AgentRegistry
@@ -17,11 +18,10 @@ from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import empty_object_schema, strict_object, string_field
+from minibot.shared.parse_utils import parse_json_with_fenced_fallback
 from minibot.shared.utils import session_identifier
 from minibot.shared.assistant_response import (
     assistant_response_schema,
-    coerce_should_answer,
-    payload_to_object,
     validate_attachments,
 )
 
@@ -34,6 +34,43 @@ class _DelegationOutcome:
     valid: bool
     error_code: str | None
     attachments: list[dict[str, Any]]
+
+
+class _DelegatedAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["text", "html", "markdown", "json"]
+    content: str
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("meta", mode="before")
+    @classmethod
+    def _normalize_meta(cls, value: Any) -> Any:
+        if value is None:
+            return {}
+        return value
+
+    @field_validator("content")
+    @classmethod
+    def _validate_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("content must be a non-empty string")
+        return value
+
+
+class _DelegatedPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: _DelegatedAnswer
+    should_answer_to_user: bool
+    attachments: list[Any] = Field(default_factory=list)
+
+    @field_validator("attachments", mode="before")
+    @classmethod
+    def _normalize_attachments(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        return value
 
 
 class AgentDelegateTool:
@@ -297,45 +334,26 @@ def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
 
 
 def _extract_outcome(payload: Any) -> _DelegationOutcome:
-    payload_obj = payload_to_object(payload)
+    payload_obj = _payload_to_object(payload)
     if payload_obj is not None:
-        answer = payload_obj.get("answer")
-        should_flag = coerce_should_answer(payload_obj.get("should_answer_to_user"))
-        attachments = validate_attachments(payload_obj.get("attachments"))
-        if should_flag is None:
+        try:
+            parsed = _DelegatedPayload.model_validate(payload_obj)
+        except ValidationError:
             return _DelegationOutcome(
                 text=str(payload_obj),
                 payload=payload_obj,
                 should_answer_to_user=None,
                 valid=False,
-                error_code="missing_should_answer_to_user",
-                attachments=attachments,
+                error_code="invalid_payload_schema",
+                attachments=_validate_attachments(payload_obj.get("attachments")),
             )
-        if isinstance(answer, dict):
-            content = answer.get("content")
-            if isinstance(content, str) and content.strip():
-                return _DelegationOutcome(
-                    text=content,
-                    payload=payload_obj,
-                    should_answer_to_user=should_flag,
-                    valid=True,
-                    error_code=None,
-                    attachments=attachments,
-                )
-            return _DelegationOutcome(
-                text=str(payload_obj),
-                payload=payload_obj,
-                should_answer_to_user=should_flag,
-                valid=False,
-                error_code="missing_answer_content",
-                attachments=attachments,
-            )
+        attachments = _validate_attachments(parsed.attachments)
         return _DelegationOutcome(
-            text=str(payload_obj),
-            payload=payload_obj,
-            should_answer_to_user=should_flag,
-            valid=False,
-            error_code="missing_answer_object",
+            text=parsed.answer.content,
+            payload=parsed.model_dump(mode="python", exclude_none=True),
+            should_answer_to_user=parsed.should_answer_to_user,
+            valid=True,
+            error_code=None,
             attachments=attachments,
         )
     return _DelegationOutcome(
@@ -363,3 +381,17 @@ def _agent_prompt_cache_key(*, llm_client: Any, context: ToolContext, agent_name
     channel = context.channel or "agent"
     session_id = session_identifier(channel, context.chat_id, context.user_id)
     return f"{session_id}:agent:{agent_name}"
+
+
+def _payload_to_object(payload: Any) -> dict[str, Any] | None:
+    if isinstance(payload, dict):
+        return payload
+    if not isinstance(payload, str):
+        return None
+    try:
+        parsed = parse_json_with_fenced_fallback(payload)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
