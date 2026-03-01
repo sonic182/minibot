@@ -287,13 +287,13 @@ async def test_handler_returns_rich_text_answer_object() -> None:
 
 @pytest.mark.asyncio
 async def test_handler_parses_rich_text_answer_from_json_string() -> None:
-    handler, _, _ = _handler('{"answer":{"kind":"markdown_v2","text":"*hi*"},"should_answer_to_user":true}')
+    handler, _, _ = _handler('{"answer":{"kind":"markdown","text":"*hi*"},"should_answer_to_user":true}')
 
     response = await handler.handle(_message_event("ping"))
 
     assert response.text == "*hi*"
     assert response.render is not None
-    assert response.render.kind == "markdown_v2"
+    assert response.render.kind == "markdown"
 
 
 @pytest.mark.asyncio
@@ -312,18 +312,18 @@ async def test_handler_normalizes_markdown_kind_alias() -> None:
     response = await handler.handle(_message_event("ping"))
 
     assert response.render is not None
-    assert response.render.kind == "markdown_v2"
+    assert response.render.kind == "markdown"
     assert response.text == "*hi*"
 
 
 @pytest.mark.asyncio
 async def test_handler_accepts_string_should_answer_flag() -> None:
-    handler, _, _ = _handler('{"answer":{"kind":"markdown_v2","content":"*ok*"},"should_answer_to_user":"true"}')
+    handler, _, _ = _handler('{"answer":{"kind":"markdown","content":"*ok*"},"should_answer_to_user":"true"}')
 
     response = await handler.handle(_message_event("ping"))
 
     assert response.render is not None
-    assert response.render.kind == "markdown_v2"
+    assert response.render.kind == "markdown"
     assert response.metadata.get("should_reply") is True
 
 
@@ -1064,7 +1064,7 @@ async def test_handler_injects_channel_prompt_fragment(tmp_path: Path) -> None:
     prompts_dir = tmp_path / "prompts"
     telegram_prompt = prompts_dir / "channels" / "telegram.md"
     telegram_prompt.parent.mkdir(parents=True, exist_ok=True)
-    telegram_prompt.write_text("Always use kind=markdown_v2 for markdown requests.", encoding="utf-8")
+    telegram_prompt.write_text("Always use kind=markdown for markdown requests.", encoding="utf-8")
 
     memory = StubMemory()
     client = StubLLMClient(
@@ -1080,7 +1080,7 @@ async def test_handler_injects_channel_prompt_fragment(tmp_path: Path) -> None:
     override = call_kwargs.get("system_prompt_override")
     assert isinstance(override, str)
     assert "You are Minibot." in override
-    assert "Always use kind=markdown_v2" in override
+    assert "Always use kind=markdown" in override
 
 
 @pytest.mark.asyncio
@@ -1110,7 +1110,7 @@ async def test_repair_response_appends_retry_prompt_and_answer_to_history() -> N
     client = StubLLMClient(
         {
             "answer": {
-                "kind": "markdown_v2",
+                "kind": "markdown",
                 "content": "*fixed*",
                 "meta": {},
             },
@@ -1125,7 +1125,7 @@ async def test_repair_response_appends_retry_prompt_and_answer_to_history() -> N
             channel="telegram",
             chat_id=1,
             text="bad",
-            render=RenderableResponse(kind="markdown_v2", text="bad"),
+            render=RenderableResponse(kind="markdown", text="bad"),
         ),
         parse_error="can't parse entities",
         channel="telegram",
@@ -1142,7 +1142,7 @@ async def test_repair_response_appends_retry_prompt_and_answer_to_history() -> N
     assert saved[1].role == "assistant"
     assert saved[1].content == "*fixed*"
     assert repaired.render is not None
-    assert repaired.render.kind == "markdown_v2"
+    assert repaired.render.kind == "markdown"
     token_trace = repaired.metadata.get("token_trace")
     assert isinstance(token_trace, dict)
     assert token_trace.get("accounting_scope") == "all_turn_calls"
@@ -1153,7 +1153,7 @@ async def test_repair_response_reuses_and_refreshes_previous_response_id_when_mo
     memory = StubMemory()
     client = StubLLMClient(
         {
-            "answer": {"kind": "markdown_v2", "content": "*fixed*"},
+            "answer": {"kind": "markdown", "content": "*fixed*"},
             "should_answer_to_user": True,
         },
         response_id="resp-repair",
@@ -1170,7 +1170,7 @@ async def test_repair_response_reuses_and_refreshes_previous_response_id_when_mo
             channel="telegram",
             chat_id=1,
             text="bad",
-            render=RenderableResponse(kind="markdown_v2", text="bad"),
+            render=RenderableResponse(kind="markdown", text="bad"),
         ),
         parse_error="can't parse entities",
         channel="telegram",

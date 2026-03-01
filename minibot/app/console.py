@@ -39,6 +39,10 @@ async def run(
     _configure_console_file_only_logging(logger)
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
+    logger.info(
+        "console tool configuration loaded",
+        extra={"main_agent_tools_enabled": dispatcher.main_agent_tool_names or ["none"]},
+    )
     console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
     await AppContainer.initialize_storage()
     await dispatcher.start()

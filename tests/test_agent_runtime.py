@@ -154,3 +154,89 @@ async def test_runtime_renders_managed_file_reference_to_input_file_data_url(tmp
     assert user_content[0]["type"] == "input_file"
     assert user_content[0]["filename"] == "a.txt"
     assert user_content[0]["file_data"].startswith("data:text/plain;base64,")
+
+
+@pytest.mark.asyncio
+async def test_runtime_validates_structured_output_with_ratchet() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[
+            LLMCompletionStep(
+                message=_FakeMessage(
+                    content='{"answer":{"kind":"markdown","content":"*done*"},"should_answer_to_user":true}'
+                ),
+                response_id="resp-1",
+                total_tokens=7,
+            )
+        ],
+        executions=[],
+    )
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["kind"] == "markdown"
+    assert result.payload["answer"]["content"] == "*done*"
+    assert result.payload["should_answer_to_user"] is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_retries_invalid_structured_output_then_succeeds() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[
+            LLMCompletionStep(message=_FakeMessage(content="not-json"), response_id="resp-1", total_tokens=4),
+            LLMCompletionStep(
+                message=_FakeMessage(content='{"answer":{"kind":"text","content":"ok"},"should_answer_to_user":true}'),
+                response_id="resp-2",
+                total_tokens=5,
+            ),
+        ],
+        executions=[],
+    )
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert llm_client.complete_once_calls == 2
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["content"] == "ok"
+    second_call_messages = llm_client.complete_once_kwargs[1]["messages"]
+    assert any(message["role"] == "assistant" for message in second_call_messages)
+    assert any(message["role"] == "user" and message["content"] != "ping" for message in second_call_messages)
+
+
+@pytest.mark.asyncio
+async def test_runtime_returns_fallback_after_structured_output_exhausted_retries() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[
+            LLMCompletionStep(message=_FakeMessage(content="bad-1"), response_id="resp-1", total_tokens=1),
+            LLMCompletionStep(message=_FakeMessage(content="bad-2"), response_id="resp-2", total_tokens=1),
+            LLMCompletionStep(message=_FakeMessage(content="bad-3"), response_id="resp-3", total_tokens=1),
+            LLMCompletionStep(message=_FakeMessage(content="bad-4"), response_id="resp-4", total_tokens=1),
+        ],
+        executions=[],
+    )
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert llm_client.complete_once_calls == 4
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["kind"] == "text"
+    assert "valid structured response" in result.payload["answer"]["content"]
+    assert result.payload["should_answer_to_user"] is True

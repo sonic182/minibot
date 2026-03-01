@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+from ratchet_sm import FailAction, RetryAction, ValidAction
+
+from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
 from minibot.core.agent_runtime import (
     AgentMessage,
     AgentState,
@@ -59,6 +62,7 @@ class AgentRuntime:
         previous_response_id: str | None = initial_previous_response_id
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
+        structured_validator = RuntimeStructuredOutputValidator(max_attempts=3) if response_schema else None
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
@@ -109,12 +113,81 @@ class AgentRuntime:
 
                 tool_calls = getattr(completion.message, "tool_calls", None) or []
                 if not tool_calls:
+                    assistant_message = self._from_provider_assistant_message(completion.message)
+                    state.messages.append(assistant_message)
+                    if structured_validator is not None:
+                        action = structured_validator.receive(getattr(completion.message, "content", ""))
+                        if isinstance(action, ValidAction):
+                            self._logger.debug(
+                                "agent runtime structured output validated",
+                                extra={
+                                    "step": step,
+                                    "response_id": completion.response_id,
+                                    "attempts": action.attempts,
+                                    "format_detected": action.format_detected,
+                                },
+                            )
+                            return RuntimeResult(
+                                payload=structured_validator.valid_payload(action),
+                                response_id=completion.response_id,
+                                state=state,
+                                total_tokens=total_tokens,
+                            )
+                        if isinstance(action, RetryAction):
+                            retry_patch = (action.prompt_patch or "").strip()
+                            raw_preview = action.raw.strip().replace("\n", " ")
+                            if len(raw_preview) > 300:
+                                raw_preview = f"{raw_preview[:300]}..."
+                            self._logger.warning(
+                                "agent runtime structured output invalid; retrying",
+                                extra={
+                                    "step": step,
+                                    "response_id": completion.response_id,
+                                    "attempts": action.attempts,
+                                    "reason": action.reason,
+                                    "errors": list(action.errors),
+                                    "raw_preview": raw_preview,
+                                    "retry_patch_present": bool(retry_patch),
+                                },
+                            )
+                            if retry_patch:
+                                state.messages.append(
+                                    AgentMessage(
+                                        role="user",
+                                        content=[MessagePart(type="text", text=retry_patch)],
+                                    )
+                                )
+                            step += 1
+                            continue
+                        if isinstance(action, FailAction):
+                            validation_errors: list[str] = []
+                            for item in action.history:
+                                if isinstance(item, RetryAction):
+                                    validation_errors.extend(item.errors)
+                            raw_preview = action.raw.strip().replace("\n", " ")
+                            if len(raw_preview) > 300:
+                                raw_preview = f"{raw_preview[:300]}..."
+                            self._logger.warning(
+                                "agent runtime structured output failed; returning fallback",
+                                extra={
+                                    "step": step,
+                                    "response_id": completion.response_id,
+                                    "attempts": action.attempts,
+                                    "reason": action.reason,
+                                    "errors": validation_errors,
+                                    "raw_preview": raw_preview,
+                                },
+                            )
+                            return RuntimeResult(
+                                payload=structured_validator.fallback_payload(),
+                                response_id=completion.response_id,
+                                state=state,
+                                total_tokens=total_tokens,
+                            )
                     self._logger.debug(
                         "agent runtime step returned final assistant message",
                         extra={"step": step, "response_id": completion.response_id},
                     )
-                    assistant_message = self._from_provider_assistant_message(completion.message)
-                    state.messages.append(assistant_message)
                     return RuntimeResult(
                         payload=getattr(completion.message, "content", ""),
                         response_id=completion.response_id,

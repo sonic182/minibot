@@ -1896,6 +1896,23 @@ files = [
 ]
 
 [[package]]
+name = "ratchet-sm"
+version = "0.0.1"
+description = "A provider-agnostic state machine for handling, normalizing, and recovering structured LLM outputs."
+optional = false
+python-versions = "<4.0,>=3.10"
+files = [
+    {file = "ratchet_sm-0.0.1-py3-none-any.whl", hash = "sha256:d4be845a153879fed8d59e0cec2dafa1bba9122f09b7c593e7bf97518b3da748"},
+    {file = "ratchet_sm-0.0.1.tar.gz", hash = "sha256:4d338cd7befa49af9b376d6be697a17b06d386bd480a05c3601f47348b0c75df"},
+]
+
+[package.extras]
+all = ["pydantic (>=2.0)", "python-frontmatter", "pyyaml"]
+frontmatter = ["python-frontmatter"]
+pydantic = ["pydantic (>=2.0)"]
+yaml = ["pyyaml"]
+
+[[package]]
 name = "referencing"
 version = "0.37.0"
 description = "JSON Referencing + Python"
@@ -2431,4 +2448,4 @@ mcp = ["mcp"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.12,<3.15"
-content-hash = "98eed68690a4c4c6edd8ab987a5d83dcd12795473340a256131754c2e1200f68"
+content-hash = "28e6b15956d9eea1a099ce1c1c30d8e26ed207e553a56ef29b56c42775090ebc"

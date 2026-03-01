@@ -112,7 +112,7 @@ def render_from_payload(value: Any, *, logger: logging.Logger) -> RenderableResp
     return render
 
 
-def normalize_render_kind(value: Any) -> Literal["text", "html", "markdown_v2"] | None:
+def normalize_render_kind(value: Any) -> Literal["text", "html", "markdown"] | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip().lower()
@@ -121,5 +121,5 @@ def normalize_render_kind(value: Any) -> Literal["text", "html", "markdown_v2"] 
     if normalized in {"html", "htm"}:
         return "html"
     if normalized in {"markdown_v2", "markdownv2", "markdown", "md"}:
-        return "markdown_v2"
+        return "markdown"
     return None
