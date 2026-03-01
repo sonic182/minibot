@@ -197,5 +197,5 @@ def test_extract_outcome_missing_should_answer_preserves_attachments():
     }
     outcome = _extract_outcome(payload)
     assert outcome.valid is False
-    assert outcome.error_code == "missing_should_answer_to_user"
+    assert outcome.error_code == "invalid_payload_schema"
     assert len(outcome.attachments) == 1

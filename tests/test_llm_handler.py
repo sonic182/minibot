@@ -220,7 +220,7 @@ def _message_event(text: str = "hi") -> MessageEvent:
 @pytest.mark.asyncio
 async def test_handler_returns_structured_answer() -> None:
     handler, stub_client, _ = _handler(
-        {"answer": "hello", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "hello"}, "should_answer_to_user": True},
         responses_provider=True,
         response_id="resp-1",
     )
@@ -241,7 +241,7 @@ async def test_handler_returns_structured_answer() -> None:
 async def test_handler_includes_usage_trace_metadata() -> None:
     memory = StubMemory()
     stub_client = StubLLMClient(
-        {"answer": "hello", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "hello"}, "should_answer_to_user": True},
         is_responses=True,
         provider="openai_responses",
         total_tokens=33,
@@ -270,7 +270,7 @@ async def test_handler_returns_rich_text_answer_object() -> None:
         {
             "answer": {
                 "kind": "html",
-                "text": "<b>hello</b>",
+                "content": "<b>hello</b>",
                 "meta": {"disable_link_preview": True},
             },
             "should_answer_to_user": True,
@@ -287,7 +287,7 @@ async def test_handler_returns_rich_text_answer_object() -> None:
 
 @pytest.mark.asyncio
 async def test_handler_parses_rich_text_answer_from_json_string() -> None:
-    handler, _, _ = _handler('{"answer":{"kind":"markdown","text":"*hi*"},"should_answer_to_user":true}')
+    handler, _, _ = _handler('{"answer":{"kind":"markdown","content":"*hi*"},"should_answer_to_user":true}')
 
     response = await handler.handle(_message_event("ping"))
 
@@ -317,31 +317,31 @@ async def test_handler_normalizes_markdown_kind_alias() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handler_accepts_string_should_answer_flag() -> None:
+async def test_handler_rejects_string_should_answer_flag() -> None:
     handler, _, _ = _handler('{"answer":{"kind":"markdown","content":"*ok*"},"should_answer_to_user":"true"}')
 
     response = await handler.handle(_message_event("ping"))
 
     assert response.render is not None
-    assert response.render.kind == "markdown"
+    assert response.render.kind == "text"
     assert response.metadata.get("should_reply") is True
 
 
 @pytest.mark.asyncio
-async def test_handler_defaults_should_answer_when_missing() -> None:
+async def test_handler_does_not_default_should_answer_when_missing() -> None:
     handler, _, _ = _handler('{"answer":{"kind":"html","content":"<b>ok</b>"}}')
 
     response = await handler.handle(_message_event("ping"))
 
     assert response.render is not None
-    assert response.render.kind == "html"
+    assert response.render.kind == "text"
     assert response.metadata.get("should_reply") is True
 
 
 @pytest.mark.asyncio
 async def test_handler_respects_silent_flag() -> None:
     handler, stub_client, _ = _handler(
-        {"answer": "internal", "should_answer_to_user": False},
+        {"answer": {"kind": "text", "content": "internal"}, "should_answer_to_user": False},
         responses_provider=True,
         response_id="resp-2",
     )
@@ -354,7 +354,7 @@ async def test_handler_respects_silent_flag() -> None:
 @pytest.mark.asyncio
 async def test_handler_does_not_reuse_previous_response_id() -> None:
     handler, stub_client, _ = _handler(
-        {"answer": "hello", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "hello"}, "should_answer_to_user": True},
         responses_provider=True,
         response_id="resp-1",
     )
@@ -368,7 +368,7 @@ async def test_handler_does_not_reuse_previous_response_id() -> None:
 async def test_handler_reuses_previous_response_id_when_mode_enabled() -> None:
     memory = StubMemory()
     stub_client = StubLLMClient(
-        {"answer": "hello", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "hello"}, "should_answer_to_user": True},
         response_id="resp-1",
         is_responses=True,
         provider="openai_responses",
@@ -387,7 +387,7 @@ async def test_handler_reuses_previous_response_id_when_mode_enabled() -> None:
 async def test_handler_disables_prompt_cache_when_client_turns_it_off() -> None:
     memory = StubMemory()
     stub_client = StubLLMClient(
-        {"answer": "hello", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "hello"}, "should_answer_to_user": True},
         response_id="resp-1",
         is_responses=True,
         provider="openai_responses",
@@ -403,7 +403,7 @@ async def test_handler_disables_prompt_cache_when_client_turns_it_off() -> None:
 @pytest.mark.asyncio
 async def test_handler_uses_fallback_prompt_cache_key_without_chat_or_user() -> None:
     handler, stub_client, _ = _handler(
-        {"answer": "hello", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "hello"}, "should_answer_to_user": True},
         responses_provider=True,
         response_id="resp-1",
     )
@@ -424,19 +424,19 @@ async def test_handler_falls_back_for_plain_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handler_extracts_result_from_tool_like_payload_string() -> None:
+async def test_handler_does_not_extract_result_from_tool_like_payload_string() -> None:
     handler, _, _ = _handler("{'ok': True, 'tool': 'current_datetime', 'result': '2026-02-08T13:09:01Z'}")
 
     response = await handler.handle(_message_event("ping"))
 
-    assert response.text == "2026-02-08T13:09:01Z"
+    assert response.text == "{'ok': True, 'tool': 'current_datetime', 'result': '2026-02-08T13:09:01Z'}"
     assert response.metadata.get("should_reply") is True
 
 
 @pytest.mark.asyncio
 async def test_handler_trims_history_when_limit_is_configured() -> None:
     memory = StubMemory()
-    client = StubLLMClient({"answer": "ok", "should_answer_to_user": True})
+    client = StubLLMClient({"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True})
     handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client), max_history_messages=2)
 
     await handler.handle(_message_event("one"))
@@ -451,7 +451,10 @@ async def test_handler_trims_history_when_limit_is_configured() -> None:
 @pytest.mark.asyncio
 async def test_handler_compacts_history_when_token_limit_reached() -> None:
     memory = StubMemory()
-    client = StubLLMClient({"answer": "ok", "should_answer_to_user": True}, total_tokens=60)
+    client = StubLLMClient(
+        {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
+        total_tokens=60,
+    )
     handler = LLMMessageHandler(
         memory=memory,
         llm_client=cast(LLMClient, client),
@@ -480,7 +483,7 @@ async def test_handler_compacts_history_when_token_limit_reached() -> None:
 async def test_handler_uses_responses_compaction_endpoint_in_previous_id_mode() -> None:
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": "ok", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
         response_id="resp-1",
         is_responses=True,
         provider="openai_responses",
@@ -526,7 +529,7 @@ async def test_handler_fallback_compaction_updates_previous_response_id() -> Non
     class _FallbackCompactionClient(StubLLMClient):
         def __init__(self) -> None:
             super().__init__(
-                {"answer": "ok", "should_answer_to_user": True},
+                {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
                 response_id="resp-1",
                 is_responses=True,
                 provider="openai_responses",
@@ -574,7 +577,7 @@ async def test_handler_uses_compact_prompt_from_prompts_dir(tmp_path: Path) -> N
     (tmp_path / "compact.md").write_text("compact with these rules", encoding="utf-8")
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": "ok", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
         total_tokens=60,
         prompts_dir=str(tmp_path),
     )
@@ -595,7 +598,10 @@ async def test_handler_reports_compaction_error_without_breaking_response() -> N
             return LLMGeneration(self.payload, self.response_id, total_tokens=self.total_tokens)
 
     memory = StubMemory()
-    client = _CompactionFailClient({"answer": "ok", "should_answer_to_user": True}, total_tokens=60)
+    client = _CompactionFailClient(
+        {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
+        total_tokens=60,
+    )
     handler = LLMMessageHandler(
         memory=memory,
         llm_client=cast(LLMClient, client),
@@ -618,7 +624,7 @@ async def test_handler_reports_compaction_error_without_breaking_response() -> N
 async def test_handler_builds_multimodal_input_for_responses_provider() -> None:
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": "done", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "done"}, "should_answer_to_user": True},
         is_responses=True,
         provider="openai_responses",
     )
@@ -655,7 +661,7 @@ async def test_handler_builds_multimodal_input_for_responses_provider() -> None:
 async def test_handler_rejects_media_for_non_responses_provider() -> None:
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": "unused", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "unused"}, "should_answer_to_user": True},
         is_responses=False,
         provider="claude",
     )
@@ -679,7 +685,7 @@ async def test_handler_rejects_media_for_non_responses_provider() -> None:
 async def test_handler_builds_multimodal_input_for_openrouter_chat_completions() -> None:
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": "done", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "done"}, "should_answer_to_user": True},
         is_responses=False,
         provider="openrouter",
     )
@@ -722,7 +728,7 @@ async def test_handler_builds_multimodal_input_for_openrouter_chat_completions()
 
 @pytest.mark.asyncio
 async def test_handler_builds_text_notice_for_incoming_managed_files() -> None:
-    handler, stub_client, _ = _handler({"answer": "ok", "should_answer_to_user": True})
+    handler, stub_client, _ = _handler({"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True})
     event = MessageEvent(
         message=_message(
             text="what is this about?",
@@ -756,7 +762,7 @@ async def test_handler_builds_text_notice_for_incoming_managed_files() -> None:
 
 @pytest.mark.asyncio
 async def test_handler_guides_move_for_save_intent_with_incoming_files() -> None:
-    handler, stub_client, _ = _handler({"answer": "ok", "should_answer_to_user": True})
+    handler, stub_client, _ = _handler({"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True})
     event = MessageEvent(
         message=_message(
             text="save this",
@@ -1025,7 +1031,10 @@ async def test_handler_counts_guardrail_tokens_in_session_compaction_accounting(
             return GuardrailDecision(requires_retry=False, tokens_used=60)
 
     memory = StubMemory()
-    client = StubLLMClient({"answer": "compact summary", "should_answer_to_user": True}, provider="openrouter")
+    client = StubLLMClient(
+        {"answer": {"kind": "text", "content": "compact summary"}, "should_answer_to_user": True},
+        provider="openrouter",
+    )
     handler = LLMMessageHandler(
         memory=memory,
         llm_client=cast(LLMClient, client),
@@ -1068,7 +1077,7 @@ async def test_handler_injects_channel_prompt_fragment(tmp_path: Path) -> None:
 
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": "ok", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
         system_prompt="You are Minibot.",
         prompts_dir=str(prompts_dir),
     )
@@ -1087,7 +1096,7 @@ async def test_handler_injects_channel_prompt_fragment(tmp_path: Path) -> None:
 async def test_handler_injects_environment_prompt_fragment() -> None:
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": "ok", "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
         system_prompt="You are Minibot.",
     )
     handler = LLMMessageHandler(

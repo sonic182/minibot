@@ -28,6 +28,13 @@ class AssistantAnswer(BaseModel):
             return {}
         return value
 
+    @field_validator("content")
+    @classmethod
+    def _validate_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("content must be a non-empty string")
+        return value
+
 
 class AssistantRuntimePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")

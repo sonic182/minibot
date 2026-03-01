@@ -69,7 +69,10 @@ class AgentRuntime:
                 if step >= self._limits.max_steps:
                     return RuntimeResult(
                         payload={
-                            "answer": "I reached the maximum execution steps before finishing.",
+                            "answer": {
+                                "kind": "text",
+                                "content": "I reached the maximum execution steps before finishing.",
+                            },
                             "should_answer_to_user": True,
                         }
                         if response_schema
@@ -207,7 +210,10 @@ class AgentRuntime:
                 if tool_calls_count > self._limits.max_tool_calls:
                     return RuntimeResult(
                         payload={
-                            "answer": "I reached the maximum number of tool calls before finishing.",
+                            "answer": {
+                                "kind": "text",
+                                "content": "I reached the maximum number of tool calls before finishing.",
+                            },
                             "should_answer_to_user": True,
                         }
                         if response_schema

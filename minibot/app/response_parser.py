@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Any
 
 from minibot.core.channels import RenderableResponse
-from minibot.shared.assistant_response import coerce_should_answer, payload_to_object
+from minibot.shared.parse_utils import parse_json_with_fenced_fallback
 
 
 def plain_render(text: str) -> RenderableResponse:
@@ -16,30 +16,15 @@ def extract_answer(payload: Any, *, logger: logging.Logger) -> tuple[RenderableR
     if payload_obj is not None:
         answer = payload_obj.get("answer")
         should = payload_obj.get("should_answer_to_user")
-        render = render_from_payload(answer, logger=logger)
-        should_flag = coerce_should_answer(should)
-        if render is not None and should_flag is not None:
-            logger.debug(
-                "structured output extracted from dict payload",
-                extra={"kind": render.kind, "has_answer_object": isinstance(answer, dict)},
-            )
-            return render, should_flag
-        if render is not None and should is None:
-            logger.debug(
-                "structured output missing should_answer_to_user; defaulting to true",
-                extra={"kind": render.kind},
-            )
-            return render, True
-        result = payload_obj.get("result")
-        if isinstance(result, str):
-            return plain_render(result), True
-        timestamp = payload_obj.get("timestamp")
-        if isinstance(timestamp, str):
-            return plain_render(timestamp), True
+        render = render_from_payload(answer)
+        if render is not None and isinstance(should, bool):
+            logger.debug("structured output extracted from dict payload", extra={"kind": render.kind})
+            return render, should
         logger.debug(
-            "parsed payload looked structured but failed validation",
+            "structured output payload failed strict validation",
             extra={
                 "parsed_keys": sorted(str(key) for key in payload_obj.keys()),
+                "answer_type": type(answer).__name__,
                 "should_type": type(should).__name__,
             },
         )
@@ -48,78 +33,35 @@ def extract_answer(payload: Any, *, logger: logging.Logger) -> tuple[RenderableR
     return plain_render(str(payload)), True
 
 
-def render_from_payload(value: Any, *, logger: logging.Logger) -> RenderableResponse | None:
-    if isinstance(value, str):
-        logger.debug("structured output answer is legacy string; forcing text kind")
-        return plain_render(value)
+def render_from_payload(value: Any) -> RenderableResponse | None:
     if not isinstance(value, dict):
         return None
-
-    content_value = value.get("content")
-    if not isinstance(content_value, str):
-        legacy_text = value.get("text")
-        if isinstance(legacy_text, str):
-            content_value = legacy_text
-
-    raw_kind = value.get("kind")
-    normalized_kind = normalize_render_kind(raw_kind)
     meta_value = value.get("meta")
-    normalized_meta = meta_value if isinstance(meta_value, dict) else {}
-
-    if isinstance(content_value, str) and normalized_kind is not None:
-        if not isinstance(meta_value, dict) and meta_value is not None:
-            logger.debug(
-                "structured output meta is not an object; coercing to empty object",
-                extra={"meta_type": type(meta_value).__name__},
-            )
-        render = RenderableResponse(kind=normalized_kind, text=content_value, meta=normalized_meta)
-        logger.debug(
-            "structured output answer object normalized",
-            extra={
-                "kind": render.kind,
-                "meta_keys": sorted(render.meta.keys()),
-                "source_keys": sorted(str(key) for key in value.keys()),
-            },
-        )
-        if not render.text.strip():
-            return None
-        return render
-
-    try:
-        render = RenderableResponse.model_validate(value)
-    except Exception as exc:
-        text = content_value
-        if isinstance(text, str):
-            logger.debug(
-                "structured output answer object invalid; using plain text fallback",
-                extra={
-                    "available_keys": sorted(str(key) for key in value.keys()),
-                    "validation_error": str(exc),
-                    "raw_kind": raw_kind,
-                },
-            )
-            return plain_render(text)
+    if meta_value is None:
+        meta_value = {}
+    if not isinstance(meta_value, dict):
         return None
+    kind = value.get("kind")
+    content = value.get("content")
+    if kind not in {"text", "html", "markdown"}:
+        return None
+    if not isinstance(content, str) or not content.strip():
+        return None
+    render = RenderableResponse(kind=kind, text=content, meta=meta_value)
     if not render.text.strip():
         return None
-    logger.debug(
-        "structured output answer object validated",
-        extra={
-            "kind": render.kind,
-            "meta_keys": sorted(render.meta.keys()),
-        },
-    )
     return render
 
 
-def normalize_render_kind(value: Any) -> Literal["text", "html", "markdown"] | None:
-    if not isinstance(value, str):
+def payload_to_object(payload: Any) -> dict[str, Any] | None:
+    if isinstance(payload, dict):
+        return payload
+    if not isinstance(payload, str):
         return None
-    normalized = value.strip().lower()
-    if normalized in {"text", "plain", "plain_text", "plaintext"}:
-        return "text"
-    if normalized in {"html", "htm"}:
-        return "html"
-    if normalized in {"markdown_v2", "markdownv2", "markdown", "md"}:
-        return "markdown"
+    try:
+        parsed = parse_json_with_fenced_fallback(payload)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
     return None
