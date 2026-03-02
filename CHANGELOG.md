@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ratchet-backed structured output validation (`minibot/app/runtime_structured_output.py`) with schema-aware retries and deterministic fallback payloads.
 - Runtime dependency `ratchet-sm[pydantic]` for structured output state-machine validation.
 - Expanded runtime tests covering structured-output success, retry recovery, retry exhaustion fallback, step-budget retry behavior, and custom validator schemas.
+- New `memory(action="list_titles")` operation for lightweight memory discovery (`id`, `title`, `updated_at`, `source`) with optional query filtering.
 
 ### Changed
 
@@ -20,10 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Structured response parsing now requires strict `answer` object + boolean `should_answer_to_user` semantics.
 - Canonical render kind was standardized from `markdown_v2` to `markdown` across channel schema, handler/prompt paths, and Telegram prompt guidance.
 - Dispatcher/console startup logging now includes enabled main-agent tool names for observability.
+- Memory search now uses a two-stage FTS strategy: strict token matching first, then relaxed matching when strict results are empty.
 
 ### Fixed
 
 - Console command startup no longer assumes a full `logging.Logger` interface in tests; info-level startup logging is now defensive for lightweight logger doubles.
+- `memory(action="get")` misses by title now return `suggested_titles` when similar entries exist, improving memory recall and follow-up selection.
 
 ## [0.0.7] - 2026-02-25
 
