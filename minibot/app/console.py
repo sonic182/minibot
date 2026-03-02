@@ -39,9 +39,11 @@ async def run(
     _configure_console_file_only_logging(logger)
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
-    logger.info(
+    main_agent_tools_enabled = getattr(dispatcher, "main_agent_tool_names", None) or ["none"]
+    _log_info(
+        logger,
         "console tool configuration loaded",
-        extra={"main_agent_tools_enabled": dispatcher.main_agent_tool_names or ["none"]},
+        extra={"main_agent_tools_enabled": main_agent_tools_enabled},
     )
     console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
     await AppContainer.initialize_storage()
@@ -148,3 +150,9 @@ def _configure_console_file_only_logging(logger: object) -> None:
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
         file_handler.setFormatter(formatter)
     logger.handlers = [file_handler]
+
+
+def _log_info(logger: object, message: str, **kwargs: object) -> None:
+    info_method = getattr(logger, "info", None)
+    if callable(info_method):
+        info_method(message, **kwargs)
