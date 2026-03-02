@@ -330,6 +330,7 @@ class TelegramService:
                 "telegramify-markdown unavailable; using raw markdown content",
                 extra={"chat_id": chat_id},
             )
+            # ParseMode.MARKDOWN_V2 is the Telegram API constant; kind="markdown" is the internal concept
             return markdown_text, ParseMode.MARKDOWN_V2
         try:
             formatted = markdownify(markdown_text)

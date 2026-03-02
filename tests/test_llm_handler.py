@@ -297,7 +297,7 @@ async def test_handler_parses_rich_text_answer_from_json_string() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handler_normalizes_markdown_kind_alias() -> None:
+async def test_handler_accepts_canonical_markdown_kind() -> None:
     handler, _, _ = _handler(
         {
             "answer": {

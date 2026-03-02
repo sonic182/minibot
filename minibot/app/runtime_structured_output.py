@@ -52,12 +52,13 @@ class AssistantRuntimePayload(BaseModel):
 
 
 class RuntimeStructuredOutputValidator:
-    def __init__(self, *, max_attempts: int = 3) -> None:
+    def __init__(self, *, max_attempts: int = 3, schema_model: type[BaseModel] = AssistantRuntimePayload) -> None:
+        self._schema_model = schema_model
         self._machine = StateMachine(
             states={
                 "final_response": State(
                     name="final_response",
-                    schema=AssistantRuntimePayload,
+                    schema=schema_model,
                     max_attempts=max_attempts,
                     normalizers=[StripFences(), ParseJSON()],
                 )
@@ -67,25 +68,23 @@ class RuntimeStructuredOutputValidator:
         )
 
     def receive(self, payload: Any) -> ValidAction | RetryAction | FailAction:
-        action = self._machine.receive(_to_raw_text(payload))
+        raw = _to_raw_text(payload)
+        action = self._machine.receive(raw)
         if isinstance(action, ValidAction | RetryAction | FailAction):
             return action
         return FailAction(
             attempts=1,
             state_name="final_response",
-            raw=_to_raw_text(payload),
+            raw=raw,
             history=(),
             reason=f"Unsupported ratchet action type: {type(action).__name__}",
         )
 
-    @staticmethod
-    def valid_payload(action: ValidAction) -> dict[str, Any]:
+    def valid_payload(self, action: ValidAction) -> dict[str, Any]:
         parsed = action.parsed
-        if isinstance(parsed, AssistantRuntimePayload):
-            return parsed.model_dump(mode="python", exclude_none=True)
-        if isinstance(parsed, dict):
-            return parsed
-        return AssistantRuntimePayload.model_validate(parsed).model_dump(mode="python", exclude_none=True)
+        if not isinstance(parsed, BaseModel):
+            raise TypeError(f"Expected a Pydantic BaseModel, got {type(parsed).__name__}")
+        return parsed.model_dump(mode="python", exclude_none=True)
 
     @staticmethod
     def fallback_payload() -> dict[str, Any]:

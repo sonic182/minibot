@@ -11,6 +11,7 @@ from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
@@ -174,6 +175,7 @@ class AgentDelegateTool:
                 response_schema=_agent_response_schema(),
                 prompt_cache_key=prompt_cache_key,
                 initial_previous_response_id=previous_response_id,
+                structured_validator=RuntimeStructuredOutputValidator(schema_model=_DelegatedPayload, max_attempts=3),
             )
             if use_previous_response_id:
                 previous_response_id = generation.response_id
@@ -204,6 +206,7 @@ class AgentDelegateTool:
                     response_schema=_agent_response_schema(),
                     prompt_cache_key=prompt_cache_key,
                     initial_previous_response_id=previous_response_id,
+                    structured_validator=RuntimeStructuredOutputValidator(schema_model=_DelegatedPayload, max_attempts=3),
                 )
                 if use_previous_response_id:
                     previous_response_id = generation.response_id

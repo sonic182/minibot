@@ -56,13 +56,16 @@ class AgentRuntime:
         response_schema: dict[str, Any] | None = None,
         prompt_cache_key: str | None = None,
         initial_previous_response_id: str | None = None,
+        structured_validator: RuntimeStructuredOutputValidator | None = None,
     ) -> RuntimeResult:
         tool_calls_count = 0
         step = 0
         previous_response_id: str | None = initial_previous_response_id
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
-        structured_validator = RuntimeStructuredOutputValidator(max_attempts=3) if response_schema else None
+        _validator = structured_validator if response_schema is not None else None
+        if _validator is None and response_schema is not None:
+            _validator = RuntimeStructuredOutputValidator(max_attempts=3)
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
@@ -74,6 +77,7 @@ class AgentRuntime:
                                 "content": "I reached the maximum execution steps before finishing.",
                             },
                             "should_answer_to_user": True,
+                            "attachments": [],
                         }
                         if response_schema
                         else "I reached the maximum execution steps before finishing.",
@@ -118,8 +122,8 @@ class AgentRuntime:
                 if not tool_calls:
                     assistant_message = self._from_provider_assistant_message(completion.message)
                     state.messages.append(assistant_message)
-                    if structured_validator is not None:
-                        action = structured_validator.receive(getattr(completion.message, "content", ""))
+                    if _validator is not None:
+                        action = _validator.receive(getattr(completion.message, "content", ""))
                         if isinstance(action, ValidAction):
                             self._logger.debug(
                                 "agent runtime structured output validated",
@@ -131,7 +135,7 @@ class AgentRuntime:
                                 },
                             )
                             return RuntimeResult(
-                                payload=structured_validator.valid_payload(action),
+                                payload=_validator.valid_payload(action),
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,
@@ -160,7 +164,6 @@ class AgentRuntime:
                                         content=[MessagePart(type="text", text=retry_patch)],
                                     )
                                 )
-                            step += 1
                             continue
                         if isinstance(action, FailAction):
                             validation_errors: list[str] = []
@@ -182,7 +185,7 @@ class AgentRuntime:
                                 },
                             )
                             return RuntimeResult(
-                                payload=structured_validator.fallback_payload(),
+                                payload=_validator.fallback_payload(),
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,
@@ -215,6 +218,7 @@ class AgentRuntime:
                                 "content": "I reached the maximum number of tool calls before finishing.",
                             },
                             "should_answer_to_user": True,
+                            "attachments": [],
                         }
                         if response_schema
                         else "I reached the maximum number of tool calls before finishing.",

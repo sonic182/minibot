@@ -20,7 +20,7 @@ def extract_answer(payload: Any, *, logger: logging.Logger) -> tuple[RenderableR
         if render is not None and isinstance(should, bool):
             logger.debug("structured output extracted from dict payload", extra={"kind": render.kind})
             return render, should
-        logger.debug(
+        logger.warning(
             "structured output payload failed strict validation",
             extra={
                 "parsed_keys": sorted(str(key) for key in payload_obj.keys()),

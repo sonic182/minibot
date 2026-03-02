@@ -6,15 +6,18 @@ from typing import Any, cast
 import pytest
 
 from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
 from minibot.core.agent_runtime import (
     AgentMessage,
     AgentState,
     AppendMessageDirective,
     MessagePart,
+    RuntimeLimits,
     ToolResult,
 )
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.provider_factory import LLMCompletionStep, ToolExecutionRecord
+from minibot.llm.tools.agent_delegate import _DelegatedPayload
 from minibot.llm.tools.base import ToolContext
 
 
@@ -240,3 +243,65 @@ async def test_runtime_returns_fallback_after_structured_output_exhausted_retrie
     assert result.payload["answer"]["kind"] == "text"
     assert "valid structured response" in result.payload["answer"]["content"]
     assert result.payload["should_answer_to_user"] is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_retries_do_not_consume_step_budget() -> None:
+    """M1 fix: RetryAction must not increment step; a retry should not use up the step budget."""
+    valid_json = '{"answer":{"kind":"text","content":"ok"},"should_answer_to_user":true}'
+    llm_client = _StubRuntimeLLMClient(
+        steps=[
+            LLMCompletionStep(message=_FakeMessage(content="not-json"), response_id="resp-1", total_tokens=3),
+            LLMCompletionStep(message=_FakeMessage(content=valid_json), response_id="resp-2", total_tokens=5),
+        ],
+        executions=[],
+    )
+    runtime = AgentRuntime(
+        llm_client=cast(LLMClient, llm_client),
+        tools=[],
+        limits=RuntimeLimits(max_steps=1),
+    )
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    # Both LLM calls must have happened (retry did not exhaust max_steps=1)
+    assert llm_client.complete_once_calls == 2
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["content"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_runtime_custom_validator_honors_caller_schema() -> None:
+    """P1 fix: a custom validator with _DelegatedPayload must accept kind='json' without retrying."""
+    delegated_json = (
+        '{"answer":{"kind":"json","content":"{\\"key\\":\\"value\\"}"},"should_answer_to_user":true}'
+    )
+    llm_client = _StubRuntimeLLMClient(
+        steps=[
+            LLMCompletionStep(
+                message=_FakeMessage(content=delegated_json),
+                response_id="resp-1",
+                total_tokens=10,
+            )
+        ],
+        executions=[],
+    )
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+        structured_validator=RuntimeStructuredOutputValidator(schema_model=_DelegatedPayload, max_attempts=3),
+    )
+
+    # No retries — validated on first attempt
+    assert llm_client.complete_once_calls == 1
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["kind"] == "json"
