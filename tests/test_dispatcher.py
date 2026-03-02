@@ -209,7 +209,7 @@ async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
                 channel="telegram",
                 chat_id=1,
                 text="bad markdown",
-                render=RenderableResponse(kind="markdown_v2", text="*bad"),
+                render=RenderableResponse(kind="markdown", text="*bad"),
                 metadata={"source_user_id": 1},
             ),
             parse_error="can't parse entities",

@@ -63,6 +63,11 @@ class Dispatcher:
             managed_files_root=settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
+        self._main_agent_tool_names = sorted(binding.tool.name for binding in main_agent_tools_view.tools)
+        self._logger.info(
+            "main agent tool configuration loaded",
+            extra={"main_agent_tools_enabled": self._main_agent_tool_names or ["none"]},
+        )
         if settings.tools.mcp.enabled:
             mcp_prefix = f"{settings.tools.mcp.name_prefix}_"
             mcp_tool_names = sorted(
@@ -83,6 +88,10 @@ class Dispatcher:
                 extra={"hidden_tools": main_agent_tools_view.hidden_tool_names},
             )
         self._task: Optional[asyncio.Task[None]] = None
+
+    @property
+    def main_agent_tool_names(self) -> list[str]:
+        return list(self._main_agent_tool_names)
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run())

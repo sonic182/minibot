@@ -82,9 +82,9 @@ class ConsoleService:
 
     def _render_response(self, response: ChannelResponse) -> str:
         render = response.render or RenderableResponse(kind="text", text=response.text)
-        if render.kind == "markdown_v2":
+        if render.kind == "markdown":
             text = render.text
-            self._console.print(format_assistant_output("markdown_v2", text))
+            self._console.print(format_assistant_output("markdown", text))
             return text
         if render.kind == "html":
             text = _render_html_to_text(render.text)

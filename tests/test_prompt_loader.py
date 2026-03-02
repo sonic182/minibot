@@ -8,11 +8,11 @@ from minibot.shared.prompt_loader import load_channel_prompt, load_compact_promp
 def test_load_channel_prompt_reads_channel_file(tmp_path: Path) -> None:
     prompt_file = tmp_path / "channels" / "telegram.md"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
-    prompt_file.write_text("use markdown_v2", encoding="utf-8")
+    prompt_file.write_text("use markdown", encoding="utf-8")
 
     loaded = load_channel_prompt(str(tmp_path), "telegram")
 
-    assert loaded == "use markdown_v2"
+    assert loaded == "use markdown"
 
 
 def test_load_channel_prompt_returns_none_for_missing_or_invalid_channel(tmp_path: Path) -> None:

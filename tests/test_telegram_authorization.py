@@ -316,7 +316,7 @@ async def test_send_parse_mode_chunks_sets_markdown_mode(monkeypatch: pytest.Mon
 
     success, parse_error = await service._send_parse_mode_chunks(
         chat_id=1,
-        render=RenderableResponse(kind="markdown_v2", text="*bold*"),
+        render=RenderableResponse(kind="markdown", text="*bold*"),
     )
 
     assert success is True
@@ -350,7 +350,7 @@ async def test_send_parse_mode_chunks_falls_back_to_plain_text_when_markdownify_
 
     success, parse_error = await service._send_parse_mode_chunks(
         chat_id=1,
-        render=RenderableResponse(kind="markdown_v2", text="*bold*"),
+        render=RenderableResponse(kind="markdown", text="*bold*"),
     )
 
     assert success is True

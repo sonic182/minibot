@@ -36,7 +36,7 @@ class CompatConsole:
 def format_assistant_output(kind: str, text: str) -> Any:
     if RichPanel is None:
         return f"assistant: {text}"
-    if kind == "markdown_v2" and RichMarkdown is not None:
+    if kind == "markdown" and RichMarkdown is not None:
         body: Any = RichMarkdown(text)
     elif RichText is not None:
         body = RichText(text)

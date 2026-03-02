@@ -28,7 +28,7 @@ class IncomingFileRef(BaseModel):
 class RenderableResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    kind: Literal["text", "html", "markdown_v2"] = "text"
+    kind: Literal["text", "html", "markdown"] = "text"
     text: str = Field(validation_alias=AliasChoices("content", "text"), serialization_alias="content")
     meta: Dict[str, Any] = Field(default_factory=dict)
 

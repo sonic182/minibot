@@ -165,7 +165,7 @@ def test_user_input_service_transforms_attachments_for_chat_completions() -> Non
 def test_prompt_service_builds_format_repair_prompt() -> None:
     prompt = PromptService.build_format_repair_prompt(
         channel="telegram",
-        original_kind="markdown_v2",
+        original_kind="markdown",
         parse_error="can't parse entities",
         original_content="*Hello",
     )

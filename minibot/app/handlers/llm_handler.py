@@ -450,7 +450,7 @@ class LLMMessageHandler:
         return self._input_service.build_model_user_input(message)
 
     def _response_schema(self) -> dict[str, Any]:
-        return assistant_response_schema(kinds=["text", "html", "markdown_v2"], include_meta=True)
+        return assistant_response_schema(kinds=["text", "html", "markdown"], include_meta=True)
 
     async def _enforce_history_limit(self, session_id: str) -> None:
         if self._max_history_messages is None:
