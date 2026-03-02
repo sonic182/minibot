@@ -558,7 +558,7 @@ Tooling
 Tools live under `minibot/llm/tools/` and are exposed to [llm-async] with server-side execution controls.
 
 - 🧠 Chat memory tools: `chat_history_info`, `chat_history_trim`.
-- 📝 User memory tools: `memory` action facade (`save`/`get`/`search`/`delete`).
+- 📝 User memory tools: `memory` action facade (`save`/`get`/`search`/`list_titles`/`delete`), with title suggestions on `get` misses.
 - ⏰ Scheduler tools: `schedule` action facade (`create`/`list`/`cancel`/`delete`) plus granular aliases (`schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`).
 - 🗂️ File tools: `filesystem` action facade (`list`/`glob`/`info`/`write`/`move`/`delete`/`send`), `glob_files`, `read_file`.
 - 🧩 `self_insert_artifact`: inject managed files (`tools.file_storage.root_dir` relative path) into runtime directives for in-loop multimodal analysis.

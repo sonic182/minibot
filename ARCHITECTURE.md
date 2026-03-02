@@ -54,6 +54,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── mcp_tool_name.py
 │   │   ├── response_parser.py
 │   │   ├── runtime_limits.py
+│   │   ├── runtime_structured_output.py
 │   │   ├── scheduler_service.py
 │   │   ├── tool_capabilities.py
 │   │   ├── tool_policy_utils.py
@@ -241,8 +242,9 @@ flowchart TD
 - `app/environment_context.py`: builds the environment context fragment injected into system prompts (e.g. configured output directories).
 - `app/incoming_files_context.py`: assembles incoming-file context for model input and history entries (`build_incoming_files_text`, `build_history_user_entry`, `incoming_files_from_metadata`).
 - `app/mcp_tool_name.py`: utilities for parsing and validating MCP-namespaced tool names (`is_mcp_tool_name`, `extract_mcp_server`).
-- `app/response_parser.py`: parses structured LLM output payloads into render objects (`extract_answer`, `render_from_payload`, `normalize_render_kind`, `plain_render`).
+- `app/response_parser.py`: parses structured LLM output payloads into render objects (`extract_answer`, `render_from_payload`, `payload_to_object`, `plain_render`).
 - `app/runtime_limits.py`: constructs `AgentRuntimeLimits` from config and client capabilities (`build_runtime_limits`).
+- `app/runtime_structured_output.py`: ratchet-backed structured-output schema validation with retries/fallback payload shaping (`RuntimeStructuredOutputValidator`).
 - `app/tool_policy_utils.py`: shared `fnmatch`-based tool allow/deny filtering used by agent policies and tool capability views.
 - `app/tool_use_guardrail.py`: `ToolUseGuardrail` protocol with `NoopToolUseGuardrail` (default) and `LLMClassifierToolUseGuardrail` (opt-in via `[orchestration].main_tool_use_guardrail = "llm_classifier"`).
 - `app/handlers/llm_handler.py`: top-level request flow coordinator for history persistence, runtime execution, format repair, and response metadata assembly.
