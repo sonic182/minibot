@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Ratchet-backed structured output validation (`minibot/app/runtime_structured_output.py`) with schema-aware retries and deterministic fallback payloads.
+- Runtime dependency `ratchet-sm[pydantic]` for structured output state-machine validation.
+- Expanded runtime tests covering structured-output success, retry recovery, retry exhaustion fallback, step-budget retry behavior, and custom validator schemas.
+
+### Changed
+
+- `AgentRuntime` now validates structured final responses, retries invalid payloads with repair prompts, and returns safe fallback structured payloads after max attempts.
+- Delegated-agent payload extraction now validates against strict Pydantic schemas instead of permissive coercion.
+- Structured response parsing now requires strict `answer` object + boolean `should_answer_to_user` semantics.
+- Canonical render kind was standardized from `markdown_v2` to `markdown` across channel schema, handler/prompt paths, and Telegram prompt guidance.
+- Dispatcher/console startup logging now includes enabled main-agent tool names for observability.
+
+### Fixed
+
+- Console command startup no longer assumes a full `logging.Logger` interface in tests; info-level startup logging is now defensive for lightweight logger doubles.
+
 ## [0.0.7] - 2026-02-25
 
 ### Added
