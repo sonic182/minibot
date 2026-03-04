@@ -11,3 +11,4 @@ Patch format:
 - Optional `*** End of File` anchor is supported inside update chunks.
 
 Use this tool when making targeted file edits from diff-like instructions.
+For edits to existing files, this is the preferred tool over filesystem write.

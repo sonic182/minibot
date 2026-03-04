@@ -176,6 +176,12 @@ class LLMClassifierToolUseGuardrail:
 
             suggested_tool = payload.suggested_tool if payload.suggested_tool in tool_names else None
             suggested_path = payload.path
+            suggested_tool, suggested_path = _normalize_edit_tool_routing(
+                user_text=user_text,
+                tool_names=tool_names,
+                suggested_tool=suggested_tool,
+                suggested_path=suggested_path,
+            )
 
             direct_result = await self._try_direct_delete(
                 user_text=user_text,
@@ -233,6 +239,7 @@ class LLMClassifierToolUseGuardrail:
             "Decide whether the user's request requires executing at least one tool before answering.\n"
             "Return only a JSON object with keys: requires_tools, suggested_tool, path, reason.\n"
             "Use available tool names exactly when suggested_tool is not null.\n"
+            "If the user asks to edit/refactor an existing file, suggested_tool should be apply_patch.\n"
             "Set suggested_tool/path/reason to null when not applicable.\n\n"
             f"Available tools: {', '.join(tool_names)}\n"
             f"User request:\n{user_text}"
@@ -320,7 +327,62 @@ def _extract_delete_path_candidates(text: str) -> list[str]:
         if n and n not in candidates:
             candidates.append(n)
 
-        return candidates
+    return candidates
+
+
+def _extract_path_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    for item in re.findall(r"['\"]([^'\"]+)['\"]", text):
+        normalized = item.strip().strip('"').strip("'")
+        if normalized.startswith("./"):
+            normalized = normalized[2:]
+        normalized = normalize_path_separators(normalized)
+        if re.search(r"\.[a-zA-Z0-9]{1,10}$", normalized) and normalized not in candidates:
+            candidates.append(normalized)
+    for item in re.findall(r"(?:\.?/?[a-zA-Z0-9_-]+/)+[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]{1,10}", text):
+        normalized = item.strip()
+        if normalized.startswith("./"):
+            normalized = normalized[2:]
+        normalized = normalize_path_separators(normalized)
+        if normalized not in candidates:
+            candidates.append(normalized)
+    return candidates
+
+
+def _normalize_edit_tool_routing(
+    *,
+    user_text: str,
+    tool_names: Sequence[str],
+    suggested_tool: str | None,
+    suggested_path: str | None,
+) -> tuple[str | None, str | None]:
+    if "apply_patch" not in tool_names:
+        return suggested_tool, suggested_path
+    lowered = user_text.lower()
+    explicit_force = "apply patch" in lowered or "apply_patch" in lowered
+    edit_terms = (
+        "refactor",
+        "modifica",
+        "editar",
+        "edit ",
+        "fix ",
+        "arregla",
+        "update ",
+        "actualiza",
+        "replace ",
+        "cambia",
+    )
+    create_terms = ("create ", "crear ", "new file", "nuevo archivo", "from scratch", "guardar como")
+    mentions_edit = explicit_force or any(term in lowered for term in edit_terms)
+    mentions_create = any(term in lowered for term in create_terms)
+    if not mentions_edit or mentions_create:
+        return suggested_tool, suggested_path
+    inferred_path = suggested_path
+    if not inferred_path:
+        paths = _extract_path_candidates(user_text)
+        if paths:
+            inferred_path = paths[0]
+    return "apply_patch", inferred_path
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import re
 from typing import Any, Sequence, cast
 
 from minibot.app.agent_runtime import AgentRuntime
@@ -59,6 +60,7 @@ class RuntimeOrchestrationService:
     ) -> AgentRuntimeResult:
         tokens_used = 0
         trace_result = None
+        apply_patch_required = _requires_apply_patch_for_edit_request(model_text)
 
         state = self._build_agent_state(
             history=history,
@@ -77,6 +79,42 @@ class RuntimeOrchestrationService:
         tool_messages_count = count_tool_messages(generation.state)
         trace_result = extract_delegation_trace(generation.state)
         delegation_unresolved = trace_result.unresolved
+
+        if apply_patch_required and not _state_has_tool_call(generation.state, "apply_patch"):
+            self._logger.debug(
+                "apply_patch policy enforcing retry for existing-file edit request",
+                extra={"session_id": session_id, "chat_id": chat_id},
+            )
+            retry_state = self._build_agent_state(
+                history=history,
+                user_text=model_text,
+                user_content=model_user_content,
+                system_prompt=f"{system_prompt}\n\n{_apply_patch_enforcement_suffix()}",
+            )
+            generation = await self._runtime.run(
+                state=retry_state,
+                tool_context=tool_context,
+                response_schema=response_schema,
+                prompt_cache_key=prompt_cache_key,
+                initial_previous_response_id=generation.response_id,
+            )
+            tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
+            tool_messages_count = count_tool_messages(generation.state)
+            trace_result = extract_delegation_trace(generation.state)
+            delegation_unresolved = trace_result.unresolved
+            if not _state_has_tool_call(generation.state, "apply_patch"):
+                return AgentRuntimeResult(
+                    render=plain_render(
+                        "I could not apply changes to the existing file with apply_patch in this attempt. "
+                        "Please ask me again with the exact target path and I will patch it in place."
+                    ),
+                    should_reply=True,
+                    response_id=generation.response_id,
+                    runtime_state=generation.state,
+                    agent_trace=trace_result.trace,
+                    delegation_fallback_used=trace_result.fallback_used,
+                    tokens_used=tokens_used,
+                )
 
         guardrail = None
         if tool_messages_count == 0:
@@ -229,3 +267,43 @@ class RuntimeOrchestrationService:
                 )
             )
         return AgentState(messages=messages)
+
+
+def _state_has_tool_call(state: AgentState, tool_name: str) -> bool:
+    for message in state.messages:
+        if message.role == "tool" and message.name == tool_name:
+            return True
+    return False
+
+
+def _requires_apply_patch_for_edit_request(text: str) -> bool:
+    lowered = text.lower()
+    force_terms = ("apply patch", "apply_patch", "usa apply patch", "use apply patch")
+    if any(term in lowered for term in force_terms):
+        return True
+    create_terms = ("create ", "crear ", "nuevo archivo", "new file", "from scratch", "guardar como")
+    if any(term in lowered for term in create_terms):
+        return False
+    edit_terms = (
+        "refactor",
+        "modifica",
+        "editar",
+        "edit ",
+        "fix ",
+        "arregla",
+        "update ",
+        "actualiza",
+        "replace ",
+        "cambia",
+    )
+    if not any(term in lowered for term in edit_terms):
+        return False
+    return bool(re.search(r"[a-zA-Z0-9_.\-/]+\.[a-zA-Z0-9]{1,10}", text))
+
+
+def _apply_patch_enforcement_suffix() -> str:
+    return (
+        "Editing policy reminder: for existing files, you must use apply_patch. "
+        "Do not use filesystem action=write to rewrite an existing file. "
+        "Use read_file only to gather context and then call apply_patch."
+    )

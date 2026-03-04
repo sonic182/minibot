@@ -199,11 +199,52 @@ async def test_guardrail_direct_delete_returns_resolved_text() -> None:
     assert deleted == [{"action": "delete", "path": "tmp/a.txt"}]
 
 
+@pytest.mark.asyncio
+async def test_guardrail_normalizes_existing_file_edit_to_apply_patch() -> None:
+    client = _StubClassifierClient(
+        payloads=[
+            {
+                "requires_tools": True,
+                "suggested_tool": "filesystem",
+                "path": "count_words.py",
+                "reason": "edit file",
+            }
+        ],
+    )
+    guardrail = LLMClassifierToolUseGuardrail(
+        llm_client=client,
+        tools=[_filesystem_binding(), _tool_binding("apply_patch")],
+    )
+
+    decision = await guardrail.apply(
+        session_id="s1",
+        user_text="refactor count_words.py to use logging",
+        tool_context=ToolContext(owner_id="u1"),
+        state=_state("refactor count_words.py"),
+        system_prompt="system",
+        prompt_cache_key=None,
+    )
+
+    assert decision.requires_retry is True
+    assert decision.suggested_tool == "apply_patch"
+    assert decision.suggested_path == "count_words.py"
+
+
 def _filesystem_binding() -> ToolBinding:
     async def _handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
         return {"deleted_count": 0}
 
     return ToolBinding(
         tool=Tool(name="filesystem", description="filesystem tool", parameters={"type": "object"}),
+        handler=_handler,
+    )
+
+
+def _tool_binding(name: str) -> ToolBinding:
+    async def _handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"ok": True}
+
+    return ToolBinding(
+        tool=Tool(name=name, description=f"{name} tool", parameters={"type": "object"}),
         handler=_handler,
     )

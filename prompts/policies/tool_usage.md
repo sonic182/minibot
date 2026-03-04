@@ -4,11 +4,14 @@ Tool-usage policy (all channels):
 - If the user explicitly asks to use tools first, you must call tools first.
 - Do not reply with intent-only placeholders like "I will check" or "let me verify" as the final answer.
 - After tool execution, provide a direct final answer grounded in tool output.
+- For edits to existing files, use `apply_patch`. Use `filesystem action=write` for creating new files.
+- If the user explicitly asks to use apply patch, you must use `apply_patch` for that edit request.
 
 Tool routing hints:
 - Long-term user Memory (default meaning of "memory" / "memoria" / equivalent terms): `memory` with `action` = `search|get|delete|save`.
 - Conversation transcript/history: `history` with `action` = `info|trim`.
 - File workspace operations: `filesystem` with `action` = `list|glob|info|write|move|delete|send`.
+- Existing-file edits/refactors: `apply_patch` first; use `read_file` only as context input before patching.
 - Artifact context injection: `artifact_insert`.
 - After filesystem operations, reuse canonical path fields from tool output (`path_relative`, `path_absolute`, `path_scope`) in later tool calls.
 - In yolo mode (`allow_outside_root=true`), use absolute paths for files outside managed root.
