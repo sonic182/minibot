@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Mapping, Sequence
 
@@ -160,6 +161,34 @@ def sanitize_tool_argument_value(value: Any) -> Any:
     return str(value)
 
 
+def normalize_tool_args_for_signature(arguments: Mapping[str, Any]) -> str:
+    normalized = _normalize_signature_value(arguments)
+    return json.dumps(normalized, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
+
+
+def tool_failure_signature(tool_name: str, arguments: Mapping[str, Any], error_code: str, error: str) -> str:
+    signature_payload = {
+        "tool": tool_name,
+        "arguments": json.loads(normalize_tool_args_for_signature(arguments)),
+        "error_code": error_code,
+        "error": error.strip(),
+    }
+    signature_text = json.dumps(signature_payload, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(signature_text.encode("utf-8")).hexdigest()
+
+
+def _normalize_signature_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _normalize_signature_value(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [_normalize_signature_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_normalize_signature_value(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 async def execute_tool_calls_for_runtime(
     tool_calls: Sequence[ToolCall],
     tools: Sequence[ToolBinding],
@@ -177,6 +206,7 @@ async def execute_tool_calls_for_runtime(
             if isinstance(input_call_id, str) and input_call_id:
                 call_id = input_call_id
         tool_name = tool_name_from_call(call)
+        arguments: dict[str, Any] = {}
         try:
             tool_name, arguments = parse_tool_call(call)
             binding = tool_map.get(tool_name)
@@ -206,6 +236,12 @@ async def execute_tool_calls_for_runtime(
             error_code = "tool_execution_failed"
             if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
                 error_code = "invalid_tool_arguments"
+            signature = tool_failure_signature(
+                tool_name=tool_name,
+                arguments=arguments,
+                error_code=error_code,
+                error=str(exc),
+            )
             logger.exception(
                 "tool execution failed",
                 extra={
@@ -219,6 +255,8 @@ async def execute_tool_calls_for_runtime(
                     "tool": tool_name,
                     "error_code": error_code,
                     "error": str(exc),
+                    "failure_signature": signature,
+                    "is_repeated_failure_candidate": True,
                 }
             )
         if responses_mode:

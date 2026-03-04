@@ -14,7 +14,13 @@ from llm_async.models import Tool
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
 from minibot.llm.provider_factory import LLMClient
-from minibot.llm.services.tool_executor import parse_tool_call, sanitize_tool_arguments_for_log, stringify_result
+from minibot.llm.services.tool_executor import (
+    normalize_tool_args_for_signature,
+    parse_tool_call,
+    sanitize_tool_arguments_for_log,
+    stringify_result,
+    tool_failure_signature,
+)
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
@@ -1053,6 +1059,23 @@ def test_parse_tool_call_repairs_unclosed_json_object() -> None:
 
     assert tool_name == "http_request"
     assert arguments == {"url": "https://www.ecosbox.com", "method": "GET"}
+
+
+def test_normalize_tool_args_for_signature_is_stable_across_dict_order() -> None:
+    left = {"b": 2, "a": {"y": 2, "x": 1}}
+    right = {"a": {"x": 1, "y": 2}, "b": 2}
+
+    assert normalize_tool_args_for_signature(left) == normalize_tool_args_for_signature(right)
+
+
+def test_tool_failure_signature_is_stable_across_dict_order() -> None:
+    args_one = {"headers": {"B": "2", "A": "1"}, "url": "https://example.com"}
+    args_two = {"url": "https://example.com", "headers": {"A": "1", "B": "2"}}
+
+    assert (
+        tool_failure_signature("http_request", args_one, "tool_execution_failed", "boom")
+        == tool_failure_signature("http_request", args_two, "tool_execution_failed", "boom")
+    )
 
 
 def test_stringify_result_serializes_structured_payloads_as_json() -> None:

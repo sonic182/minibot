@@ -63,6 +63,7 @@ class AgentRuntime:
         previous_response_id: str | None = initial_previous_response_id
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
+        repeated_failure_counts: dict[str, int] = {}
         _validator = structured_validator if response_schema is not None else None
         if _validator is None and response_schema is not None:
             _validator = RuntimeStructuredOutputValidator(max_attempts=3)
@@ -255,6 +256,30 @@ class AgentRuntime:
                     applied_directive_messages.extend(
                         self._apply_directives(state, execution.tool_name, execution.result.directives)
                     )
+                    if self._is_repeated_failure_candidate(execution.result.content):
+                        failure_signature = str(execution.result.content.get("failure_signature", "")).strip()
+                        if failure_signature:
+                            count = repeated_failure_counts.get(failure_signature, 0) + 1
+                            repeated_failure_counts[failure_signature] = count
+                            if count >= 2:
+                                self._logger.warning(
+                                    "agent runtime repeated identical tool failure; returning fallback",
+                                    extra={
+                                        "tool": execution.tool_name,
+                                        "call_id": execution.call_id,
+                                        "failure_count": count,
+                                        "failure_signature": failure_signature[:16],
+                                    },
+                                )
+                                return RuntimeResult(
+                                    payload=self._repeated_failure_payload(
+                                        response_schema=response_schema,
+                                        tool_name=execution.tool_name,
+                                    ),
+                                    response_id=completion.response_id,
+                                    state=state,
+                                    total_tokens=total_tokens,
+                                )
                 if self._llm_client.is_responses_provider():
                     responses_followup_messages = [execution.message_payload for execution in executions]
                     if applied_directive_messages:
@@ -262,6 +287,31 @@ class AgentRuntime:
                             self._render_messages(AgentState(messages=applied_directive_messages))
                         )
                 step += 1
+
+    @staticmethod
+    def _is_repeated_failure_candidate(content: Any) -> bool:
+        if not isinstance(content, dict):
+            return False
+        if content.get("ok") is not False:
+            return False
+        return bool(content.get("is_repeated_failure_candidate"))
+
+    @staticmethod
+    def _repeated_failure_payload(*, response_schema: dict[str, Any] | None, tool_name: str) -> Any:
+        answer = (
+            "I hit the same tool error repeatedly with the same parameters before finishing. "
+            f"Tool: {tool_name}. Please adjust parameters or ask for a different approach."
+        )
+        if response_schema is None:
+            return answer
+        return {
+            "answer": {
+                "kind": "text",
+                "content": answer,
+            },
+            "should_answer_to_user": True,
+            "attachments": [],
+        }
 
     def _apply_directives(self, state: AgentState, tool_name: str, directives: Sequence[Any]) -> list[AgentMessage]:
         appended: list[AgentMessage] = []
