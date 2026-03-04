@@ -5,7 +5,7 @@ enabled: true
 mode: agent
 model_provider: openrouter
 model: x-ai/grok-4.1-fast
-reasoning_effort: high
+openrouter_reasoning_enabled: true
 max_tool_iterations: 25
 mcp_servers:
   - playwright-cli
