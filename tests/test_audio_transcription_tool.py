@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -134,3 +135,40 @@ async def test_audio_transcription_tool_returns_error_payload_on_runtime_failure
     assert result["ok"] is False
     assert result["path"] == "uploads/broken.wav"
     assert "decoder failure" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_audio_transcription_tool_offloads_transcription_with_to_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    audio_file = tmp_path / "uploads" / "threaded.wav"
+    audio_file.parent.mkdir(parents=True, exist_ok=True)
+    audio_file.write_bytes(b"fake-audio")
+    to_thread_calls: list[str] = []
+
+    class _FakeWhisperModel:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def transcribe(self, *_args: Any, **_kwargs: Any) -> tuple[list[_Segment], _Info]:
+            return [_Segment(start=0.0, end=0.2, text="ok")], _Info(
+                language="en",
+                language_probability=1.0,
+                duration=0.2,
+            )
+
+    async def _fake_to_thread(func, /, *args, **kwargs):
+        to_thread_calls.append(getattr(func, "__name__", "unknown"))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", _fake_to_thread)
+    monkeypatch.setattr(AudioTranscriptionTool, "_load_whisper_model_class", staticmethod(lambda: _FakeWhisperModel))
+    tool = AudioTranscriptionTool(config=AudioTranscriptionToolConfig(enabled=True), storage=storage)
+    binding = tool.bindings()[0]
+
+    result = await binding.handler({"path": "uploads/threaded.wav"}, ToolContext(owner_id="1"))
+
+    assert result["ok"] is True
+    assert result["text"] == "ok"
+    assert "_transcribe_sync" in to_thread_calls

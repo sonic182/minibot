@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 import re
 from typing import Any
@@ -106,49 +107,18 @@ class GrepTool:
 
         target = self._resolve_target(raw_path)
         matcher = self._build_matcher(pattern=pattern, ignore_case=ignore_case, fixed_string=fixed_string)
-
-        files = self._iter_candidate_files(target, recursive=recursive, include_hidden=include_hidden)
-        matches: list[dict[str, Any]] = []
-        files_scanned = 0
-        files_skipped = 0
-        truncated = False
         before = context_before or 0
         after = context_after or 0
-
-        for file_path in files:
-            files_scanned += 1
-            try:
-                stat = file_path.stat()
-            except OSError:
-                files_skipped += 1
-                continue
-            if stat.st_size > self._config.max_file_size_bytes:
-                files_skipped += 1
-                continue
-            try:
-                lines = file_path.read_text(encoding="utf-8").splitlines()
-            except (UnicodeDecodeError, OSError):
-                files_skipped += 1
-                continue
-            for index, line in enumerate(lines):
-                if not matcher(line):
-                    continue
-                start = max(0, index - before)
-                end = min(len(lines), index + after + 1)
-                matches.append(
-                    {
-                        "path": self._storage.display_path(file_path),
-                        "line": index + 1,
-                        "match": line,
-                        "context_before": lines[start:index],
-                        "context_after": lines[index + 1 : end],
-                    }
-                )
-                if len(matches) >= effective_max_matches:
-                    truncated = True
-                    break
-            if truncated:
-                break
+        matches, files_scanned, files_skipped, truncated = await asyncio.to_thread(
+            self._search_files,
+            target=target,
+            matcher=matcher,
+            recursive=recursive,
+            include_hidden=include_hidden,
+            context_before=before,
+            context_after=after,
+            effective_max_matches=effective_max_matches,
+        )
 
         return {
             "ok": True,
@@ -168,6 +138,60 @@ class GrepTool:
             "truncated": truncated,
             "matches": matches,
         }
+
+    def _search_files(
+        self,
+        *,
+        target: Path,
+        matcher: Any,
+        recursive: bool,
+        include_hidden: bool,
+        context_before: int,
+        context_after: int,
+        effective_max_matches: int,
+    ) -> tuple[list[dict[str, Any]], int, int, bool]:
+        files = self._iter_candidate_files(target, recursive=recursive, include_hidden=include_hidden)
+        matches: list[dict[str, Any]] = []
+        files_scanned = 0
+        files_skipped = 0
+        truncated = False
+
+        for file_path in files:
+            files_scanned += 1
+            try:
+                stat = file_path.stat()
+            except OSError:
+                files_skipped += 1
+                continue
+            if stat.st_size > self._config.max_file_size_bytes:
+                files_skipped += 1
+                continue
+            try:
+                lines = file_path.read_text(encoding="utf-8").splitlines()
+            except (UnicodeDecodeError, OSError):
+                files_skipped += 1
+                continue
+            for index, line in enumerate(lines):
+                if not matcher(line):
+                    continue
+                start = max(0, index - context_before)
+                end = min(len(lines), index + context_after + 1)
+                matches.append(
+                    {
+                        "path": self._storage.display_path(file_path),
+                        "line": index + 1,
+                        "match": line,
+                        "context_before": lines[start:index],
+                        "context_after": lines[index + 1 : end],
+                    }
+                )
+                if len(matches) >= effective_max_matches:
+                    truncated = True
+                    break
+            if truncated:
+                break
+
+        return matches, files_scanned, files_skipped, truncated
 
     def _resolve_target(self, path_value: str | None) -> Path:
         if not path_value:

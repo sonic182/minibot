@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from typing import Any
 
 from minibot.adapters.config.schema import AudioTranscriptionToolConfig
@@ -18,6 +20,7 @@ class AudioTranscriptionFacade:
         self._storage = storage
         self._whisper_model_class = whisper_model_class
         self._model: Any | None = None
+        self._model_lock = threading.Lock()
 
     async def transcribe_path(
         self,
@@ -38,8 +41,7 @@ class AudioTranscriptionFacade:
             options["task"] = task
 
         try:
-            segments_iter, info = model.transcribe(str(resolved_path), **options)
-            segments = list(segments_iter)
+            segments, info = await asyncio.to_thread(self._transcribe_sync, model, str(resolved_path), options)
         except Exception as exc:  # noqa: BLE001
             return {
                 "ok": False,
@@ -72,10 +74,18 @@ class AudioTranscriptionFacade:
         }
 
     def _get_model(self) -> Any:
-        if self._model is None:
-            self._model = self._whisper_model_class(
-                self._config.model,
-                device=self._config.device,
-                compute_type=self._config.compute_type,
-            )
+        if self._model is not None:
+            return self._model
+        with self._model_lock:
+            if self._model is None:
+                self._model = self._whisper_model_class(
+                    self._config.model,
+                    device=self._config.device,
+                    compute_type=self._config.compute_type,
+                )
         return self._model
+
+    @staticmethod
+    def _transcribe_sync(model: Any, path: str, options: dict[str, Any]) -> tuple[list[Any], Any]:
+        segments_iter, info = model.transcribe(path, **options)
+        return list(segments_iter), info

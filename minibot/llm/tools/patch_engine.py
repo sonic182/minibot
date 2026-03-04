@@ -102,8 +102,10 @@ def parse_patch(patch_text: str) -> PatchParseResult:
             i += 1
             content_lines: list[str] = []
             while i < end_idx and not lines[i].startswith("***"):
-                if lines[i].startswith("+"):
-                    content_lines.append(lines[i][1:])
+                current = lines[i]
+                if not current.startswith("+"):
+                    raise ValueError(f"Invalid add line for {file_path}: expected '+' prefix")
+                content_lines.append(current[1:])
                 i += 1
             hunks.append(AddHunk(type="add", path=file_path, contents="\n".join(content_lines)))
             continue
@@ -129,8 +131,7 @@ def parse_patch(patch_text: str) -> PatchParseResult:
             chunks: list[UpdateFileChunk] = []
             while i < end_idx and not lines[i].startswith("***"):
                 if not lines[i].startswith("@@"):
-                    i += 1
-                    continue
+                    raise ValueError(f"Invalid update hunk for {file_path}: expected '@@' header")
                 context = lines[i][2:].strip() or None
                 i += 1
                 old_lines: list[str] = []
@@ -149,6 +150,10 @@ def parse_patch(patch_text: str) -> PatchParseResult:
                         old_lines.append(raw[1:])
                     elif raw.startswith("+"):
                         new_lines.append(raw[1:])
+                    else:
+                        raise ValueError(
+                            f"Invalid update line for {file_path}: expected one of ' ', '+', '-', or '*** End of File'"
+                        )
                     i += 1
                 chunks.append(
                     UpdateFileChunk(

@@ -166,7 +166,7 @@ async def test_guardrail_fail_closed_when_validation_exhausted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_guardrail_direct_delete_returns_resolved_text() -> None:
+async def test_guardrail_never_executes_delete_side_effects_directly() -> None:
     deleted: list[dict[str, Any]] = []
 
     async def _filesystem_handler(payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
@@ -194,13 +194,13 @@ async def test_guardrail_direct_delete_returns_resolved_text() -> None:
         prompt_cache_key=None,
     )
 
-    assert decision.requires_retry is False
-    assert decision.resolved_render_text == "deleted ok"
-    assert deleted == [{"action": "delete", "path": "tmp/a.txt"}]
+    assert decision.requires_retry is True
+    assert decision.resolved_render_text is None
+    assert deleted == []
 
 
 @pytest.mark.asyncio
-async def test_guardrail_normalizes_existing_file_edit_to_apply_patch() -> None:
+async def test_guardrail_does_not_rewrite_tool_routing_with_text_heuristics() -> None:
     client = _StubClassifierClient(
         payloads=[
             {
@@ -213,7 +213,7 @@ async def test_guardrail_normalizes_existing_file_edit_to_apply_patch() -> None:
     )
     guardrail = LLMClassifierToolUseGuardrail(
         llm_client=client,
-        tools=[_filesystem_binding(), _tool_binding("apply_patch")],
+        tools=[_filesystem_binding()],
     )
 
     decision = await guardrail.apply(
@@ -226,7 +226,7 @@ async def test_guardrail_normalizes_existing_file_edit_to_apply_patch() -> None:
     )
 
     assert decision.requires_retry is True
-    assert decision.suggested_tool == "apply_patch"
+    assert decision.suggested_tool == "filesystem"
     assert decision.suggested_path == "count_words.py"
 
 
@@ -236,15 +236,5 @@ def _filesystem_binding() -> ToolBinding:
 
     return ToolBinding(
         tool=Tool(name="filesystem", description="filesystem tool", parameters={"type": "object"}),
-        handler=_handler,
-    )
-
-
-def _tool_binding(name: str) -> ToolBinding:
-    async def _handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
-        return {"ok": True}
-
-    return ToolBinding(
-        tool=Tool(name=name, description=f"{name} tool", parameters={"type": "object"}),
         handler=_handler,
     )

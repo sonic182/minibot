@@ -406,11 +406,12 @@ async def test_compaction_service_fallback_summary_clears_previous_response_id_w
 
 @pytest.mark.asyncio
 async def test_runtime_service_returns_guardrail_resolved_text() -> None:
+    session_state = SessionStateService()
     service = RuntimeOrchestrationService(
         runtime=cast(AgentRuntime, _StubRuntime()),
         llm_client=cast(LLMClient, _StubClient()),
         guardrail=_ResolvedGuardrail(),
-        session_state=SessionStateService(),
+        session_state=session_state,
         logger=logging.getLogger("test"),
     )
 
@@ -431,6 +432,7 @@ async def test_runtime_service_returns_guardrail_resolved_text() -> None:
     assert result.should_reply is True
     assert result.render.text == "resolved"
     assert result.tokens_used == 7
+    assert session_state.current_tokens("s1") == 7
 
 
 @pytest.mark.asyncio
@@ -508,129 +510,3 @@ async def test_runtime_service_calls_guardrail_when_no_tool_messages() -> None:
 
     assert guardrail.calls == 1
 
-
-@pytest.mark.asyncio
-async def test_runtime_service_enforces_apply_patch_for_existing_file_edits() -> None:
-    class _SequenceRuntime:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        async def run(self, **_: Any) -> RuntimeResult:
-            self.calls += 1
-            if self.calls == 1:
-                return RuntimeResult(
-                    payload='{"answer":{"kind":"text","content":"read only"},"should_answer_to_user":true}',
-                    response_id="resp-1",
-                    state=AgentState(
-                        messages=[
-                            AgentMessage(role="assistant", content=[MessagePart(type="text", text="thinking")]),
-                            AgentMessage(
-                                role="tool",
-                                name="read_file",
-                                content=[MessagePart(type="text", text='{"ok":true}')],
-                            ),
-                        ]
-                    ),
-                    total_tokens=4,
-                )
-            return RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"patched"},"should_answer_to_user":true}',
-                response_id="resp-2",
-                state=AgentState(
-                    messages=[
-                        AgentMessage(role="assistant", content=[MessagePart(type="text", text="thinking")]),
-                        AgentMessage(
-                            role="tool",
-                            name="read_file",
-                            content=[MessagePart(type="text", text='{"ok":true}')],
-                        ),
-                        AgentMessage(
-                            role="tool",
-                            name="apply_patch",
-                            content=[MessagePart(type="text", text='{"ok":true}')],
-                        ),
-                    ]
-                ),
-                total_tokens=5,
-            )
-
-    runtime = _SequenceRuntime()
-    guardrail = _CountingGuardrail()
-    service = RuntimeOrchestrationService(
-        runtime=cast(AgentRuntime, runtime),
-        llm_client=cast(LLMClient, _StubClient()),
-        guardrail=guardrail,
-        session_state=SessionStateService(),
-        logger=logging.getLogger("test"),
-    )
-
-    result = await service.run_with_agent_runtime(
-        session_id="s1",
-        history=[],
-        model_text="refactor count_words.py to use logging",
-        model_user_content=None,
-        system_prompt="system",
-        tool_context=ToolContext(),
-        prompt_cache_key=None,
-        previous_response_id=None,
-        chat_id=1,
-        channel="telegram",
-        response_schema={"type": "object"},
-    )
-
-    assert runtime.calls == 2
-    assert guardrail.calls == 0
-    assert result.should_reply is True
-    assert result.render.text == "patched"
-
-
-@pytest.mark.asyncio
-async def test_runtime_service_returns_failure_when_apply_patch_not_used_after_retry() -> None:
-    class _SequenceRuntimeNoPatch:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        async def run(self, **_: Any) -> RuntimeResult:
-            self.calls += 1
-            return RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"read only"},"should_answer_to_user":true}',
-                response_id=f"resp-{self.calls}",
-                state=AgentState(
-                    messages=[
-                        AgentMessage(role="assistant", content=[MessagePart(type="text", text="thinking")]),
-                        AgentMessage(
-                            role="tool",
-                            name="read_file",
-                            content=[MessagePart(type="text", text='{"ok":true}')],
-                        ),
-                    ]
-                ),
-                total_tokens=4,
-            )
-
-    runtime = _SequenceRuntimeNoPatch()
-    service = RuntimeOrchestrationService(
-        runtime=cast(AgentRuntime, runtime),
-        llm_client=cast(LLMClient, _StubClient()),
-        guardrail=_CountingGuardrail(),
-        session_state=SessionStateService(),
-        logger=logging.getLogger("test"),
-    )
-
-    result = await service.run_with_agent_runtime(
-        session_id="s1",
-        history=[],
-        model_text="modifica count_words.py para usar logging",
-        model_user_content=None,
-        system_prompt="system",
-        tool_context=ToolContext(),
-        prompt_cache_key=None,
-        previous_response_id=None,
-        chat_id=1,
-        channel="telegram",
-        response_schema={"type": "object"},
-    )
-
-    assert runtime.calls == 2
-    assert result.should_reply is True
-    assert "apply_patch" in result.render.text

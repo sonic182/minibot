@@ -46,6 +46,43 @@ def test_parse_patch_supports_heredoc_wrapper() -> None:
     assert parsed.hunks[0].type == "add"
 
 
+def test_parse_patch_rejects_add_lines_without_plus_prefix() -> None:
+    patch = (
+        "*** Begin Patch\n"
+        "*** Add File: bad.txt\n"
+        "missing-prefix\n"
+        "*** End Patch"
+    )
+
+    with pytest.raises(ValueError, match="Invalid add line"):
+        parse_patch(patch)
+
+
+def test_parse_patch_rejects_update_hunk_without_header() -> None:
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: a.txt\n"
+        "not-a-header\n"
+        "*** End Patch"
+    )
+
+    with pytest.raises(ValueError, match="expected '@@' header"):
+        parse_patch(patch)
+
+
+def test_parse_patch_rejects_invalid_update_body_line() -> None:
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: a.txt\n"
+        "@@\n"
+        "bad-body-line\n"
+        "*** End Patch"
+    )
+
+    with pytest.raises(ValueError, match="Invalid update line"):
+        parse_patch(patch)
+
+
 def test_plan_patch_actions_restricts_escape(tmp_path: Path) -> None:
     parsed = parse_patch("*** Begin Patch\n*** Add File: ../escape.txt\n+no\n*** End Patch")
     with pytest.raises(ValueError, match="path escapes workspace root"):

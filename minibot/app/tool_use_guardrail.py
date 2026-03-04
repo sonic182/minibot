@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
 
@@ -10,7 +9,6 @@ from ratchet_sm import FailAction, RetryAction, ValidAction
 from minibot.core.agent_runtime import AgentMessage, AgentState
 from minibot.app.tool_guardrail_validator import ToolGuardrailValidator
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.shared.path_utils import normalize_path_separators
 
 
 @dataclass(frozen=True)
@@ -68,6 +66,7 @@ class LLMClassifierToolUseGuardrail:
         system_prompt: str,
         prompt_cache_key: str | None,
     ) -> GuardrailDecision:
+        _ = tool_context
         if not self._tools:
             return GuardrailDecision(requires_retry=False, attempts=0)
 
@@ -176,39 +175,6 @@ class LLMClassifierToolUseGuardrail:
 
             suggested_tool = payload.suggested_tool if payload.suggested_tool in tool_names else None
             suggested_path = payload.path
-            suggested_tool, suggested_path = _normalize_edit_tool_routing(
-                user_text=user_text,
-                tool_names=tool_names,
-                suggested_tool=suggested_tool,
-                suggested_path=suggested_path,
-            )
-
-            direct_result = await self._try_direct_delete(
-                user_text=user_text,
-                tool_context=tool_context,
-                suggested_tool=suggested_tool,
-                suggested_path=suggested_path,
-            )
-            if direct_result is not None:
-                self._logger.debug(
-                    "tool requirement classifier resolved action directly",
-                    extra={
-                        "session_id": session_id,
-                        "attempts": attempts,
-                        "suggested_tool": suggested_tool,
-                        "suggested_path": suggested_path,
-                        "reason": payload.reason,
-                    },
-                )
-                return GuardrailDecision(
-                    requires_retry=False,
-                    resolved_render_text=direct_result,
-                    suggested_tool=suggested_tool,
-                    suggested_path=suggested_path,
-                    reason=payload.reason,
-                    attempts=attempts,
-                    tokens_used=tokens,
-                )
 
             self._logger.debug(
                 "tool requirement classifier requires retry",
@@ -256,35 +222,6 @@ class LLMClassifierToolUseGuardrail:
             "Do not answer with intent statements like 'I will check'."
         )
 
-    async def _try_direct_delete(
-        self,
-        *,
-        user_text: str,
-        tool_context: ToolContext,
-        suggested_tool: str | None,
-        suggested_path: str | None,
-    ) -> str | None:
-        if suggested_tool not in {"delete_file", "filesystem"}:
-            return None
-        binding = next((item for item in self._tools if item.tool.name == "filesystem"), None)
-        if binding is None:
-            return None
-        candidates = _extract_delete_path_candidates(user_text)
-        if suggested_path is not None and suggested_path not in candidates:
-            candidates.insert(0, suggested_path)
-        if not candidates:
-            return None
-        for candidate in candidates:
-            try:
-                raw_result = await binding.handler({"action": "delete", "path": candidate}, tool_context)
-                if not isinstance(raw_result, dict):
-                    continue
-                if int(raw_result.get("deleted_count") or 0) > 0:
-                    return str(raw_result.get("message") or f"Deleted file successfully: {candidate}")
-            except Exception:
-                self._logger.exception("direct filesystem delete failed", extra={"path": candidate})
-        return None
-
     @staticmethod
     def _schema() -> dict[str, Any]:
         return {
@@ -298,91 +235,6 @@ class LLMClassifierToolUseGuardrail:
             "required": ["requires_tools", "suggested_tool", "path", "reason"],
             "additionalProperties": False,
         }
-
-
-def _extract_delete_path_candidates(text: str) -> list[str]:
-    candidates: list[str] = []
-
-    def _normalize(value: str) -> str | None:
-        value = value.strip().strip('"').strip("'")
-        if not value:
-            return None
-        if value.startswith("./"):
-            value = value[2:]
-        return normalize_path_separators(value)
-
-    for item in re.findall(r"['\"]([^'\"]+)['\"]", text):
-        n = _normalize(item)
-        if n and n not in candidates:
-            candidates.append(n)
-
-    for item in re.findall(r"(?:\.?/?[a-zA-Z0-9_-]+/)+[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]{1,10}", text):
-        n = _normalize(item)
-        if n and n not in candidates:
-            candidates.append(n)
-
-    m = re.search(r"([a-zA-Z0-9_.-]+\.[a-zA-Z0-9]{1,10})", text)
-    if m:
-        n = _normalize(m.group(1))
-        if n and n not in candidates:
-            candidates.append(n)
-
-    return candidates
-
-
-def _extract_path_candidates(text: str) -> list[str]:
-    candidates: list[str] = []
-    for item in re.findall(r"['\"]([^'\"]+)['\"]", text):
-        normalized = item.strip().strip('"').strip("'")
-        if normalized.startswith("./"):
-            normalized = normalized[2:]
-        normalized = normalize_path_separators(normalized)
-        if re.search(r"\.[a-zA-Z0-9]{1,10}$", normalized) and normalized not in candidates:
-            candidates.append(normalized)
-    for item in re.findall(r"(?:\.?/?[a-zA-Z0-9_-]+/)+[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]{1,10}", text):
-        normalized = item.strip()
-        if normalized.startswith("./"):
-            normalized = normalized[2:]
-        normalized = normalize_path_separators(normalized)
-        if normalized not in candidates:
-            candidates.append(normalized)
-    return candidates
-
-
-def _normalize_edit_tool_routing(
-    *,
-    user_text: str,
-    tool_names: Sequence[str],
-    suggested_tool: str | None,
-    suggested_path: str | None,
-) -> tuple[str | None, str | None]:
-    if "apply_patch" not in tool_names:
-        return suggested_tool, suggested_path
-    lowered = user_text.lower()
-    explicit_force = "apply patch" in lowered or "apply_patch" in lowered
-    edit_terms = (
-        "refactor",
-        "modifica",
-        "editar",
-        "edit ",
-        "fix ",
-        "arregla",
-        "update ",
-        "actualiza",
-        "replace ",
-        "cambia",
-    )
-    create_terms = ("create ", "crear ", "new file", "nuevo archivo", "from scratch", "guardar como")
-    mentions_edit = explicit_force or any(term in lowered for term in edit_terms)
-    mentions_create = any(term in lowered for term in create_terms)
-    if not mentions_edit or mentions_create:
-        return suggested_tool, suggested_path
-    inferred_path = suggested_path
-    if not inferred_path:
-        paths = _extract_path_candidates(user_text)
-        if paths:
-            inferred_path = paths[0]
-    return "apply_patch", inferred_path
 
 
 @dataclass(frozen=True)

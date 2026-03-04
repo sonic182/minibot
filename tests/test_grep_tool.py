@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -106,3 +107,24 @@ async def test_grep_tool_excludes_hidden_files_by_default(tmp_path: Path) -> Non
     assert isinstance(result, dict)
     assert result["count"] == 1
     assert result["matches"][0]["path"] == "visible.txt"
+
+
+@pytest.mark.asyncio
+async def test_grep_tool_offloads_search_work_with_to_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    storage.create_text_file(path="a.txt", content="needle", overwrite=False)
+    tool = GrepTool(storage=storage, config=GrepToolConfig(enabled=True))
+    binding = _grep_binding(tool)
+    calls: list[str] = []
+
+    async def _fake_to_thread(func, /, *args, **kwargs):
+        calls.append(getattr(func, "__name__", "unknown"))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", _fake_to_thread)
+    result = await binding.handler({"pattern": "needle", "path": "a.txt"}, ToolContext())
+
+    assert result["ok"] is True
+    assert calls == ["_search_files"]
