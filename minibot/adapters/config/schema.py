@@ -268,6 +268,24 @@ class PythonExecToolConfig(BaseModel):
     jail: PythonExecJailConfig = PythonExecJailConfig()
 
 
+class BashToolConfig(BaseModel):
+    enabled: bool = False
+    default_timeout_seconds: PositiveInt = 15
+    max_timeout_seconds: PositiveInt = 120
+    max_output_bytes: ByteSizeValue = 128000
+    pass_parent_env: bool = True
+    env_allowlist: List[str] = Field(default_factory=lambda: ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"])
+
+
+class ApplyPatchToolConfig(BaseModel):
+    enabled: bool = False
+    restrict_to_workspace: bool = True
+    workspace_root: str = "."
+    allow_outside_workspace: bool = False
+    preserve_trailing_newline: bool = True
+    max_patch_bytes: ByteSizeValue = 262144
+
+
 class MCPServerConfig(BaseModel):
     name: str
     transport: Literal["stdio", "http"] = "stdio"
@@ -292,13 +310,31 @@ class FileStorageToolConfig(BaseModel):
     enabled: bool = False
     root_dir: str = "./data/files"
     max_write_bytes: ByteSizeValue = 64000
+    allow_outside_root: bool = False
     save_incoming_uploads: bool = False
     uploads_subdir: str = "uploads"
     incoming_temp_subdir: str = "uploads/temp"
 
 
+class GrepToolConfig(BaseModel):
+    enabled: bool = False
+    max_matches: PositiveInt = 200
+    max_file_size_bytes: ByteSizeValue = 1000000
+
+
 class BrowserToolConfig(BaseModel):
     output_dir: str = "./data/files/browser"
+
+
+class AudioTranscriptionToolConfig(BaseModel):
+    enabled: bool = False
+    model: str = "small"
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+    compute_type: str = "int8"
+    beam_size: PositiveInt = 5
+    vad_filter: bool = True
+    auto_transcribe_short_incoming: bool = True
+    auto_transcribe_max_duration_seconds: PositiveInt = 45
 
 
 class ToolsConfig(BaseModel):
@@ -307,8 +343,12 @@ class ToolsConfig(BaseModel):
     time: TimeToolConfig = TimeToolConfig()
     calculator: CalculatorToolConfig = CalculatorToolConfig()
     python_exec: PythonExecToolConfig = PythonExecToolConfig()
+    bash: BashToolConfig = BashToolConfig()
+    apply_patch: ApplyPatchToolConfig = ApplyPatchToolConfig()
     file_storage: FileStorageToolConfig = FileStorageToolConfig()
+    grep: GrepToolConfig = GrepToolConfig()
     browser: BrowserToolConfig = BrowserToolConfig()
+    audio_transcription: AudioTranscriptionToolConfig = AudioTranscriptionToolConfig()
     mcp: MCPToolConfig = MCPToolConfig()
 
 

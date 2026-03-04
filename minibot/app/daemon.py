@@ -24,6 +24,10 @@ async def run() -> None:
         enabled_tools.append("calculator")
     if settings.tools.python_exec.enabled:
         enabled_tools.append("python_exec")
+    if settings.tools.bash.enabled:
+        enabled_tools.append("bash")
+    if settings.tools.apply_patch.enabled:
+        enabled_tools.append("apply_patch")
     if settings.tools.file_storage.enabled:
         enabled_tools.append("file_storage")
     if settings.scheduler.prompts.enabled:

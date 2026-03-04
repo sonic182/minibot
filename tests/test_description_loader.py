@@ -33,11 +33,15 @@ def test_all_builtin_descriptions_load() -> None:
         "chat_history_trim",
         "filesystem",
         "glob_files",
+        "grep",
         "read_file",
         "self_insert_artifact",
         "memory",
+        "bash",
+        "apply_patch",
         "list_agents",
         "invoke_agent",
+        "transcribe_audio",
     ]
     for name in names:
         text = load_tool_description(name)

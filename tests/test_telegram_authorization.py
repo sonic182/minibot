@@ -44,11 +44,28 @@ class _Document:
 
 
 @dataclass
+class _Audio:
+    file_unique_id: str
+    duration: int = 0
+    file_name: str | None = None
+    mime_type: str | None = None
+
+
+@dataclass
+class _Voice:
+    file_unique_id: str
+    duration: int = 0
+    mime_type: str | None = None
+
+
+@dataclass
 class _MediaMessage:
     chat: _Chat
     from_user: _User | None
     photo: list[_Photo] | None = None
     document: _Document | None = None
+    audio: _Audio | None = None
+    voice: _Voice | None = None
 
 
 def _service(config: TelegramChannelConfig) -> TelegramService:
@@ -228,6 +245,115 @@ async def test_collect_incoming_files_rejects_document_mime_not_allowed(tmp_path
 
     assert not incoming_files
     assert errors == ["document_mime_not_allowed"]
+
+
+@pytest.mark.asyncio
+async def test_collect_incoming_files_saves_audio_to_temp_dir(tmp_path: Path) -> None:
+    config = TelegramChannelConfig(bot_token="token")
+    service = _service(config)
+    service._file_storage_config = FileStorageToolConfig(
+        enabled=True,
+        root_dir=str(tmp_path),
+        incoming_temp_subdir="uploads/temp",
+    )
+    service._managed_root_dir = Path(str(tmp_path)).resolve()
+    service._local_storage = LocalFileStorage(
+        root_dir=str(tmp_path),
+        max_write_bytes=service._file_storage_config.max_write_bytes,
+    )
+
+    async def _download(_media):
+        return b"audio-bytes"
+
+    service._download_media_bytes = _download  # type: ignore[attr-defined]
+    message = _MediaMessage(
+        chat=_Chat(1),
+        from_user=_User(2),
+        audio=_Audio(file_unique_id="a1", file_name="sample.mp3", mime_type="audio/mpeg"),
+    )
+    message.message_id = 10  # type: ignore[attr-defined]
+    message.caption = "audio-caption"  # type: ignore[attr-defined]
+
+    incoming_files, errors = await service._collect_incoming_files(message)  # type: ignore[arg-type]
+
+    assert not errors
+    assert len(incoming_files) == 1
+    assert incoming_files[0].path == "uploads/temp/sample.mp3"
+    assert incoming_files[0].filename == "sample.mp3"
+    assert incoming_files[0].mime == "audio/mpeg"
+    assert incoming_files[0].source == "audio"
+    assert incoming_files[0].caption == "audio-caption"
+    assert incoming_files[0].duration_seconds == 0
+
+
+@pytest.mark.asyncio
+async def test_collect_incoming_files_saves_voice_to_temp_dir(tmp_path: Path) -> None:
+    config = TelegramChannelConfig(bot_token="token")
+    service = _service(config)
+    service._file_storage_config = FileStorageToolConfig(
+        enabled=True,
+        root_dir=str(tmp_path),
+        incoming_temp_subdir="uploads/temp",
+    )
+    service._managed_root_dir = Path(str(tmp_path)).resolve()
+    service._local_storage = LocalFileStorage(
+        root_dir=str(tmp_path),
+        max_write_bytes=service._file_storage_config.max_write_bytes,
+    )
+
+    async def _download(_media):
+        return b"voice-bytes"
+
+    service._download_media_bytes = _download  # type: ignore[attr-defined]
+    message = _MediaMessage(
+        chat=_Chat(1),
+        from_user=_User(2),
+        voice=_Voice(file_unique_id="v1", mime_type="audio/ogg"),
+    )
+    message.message_id = 11  # type: ignore[attr-defined]
+
+    incoming_files, errors = await service._collect_incoming_files(message)  # type: ignore[arg-type]
+
+    assert not errors
+    assert len(incoming_files) == 1
+    assert incoming_files[0].path.startswith("uploads/temp/voice_")
+    assert incoming_files[0].filename.endswith(".ogg")
+    assert incoming_files[0].mime == "audio/ogg"
+    assert incoming_files[0].source == "voice"
+    assert incoming_files[0].duration_seconds == 0
+
+
+@pytest.mark.asyncio
+async def test_collect_incoming_files_rejects_audio_mime_not_allowed(tmp_path: Path) -> None:
+    config = TelegramChannelConfig(bot_token="token")
+    service = _service(config)
+    service._file_storage_config = FileStorageToolConfig(
+        enabled=True,
+        root_dir=str(tmp_path),
+        incoming_temp_subdir="uploads/temp",
+    )
+    service._managed_root_dir = Path(str(tmp_path)).resolve()
+    service._local_storage = LocalFileStorage(
+        root_dir=str(tmp_path),
+        max_write_bytes=service._file_storage_config.max_write_bytes,
+    )
+    service._config.allowed_document_mime_types = ["application/pdf"]
+
+    async def _download(_media):
+        return b"audio-bytes"
+
+    service._download_media_bytes = _download  # type: ignore[attr-defined]
+    message = _MediaMessage(
+        chat=_Chat(1),
+        from_user=_User(2),
+        audio=_Audio(file_unique_id="a2", file_name="sample.mp3", mime_type="audio/mpeg"),
+    )
+    message.message_id = 12  # type: ignore[attr-defined]
+
+    incoming_files, errors = await service._collect_incoming_files(message)  # type: ignore[arg-type]
+
+    assert not incoming_files
+    assert errors == ["audio_mime_not_allowed"]
 
 
 @pytest.mark.asyncio

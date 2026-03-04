@@ -29,10 +29,10 @@ var/
 pip-wheel-metadata/
 pip-log.txt
 venv/
+.venv/
 ENV/
 env/
 venv.bak/
-venv/
 
 # PyInstaller
 *.manifest
@@ -72,6 +72,10 @@ coverage.xml
 .DS_Store
 
 config.toml
-config.*.bckp
+config.*
 data/
 testdata/
+
+opencode/
+aiogram/
+llm-async/

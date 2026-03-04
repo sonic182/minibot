@@ -1,0 +1,13 @@
+Edit files using a structured patch format.
+
+Patch format:
+- Must start with `*** Begin Patch` and end with `*** End Patch`.
+- Supported file operations:
+  - `*** Add File: <path>` followed by `+` lines.
+  - `*** Delete File: <path>`.
+  - `*** Update File: <path>` with one or more `@@` chunks.
+  - Optional `*** Move to: <new_path>` after `*** Update File:`.
+- Chunk lines use prefixes: space (context), `-` (remove), `+` (add).
+- Optional `*** End of File` anchor is supported inside update chunks.
+
+Use this tool when making targeted file edits from diff-like instructions.

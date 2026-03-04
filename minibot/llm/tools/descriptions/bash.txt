@@ -1,0 +1,9 @@
+Run arbitrary shell commands on the host using /bin/bash -lc.
+
+Use this only when shell/CLI execution is actually required and dedicated tools are insufficient.
+
+Supports full shell syntax (pipes, redirects, command chaining, subshells).
+
+Before commands with meaningful side effects (writes/deletes/system changes), briefly state what you will do.
+
+Returns exit code, stdout/stderr, timeout/truncation flags, and execution metadata.

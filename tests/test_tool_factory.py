@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import pytest
+
 from minibot.adapters.config.schema import (
+    ApplyPatchToolConfig,
+    AudioTranscriptionToolConfig,
+    BashToolConfig,
     BrowserToolConfig,
     CalculatorToolConfig,
     FileStorageToolConfig,
+    GrepToolConfig,
     HTTPClientToolConfig,
     KeyValueMemoryConfig,
     LLMMConfig,
@@ -93,8 +99,12 @@ def _settings(
     time_enabled: bool,
     calculator_enabled: bool,
     python_exec_enabled: bool,
+    bash_enabled: bool,
+    apply_patch_enabled: bool,
     prompts_enabled: bool,
     file_storage_enabled: bool,
+    audio_transcription_enabled: bool,
+    grep_enabled: bool,
 ) -> Settings:
     return Settings(
         llm=LLMMConfig(api_key="secret"),
@@ -104,8 +114,12 @@ def _settings(
             time=TimeToolConfig(enabled=time_enabled),
             calculator=CalculatorToolConfig(enabled=calculator_enabled),
             python_exec=PythonExecToolConfig(enabled=python_exec_enabled),
+            bash=BashToolConfig(enabled=bash_enabled),
+            apply_patch=ApplyPatchToolConfig(enabled=apply_patch_enabled),
             file_storage=FileStorageToolConfig(enabled=file_storage_enabled),
+            grep=GrepToolConfig(enabled=grep_enabled),
             browser=BrowserToolConfig(output_dir="./data/files/browser"),
+            audio_transcription=AudioTranscriptionToolConfig(enabled=audio_transcription_enabled),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
     )
@@ -118,8 +132,12 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
         time_enabled=True,
         calculator_enabled=True,
         python_exec_enabled=True,
+        bash_enabled=False,
+        apply_patch_enabled=False,
         prompts_enabled=True,
         file_storage_enabled=False,
+        audio_transcription_enabled=False,
+        grep_enabled=False,
     )
 
     tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
@@ -131,6 +149,8 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
     assert "calculate_expression" in names
     assert "python_execute" in names
     assert "python_environment_info" in names
+    assert "bash" not in names
+    assert "apply_patch" not in names
     assert "schedule_prompt" not in names
 
 
@@ -141,8 +161,12 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
         time_enabled=False,
         calculator_enabled=False,
         python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
         prompts_enabled=True,
         file_storage_enabled=True,
+        audio_transcription_enabled=False,
+        grep_enabled=False,
     )
 
     event_bus = _EventBusStub()
@@ -184,6 +208,57 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
     assert "calculate_expression" not in names
     assert "python_execute" not in names
     assert "python_environment_info" not in names
+    assert "bash" not in names
+    assert "apply_patch" not in names
+    assert "transcribe_audio" not in names
+
+
+def test_build_enabled_tools_includes_audio_transcription_when_enabled(monkeypatch) -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=True,
+        audio_transcription_enabled=True,
+        grep_enabled=False,
+    )
+
+    class _FakeAudioTool:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def bindings(self) -> list[Any]:
+            return [type("Binding", (), {"tool": type("Tool", (), {"name": "transcribe_audio"})()})()]
+
+    monkeypatch.setattr("minibot.llm.tools.factory.AudioTranscriptionTool", _FakeAudioTool)
+    tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
+    names = {binding.tool.name for binding in tools}
+
+    assert "transcribe_audio" in names
+
+
+def test_build_enabled_tools_rejects_audio_transcription_without_file_storage() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=False,
+        audio_transcription_enabled=True,
+        grep_enabled=False,
+    )
+
+    with pytest.raises(ValueError, match="tools.audio_transcription.enabled requires tools.file_storage.enabled"):
+        _ = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
 
 
 def test_build_enabled_tools_overrides_playwright_output_dir(monkeypatch) -> None:
@@ -211,7 +286,10 @@ def test_build_enabled_tools_overrides_playwright_output_dir(monkeypatch) -> Non
             time=TimeToolConfig(enabled=False),
             calculator=CalculatorToolConfig(enabled=False),
             python_exec=PythonExecToolConfig(enabled=False),
+            bash=BashToolConfig(enabled=False),
+            apply_patch=ApplyPatchToolConfig(enabled=False),
             file_storage=FileStorageToolConfig(enabled=False),
+            grep=GrepToolConfig(enabled=False),
             browser=BrowserToolConfig(output_dir="./custom/browser-out"),
             mcp=MCPToolConfig(
                 enabled=True,
@@ -232,3 +310,82 @@ def test_build_enabled_tools_overrides_playwright_output_dir(monkeypatch) -> Non
 
     assert "--output-dir=./custom/browser-out" in captured_args
     assert "--output-dir=./data/files/browser" not in captured_args
+
+
+def test_build_enabled_tools_includes_bash_when_enabled() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=True,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=False,
+        audio_transcription_enabled=False,
+        grep_enabled=False,
+    )
+
+    tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
+    names = {binding.tool.name for binding in tools}
+    assert "bash" in names
+
+
+def test_build_enabled_tools_includes_apply_patch_when_enabled() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=True,
+        prompts_enabled=False,
+        file_storage_enabled=False,
+        audio_transcription_enabled=False,
+        grep_enabled=False,
+    )
+
+    tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
+    names = {binding.tool.name for binding in tools}
+    assert "apply_patch" in names
+
+
+def test_build_enabled_tools_includes_grep_when_enabled() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=True,
+        audio_transcription_enabled=False,
+        grep_enabled=True,
+    )
+
+    tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
+    names = {binding.tool.name for binding in tools}
+    assert "grep" in names
+
+
+def test_build_enabled_tools_rejects_grep_without_file_storage() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=False,
+        audio_transcription_enabled=False,
+        grep_enabled=True,
+    )
+
+    with pytest.raises(ValueError, match="tools.grep.enabled requires tools.file_storage.enabled"):
+        _ = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)

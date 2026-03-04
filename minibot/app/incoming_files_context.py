@@ -91,12 +91,42 @@ def build_incoming_files_text(prompt_text: str, incoming_files: Sequence[Incomin
             "If user asks to save the uploaded file, use filesystem action=move "
             f"source_path={first_path} destination_path={suggested_destination}."
         )
-    lines.append("For analysis requests, use self_insert_artifact when inspection is required.")
-    lines.append("If user intent is unclear, ask a clarifying question before acting.")
+    only_audio_files = _are_audio_incoming_files(incoming_files)
+    if only_audio_files:
+        lines.append(
+            "These incoming files are audio/voice. Prioritize executing the user's spoken request directly "
+            "instead of asking what to do with the file."
+        )
+        lines.append(
+            "Only ask file-management follow-up questions when the user explicitly requests save/move/send/delete."
+        )
+    else:
+        lines.append("For analysis requests, use self_insert_artifact when inspection is required.")
+        lines.append("If user intent is unclear, ask a clarifying question before acting.")
     if prompt_text:
         return f"{prompt_text}\n\n" + "\n".join(lines)
+    if only_audio_files:
+        return (
+            "The user uploaded audio/voice file(s) without additional text. "
+            "Treat the transcribed content as the user intent for this turn.\n"
+            + "\n".join(lines)
+        )
     return (
         "The user uploaded file(s) but did not include a clear instruction.\n"
         + "\n".join(lines)
         + "\nAsk the user what to do, unless the intent is already obvious."
     )
+
+
+def _are_audio_incoming_files(incoming_files: Sequence[IncomingFileRef]) -> bool:
+    if not incoming_files:
+        return False
+    for item in incoming_files:
+        source = item.source.strip().lower()
+        mime = item.mime.strip().lower()
+        if source in {"audio", "voice"}:
+            continue
+        if mime.startswith("audio/"):
+            continue
+        return False
+    return True

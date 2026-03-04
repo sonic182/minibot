@@ -22,6 +22,14 @@ max_document_bytes = "10MB"
 max_total_media_bytes = "12MB"
 max_attachments_per_message = 3
 allowed_document_mime_types = []
+# Example (Telegram + STT): allow common audio document MIME types.
+# allowed_document_mime_types = [
+#   "audio/mpeg",   # .mp3
+#   "audio/mp4",    # .m4a
+#   "audio/wav",    # .wav
+#   "audio/ogg",    # .ogg / opus-in-ogg
+#   "audio/x-wav"
+# ]
 
 # LLM provider and generation settings.
 [llm]
@@ -181,9 +189,31 @@ normalize_whitespace = true
 enabled = false
 root_dir = "./data/files"
 max_write_bytes = "64KB"
+allow_outside_root = false
 save_incoming_uploads = false
 uploads_subdir = "uploads"
 incoming_temp_subdir = "uploads/temp"
+
+# Optional grep-style text search over managed files.
+[tools.grep]
+enabled = false
+max_matches = 200
+max_file_size_bytes = "1MB"
+
+# Optional speech-to-text tool powered by faster-whisper (install with extras: stt).
+[tools.audio_transcription]
+enabled = false
+model = "small"
+device = "auto"
+compute_type = "int8"
+beam_size = 5
+vad_filter = true
+auto_transcribe_short_incoming = true
+auto_transcribe_max_duration_seconds = 45
+# Telegram STT example:
+# 1) set [tools.file_storage].enabled = true
+# 2) optionally set allowed_document_mime_types to audio MIME types above
+# 3) set enabled = true here and ask in Telegram: "transcribe this audio"
 
 # Browser runtime paths used by browser-specialist prompts and Playwright MCP output-dir.
 [tools.browser]
@@ -219,6 +249,24 @@ artifacts_allow_in_jail = false
 artifacts_jail_shared_dir = ""
 pass_parent_env = false
 env_allowlist = ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"]
+
+# Host Bash execution tool.
+[tools.bash]
+enabled = false
+default_timeout_seconds = 15
+max_timeout_seconds = 120
+max_output_bytes = "128KB"
+pass_parent_env = true
+env_allowlist = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"]
+
+# Structured file patch tool (opencode-style apply_patch format).
+[tools.apply_patch]
+enabled = false
+restrict_to_workspace = true
+workspace_root = "."
+allow_outside_workspace = false
+preserve_trailing_newline = true
+max_patch_bytes = "256KB"
 
 # RLIMIT sandbox parameters.
 [tools.python_exec.rlimit]

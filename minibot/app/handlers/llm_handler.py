@@ -10,6 +10,7 @@ from minibot.app.incoming_files_context import (
 )
 from minibot.app.handlers.services import (
     AgentRuntimeResult,
+    AudioAutoTranscriptionService,
     CompactionResult,
     HistoryCompactionService,
     PromptService,
@@ -65,6 +66,7 @@ class LLMMessageHandler:
         environment_prompt_fragment: str = "",
         tool_use_guardrail: ToolUseGuardrail | None = None,
         managed_files_root: str | None = None,
+        audio_auto_transcription_service: AudioAutoTranscriptionService | None = None,
     ) -> None:
         self._memory = memory
         self._llm_client = llm_client
@@ -74,6 +76,7 @@ class LLMMessageHandler:
         self._max_history_tokens = max_history_tokens
         self._notify_compaction_updates = notify_compaction_updates
         self._tool_use_guardrail: ToolUseGuardrail = tool_use_guardrail or NoopToolUseGuardrail()
+        self._audio_auto_transcription_service = audio_auto_transcription_service
         self._logger = logging.getLogger("minibot.handler")
         self._session_state = SessionStateService()
         self._session_total_tokens = self._session_state.session_total_tokens
@@ -165,7 +168,19 @@ class LLMMessageHandler:
         message = event.message
         session_id = session_id_for(message)
         turn_total_tokens = 0
+        owner_id = resolve_owner_id(message, self._default_owner_id)
         model_text, model_user_content = self._build_model_user_input(message)
+        if model_user_content is None and self._audio_auto_transcription_service is not None:
+            auto_result = await self._audio_auto_transcription_service.transcribe_incoming_audio(
+                message=message,
+                context=ToolContext(
+                    owner_id=owner_id,
+                    channel=message.channel,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                ),
+            )
+            model_text = self._audio_auto_transcription_service.apply_to_model_text(model_text, auto_result)
         if message.attachments:
             self._logger.debug(
                 "prepared multimodal message",
@@ -203,7 +218,6 @@ class LLMMessageHandler:
             )
 
         history = list(await self._memory.get_history(session_id))
-        owner_id = resolve_owner_id(message, self._default_owner_id)
         responses_state_mode = self._responses_state_mode()
         use_previous_response_id = (
             self._llm_client.is_responses_provider() and responses_state_mode == "previous_response_id"

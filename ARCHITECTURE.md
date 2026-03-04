@@ -26,6 +26,8 @@ and emit outbound responses back to the active channel adapter.
 ├── TODO.md
 ├── agents/              (specialist agent definition markdown files)
 ├── config.example.toml
+├── config.yolo.toml
+├── docker-requirements.txt
 ├── prompts/
 │   ├── channels/
 │   │   ├── console.md
@@ -62,12 +64,14 @@ and emit outbound responses back to the active channel adapter.
 │   │   └── handlers/
 │   │       ├── llm_handler.py
 │   │       └── services/
+│   │           ├── audio_transcription_service.py
 │   │           ├── compaction_service.py
 │   │           ├── input_service.py
 │   │           ├── metadata_service.py
 │   │           ├── prompt_service.py
 │   │           ├── runtime_service.py
-│   │           └── session_state_service.py
+│   │           ├── session_state_service.py
+│   │           └── tool_audio_executor.py
 │   ├── core/
 │   │   ├── agent_runtime.py
 │   │   ├── agents.py
@@ -95,6 +99,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   │   ├── console/
 │   │   │   │   └── service.py
 │   │   │   └── telegram/
+│   │   │       ├── incoming_media_mapper.py
 │   │   │       └── service.py
 │   │   └── scheduler/
 │   │       └── sqlalchemy_prompt_store.py
@@ -115,15 +120,21 @@ and emit outbound responses back to the active channel adapter.
 │   │       ├── descriptions/      (tool description .txt files, loaded at runtime)
 │   │       ├── agent_delegate.py
 │   │       ├── arg_utils.py
+│   │       ├── audio_transcription.py
+│   │       ├── audio_transcription_facade.py
+│   │       ├── apply_patch.py
+│   │       ├── bash.py
 │   │       ├── base.py
 │   │       ├── calculator.py
 │   │       ├── chat_memory.py
 │   │       ├── description_loader.py
 │   │       ├── factory.py
 │   │       ├── file_storage.py
+│   │       ├── grep.py
 │   │       ├── http_client.py
 │   │       ├── mcp_bridge.py
 │   │       ├── python_exec.py
+│   │       ├── patch_engine.py
 │   │       ├── schema_utils.py
 │   │       ├── scheduler.py
 │   │       ├── time.py
@@ -249,12 +260,14 @@ flowchart TD
 - `app/tool_use_guardrail.py`: `ToolUseGuardrail` protocol with `NoopToolUseGuardrail` (default) and `LLMClassifierToolUseGuardrail` (opt-in via `[orchestration].main_tool_use_guardrail = "llm_classifier"`).
 - `app/handlers/llm_handler.py`: top-level request flow coordinator for history persistence, runtime execution, format repair, and response metadata assembly.
 - `app/handlers/services/*`: extracted collaborators used by `LLMMessageHandler`:
+  - `audio_transcription_service.py`: short-audio candidate selection, auto-transcription execution, and prompt-prefix composition,
   - `input_service.py`: multimodal input shaping (`responses` vs chat-completions compatible parts),
   - `prompt_service.py`: base prompt + policy/channel fragments + environment/tool guidance composition,
   - `runtime_service.py`: main runtime execution, guardrail retry path, and delegation fallback handling,
   - `compaction_service.py`: token-pressure checks and compaction strategy (Responses compact endpoint or summary fallback),
   - `session_state_service.py`: per-session token counters and `previous_response_id` tracking,
-  - `metadata_service.py`: provider/model metadata extraction for outbound responses.
+  - `metadata_service.py`: provider/model metadata extraction for outbound responses,
+  - `tool_audio_executor.py`: adapter for executing `transcribe_audio` tool bindings from app services.
 - `app/agent_runtime.py`:
   - owns directive-loop execution (`provider step -> tool calls -> tool output append -> directive apply -> next step`),
   - maintains runtime `AgentState` (`messages`, `meta`),
@@ -305,6 +318,7 @@ Current notes:
 - Messaging:
   - `adapters/messaging/console/service.py` handles local console I/O with EventBus publish/subscribe semantics.
   - `adapters/messaging/telegram/service.py` handles Telegram authorization, inbound text/media extraction, outbound message sending, and long-message chunking.
+  - `adapters/messaging/telegram/incoming_media_mapper.py` normalizes media-target paths and `IncomingFileRef` mapping for photo/document/audio/voice uploads.
 - Files:
   - `adapters/files/local_storage.py` handles managed workspace path-safe list/write/read operations.
 - MCP:
@@ -332,7 +346,10 @@ Current notes:
   - HTTP client (`http_client`, `http_request`),
   - user/KV memory (`memory` action facade),
   - Python execution (`python_execute`, `python_environment_info`),
-  - file storage/workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `self_insert_artifact`,
+  - shell execution (`bash`),
+  - structured patch editing (`apply_patch`),
+  - file storage/workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `grep`, `self_insert_artifact` (path confinement defaults to `tools.file_storage.root_dir` and can be relaxed with `allow_outside_root`),
+  - audio transcription: `transcribe_audio` (backed by `audio_transcription_facade.py` for model lifecycle/transcription normalization),
   - scheduler controls (`schedule` action facade, `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`),
   - time helpers (`current_datetime`, `datetime_now`).
 
@@ -368,11 +385,13 @@ The scheduler currently focuses on scheduled prompts (not a generic task DAG eng
 
 ## Multimodal Input Path (Telegram -> LLM)
 
-- Telegram adapter can ingest `photo` and `document` updates when media is enabled in config.
-- Attachments are normalized into Responses-style parts:
-  - images -> `input_image` (data URL),
-  - non-image docs -> `input_file`.
-- Handler maps attachments to provider-specific formats for supported providers (`openai_responses`, `openai`, `openrouter`).
+- Telegram adapter can ingest `photo`, `document`, `audio`, and `voice` updates when media is enabled in config.
+- Incoming uploads are persisted as managed files and exposed through `metadata.incoming_files`.
+- `audio`/`voice` include `duration_seconds` in `IncomingFileRef` metadata when Telegram provides it.
+- `LLMMessageHandler` delegates short-audio auto-transcription to `AudioAutoTranscriptionService` (through `ToolBindingAudioTranscriptionExecutor`) before normal LLM generation, when enabled.
+- Attachments provided as direct multimodal payloads are normalized into provider-specific formats:
+  - responses-style `input_image`/`input_file` for Responses providers,
+  - chat-completions-compatible `image_url`/`file` for chat-completions providers.
 - For non-supporting provider modes, handler returns a clear user-facing message and avoids invalid provider calls.
 
 ## Data and State
@@ -385,6 +404,7 @@ The scheduler currently focuses on scheduled prompts (not a generic task DAG eng
 ## Configuration Surface
 
 `config.example.toml` is the canonical reference (with inline notes for production-oriented values).
+`config.yolo.toml` is a Docker-oriented full-capability profile (pre-enabled tools + Playwright MCP server).
 
 Main sections:
 
@@ -396,10 +416,16 @@ Main sections:
 - `[orchestration.main_agent]` (main-agent tool allow/deny)
 - `[memory]`
 - `[scheduler.prompts]`
-- `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `time`, `file_storage`, `browser`, `mcp`)
+- `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `bash`, `apply_patch`, `time`, `file_storage`, `grep`, `audio_transcription`, `browser`, `mcp`)
 - `[logging]`
 
 Agent definition files under `./agents` are part of the effective config surface.
+
+Container profile notes:
+
+- `docker-compose.yml` mounts `config.toml` as `/app/config.toml` by default.
+- `config.yolo.toml` is an optional reference profile for users who want pre-enabled tools/MCP.
+- Docker image includes all Poetry extras plus additional Python packages from `docker-requirements.txt`.
 
 ## Testing Strategy
 

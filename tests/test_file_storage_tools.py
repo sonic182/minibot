@@ -40,6 +40,22 @@ def test_local_storage_blocks_path_escape(tmp_path: Path) -> None:
         storage.create_text_file(path="../outside.txt", content="nope", overwrite=False)
 
 
+def test_local_storage_allows_outside_paths_when_enabled(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000, allow_outside_root=True)
+
+    result = storage.create_text_file(path="../outside.txt", content="ok", overwrite=False)
+
+    assert result["path"].endswith("/outside.txt")
+
+
+def test_local_storage_blocks_absolute_paths_by_default(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    absolute = str((tmp_path / "abs.txt").resolve())
+
+    with pytest.raises(ValueError, match="relative to managed root"):
+        storage.create_text_file(path=absolute, content="nope", overwrite=False)
+
+
 def test_local_storage_moves_and_deletes_files(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     storage.create_text_file(path="temp/report.txt", content="ok", overwrite=False)
