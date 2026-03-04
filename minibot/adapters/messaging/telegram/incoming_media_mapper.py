@@ -91,6 +91,9 @@ class TelegramIncomingMediaMapper:
 
     @staticmethod
     def media_suffix(mime_type: str) -> str:
+        normalized = mime_type.strip().lower()
+        if normalized == "audio/ogg":
+            return ".ogg"
         suffix = mimetypes.guess_extension(mime_type, strict=False)
         if not suffix:
             return ".bin"
