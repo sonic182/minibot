@@ -10,5 +10,7 @@ Tool routing hints:
 - Conversation transcript/history: `history` with `action` = `info|trim`.
 - File workspace operations: `filesystem` with `action` = `list|glob|info|write|move|delete|send`.
 - Artifact context injection: `artifact_insert`.
+- After filesystem operations, reuse canonical path fields from tool output (`path_relative`, `path_absolute`, `path_scope`) in later tool calls.
+- In yolo mode (`allow_outside_root=true`), use absolute paths for files outside managed root.
 - Disambiguation: treat "memory" as `history` only when the user explicitly asks about chat/conversation/messages history.
 - If the user asks to delete a memory entry but gives no `entry_id` or `title`, ask for selector or search first.

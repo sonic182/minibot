@@ -1260,6 +1260,58 @@ async def test_handler_injects_environment_prompt_fragment() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handler_injects_recent_filesystem_paths_in_current_turn_only() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(payload="unused", provider="openrouter")
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client), managed_files_root="./data/files")
+
+    first_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"saved"},"should_answer_to_user":true}',
+        response_id="r1",
+        state=AgentState(
+            messages=[
+                AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")]),
+                AgentMessage(
+                    role="tool",
+                    name="filesystem",
+                    content=[
+                        MessagePart(
+                            type="json",
+                            value={
+                                "action": "write",
+                                "path": "data/files/count_words.py",
+                                "path_relative": "data/files/count_words.py",
+                                "path_absolute": "/home/johanderson/sandbox/minibot/data/files/count_words.py",
+                                "path_scope": "inside_root",
+                            },
+                        )
+                    ],
+                ),
+            ]
+        ),
+    )
+    second_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"patched"},"should_answer_to_user":true}',
+        response_id="r2",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="ok")])]),
+    )
+    runtime = StubRuntime([first_result, second_result])
+    handler._runtime = runtime  # type: ignore[attr-defined]
+
+    await handler.handle(_message_event("save file"))
+    await handler.handle(_message_event("patch it"))
+
+    second_state: AgentState = runtime.calls[1]["state"]
+    second_user = second_state.messages[-1].content[0].text or ""
+    assert "Recent filesystem paths from this session" in second_user
+    assert "count_words.py" in second_user
+
+    session_id = session_id_for(_message_event("patch it").message)
+    user_entries = [entry for entry in memory._store.get(session_id, []) if entry.role == "user"]
+    assert user_entries[-1].content == "patch it"
+
+
+@pytest.mark.asyncio
 async def test_repair_response_appends_retry_prompt_and_answer_to_history() -> None:
     memory = StubMemory()
     client = StubLLMClient(

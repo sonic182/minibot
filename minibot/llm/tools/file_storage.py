@@ -142,8 +142,10 @@ class FileStorageTool:
 
     async def _list_files(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         folder = optional_str(payload.get("folder"))
-        entries = self._storage.list_files(folder)
+        raw_entries = self._storage.list_files(folder)
+        entries = [self._entry_with_canonical_paths(entry) for entry in raw_entries]
         return {
+            "action": "list",
             "root_dir": str(self._storage.root_dir),
             "folder": folder or ".",
             "entries": entries,
@@ -162,8 +164,10 @@ class FileStorageTool:
             type_error="Expected integer value",
             min_error="Expected integer value >= 1",
         )
-        entries = self._storage.glob_files(pattern=pattern, folder=folder, limit=limit)
+        raw_entries = self._storage.glob_files(pattern=pattern, folder=folder, limit=limit)
+        entries = [self._entry_with_canonical_paths(entry) for entry in raw_entries]
         return {
+            "action": "glob",
             "root_dir": str(self._storage.root_dir),
             "folder": folder or ".",
             "pattern": pattern,
@@ -174,7 +178,12 @@ class FileStorageTool:
 
     async def _read_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         path = require_non_empty_str(payload, "path")
-        return self._storage.read_text_file(path)
+        result = self._storage.read_text_file(path)
+        return {
+            "action": "read",
+            **result,
+            **self._canonical_path_payload(str(result["path"])),
+        }
 
     async def _create_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         path = require_non_empty_str(payload, "path")
@@ -182,18 +191,22 @@ class FileStorageTool:
         overwrite = bool(payload.get("overwrite") or False)
         result = self._storage.create_text_file(path=path, content=content, overwrite=overwrite)
         return {
+            "action": "write",
             "ok": True,
             "path": result["path"],
             "bytes_written": result["bytes_written"],
             "overwrite": overwrite,
+            **self._canonical_path_payload(str(result["path"])),
         }
 
     async def _file_info(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         path = require_non_empty_str(payload, "path")
         info = self._storage.file_info(path)
         return {
+            "action": "info",
             "ok": True,
             **info,
+            **self._canonical_path_payload(str(info["path"])),
         }
 
     async def _send_file(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
@@ -219,11 +232,13 @@ class FileStorageTool:
             )
         )
         return {
+            "action": "send",
             "ok": True,
             "path": str(path),
             "chat_id": context.chat_id,
             "channel": context.channel,
             "sent": True,
+            **self._canonical_path_payload(str(path)),
         }
 
     async def _move_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
@@ -236,10 +251,13 @@ class FileStorageTool:
             overwrite=overwrite,
         )
         return {
+            "action": "move",
             "ok": True,
             "source_path": result["source_path"],
             "destination_path": result["destination_path"],
             "overwrite": overwrite,
+            **self._canonical_path_payload(str(result["source_path"]), prefix="source_"),
+            **self._canonical_path_payload(str(result["destination_path"]), prefix="destination_"),
         }
 
     async def _delete_file(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
@@ -259,6 +277,7 @@ class FileStorageTool:
             else f"No file or folder found to delete: {resolved_path}"
         )
         return {
+            "action": "delete",
             "ok": True,
             "path": result["path"],
             "deleted": bool(result.get("deleted", False)),
@@ -267,6 +286,7 @@ class FileStorageTool:
             "recursive": recursive,
             "target_type": target_type,
             "message": message,
+            **self._canonical_path_payload(resolved_path),
         }
 
     async def _self_insert_artifact(self, payload: dict[str, Any], _: ToolContext) -> ToolResult:
@@ -431,3 +451,27 @@ class FileStorageTool:
         if isinstance(guessed, str) and guessed:
             return guessed.lower()
         return "application/octet-stream"
+
+    def _entry_with_canonical_paths(self, entry: dict[str, Any]) -> dict[str, Any]:
+        path_value = entry.get("path")
+        if not isinstance(path_value, str) or not path_value.strip():
+            return dict(entry)
+        return {
+            **entry,
+            **self._canonical_path_payload(path_value),
+        }
+
+    def _canonical_path_payload(self, path_value: str, *, prefix: str = "") -> dict[str, Any]:
+        resolved = self._storage.resolve_file(path_value)
+        absolute = resolved.resolve().as_posix()
+        if resolved.is_relative_to(self._storage.root_dir):
+            relative = to_posix_relative(resolved, self._storage.root_dir)
+            scope = "inside_root"
+        else:
+            relative = None
+            scope = "outside_root"
+        return {
+            f"{prefix}path_relative": relative,
+            f"{prefix}path_absolute": absolute,
+            f"{prefix}path_scope": scope,
+        }

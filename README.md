@@ -235,6 +235,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[runtime]`: global flags such as log level and environment.
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
 - `[llm]`: configures default model/provider behavior for the main agent and specialist agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir`). Responses API tuning includes `http2`, per-role state strategy (`main_responses_state_mode`, `agent_responses_state_mode`), and prompt-cache controls (`prompt_cache_enabled`, optional `prompt_cache_retention`). Request params are only sent when present in `config.toml`.
+  - OpenRouter note: when `reasoning_effort` is set, MiniBot sends `reasoning.enabled = true` together with `reasoning.effort`.
 - `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
 - `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`), fully specialist-owned (`exclusive`), or only specialist-owned for MCP tools (`exclusive_mcp`). `main_tool_use_guardrail` enables an optional LLM-based tool-routing classifier per main-agent turn (`"disabled"` by default; set to `"llm_classifier"` to enable).
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; `max_history_tokens` triggers compaction once cumulative generation usage crosses the threshold; `notify_compaction_updates` controls whether compaction status messages are sent to end users.
@@ -349,6 +350,7 @@ Tool filtering behavior:
 Troubleshooting:
 
 - If discovery fails for a server, startup logs include `failed to load mcp tools` with the server name.
+- If the main agent keeps answering without tools (especially with some OpenRouter models), set `[orchestration].main_tool_use_guardrail = "llm_classifier"` to enforce an extra tool-routing classification step before the final answer.
 
 Agent Tool Scoping
 ------------------

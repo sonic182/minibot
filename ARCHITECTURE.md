@@ -59,6 +59,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── runtime_structured_output.py
 │   │   ├── scheduler_service.py
 │   │   ├── tool_capabilities.py
+│   │   ├── tool_guardrail_validator.py
 │   │   ├── tool_policy_utils.py
 │   │   ├── tool_use_guardrail.py
 │   │   └── handlers/
@@ -256,8 +257,9 @@ flowchart TD
 - `app/response_parser.py`: parses structured LLM output payloads into render objects (`extract_answer`, `render_from_payload`, `payload_to_object`, `plain_render`).
 - `app/runtime_limits.py`: constructs `AgentRuntimeLimits` from config and client capabilities (`build_runtime_limits`).
 - `app/runtime_structured_output.py`: ratchet-backed structured-output schema validation with retries/fallback payload shaping (`RuntimeStructuredOutputValidator`).
+- `app/tool_guardrail_validator.py`: ratchet-backed structured-output validator for tool-use guardrail classification payloads.
 - `app/tool_policy_utils.py`: shared `fnmatch`-based tool allow/deny filtering used by agent policies and tool capability views.
-- `app/tool_use_guardrail.py`: `ToolUseGuardrail` protocol with `NoopToolUseGuardrail` (default) and `LLMClassifierToolUseGuardrail` (opt-in via `[orchestration].main_tool_use_guardrail = "llm_classifier"`).
+- `app/tool_use_guardrail.py`: `ToolUseGuardrail` protocol with `NoopToolUseGuardrail` (default) and ratchet-validated `LLMClassifierToolUseGuardrail` (opt-in via `[orchestration].main_tool_use_guardrail = "llm_classifier"`).
 - `app/handlers/llm_handler.py`: top-level request flow coordinator for history persistence, runtime execution, format repair, and response metadata assembly.
 - `app/handlers/services/*`: extracted collaborators used by `LLMMessageHandler`:
   - `audio_transcription_service.py`: short-audio candidate selection, auto-transcription execution, and prompt-prefix composition,

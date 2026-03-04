@@ -36,4 +36,10 @@ def should_retry_without_response_schema(*, call_kwargs: dict[str, Any], exc: Ex
         return True
     if '"code":20024' in message:
         return True
+    if "http 400" in message and "provider returned error" in message:
+        return True
+    if "invalid_request_error" in message:
+        return True
+    if "http 400" in message and "trace_id" in message:
+        return True
     return False

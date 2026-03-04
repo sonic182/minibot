@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import logging
 from typing import Any, Sequence
 
@@ -22,6 +23,7 @@ from minibot.app.handlers.services import (
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.response_parser import extract_answer, plain_render
 from minibot.app.tool_use_guardrail import NoopToolUseGuardrail, ToolUseGuardrail
+from minibot.core.agent_runtime import AgentState
 from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
@@ -45,6 +47,7 @@ class _AgentRuntimeResult(AgentRuntimeResult):
     render: Any
     should_reply: bool
     response_id: str | None
+    runtime_state: AgentState | None
     agent_trace: list[dict[str, Any]]
     delegation_fallback_used: bool
     tokens_used: int
@@ -81,6 +84,8 @@ class LLMMessageHandler:
         self._session_state = SessionStateService()
         self._session_total_tokens = self._session_state.session_total_tokens
         self._session_previous_response_ids = self._session_state.session_previous_response_ids
+        self._session_recent_files = self._session_state.session_recent_files
+        self._managed_files_root = Path(managed_files_root).resolve() if managed_files_root else None
         self._metadata_service = ResponseMetadataService(llm_client=self._llm_client)
         self._input_service = UserInputService(llm_client=self._llm_client)
         self._prompt_service = PromptService(
@@ -196,6 +201,7 @@ class LLMMessageHandler:
             )
         await self._memory.append_history(session_id, "user", build_history_user_entry(message, model_text))
         await self._enforce_history_limit(session_id)
+        model_text_for_generation = self._augment_model_text_with_recent_files(session_id, model_text)
 
         if message.attachments and not self._supports_media_inputs():
             answer = "Media inputs are supported for `openai_responses`, `openai`, and `openrouter`."
@@ -240,7 +246,7 @@ class LLMMessageHandler:
             if self._runtime is None:
                 generation = await self._llm_client.generate(
                     history,
-                    model_text,
+                    model_text_for_generation,
                     user_content=model_user_content,
                     tools=self._tools,
                     tool_context=tool_context,
@@ -265,7 +271,7 @@ class LLMMessageHandler:
                 runtime_result = await self._run_with_agent_runtime(
                     session_id=session_id,
                     history=history,
-                    model_text=model_text,
+                    model_text=model_text_for_generation,
                     model_user_content=model_user_content,
                     system_prompt=system_prompt,
                     tool_context=tool_context,
@@ -279,6 +285,7 @@ class LLMMessageHandler:
                 should_reply = runtime_result.should_reply
                 agent_trace = runtime_result.agent_trace
                 delegation_fallback_used = runtime_result.delegation_fallback_used
+                self._track_recent_files_from_runtime_state(session_id, runtime_result.runtime_state)
                 if use_previous_response_id and runtime_result.response_id:
                     self._session_previous_response_ids[session_id] = runtime_result.response_id
 
@@ -455,10 +462,131 @@ class LLMMessageHandler:
             render=result.render,
             should_reply=result.should_reply,
             response_id=result.response_id,
+            runtime_state=result.runtime_state,
             agent_trace=result.agent_trace,
             delegation_fallback_used=result.delegation_fallback_used,
             tokens_used=result.tokens_used,
         )
+
+    def _augment_model_text_with_recent_files(self, session_id: str, model_text: str) -> str:
+        recent = self._session_state.recent_files(session_id, limit=5)
+        if not recent:
+            return model_text
+        lines = [
+            "Recent filesystem paths from this session (use exact paths for filesystem/apply_patch/bash):",
+        ]
+        for item in recent:
+            relative = item.path_relative or "-"
+            lines.append(
+                f"- op={item.operation}; relative={relative}; absolute={item.path_absolute}; scope={item.path_scope}"
+            )
+        prefix = "\n".join(lines)
+        if model_text.strip():
+            return f"{model_text}\n\n{prefix}"
+        return prefix
+
+    def _track_recent_files_from_runtime_state(self, session_id: str, runtime_state: AgentState | None) -> None:
+        if runtime_state is None:
+            return
+        for message in runtime_state.messages:
+            if message.role != "tool" or message.name != "filesystem":
+                continue
+            for part in message.content:
+                if part.type != "json" or not isinstance(part.value, dict):
+                    continue
+                payload = part.value
+                operation = str(payload.get("action") or "filesystem")
+                for ref in self._extract_recent_file_refs(payload, operation=operation):
+                    self._session_state.track_recent_file(session_id, ref)
+
+    def _extract_recent_file_refs(self, payload: dict[str, Any], *, operation: str) -> list[Any]:
+        from minibot.app.handlers.services.session_state_service import RecentFileRef
+
+        refs: list[RecentFileRef] = []
+        seen_abs: set[str] = set()
+        candidates = self._collect_path_candidates(payload)
+        for candidate in candidates:
+            canonical = self._canonicalize_path_candidate(candidate)
+            if canonical is None:
+                continue
+            path_absolute, path_relative, path_scope = canonical
+            if path_absolute in seen_abs:
+                continue
+            seen_abs.add(path_absolute)
+            refs.append(
+                RecentFileRef(
+                    operation=operation,
+                    path_absolute=path_absolute,
+                    path_relative=path_relative,
+                    path_scope=path_scope,
+                )
+            )
+        return refs
+
+    @staticmethod
+    def _collect_path_candidates(payload: dict[str, Any]) -> list[tuple[str | None, str | None, str | None]]:
+        candidates: list[tuple[str | None, str | None, str | None]] = []
+        for prefix in ("", "source_", "destination_"):
+            absolute = payload.get(f"{prefix}path_absolute")
+            relative = payload.get(f"{prefix}path_relative")
+            scope = payload.get(f"{prefix}path_scope")
+            if isinstance(absolute, str) and absolute.strip():
+                relative_value = relative if isinstance(relative, str) else None
+                scope_value = scope if isinstance(scope, str) else None
+                candidates.append((absolute, relative_value, scope_value))
+        fallback_keys = ("path", "source_path", "destination_path")
+        for key in fallback_keys:
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                candidates.append((value, None, None))
+        entries = payload.get("entries")
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                absolute = entry.get("path_absolute")
+                relative = entry.get("path_relative")
+                scope = entry.get("path_scope")
+                if isinstance(absolute, str) and absolute.strip():
+                    candidates.append(
+                        (
+                            absolute,
+                            relative if isinstance(relative, str) else None,
+                            scope if isinstance(scope, str) else None,
+                        )
+                    )
+                    continue
+                path_value = entry.get("path")
+                if isinstance(path_value, str) and path_value.strip():
+                    candidates.append((path_value, None, None))
+        return candidates
+
+    def _canonicalize_path_candidate(
+        self, candidate: tuple[str | None, str | None, str | None]
+    ) -> tuple[str, str | None, str] | None:
+        raw_value, relative_hint, scope_hint = candidate
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            return None
+        path = Path(raw_value.strip()).expanduser()
+        if path.is_absolute():
+            absolute = path.resolve().as_posix()
+            if isinstance(relative_hint, str) and relative_hint.strip():
+                relative = relative_hint.strip()
+            elif self._managed_files_root is not None and path.resolve().is_relative_to(self._managed_files_root):
+                relative = str(path.resolve().relative_to(self._managed_files_root)).replace("\\", "/")
+            else:
+                relative = None
+            if isinstance(scope_hint, str) and scope_hint in {"inside_root", "outside_root"}:
+                scope = scope_hint
+            elif relative is not None:
+                scope = "inside_root"
+            else:
+                scope = "outside_root"
+            return absolute, relative, scope
+        if self._managed_files_root is not None:
+            absolute_path = (self._managed_files_root / path).resolve()
+            return absolute_path.as_posix(), str(path).replace("\\", "/"), "inside_root"
+        return path.resolve().as_posix(), str(path).replace("\\", "/"), "outside_root"
 
     def _build_model_user_input(self, message: ChannelMessage) -> tuple[str, str | list[dict[str, Any]] | None]:
         return self._input_service.build_model_user_input(message)
