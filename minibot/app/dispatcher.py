@@ -54,10 +54,17 @@ class Dispatcher:
             )
         else:
             tool_use_guardrail = NoopToolUseGuardrail()
+        audio_transcription_cfg = getattr(settings.tools, "audio_transcription", None)
+        auto_transcribe_enabled = bool(
+            getattr(audio_transcription_cfg, "auto_transcribe_short_incoming", False)
+        )
+        auto_transcribe_max_duration_seconds = int(
+            getattr(audio_transcription_cfg, "auto_transcribe_max_duration_seconds", 45)
+        )
         audio_auto_transcription_service = _build_audio_auto_transcription_service(
             tools=main_agent_tools_view.tools,
-            enabled=settings.tools.audio_transcription.auto_transcribe_short_incoming,
-            max_duration_seconds=settings.tools.audio_transcription.auto_transcribe_max_duration_seconds,
+            enabled=auto_transcribe_enabled,
+            max_duration_seconds=auto_transcribe_max_duration_seconds,
         )
         self._handler = LLMMessageHandler(
             memory=memory_backend,

@@ -193,11 +193,10 @@ class GrepTool:
 
     @staticmethod
     def _is_hidden(path: Path, *, base: Path) -> bool:
-        with_parent = path.parent if path.is_file() else path
         try:
-            relative_parts = with_parent.relative_to(base).parts
+            relative_parts = path.relative_to(base).parts
         except ValueError:
-            relative_parts = with_parent.parts
+            relative_parts = path.parts
         return any(part.startswith(".") for part in relative_parts)
 
     def _build_matcher(self, *, pattern: str, ignore_case: bool, fixed_string: bool) -> Any:

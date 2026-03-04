@@ -279,7 +279,7 @@ def _compute_replacements(
             line_index = context_idx + 1
 
         if not chunk.old_lines:
-            insertion_idx = len(original_lines)
+            insertion_idx = line_index
             replacements.append((insertion_idx, 0, chunk.new_lines))
             continue
 

@@ -116,3 +116,27 @@ def test_apply_patch_actions_add_update_delete(tmp_path: Path) -> None:
     assert modify.read_text(encoding="utf-8") == "line1\nchanged\n"
     assert not delete.exists()
     assert result.summary_lines == ["A nested/new.txt", "D delete.txt", "M modify.txt"]
+
+
+def test_apply_patch_context_only_addition_respects_matched_location(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("a\nb\nc\n", encoding="utf-8")
+
+    parsed = parse_patch(
+        "*** Begin Patch\n"
+        "*** Update File: sample.txt\n"
+        "@@ b\n"
+        "+inserted\n"
+        "*** End Patch"
+    )
+
+    actions = plan_patch_actions(
+        hunks=parsed.hunks,
+        workspace_root=tmp_path,
+        restrict_to_workspace=True,
+        allow_outside_workspace=False,
+        preserve_trailing_newline=True,
+    )
+    apply_patch_actions(actions, tmp_path)
+
+    assert target.read_text(encoding="utf-8") == "a\nb\ninserted\nc\n"

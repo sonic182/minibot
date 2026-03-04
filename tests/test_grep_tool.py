@@ -91,3 +91,18 @@ async def test_grep_tool_skips_large_files(tmp_path: Path) -> None:
     assert isinstance(result, dict)
     assert result["count"] == 1
     assert result["files_skipped"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_grep_tool_excludes_hidden_files_by_default(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    storage.create_text_file(path="visible.txt", content="token", overwrite=False)
+    storage.create_text_file(path=".env", content="token", overwrite=False)
+    tool = GrepTool(storage=storage, config=GrepToolConfig(enabled=True, max_matches=10))
+    binding = _grep_binding(tool)
+
+    result = await binding.handler({"pattern": "token", "path": "."}, ToolContext())
+
+    assert isinstance(result, dict)
+    assert result["count"] == 1
+    assert result["matches"][0]["path"] == "visible.txt"
