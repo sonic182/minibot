@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime dependency `ratchet-sm[pydantic]` for structured output state-machine validation.
 - Expanded runtime tests covering structured-output success, retry recovery, retry exhaustion fallback, step-budget retry behavior, and custom validator schemas.
 - New `memory(action="list_titles")` operation for lightweight memory discovery (`id`, `title`, `updated_at`, `source`) with optional query filtering.
+- Optional tool suite additions: `bash`, `apply_patch`, `grep`, and `transcribe_audio` (with dedicated tool descriptions and patch-engine support).
+- Audio transcription runtime support via optional `faster-whisper` (`stt` extra) plus auto-transcribe of short incoming Telegram audio/voice attachments.
+- Telegram incoming media mapper for consistent photo/document/audio/voice file naming and attachment metadata (including `duration_seconds` for audio inputs).
+- New tool/config surfaces for `[tools.bash]`, `[tools.apply_patch]`, `[tools.grep]`, `[tools.audio_transcription]`, and `tools.file_storage.allow_outside_root`.
+- `config.yolo.toml`, `docker-requirements.txt`, and container runtime updates to support full-capability local stacks (including Playwright MCP and STT prerequisites).
 
 ### Changed
 
@@ -22,11 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Canonical render kind was standardized from `markdown_v2` to `markdown` across channel schema, handler/prompt paths, and Telegram prompt guidance.
 - Dispatcher/console startup logging now includes enabled main-agent tool names for observability.
 - Memory search now uses a two-stage FTS strategy: strict token matching first, then relaxed matching when strict results are empty.
+- File storage and filesystem tools now support optional yolo-mode path handling (absolute paths outside managed root), and tool responses include canonical path metadata (`path_relative`, `path_absolute`, `path_scope`).
+- Handler runtime now tracks recent filesystem paths from tool outputs and injects recent path context into follow-up turns to improve tool argument accuracy.
+- Tool-use guardrail classification now uses a ratchet-backed validator and is skipped when tools already executed in the same runtime pass.
+- OpenRouter request building now carries reasoning `effort` in provider kwargs and auto-enables reasoning when effort is present.
+- Environment prompt fragments now include cwd plus resolved filesystem root/path-mode guidance.
 
 ### Fixed
 
 - Console command startup no longer assumes a full `logging.Logger` interface in tests; info-level startup logging is now defensive for lightweight logger doubles.
 - `memory(action="get")` misses by title now return `suggested_titles` when similar entries exist, improving memory recall and follow-up selection.
+- Tool execution error payloads now include deterministic failure signatures, improving repeated-failure diagnostics in tool loops.
 
 ## [0.0.7] - 2026-02-25
 
