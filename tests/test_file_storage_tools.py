@@ -40,6 +40,22 @@ def test_local_storage_blocks_path_escape(tmp_path: Path) -> None:
         storage.create_text_file(path="../outside.txt", content="nope", overwrite=False)
 
 
+def test_local_storage_allows_outside_paths_when_enabled(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000, allow_outside_root=True)
+
+    result = storage.create_text_file(path="../outside.txt", content="ok", overwrite=False)
+
+    assert result["path"].endswith("/outside.txt")
+
+
+def test_local_storage_blocks_absolute_paths_by_default(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    absolute = str((tmp_path / "abs.txt").resolve())
+
+    with pytest.raises(ValueError, match="relative to managed root"):
+        storage.create_text_file(path=absolute, content="nope", overwrite=False)
+
+
 def test_local_storage_moves_and_deletes_files(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     storage.create_text_file(path="temp/report.txt", content="ok", overwrite=False)
@@ -152,6 +168,45 @@ async def test_move_and_delete_tools_manage_files(tmp_path: Path) -> None:
     assert deleted["deleted"] is True
     assert deleted["deleted_count"] == 1
     assert deleted["message"] == "Deleted file successfully: archive/report.txt"
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_returns_canonical_path_fields(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    tool = FileStorageTool(storage=storage)
+    fs_binding = next(binding for binding in tool.bindings() if binding.tool.name == "filesystem")
+
+    result = await fs_binding.handler(
+        {"action": "write", "path": "docs/example.txt", "content": "hello", "overwrite": True},
+        ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
+    )
+
+    assert isinstance(result, dict)
+    assert result["action"] == "write"
+    assert result["path_relative"] == "docs/example.txt"
+    assert result["path_scope"] == "inside_root"
+    assert str(result["path_absolute"]).endswith("/docs/example.txt")
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_outside_root_marks_scope_when_yolo_enabled(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside.txt"
+    storage = LocalFileStorage(root_dir=str(root), max_write_bytes=1000, allow_outside_root=True)
+    tool = FileStorageTool(storage=storage)
+    fs_binding = next(binding for binding in tool.bindings() if binding.tool.name == "filesystem")
+
+    result = await fs_binding.handler(
+        {"action": "write", "path": str(outside.resolve()), "content": "hello", "overwrite": True},
+        ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
+    )
+
+    assert isinstance(result, dict)
+    assert result["action"] == "write"
+    assert result["path_scope"] == "outside_root"
+    assert result["path_relative"] is None
+    assert result["path_absolute"] == outside.resolve().as_posix()
 
 
 @pytest.mark.asyncio

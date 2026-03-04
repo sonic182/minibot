@@ -16,6 +16,7 @@ from aiogram.types import FSInputFile, Message as TelegramMessage
 
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.adapters.messaging.telegram.incoming_media_mapper import TelegramIncomingMediaMapper
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent, OutboundFormatRepairEvent
@@ -40,6 +41,7 @@ class TelegramService:
         self._local_storage = LocalFileStorage(
             root_dir=self._file_storage_config.root_dir,
             max_write_bytes=self._file_storage_config.max_write_bytes,
+            allow_outside_root=self._file_storage_config.allow_outside_root,
         )
         self._event_bus = event_bus
         self._logger = logging.getLogger("minibot.telegram")
@@ -127,6 +129,14 @@ class TelegramService:
         errors: list[str] = []
         total_size = 0
         temp_dir = self._local_storage.resolve_dir(self._file_storage_config.incoming_temp_subdir, create=True)
+        mapper = TelegramIncomingMediaMapper(
+            temp_dir=temp_dir,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            caption=getattr(message, "caption", None),
+            relative_to_root=self._relative_to_root,
+            upload_filename=self._upload_filename,
+        )
 
         if message.photo and len(files) < self._config.max_attachments_per_message:
             photo = message.photo[-1]
@@ -138,24 +148,15 @@ class TelegramService:
             elif total_size + len(photo_bytes) > self._config.max_total_media_bytes:
                 errors.append("total_media_too_large")
             else:
-                photo_name = self._upload_filename(
-                    prefix="photo",
-                    message_id=message.message_id,
-                    chat_id=message.chat.id,
-                    suffix=".jpg",
-                )
-                saved = await self._save_uploaded_bytes(temp_dir / photo_name, photo_bytes)
+                saved = await self._save_uploaded_bytes(mapper.photo_target(), photo_bytes)
                 if saved is not None:
                     total_size += len(photo_bytes)
                     files.append(
-                        IncomingFileRef(
-                            path=self._relative_to_root(saved),
-                            filename=saved.name,
+                        mapper.to_incoming_file(
+                            saved=saved,
                             mime="image/jpeg",
                             size_bytes=len(photo_bytes),
                             source="photo",
-                            message_id=message.message_id,
-                            caption=getattr(message, "caption", None),
                         )
                     )
 
@@ -173,27 +174,79 @@ class TelegramService:
             elif total_size + len(document_bytes) > self._config.max_total_media_bytes:
                 errors.append("total_media_too_large")
             else:
-                base_name = Path(document.file_name or f"document_{document.file_unique_id}.bin").name
-                candidate = temp_dir / base_name
-                if candidate.exists():
-                    candidate = temp_dir / self._upload_filename(
-                        prefix="document",
-                        message_id=message.message_id,
-                        chat_id=message.chat.id,
-                        suffix=candidate.suffix or ".bin",
-                    )
-                saved = await self._save_uploaded_bytes(candidate, document_bytes)
+                saved = await self._save_uploaded_bytes(
+                    mapper.document_target(file_name=document.file_name, file_unique_id=document.file_unique_id),
+                    document_bytes,
+                )
                 if saved is not None:
                     total_size += len(document_bytes)
                     files.append(
-                        IncomingFileRef(
-                            path=self._relative_to_root(saved),
-                            filename=saved.name,
+                        mapper.to_incoming_file(
+                            saved=saved,
                             mime=mime_type,
                             size_bytes=len(document_bytes),
                             source="document",
-                            message_id=message.message_id,
-                            caption=getattr(message, "caption", None),
+                        )
+                    )
+
+        if message.audio and len(files) < self._config.max_attachments_per_message:
+            audio = message.audio
+            mime_type = audio.mime_type or "application/octet-stream"
+            if not self._is_allowed_document_mime(mime_type):
+                errors.append("audio_mime_not_allowed")
+                return files, errors
+            audio_bytes = await self._download_media_bytes(audio)
+            if audio_bytes is None:
+                errors.append("audio_download_failed")
+            elif len(audio_bytes) > self._config.max_document_bytes:
+                errors.append("audio_too_large")
+            elif total_size + len(audio_bytes) > self._config.max_total_media_bytes:
+                errors.append("total_media_too_large")
+            else:
+                saved = await self._save_uploaded_bytes(
+                    mapper.audio_target(
+                        file_name=audio.file_name,
+                        file_unique_id=audio.file_unique_id,
+                        mime_type=mime_type,
+                    ),
+                    audio_bytes,
+                )
+                if saved is not None:
+                    total_size += len(audio_bytes)
+                    files.append(
+                        mapper.to_incoming_file(
+                            saved=saved,
+                            mime=mime_type,
+                            size_bytes=len(audio_bytes),
+                            source="audio",
+                            duration_seconds=getattr(audio, "duration", None),
+                        )
+                    )
+
+        if message.voice and len(files) < self._config.max_attachments_per_message:
+            voice = message.voice
+            mime_type = voice.mime_type or "audio/ogg"
+            if not self._is_allowed_document_mime(mime_type):
+                errors.append("voice_mime_not_allowed")
+                return files, errors
+            voice_bytes = await self._download_media_bytes(voice)
+            if voice_bytes is None:
+                errors.append("voice_download_failed")
+            elif len(voice_bytes) > self._config.max_document_bytes:
+                errors.append("voice_too_large")
+            elif total_size + len(voice_bytes) > self._config.max_total_media_bytes:
+                errors.append("total_media_too_large")
+            else:
+                saved = await self._save_uploaded_bytes(mapper.voice_target(mime_type=mime_type), voice_bytes)
+                if saved is not None:
+                    total_size += len(voice_bytes)
+                    files.append(
+                        mapper.to_incoming_file(
+                            saved=saved,
+                            mime=mime_type,
+                            size_bytes=len(voice_bytes),
+                            source="voice",
+                            duration_seconds=getattr(voice, "duration", None),
                         )
                     )
 

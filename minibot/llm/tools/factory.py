@@ -13,9 +13,13 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.agent_delegate import AgentDelegateTool
+from minibot.llm.tools.apply_patch import ApplyPatchTool
+from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
+from minibot.llm.tools.bash import BashTool
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.file_storage import FileStorageTool
+from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.mcp_bridge import MCPToolBridge
 from minibot.llm.tools.user_memory import build_kv_tools
@@ -60,20 +64,51 @@ def build_enabled_tools(
         managed_storage = LocalFileStorage(
             root_dir=settings.tools.file_storage.root_dir,
             max_write_bytes=settings.tools.file_storage.max_write_bytes,
+            allow_outside_root=settings.tools.file_storage.allow_outside_root,
         )
     if settings.tools.python_exec.enabled:
         python_exec_tool = HostPythonExecTool(settings.tools.python_exec, storage=managed_storage)
         tools.extend(python_exec_tool.bindings())
+    if settings.tools.bash.enabled:
+        bash_tool = BashTool(settings.tools.bash)
+        tools.extend(bash_tool.bindings())
+    if settings.tools.apply_patch.enabled:
+        apply_patch_tool = ApplyPatchTool(settings.tools.apply_patch)
+        tools.extend(apply_patch_tool.bindings())
     if settings.tools.file_storage.enabled:
         file_storage = managed_storage or LocalFileStorage(
             root_dir=settings.tools.file_storage.root_dir,
             max_write_bytes=settings.tools.file_storage.max_write_bytes,
+            allow_outside_root=settings.tools.file_storage.allow_outside_root,
         )
         file_storage_tool = FileStorageTool(
             storage=file_storage,
             event_bus=event_bus,
         )
         tools.extend(file_storage_tool.bindings())
+    if settings.tools.audio_transcription.enabled:
+        if not settings.tools.file_storage.enabled:
+            raise ValueError("tools.audio_transcription.enabled requires tools.file_storage.enabled")
+        transcription_storage = managed_storage or LocalFileStorage(
+            root_dir=settings.tools.file_storage.root_dir,
+            max_write_bytes=settings.tools.file_storage.max_write_bytes,
+            allow_outside_root=settings.tools.file_storage.allow_outside_root,
+        )
+        audio_transcription_tool = AudioTranscriptionTool(
+            config=settings.tools.audio_transcription,
+            storage=transcription_storage,
+        )
+        tools.extend(audio_transcription_tool.bindings())
+    if settings.tools.grep.enabled:
+        if not settings.tools.file_storage.enabled:
+            raise ValueError("tools.grep.enabled requires tools.file_storage.enabled")
+        grep_storage = managed_storage or LocalFileStorage(
+            root_dir=settings.tools.file_storage.root_dir,
+            max_write_bytes=settings.tools.file_storage.max_write_bytes,
+            allow_outside_root=settings.tools.file_storage.allow_outside_root,
+        )
+        grep_tool = GrepTool(storage=grep_storage, config=settings.tools.grep)
+        tools.extend(grep_tool.bindings())
     if settings.scheduler.prompts.enabled and prompt_scheduler is not None:
         schedule_tool = SchedulePromptTool(
             prompt_scheduler,

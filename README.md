@@ -18,10 +18,21 @@ Quickstart (Docker)
 -------------------
 
 1. `cp config.example.toml config.toml`
-2. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider credentials under `[providers.<name>]`).
-3. `mkdir -p logs`
+2. Populate secrets in `config.toml` (`channels.telegram.bot_token`, allowlists, provider credentials under `[providers.<name>]`).
+3. `mkdir -p logs data`
 4. `docker compose up --build -d`
 5. `docker compose logs -f minibot`
+
+`docker-compose.yml` mounts `config.toml` by default.
+`config.yolo.toml` is provided as a reference template for users who want an all-enabled profile (file storage, STT, HTTP/KV tools, MCP bridge, unrestricted Python runtime with `sandbox_mode = "none"`, unrestricted Bash execution, and patch-based file editing).
+
+Docker image includes:
+
+- Python deps with all MiniBot extras (`stt`, `mcp`)
+- Node.js/npm (v24.14.0 from official Node.js tarball)
+- Playwright + Chromium
+- ffmpeg
+- additional Python toolkit from `docker-requirements.txt`
 
 Quickstart (Poetry)
 -------------------
@@ -97,18 +108,104 @@ Up & Running with Telegram
 3. Run `poetry run minibot` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
 4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
 
+Telegram Audio Transcription (faster-whisper)
+---------------------------------------------
+
+Use this flow to transcribe audio sent through Telegram.
+
+1. Install optional STT dependency:
+   - `poetry install --extras stt`
+2. Ensure ffmpeg is available on the host.
+3. Enable managed files and transcription in `config.toml`:
+
+```toml
+[tools.file_storage]
+enabled = true
+root_dir = "./data/files"
+
+[tools.audio_transcription]
+enabled = true
+model = "small"
+device = "auto"
+compute_type = "int8"
+beam_size = 5
+vad_filter = true
+```
+
+4. Send audio as a Telegram **document/file** attachment (for example `.mp3`, `.wav`, `.m4a`).
+5. In the same message or a follow-up, ask the bot to transcribe it (example: `"transcribe this audio"`).
+
+Notes:
+- Telegram `voice` and `audio` message types are ingested by the adapter, as well as file/document uploads.
+- If you restrict `channels.telegram.allowed_document_mime_types`, include your audio MIME types.
+- In Docker yolo profile, whisper model assets are downloaded lazily on first transcription and cached under `/app/data/.cache`.
+
+GPU Runtime Dependencies (Debian/Ubuntu and Arch/Manjaro)
+----------------------------------------------------------
+
+If STT fails with an error like `Library libcublas.so.12 is not found or cannot be loaded`, your CUDA runtime
+libraries are missing from the loader path.
+
+### Debian / Ubuntu
+
+Install NVIDIA stack and CUDA/cuDNN runtime packages (package names vary by distro release):
+
+```bash
+sudo apt update
+sudo apt install -y nvidia-driver nvidia-cuda-toolkit libcudnn9 libcudnn9-cuda-12
+```
+
+Ensure CUDA libs are visible to the dynamic linker:
+
+```bash
+echo '/usr/local/cuda/lib64' | sudo tee /etc/ld.so.conf.d/cuda.conf
+sudo ldconfig
+ldconfig -p | grep libcublas.so.12
+```
+
+### Arch / Manjaro
+
+Install CUDA/cuDNN from pacman:
+
+```bash
+sudo pacman -Syu cuda cudnn
+echo '/opt/cuda/lib64' | sudo tee /etc/ld.so.conf.d/cuda.conf
+sudo ldconfig
+ldconfig -p | grep libcublas.so.12
+```
+
+### Alternative: install CUDA runtime libs inside Poetry venv
+
+This often works well when system CUDA versions do not match your Python wheel expectations:
+
+```bash
+poetry run pip install -U nvidia-cublas-cu12 nvidia-cudnn-cu12
+export SP=$(poetry run python -c "import site; print(next(p for p in site.getsitepackages() if 'site-packages' in p))")
+export LD_LIBRARY_PATH="$SP/nvidia/cublas/lib:$SP/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
+```
+
+### Recommended STT config for GPU
+
+For strict GPU usage:
+
+```toml
+[tools.audio_transcription]
+device = "cuda"
+compute_type = "float16"
+```
+
 Top features
 ------------
 
 - 🤖 Personal assistant, not SaaS: your chats, memory, and scheduled prompts stay in your instance.
 - 🎯 Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
-- 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment.
+- 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment, including a full-capability `config.yolo.toml` profile.
 - 💻 Local console channel for development/testing with REPL and one-shot modes (`minibot-console`).
 - 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
 - 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
 - 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
-- 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, optional Python execution, and MCP server bridges.
-- 🗂️ Managed file workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, and `self_insert_artifact` (directive-based artifact insertion).
+- 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, optional Python execution, optional Bash execution, optional apply_patch editing, optional speech-to-text, and MCP server bridges.
+- 🗂️ Managed file workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `grep`, and `self_insert_artifact` (directive-based artifact insertion).
 - 🌐 Optional browser automation via MCP servers (for example Playwright MCP tools).
 - ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
 - 📊 Structured logfmt logs, request correlation IDs, and a focused test suite (`pytest` + `pytest-asyncio`).
@@ -138,6 +235,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[runtime]`: global flags such as log level and environment.
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
 - `[llm]`: configures default model/provider behavior for the main agent and specialist agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir`). Responses API tuning includes `http2`, per-role state strategy (`main_responses_state_mode`, `agent_responses_state_mode`), and prompt-cache controls (`prompt_cache_enabled`, optional `prompt_cache_retention`). Request params are only sent when present in `config.toml`.
+  - OpenRouter note: when `reasoning_effort` is set, MiniBot sends `reasoning.enabled = true` together with `reasoning.effort`.
 - `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
 - `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`), fully specialist-owned (`exclusive`), or only specialist-owned for MCP tools (`exclusive_mcp`). `main_tool_use_guardrail` enables an optional LLM-based tool-routing classifier per main-agent turn (`"disabled"` by default; set to `"llm_classifier"` to enable).
 - `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; `max_history_tokens` triggers compaction once cumulative generation usage crosses the threshold; `notify_compaction_updates` controls whether compaction status messages are sent to end users.
@@ -146,12 +244,18 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` (raw byte cap), optional `max_chars` (LLM-facing char cap), and `response_processing_mode` (`auto`/`none`) for response shaping via [aiosonic].
 - `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
 - `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`), and optional artifact export controls (`artifacts_*`) to persist generated files into managed storage for later `send_file`.
-- `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
+- `[tools.bash]`: optional host Bash execution (`/bin/bash -lc`) with timeout/output caps plus environment controls (`pass_parent_env`, `env_allowlist`).
+- `[tools.apply_patch]`: optional structured patch-editing tool using opencode-style `*** Begin Patch` format (`Add File`, `Update File`, `Delete File`, optional `Move to`), with configurable workspace restriction flags.
+- `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, optional root confinement override (`allow_outside_root`), and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
+- `[tools.grep]`: optional text-search tool over files managed by `tools.file_storage`, with limits for `max_matches` and `max_file_size_bytes`.
+- `[tools.audio_transcription]`: optional speech-to-text tool powered by `faster-whisper`; configure model/runtime defaults (`model`, `device`, `compute_type`, `beam_size`, `vad_filter`) plus short-audio auto-transcription policy (`auto_transcribe_short_incoming`, `auto_transcribe_max_duration_seconds`), and enable only when the `stt` extra is installed. Runtime decoding also requires ffmpeg available on the host.
 - `[tools.browser]`: configures browser artifact paths used by prompts and Playwright MCP launch defaults. `output_dir` is the canonical directory for screenshots/downloads/session artifacts.
 - `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
 Every section has comments + defaults in `config.example.toml`—read that file for hints.
+
+For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` if you want pre-enabled tools + Playwright MCP server.
 
 MCP Bridge Guide
 ----------------
@@ -246,6 +350,7 @@ Tool filtering behavior:
 Troubleshooting:
 
 - If discovery fails for a server, startup logs include `failed to load mcp tools` with the server name.
+- If the main agent keeps answering without tools (especially with some OpenRouter models), set `[orchestration].main_tool_use_guardrail = "llm_classifier"` to enforce an extra tool-routing classification step before the final answer.
 
 Agent Tool Scoping
 ------------------
@@ -410,11 +515,14 @@ Notes:
 Security & sandboxing
 ---------------------
 
-MiniBot intentionally exposes a very limited surface of server-side tools. The most sensitive capability is
-`python_execute`, which can run arbitrary Python code on the host if enabled. Treat it as a powerful but
-potentially dangerous tool and follow these recommendations:
+MiniBot intentionally exposes a very limited surface of server-side tools. The most sensitive capabilities are
+`python_execute`, `bash`, and (when unrestricted) `apply_patch`, which can run arbitrary code/commands or edit files on the host if enabled. Treat them as powerful but
+potentially dangerous tools and follow these recommendations:
 
 - Disable `tools.python_exec` unless you need it; toggle it via `config.example.toml`.
+- Disable `tools.bash` unless you need direct shell access.
+- Keep `tools.apply_patch.restrict_to_workspace = true` unless you explicitly need unrestricted edits.
+- Keep `tools.file_storage.allow_outside_root = false` unless you intentionally want file access outside managed root.
 - Prefer non-host execution or explicit isolation when executing untrusted code (`sandbox_mode` options include `rlimit`, `cgroup`, and `jail`).
 - If using `jail` mode, configure `tools.python_exec.jail.command_prefix` to wrap execution with a tool like Firejail and restrict filesystem/network access.
 - Artifact export (`python_execute` with `save_artifacts=true`) requires `tools.file_storage.enabled = true`. In `sandbox_mode = "jail"`, artifact export is blocked by default unless `tools.python_exec.artifacts_allow_in_jail = true` and a shared directory is configured in `tools.python_exec.artifacts_jail_shared_dir`.
@@ -476,7 +584,7 @@ Notes:
 - Ensure `tools.python_exec.python_path` (or `venv_path`) points to an interpreter visible inside Firejail.
 - `--noprofile` avoids host distro defaults that may block home directory executables.
 
-Note: ensure the wrapper binary (e.g. `firejail`) is available in your runtime image or host. The Dockerfile in this repo installs `firejail` by default for convenience; review its flags carefully before use.
+Note: ensure the wrapper binary (for example `firejail`) is available in your runtime image or host if you enable jail mode.
 
 Stage 1 targets:
 
@@ -556,17 +664,21 @@ Tooling
 -------
 
 Tools live under `minibot/llm/tools/` and are exposed to [llm-async] with server-side execution controls.
+To enable optional speech-to-text tooling, install the `stt` extra (`poetry install --extras stt` or `poetry install --all-extras`).
 
 - 🧠 Chat memory tools: `chat_history_info`, `chat_history_trim`.
 - 📝 User memory tools: `memory` action facade (`save`/`get`/`search`/`list_titles`/`delete`), with title suggestions on `get` misses.
 - ⏰ Scheduler tools: `schedule` action facade (`create`/`list`/`cancel`/`delete`) plus granular aliases (`schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`).
-- 🗂️ File tools: `filesystem` action facade (`list`/`glob`/`info`/`write`/`move`/`delete`/`send`), `glob_files`, `read_file`.
+- 🗂️ File tools: `filesystem` action facade (`list`/`glob`/`info`/`write`/`move`/`delete`/`send`), `glob_files`, `read_file`, `grep`.
 - 🧩 `self_insert_artifact`: inject managed files (`tools.file_storage.root_dir` relative path) into runtime directives for in-loop multimodal analysis.
 - 🧮 `calculator` + alias `calculate_expression`, 🕒 `current_datetime`, and 🌐 `http_client` for utility and fetch workflows.
 - 🐍 `python_execute` + `python_environment_info`: optional host Python execution and runtime/package inspection, including optional artifact export into managed files (`save_artifacts=true`) so outputs can be sent via the `filesystem` tool.
+- 💻 `bash`: optional host shell execution via `/bin/bash -lc` for command pipelines and CLI workflows.
+- 🧩 `apply_patch`: optional structured file edits via patch envelopes (`*** Begin Patch ... *** End Patch`) with add/update/delete/move operations.
+- 🎙️ `transcribe_audio`: optional managed-file audio transcription via `faster-whisper` (install with extras: `stt`).
 - 🤝 Delegation tools: `list_agents`, `invoke_agent`.
 - 🧭 `mcp_*` dynamic tools (optional): tool bindings discovered from configured MCP servers.
-- 🖼️ Telegram media inputs (`photo`/`document`) are supported on `openai_responses`, `openai`, and `openrouter`.
+- 🖼️ Telegram media inputs (`photo`/`document`/`audio`/`voice`) are supported on `openai_responses`, `openai`, and `openrouter`.
 
 Conversation context:
 

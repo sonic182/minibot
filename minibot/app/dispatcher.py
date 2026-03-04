@@ -9,6 +9,11 @@ from minibot.adapters.container import AppContainer
 from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
 from minibot.app.handlers import LLMMessageHandler
+from minibot.app.handlers.services import (
+    AudioAutoTranscribePolicy,
+    AudioAutoTranscriptionService,
+    ToolBindingAudioTranscriptionExecutor,
+)
 from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.core.channels import ChannelResponse, RenderableResponse
@@ -49,6 +54,18 @@ class Dispatcher:
             )
         else:
             tool_use_guardrail = NoopToolUseGuardrail()
+        audio_transcription_cfg = getattr(settings.tools, "audio_transcription", None)
+        auto_transcribe_enabled = bool(
+            getattr(audio_transcription_cfg, "auto_transcribe_short_incoming", False)
+        )
+        auto_transcribe_max_duration_seconds = int(
+            getattr(audio_transcription_cfg, "auto_transcribe_max_duration_seconds", 45)
+        )
+        audio_auto_transcription_service = _build_audio_auto_transcription_service(
+            tools=main_agent_tools_view.tools,
+            enabled=auto_transcribe_enabled,
+            max_duration_seconds=auto_transcribe_max_duration_seconds,
+        )
         self._handler = LLMMessageHandler(
             memory=memory_backend,
             llm_client=llm_client,
@@ -61,6 +78,7 @@ class Dispatcher:
             environment_prompt_fragment=build_environment_prompt_fragment(settings),
             tool_use_guardrail=tool_use_guardrail,
             managed_files_root=settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
+            audio_auto_transcription_service=audio_auto_transcription_service,
         )
         self._logger = logging.getLogger("minibot.dispatcher")
         self._main_agent_tool_names = sorted(binding.tool.name for binding in main_agent_tools_view.tools)
@@ -221,3 +239,19 @@ class Dispatcher:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+
+
+def _build_audio_auto_transcription_service(
+    *,
+    tools: list,
+    enabled: bool,
+    max_duration_seconds: int,
+) -> AudioAutoTranscriptionService | None:
+    transcribe_binding = next((binding for binding in tools if binding.tool.name == "transcribe_audio"), None)
+    if transcribe_binding is None:
+        return None
+    return AudioAutoTranscriptionService(
+        executor=ToolBindingAudioTranscriptionExecutor(transcribe_binding),
+        policy=AudioAutoTranscribePolicy(enabled=enabled, max_duration_seconds=max_duration_seconds),
+        logger=logging.getLogger("minibot.audio_auto_transcription"),
+    )

@@ -1,0 +1,10 @@
+Transcribe speech from a managed audio file using faster-whisper. Use this when the user asks to extract text from audio.
+
+Inputs:
+- path: required path relative to tools.file_storage.root_dir
+- language: optional language hint (for example "en")
+- task: optional "transcribe" or "translate"
+
+Returns transcript text, language metadata, duration, and timestamped segments.
+
+If the user has uploaded an audio file, use its managed path from incoming files metadata.

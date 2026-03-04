@@ -115,6 +115,15 @@ class _ResolvedGuardrail:
         return GuardrailDecision(requires_retry=False, resolved_render_text="resolved", tokens_used=3)
 
 
+class _CountingGuardrail:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def apply(self, **_: Any) -> GuardrailDecision:
+        self.calls += 1
+        return GuardrailDecision(requires_retry=False)
+
+
 def _message(**overrides: Any) -> ChannelMessage:
     base = {
         "channel": "telegram",
@@ -397,11 +406,12 @@ async def test_compaction_service_fallback_summary_clears_previous_response_id_w
 
 @pytest.mark.asyncio
 async def test_runtime_service_returns_guardrail_resolved_text() -> None:
+    session_state = SessionStateService()
     service = RuntimeOrchestrationService(
         runtime=cast(AgentRuntime, _StubRuntime()),
         llm_client=cast(LLMClient, _StubClient()),
         guardrail=_ResolvedGuardrail(),
-        session_state=SessionStateService(),
+        session_state=session_state,
         logger=logging.getLogger("test"),
     )
 
@@ -422,3 +432,81 @@ async def test_runtime_service_returns_guardrail_resolved_text() -> None:
     assert result.should_reply is True
     assert result.render.text == "resolved"
     assert result.tokens_used == 7
+    assert session_state.current_tokens("s1") == 7
+
+
+@pytest.mark.asyncio
+async def test_runtime_service_skips_guardrail_when_tool_messages_exist() -> None:
+    class _ToolRuntime:
+        async def run(self, **_: Any) -> RuntimeResult:
+            return RuntimeResult(
+                payload='{"answer":{"kind":"text","content":"done"},"should_answer_to_user":true}',
+                response_id="resp-1",
+                state=AgentState(
+                    messages=[
+                        AgentMessage(role="assistant", content=[MessagePart(type="text", text="tool call happened")]),
+                        AgentMessage(
+                            role="tool",
+                            name="read_file",
+                            content=[MessagePart(type="text", text='{"ok":true}')],
+                        ),
+                    ]
+                ),
+                total_tokens=4,
+            )
+
+    guardrail = _CountingGuardrail()
+    service = RuntimeOrchestrationService(
+        runtime=cast(AgentRuntime, _ToolRuntime()),
+        llm_client=cast(LLMClient, _StubClient()),
+        guardrail=guardrail,
+        session_state=SessionStateService(),
+        logger=logging.getLogger("test"),
+    )
+
+    result = await service.run_with_agent_runtime(
+        session_id="s1",
+        history=[],
+        model_text="read file",
+        model_user_content=None,
+        system_prompt="system",
+        tool_context=ToolContext(),
+        prompt_cache_key=None,
+        previous_response_id=None,
+        chat_id=1,
+        channel="telegram",
+        response_schema={"type": "object"},
+    )
+
+    assert guardrail.calls == 0
+    assert result.should_reply is True
+    assert result.render.text == "done"
+
+
+@pytest.mark.asyncio
+async def test_runtime_service_calls_guardrail_when_no_tool_messages() -> None:
+    guardrail = _CountingGuardrail()
+    service = RuntimeOrchestrationService(
+        runtime=cast(AgentRuntime, _StubRuntime()),
+        llm_client=cast(LLMClient, _StubClient()),
+        guardrail=guardrail,
+        session_state=SessionStateService(),
+        logger=logging.getLogger("test"),
+    )
+
+    _ = await service.run_with_agent_runtime(
+        session_id="s1",
+        history=[],
+        model_text="hi",
+        model_user_content=None,
+        system_prompt="system",
+        tool_context=ToolContext(),
+        prompt_cache_key=None,
+        previous_response_id=None,
+        chat_id=1,
+        channel="telegram",
+        response_schema={"type": "object"},
+    )
+
+    assert guardrail.calls == 1
+

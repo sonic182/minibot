@@ -32,6 +32,10 @@ def should_retry_without_response_schema(*, call_kwargs: dict[str, Any], exc: Ex
     if call_kwargs.get("response_schema") is None:
         return False
     message = str(exc).lower()
+    return _is_openrouter_schema_incompatibility_error(message)
+
+
+def _is_openrouter_schema_incompatibility_error(message: str) -> bool:
     if "json mode is not supported" in message:
         return True
     if '"code":20024' in message:

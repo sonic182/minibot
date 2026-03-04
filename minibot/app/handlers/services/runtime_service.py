@@ -20,6 +20,7 @@ class AgentRuntimeResult:
     render: Any
     should_reply: bool
     response_id: str | None
+    runtime_state: AgentState | None
     agent_trace: list[dict[str, Any]]
     delegation_fallback_used: bool
     tokens_used: int
@@ -77,28 +78,39 @@ class RuntimeOrchestrationService:
         trace_result = extract_delegation_trace(generation.state)
         delegation_unresolved = trace_result.unresolved
 
-        guardrail = await self._guardrail.apply(
-            session_id=session_id,
-            user_text=model_text,
-            tool_context=tool_context,
-            state=generation.state,
-            system_prompt=system_prompt,
-            prompt_cache_key=prompt_cache_key,
-        )
-        tokens_used += guardrail.tokens_used
-        self._session_state.track_tokens(session_id, guardrail.tokens_used)
+        guardrail = None
+        if tool_messages_count == 0:
+            guardrail = await self._guardrail.apply(
+                session_id=session_id,
+                user_text=model_text,
+                tool_context=tool_context,
+                state=generation.state,
+                system_prompt=system_prompt,
+                prompt_cache_key=prompt_cache_key,
+            )
+            tokens_used += self._session_state.track_tokens(session_id, guardrail.tokens_used)
+        else:
+            self._logger.debug(
+                "tool use guardrail skipped because tools already executed",
+                extra={
+                    "session_id": session_id,
+                    "chat_id": chat_id,
+                    "tool_messages_count": tool_messages_count,
+                },
+            )
 
-        if guardrail.resolved_render_text is not None:
+        if guardrail is not None and guardrail.resolved_render_text is not None:
             return AgentRuntimeResult(
                 render=plain_render(guardrail.resolved_render_text),
                 should_reply=True,
                 response_id=generation.response_id,
+                runtime_state=generation.state,
                 agent_trace=trace_result.trace,
                 delegation_fallback_used=trace_result.fallback_used,
                 tokens_used=tokens_used,
             )
 
-        if guardrail.requires_retry and tool_messages_count == 0:
+        if guardrail is not None and guardrail.requires_retry and tool_messages_count == 0:
             retry_system_prompt = system_prompt
             if guardrail.retry_system_prompt_suffix:
                 retry_system_prompt = f"{system_prompt}\n\n{guardrail.retry_system_prompt_suffix}"
@@ -127,6 +139,7 @@ class RuntimeOrchestrationService:
                     ),
                     should_reply=True,
                     response_id=generation.response_id,
+                    runtime_state=generation.state,
                     agent_trace=trace_result.trace,
                     delegation_fallback_used=trace_result.fallback_used,
                     tokens_used=tokens_used,
@@ -174,6 +187,7 @@ class RuntimeOrchestrationService:
             render=render,
             should_reply=should_reply,
             response_id=generation.response_id,
+            runtime_state=generation.state,
             agent_trace=trace_result.trace,
             delegation_fallback_used=trace_result.fallback_used,
             tokens_used=tokens_used,

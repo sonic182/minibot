@@ -142,9 +142,25 @@ normalize_whitespace = true
 enabled = true
 root_dir = "./testdata/files"
 max_write_bytes = "64KB"
+allow_outside_root = false
 save_incoming_uploads = false
 uploads_subdir = "uploads"
 incoming_temp_subdir = "uploads/temp"
+
+[tools.grep]
+enabled = false
+max_matches = 200
+max_file_size_bytes = "1MB"
+
+[tools.audio_transcription]
+enabled = false
+model = "small"
+device = "auto"
+compute_type = "int8"
+beam_size = 5
+vad_filter = true
+auto_transcribe_short_incoming = true
+auto_transcribe_max_duration_seconds = 45
 
 # Built-in calculator tool.
 [tools.calculator]

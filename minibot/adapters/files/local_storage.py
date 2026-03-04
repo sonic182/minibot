@@ -10,14 +10,19 @@ from minibot.shared.path_utils import to_posix_relative
 
 
 class LocalFileStorage:
-    def __init__(self, root_dir: str, max_write_bytes: int) -> None:
+    def __init__(self, root_dir: str, max_write_bytes: int, allow_outside_root: bool = False) -> None:
         self._root = Path(root_dir).resolve()
         self._root.mkdir(parents=True, exist_ok=True)
         self._max_write_bytes = max_write_bytes
+        self._allow_outside_root = allow_outside_root
 
     @property
     def root_dir(self) -> Path:
         return self._root
+
+    @property
+    def allow_outside_root(self) -> bool:
+        return self._allow_outside_root
 
     def list_files(self, folder: str | None = None) -> list[dict[str, str | int | bool]]:
         target = self.resolve_dir(folder)
@@ -233,11 +238,19 @@ class LocalFileStorage:
     def _resolve_within_root(self, relative_path: str) -> Path:
         candidate_path = Path(relative_path)
         if candidate_path.is_absolute():
-            raise ValueError("path must be relative to managed root")
+            if not self._allow_outside_root:
+                raise ValueError("path must be relative to managed root")
+            return candidate_path.resolve()
         resolved = (self._root / candidate_path).resolve()
-        if not resolved.is_relative_to(self._root):
+        if not self._allow_outside_root and not resolved.is_relative_to(self._root):
             raise ValueError("path escapes managed root")
         return resolved
 
+    def display_path(self, path: Path) -> str:
+        resolved = path.resolve()
+        if resolved.is_relative_to(self._root):
+            return to_posix_relative(resolved, self._root)
+        return resolved.as_posix()
+
     def _relative_to_root(self, path: Path) -> str:
-        return to_posix_relative(path, self._root)
+        return self.display_path(path)

@@ -6,13 +6,20 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from llm_async.models import Tool
 
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryEntry
 from minibot.app.agent_runtime import RuntimeResult
+from minibot.app.handlers.services.audio_transcription_service import (
+    AudioAutoTranscribePolicy,
+    AudioAutoTranscriptionService,
+)
+from minibot.app.handlers.services.tool_audio_executor import ToolBindingAudioTranscriptionExecutor
 from minibot.app.handlers.llm_handler import LLMMessageHandler, resolve_owner_id
+from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.provider_factory import LLMClient, LLMGeneration
 from minibot.shared.utils import session_id_for
 
@@ -794,6 +801,145 @@ async def test_handler_guides_move_for_save_intent_with_incoming_files() -> None
 
 
 @pytest.mark.asyncio
+async def test_handler_incoming_audio_guidance_prioritizes_spoken_request() -> None:
+    handler, stub_client, _ = _handler({"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True})
+    event = MessageEvent(
+        message=_message(
+            text="",
+            metadata={
+                "incoming_files": [
+                    {
+                        "path": "uploads/temp/voice_1.ogg",
+                        "filename": "voice_1.ogg",
+                        "mime": "audio/ogg",
+                        "size_bytes": 100,
+                        "source": "voice",
+                        "duration_seconds": 3,
+                        "message_id": 1,
+                        "caption": "",
+                    }
+                ]
+            },
+            user_id=1,
+            chat_id=1,
+        )
+    )
+
+    await handler.handle(event)
+
+    call_args = stub_client.calls[-1]["args"]
+    assert isinstance(call_args[1], str)
+    assert "Prioritize executing the user's spoken request directly" in call_args[1]
+    assert "Treat the transcribed content as the user intent for this turn." in call_args[1]
+    assert "Ask the user what to do" not in call_args[1]
+
+
+@pytest.mark.asyncio
+async def test_handler_auto_transcribes_short_incoming_audio_before_generation() -> None:
+    memory = StubMemory()
+    client = StubLLMClient({"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True})
+    tool_calls: list[dict[str, Any]] = []
+
+    async def _transcribe(payload: dict[str, Any], _context: ToolContext) -> dict[str, Any]:
+        tool_calls.append(payload)
+        return {"ok": True, "text": "abre el garage"}
+
+    transcribe_binding = ToolBinding(
+        tool=Tool(name="transcribe_audio", description="transcribe", parameters={"type": "object"}),
+        handler=_transcribe,
+    )
+    auto_service = AudioAutoTranscriptionService(
+        executor=ToolBindingAudioTranscriptionExecutor(transcribe_binding),
+        policy=AudioAutoTranscribePolicy(enabled=True, max_duration_seconds=45),
+    )
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        tools=[transcribe_binding],
+        audio_auto_transcription_service=auto_service,
+    )
+    event = MessageEvent(
+        message=_message(
+            text="",
+            metadata={
+                "incoming_files": [
+                    {
+                        "path": "uploads/temp/voice_1.ogg",
+                        "filename": "voice_1.ogg",
+                        "mime": "audio/ogg",
+                        "size_bytes": 12000,
+                        "source": "voice",
+                        "duration_seconds": 12,
+                    }
+                ]
+            },
+            user_id=1,
+            chat_id=1,
+        )
+    )
+
+    await handler.handle(event)
+
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["path"] == "uploads/temp/voice_1.ogg"
+    model_text = client.calls[-1]["args"][1]
+    assert "Automatic audio transcriptions from incoming files:" in model_text
+    assert "abre el garage" in model_text
+    assert "Treat these transcriptions as user instructions for this turn." in model_text
+
+
+@pytest.mark.asyncio
+async def test_handler_skips_auto_transcription_for_long_audio() -> None:
+    memory = StubMemory()
+    client = StubLLMClient({"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True})
+    tool_calls: list[dict[str, Any]] = []
+
+    async def _transcribe(payload: dict[str, Any], _context: ToolContext) -> dict[str, Any]:
+        tool_calls.append(payload)
+        return {"ok": True, "text": "ignored"}
+
+    transcribe_binding = ToolBinding(
+        tool=Tool(name="transcribe_audio", description="transcribe", parameters={"type": "object"}),
+        handler=_transcribe,
+    )
+    auto_service = AudioAutoTranscriptionService(
+        executor=ToolBindingAudioTranscriptionExecutor(transcribe_binding),
+        policy=AudioAutoTranscribePolicy(enabled=True, max_duration_seconds=45),
+    )
+    handler = LLMMessageHandler(
+        memory=memory,
+        llm_client=cast(LLMClient, client),
+        tools=[transcribe_binding],
+        audio_auto_transcription_service=auto_service,
+    )
+    event = MessageEvent(
+        message=_message(
+            text="",
+            metadata={
+                "incoming_files": [
+                    {
+                        "path": "uploads/temp/voice_long.ogg",
+                        "filename": "voice_long.ogg",
+                        "mime": "audio/ogg",
+                        "size_bytes": 12000,
+                        "source": "voice",
+                        "duration_seconds": 120,
+                    }
+                ]
+            },
+            user_id=1,
+            chat_id=1,
+        )
+    )
+
+    await handler.handle(event)
+
+    assert not tool_calls
+    model_text = client.calls[-1]["args"][1]
+    assert "Automatic audio transcriptions from incoming files:" not in model_text
+
+
+@pytest.mark.asyncio
 async def test_handler_returns_generic_error_when_not_in_debug_mode() -> None:
     memory = StubMemory()
     client = FailingLLMClient(payload=None)
@@ -1111,6 +1257,58 @@ async def test_handler_injects_environment_prompt_fragment() -> None:
     override = call_kwargs.get("system_prompt_override")
     assert isinstance(override, str)
     assert "Browser artifacts directory: ./data/files/browser" in override
+
+
+@pytest.mark.asyncio
+async def test_handler_injects_recent_filesystem_paths_in_current_turn_only() -> None:
+    memory = StubMemory()
+    client = StubLLMClient(payload="unused", provider="openrouter")
+    handler = LLMMessageHandler(memory=memory, llm_client=cast(LLMClient, client), managed_files_root="./data/files")
+
+    first_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"saved"},"should_answer_to_user":true}',
+        response_id="r1",
+        state=AgentState(
+            messages=[
+                AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")]),
+                AgentMessage(
+                    role="tool",
+                    name="filesystem",
+                    content=[
+                        MessagePart(
+                            type="json",
+                            value={
+                                "action": "write",
+                                "path": "data/files/count_words.py",
+                                "path_relative": "data/files/count_words.py",
+                                "path_absolute": "/home/johanderson/sandbox/minibot/data/files/count_words.py",
+                                "path_scope": "inside_root",
+                            },
+                        )
+                    ],
+                ),
+            ]
+        ),
+    )
+    second_result = RuntimeResult(
+        payload='{"answer":{"kind":"text","content":"patched"},"should_answer_to_user":true}',
+        response_id="r2",
+        state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="ok")])]),
+    )
+    runtime = StubRuntime([first_result, second_result])
+    handler._runtime = runtime  # type: ignore[attr-defined]
+
+    await handler.handle(_message_event("save file"))
+    await handler.handle(_message_event("patch it"))
+
+    second_state: AgentState = runtime.calls[1]["state"]
+    second_user = second_state.messages[-1].content[0].text or ""
+    assert "Recent filesystem paths from this session" in second_user
+    assert "count_words.py" in second_user
+
+    session_id = session_id_for(_message_event("patch it").message)
+    user_entries = [entry for entry in memory._store.get(session_id, []) if entry.role == "user"]
+    assert user_entries[-1].content == "patch it"
 
 
 @pytest.mark.asyncio

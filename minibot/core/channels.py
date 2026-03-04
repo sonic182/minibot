@@ -23,6 +23,7 @@ class IncomingFileRef(BaseModel):
     source: str
     message_id: int | None = None
     caption: str | None = None
+    duration_seconds: int | None = None
 
 
 class RenderableResponse(BaseModel):

@@ -42,11 +42,19 @@ class _ToolSettings:
     class _FileStorage:
         enabled = False
 
+    class _Bash:
+        enabled = False
+
+    class _ApplyPatch:
+        enabled = False
+
     kv_memory = _KV()
     http_client = _HTTP()
     time = _Time()
     calculator = _Calculator()
     python_exec = _PythonExec()
+    bash = _Bash()
+    apply_patch = _ApplyPatch()
     file_storage = _FileStorage()
 
 

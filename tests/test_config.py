@@ -89,13 +89,27 @@ max_code_bytes = "32KB"
 artifacts_max_file_bytes = "5MB"
 artifacts_max_total_bytes = "20MB"
 
+[tools.bash]
+enabled = true
+max_output_bytes = "128KB"
+
+[tools.apply_patch]
+enabled = true
+max_patch_bytes = "256KB"
+
 [tools.file_storage]
 enabled = true
 root_dir = "./data/files"
 max_write_bytes = "80KB"
+allow_outside_root = true
 save_incoming_uploads = true
 uploads_subdir = "uploads"
 incoming_temp_subdir = "uploads/temp"
+
+[tools.grep]
+enabled = true
+max_matches = 123
+max_file_size_bytes = "2MB"
 """
     )
 
@@ -108,12 +122,20 @@ incoming_temp_subdir = "uploads/temp"
     assert settings.tools.python_exec.max_code_bytes == 32_000
     assert settings.tools.python_exec.artifacts_max_file_bytes == 5_000_000
     assert settings.tools.python_exec.artifacts_max_total_bytes == 20_000_000
+    assert settings.tools.bash.enabled is True
+    assert settings.tools.bash.max_output_bytes == 128_000
+    assert settings.tools.apply_patch.enabled is True
+    assert settings.tools.apply_patch.max_patch_bytes == 256_000
     assert settings.tools.file_storage.enabled is True
     assert settings.tools.file_storage.root_dir == "./data/files"
     assert settings.tools.file_storage.max_write_bytes == 80_000
+    assert settings.tools.file_storage.allow_outside_root is True
     assert settings.tools.file_storage.save_incoming_uploads is True
     assert settings.tools.file_storage.uploads_subdir == "uploads"
     assert settings.tools.file_storage.incoming_temp_subdir == "uploads/temp"
+    assert settings.tools.grep.enabled is True
+    assert settings.tools.grep.max_matches == 123
+    assert settings.tools.grep.max_file_size_bytes == 2_000_000
 
 
 def test_load_settings_rejects_invalid_byte_size(tmp_path: Path) -> None:
@@ -132,3 +154,37 @@ max_photo_bytes = "nope"
 
     with pytest.raises(ValueError):
         load_settings(config_file)
+
+
+def test_load_settings_audio_transcription_config(tmp_path: Path) -> None:
+    config_file = tmp_path / "bot.toml"
+    config_file.write_text(
+        """
+[llm]
+provider = "openai"
+api_key = "secret"
+
+[channels.telegram]
+bot_token = "token"
+
+[tools.audio_transcription]
+enabled = true
+model = "medium"
+device = "cpu"
+compute_type = "int8_float16"
+beam_size = 7
+vad_filter = false
+auto_transcribe_short_incoming = true
+auto_transcribe_max_duration_seconds = 30
+"""
+    )
+
+    settings = load_settings(config_file)
+    assert settings.tools.audio_transcription.enabled is True
+    assert settings.tools.audio_transcription.model == "medium"
+    assert settings.tools.audio_transcription.device == "cpu"
+    assert settings.tools.audio_transcription.compute_type == "int8_float16"
+    assert settings.tools.audio_transcription.beam_size == 7
+    assert settings.tools.audio_transcription.vad_filter is False
+    assert settings.tools.audio_transcription.auto_transcribe_short_incoming is True
+    assert settings.tools.audio_transcription.auto_transcribe_max_duration_seconds == 30

@@ -175,11 +175,22 @@ def openrouter_kwargs(ctx: RequestContext) -> dict[str, Any]:
         kwargs["models"] = list(ctx.openrouter_models)
     if ctx.openrouter_provider:
         kwargs["provider"] = dict(ctx.openrouter_provider)
-    if ctx.openrouter_reasoning_enabled is True:
-        kwargs["reasoning"] = {"enabled": True}
+    reasoning_kwargs = openrouter_reasoning_kwargs(ctx)
+    if reasoning_kwargs:
+        kwargs["reasoning"] = reasoning_kwargs
     if ctx.openrouter_plugins:
         kwargs["plugins"] = list(ctx.openrouter_plugins)
     return kwargs
+
+
+def openrouter_reasoning_kwargs(ctx: RequestContext) -> dict[str, Any]:
+    reasoning: dict[str, Any] = {}
+    if ctx.reasoning_effort:
+        reasoning["effort"] = ctx.reasoning_effort
+        reasoning["enabled"] = True
+    if ctx.openrouter_reasoning_enabled is True:
+        reasoning["enabled"] = True
+    return reasoning
 
 
 def resolved_max_tokens_for_request(ctx: RequestContext) -> int | None:

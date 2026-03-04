@@ -6,7 +6,7 @@ Managed workspace file operations. Use the action field to select the operation:
 
 - action=info: Get metadata for a specific file: size, MIME type, creation/modification times, existence status. Use path to identify the file.
 
-- action=write: Create or overwrite a text file. Requires path (relative, e.g. notes/today.md) and content. Set overwrite=true to replace existing files; omit or set false to prevent accidental overwrites.
+- action=write: Create or overwrite a text file. Requires path (relative, e.g. notes/today.md) and content. Set overwrite=true to replace existing files; omit or set false to prevent accidental overwrites. For editing an existing file in place, prefer apply_patch.
 
 - action=move: Move or rename a file within the workspace. Requires source_path and destination_path. Set overwrite=true to replace an existing destination file.
 

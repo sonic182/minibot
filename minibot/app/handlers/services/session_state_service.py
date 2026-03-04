@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
+
+
+@dataclass(frozen=True)
+class RecentFileRef:
+    operation: str
+    path_absolute: str
+    path_relative: str | None
+    path_scope: str
 
 
 class SessionStateService:
@@ -12,6 +21,7 @@ class SessionStateService:
         self.session_latest_total_tokens: dict[str, int] = {}
         self.session_latest_cached_input_tokens: dict[str, int] = {}
         self.session_latest_reasoning_output_tokens: dict[str, int] = {}
+        self.session_recent_files: dict[str, list[RecentFileRef]] = {}
 
     def track_tokens(self, session_id: str, tokens: int | None) -> int:
         if tokens is None or tokens <= 0:
@@ -67,6 +77,20 @@ class SessionStateService:
             "cached_input_tokens": self.session_latest_cached_input_tokens.get(session_id),
             "reasoning_output_tokens": self.session_latest_reasoning_output_tokens.get(session_id),
         }
+
+    def track_recent_file(self, session_id: str, ref: RecentFileRef, *, max_entries: int = 10) -> None:
+        current = list(self.session_recent_files.get(session_id, []))
+        deduped = [item for item in current if item.path_absolute != ref.path_absolute]
+        deduped.append(ref)
+        if len(deduped) > max_entries:
+            deduped = deduped[-max_entries:]
+        self.session_recent_files[session_id] = deduped
+
+    def recent_files(self, session_id: str, *, limit: int = 5) -> list[RecentFileRef]:
+        items = list(self.session_recent_files.get(session_id, []))
+        if limit <= 0:
+            return []
+        return list(reversed(items[-limit:]))
 
     @staticmethod
     def build_token_trace(

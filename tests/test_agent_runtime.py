@@ -305,3 +305,133 @@ async def test_runtime_custom_validator_honors_caller_schema() -> None:
     assert llm_client.complete_once_calls == 1
     assert isinstance(result.payload, dict)
     assert result.payload["answer"]["kind"] == "json"
+
+
+@pytest.mark.asyncio
+async def test_runtime_stops_on_repeated_identical_tool_failure_signatures() -> None:
+    tool_call = _FakeToolCall(id="call-1", function={"name": "http_request", "arguments": "{}"})
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-1",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-2",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-3", total_tokens=3),
+    ]
+    executions = [
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": "err1"},
+                result=ToolResult(
+                    content={
+                        "ok": False,
+                        "tool": "http_request",
+                        "error_code": "tool_execution_failed",
+                        "error": "boom",
+                        "failure_signature": "sig-1",
+                        "is_repeated_failure_candidate": True,
+                    }
+                ),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": "err2"},
+                result=ToolResult(
+                    content={
+                        "ok": False,
+                        "tool": "http_request",
+                        "error_code": "tool_execution_failed",
+                        "error": "boom",
+                        "failure_signature": "sig-1",
+                        "is_repeated_failure_candidate": True,
+                    }
+                ),
+            )
+        ],
+    ]
+    llm_client = _StubRuntimeLLMClient(steps=steps, executions=executions)
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert llm_client.complete_once_calls == 2
+    assert isinstance(result.payload, dict)
+    assert "same tool error repeatedly" in result.payload["answer"]["content"]
+    assert result.payload["should_answer_to_user"] is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_stop_when_failure_signatures_differ() -> None:
+    tool_call = _FakeToolCall(id="call-1", function={"name": "http_request", "arguments": "{}"})
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-1",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-2",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-3", total_tokens=3),
+    ]
+    executions = [
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": "err1"},
+                result=ToolResult(
+                    content={
+                        "ok": False,
+                        "tool": "http_request",
+                        "error_code": "tool_execution_failed",
+                        "error": "boom",
+                        "failure_signature": "sig-1",
+                        "is_repeated_failure_candidate": True,
+                    }
+                ),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": "err2"},
+                result=ToolResult(
+                    content={
+                        "ok": False,
+                        "tool": "http_request",
+                        "error_code": "tool_execution_failed",
+                        "error": "boom",
+                        "failure_signature": "sig-2",
+                        "is_repeated_failure_candidate": True,
+                    }
+                ),
+            )
+        ],
+    ]
+    llm_client = _StubRuntimeLLMClient(steps=steps, executions=executions)
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(state=state, tool_context=ToolContext(owner_id="1"))
+
+    assert llm_client.complete_once_calls == 3
+    assert result.payload == "done"
