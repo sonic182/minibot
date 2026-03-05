@@ -2,28 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from minibot.llm.provider_factory import LLMClient
+from minibot.llm.services import LLMExecutionProfile
 
 
 class ResponseMetadataService:
-    def __init__(self, llm_client: LLMClient) -> None:
-        self._llm_client = llm_client
+    def __init__(self, llm_client: Any) -> None:
+        self._profile = LLMExecutionProfile.from_client(llm_client)
 
     def provider_name(self) -> str | None:
-        provider_getter = getattr(self._llm_client, "provider_name", None)
-        if callable(provider_getter):
-            provider = provider_getter()
-            if isinstance(provider, str) and provider:
-                return provider
-        return None
+        return self._profile.provider_name
 
     def model_name(self) -> str | None:
-        model_getter = getattr(self._llm_client, "model_name", None)
-        if callable(model_getter):
-            model = model_getter()
-            if isinstance(model, str) and model:
-                return model
-        return None
+        return self._profile.model_name
 
     def response_metadata(self, should_reply: bool) -> dict[str, Any]:
         return {

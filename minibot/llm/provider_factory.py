@@ -15,7 +15,13 @@ from minibot.llm.services.client_bootstrap import (
 )
 from minibot.llm.services.compaction import compact_response as compact_response_via_service
 from minibot.llm.services.compaction import continue_incomplete_response
-from minibot.llm.services.models import LLMCompaction, LLMCompletionStep, LLMGeneration, ToolExecutionRecord
+from minibot.llm.services.models import (
+    LLMCompaction,
+    LLMCompletionStep,
+    LLMExecutionProfile,
+    LLMGeneration,
+    ToolExecutionRecord,
+)
 from minibot.llm.services.provider_registry import is_responses_provider_instance
 from minibot.llm.services.request_builder import (
     RequestContext,
@@ -343,6 +349,20 @@ class LLMClient:
         if self._provider_name in {"openai", "openrouter"}:
             return "chat_completions"
         return "none"
+
+    def features(self) -> LLMExecutionProfile:
+        return LLMExecutionProfile(
+            provider_name=self.provider_name(),
+            model_name=self.model_name(),
+            system_prompt=self.system_prompt(),
+            prompts_dir=self.prompts_dir(),
+            responses_state_mode=self.responses_state_mode(),
+            prompt_cache_enabled=self.prompt_cache_enabled(),
+            media_input_mode=self.media_input_mode(),
+            supports_media_inputs=self.supports_media_inputs(),
+            supports_agent_runtime=True,
+            is_responses_provider=self.is_responses_provider(),
+        )
 
     async def _complete_with_schema_fallback(self, call_kwargs: dict[str, Any]) -> Any:
         return await complete_with_schema_fallback(

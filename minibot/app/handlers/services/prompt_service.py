@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 from typing import Sequence
 
-from minibot.llm.provider_factory import LLMClient
+from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding
 from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
 
@@ -11,30 +12,23 @@ from minibot.shared.prompt_loader import load_channel_prompt, load_compact_promp
 class PromptService:
     def __init__(
         self,
-        llm_client: LLMClient,
+        llm_client: Any,
         tools: Sequence[ToolBinding],
         environment_prompt_fragment: str,
         logger: logging.Logger,
     ) -> None:
-        self._llm_client = llm_client
+        self._profile = LLMExecutionProfile.from_client(llm_client)
         self._tools = list(tools)
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
         self._logger = logger
-        self._prompts_dir = self._resolve_prompts_dir()
+        self._prompts_dir = self._profile.prompts_dir
 
     @property
     def prompts_dir(self) -> str:
         return self._prompts_dir
 
     def compose_system_prompt(self, channel: str | None) -> str:
-        system_prompt_getter = getattr(self._llm_client, "system_prompt", None)
-        base_prompt = "You are Minibot, a helpful assistant."
-        if callable(system_prompt_getter):
-            maybe_prompt = system_prompt_getter()
-            if isinstance(maybe_prompt, str) and maybe_prompt:
-                base_prompt = maybe_prompt
-
-        fragments = [base_prompt]
+        fragments = [self._profile.system_prompt]
         fragments.extend(load_policy_prompts(self._prompts_dir))
         channel_prompt = load_channel_prompt(self._prompts_dir, channel)
         if channel_prompt:
@@ -108,11 +102,3 @@ class PromptService:
             "- Return structured output only.\n\n"
             f"Original content:\n{original_content}"
         )
-
-    def _resolve_prompts_dir(self) -> str:
-        prompts_dir_getter = getattr(self._llm_client, "prompts_dir", None)
-        if callable(prompts_dir_getter):
-            value = prompts_dir_getter()
-            if isinstance(value, str) and value:
-                return value
-        return "./prompts"
