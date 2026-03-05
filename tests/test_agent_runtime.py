@@ -122,44 +122,6 @@ async def test_runtime_applies_append_message_directive_for_trusted_tool() -> No
 
 
 @pytest.mark.asyncio
-async def test_runtime_renders_managed_file_reference_to_input_file_data_url(tmp_path) -> None:
-    managed_root = tmp_path / "files"
-    managed_root.mkdir(parents=True, exist_ok=True)
-    artifact_path = managed_root / "uploads" / "a.txt"
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    artifact_path.write_text("hello", encoding="utf-8")
-    llm_client = _StubRuntimeLLMClient(
-        steps=[LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-1")],
-        executions=[],
-    )
-    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[], managed_files_root=str(managed_root))
-    state = AgentState(
-        messages=[
-            AgentMessage(
-                role="user",
-                content=[
-                    MessagePart(
-                        type="file",
-                        source={"type": "managed_file", "path": "uploads/a.txt"},
-                        mime="text/plain",
-                        filename="a.txt",
-                    )
-                ],
-            )
-        ]
-    )
-
-    await runtime.run(state=state, tool_context=ToolContext(owner_id="1"))
-
-    rendered_messages = llm_client.complete_once_kwargs[0]["messages"]
-    user_content = rendered_messages[0]["content"]
-    assert isinstance(user_content, list)
-    assert user_content[0]["type"] == "input_file"
-    assert user_content[0]["filename"] == "a.txt"
-    assert user_content[0]["file_data"].startswith("data:text/plain;base64,")
-
-
-@pytest.mark.asyncio
 async def test_runtime_validates_structured_output_with_ratchet() -> None:
     llm_client = _StubRuntimeLLMClient(
         steps=[

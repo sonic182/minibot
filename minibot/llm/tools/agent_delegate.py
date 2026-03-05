@@ -15,16 +15,17 @@ from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidat
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
+from minibot.llm.services import LLMExecutionProfile
+from minibot.llm.services.response_schemas import delegated_agent_response_schema
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import empty_object_schema, strict_object, string_field
-from minibot.shared.parse_utils import parse_json_with_fenced_fallback
-from minibot.shared.utils import session_identifier
 from minibot.shared.assistant_response import (
-    assistant_response_schema,
     validate_attachments,
 )
+from minibot.shared.parse_utils import parse_json_with_fenced_fallback
+from minibot.shared.utils import session_identifier
 
 
 @dataclass(frozen=True)
@@ -206,7 +207,10 @@ class AgentDelegateTool:
                     response_schema=_agent_response_schema(),
                     prompt_cache_key=prompt_cache_key,
                     initial_previous_response_id=previous_response_id,
-                    structured_validator=RuntimeStructuredOutputValidator(schema_model=_DelegatedPayload, max_attempts=3),
+                    structured_validator=RuntimeStructuredOutputValidator(
+                        schema_model=_DelegatedPayload,
+                        max_attempts=3,
+                    ),
                 )
                 if use_previous_response_id:
                     previous_response_id = generation.response_id
@@ -329,7 +333,7 @@ class AgentDelegateTool:
 
 
 def _agent_response_schema() -> dict[str, Any]:
-    return assistant_response_schema(kinds=["text", "html", "markdown", "json"], include_attachments=True)
+    return delegated_agent_response_schema()
 
 
 def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
@@ -378,8 +382,8 @@ def _delegation_result_status(outcome: _DelegationOutcome) -> str:
 
 
 def _agent_prompt_cache_key(*, llm_client: Any, context: ToolContext, agent_name: str) -> str | None:
-    enabled_getter = getattr(llm_client, "prompt_cache_enabled", None)
-    if callable(enabled_getter) and not bool(enabled_getter()):
+    profile = LLMExecutionProfile.from_client(llm_client)
+    if not profile.prompt_cache_enabled:
         return None
     channel = context.channel or "agent"
     session_id = session_identifier(channel, context.chat_id, context.user_id)

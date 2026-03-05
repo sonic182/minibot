@@ -4,26 +4,18 @@ from typing import Any, Sequence
 
 from minibot.app.incoming_files_context import build_incoming_files_text, incoming_files_from_metadata
 from minibot.core.channels import ChannelMessage
-from minibot.llm.provider_factory import LLMClient
+from minibot.llm.services import LLMExecutionProfile
 
 
 class UserInputService:
-    def __init__(self, llm_client: LLMClient) -> None:
-        self._llm_client = llm_client
+    def __init__(self, llm_client: Any) -> None:
+        self._profile = LLMExecutionProfile.from_client(llm_client)
 
     def supports_media_inputs(self) -> bool:
-        supports_getter = getattr(self._llm_client, "supports_media_inputs", None)
-        if callable(supports_getter):
-            return bool(supports_getter())
-        return self._llm_client.is_responses_provider()
+        return self._profile.supports_media_inputs
 
     def media_input_mode(self) -> str:
-        mode_getter = getattr(self._llm_client, "media_input_mode", None)
-        if callable(mode_getter):
-            mode = mode_getter()
-            if isinstance(mode, str) and mode:
-                return mode
-        return "responses" if self._llm_client.is_responses_provider() else "none"
+        return self._profile.media_input_mode
 
     def build_model_user_input(
         self,
