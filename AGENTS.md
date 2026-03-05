@@ -34,10 +34,9 @@
 - **Mini hex layout**: `minibot/` contains `app` (daemon, dispatcher, handlers), `core` (domain models/protocols), `adapters` (config, messaging, memory, logging, scheduler, etc.), `llm/` (provider factory + `llm/tools/` for LLM tool schemas/handlers), and `shared` helpers. Tests mirror this split so each layer has a dedicated suite. See `ARCHITECTURE.md` for the full map.
 - **Entry point**: `minibot.app.daemon` bootstraps config via `AppContainer`, wires dependencies, starts dispatcher + channel services, and uses graceful shutdown with signal handlers.
 - **Event bus**: `app/event_bus.py` abstracts an `asyncio` queue with async iterators; keep observability (queue depth, latency) in mind for future monitoring.
-- **Memory backend**: SQLite/SQLAlchemy via `aiosqlite` powers Stage 1 conversation history; future adapters include Redis, Mongo, etc.
-- **Roadmap**: check `TODO.md` for Stage breakdown—Stage 1 is complete (Telegram + SQLite memory), Stage 2 adds scheduler/task store, Stage 3 brings advanced persistence and new channels, Stage 4 introduces tooling/observability.
+- **Memory backend**: SQLite/SQLAlchemy via `aiosqlite` powers Stage 1 conversation history.
 - **Config**: use `config.toml` (with `${ENV_VAR}` placeholders) to configure runtime, channels, logging, scheduler, memory, tools (`kv_memory`, `http_client`, `file_storage`, `audio_transcription`, `mcp`), and tasks.
-- **Local reference repos**: when `./aiosonic`, `./llm-async`, or `./aiogram` directories exist in the current working directory, the bot may look up references there; these are expected to be cloned repositories provided for reference purposes only. For convenience the corresponding public HTTPS URLs (cloneable for more information) are:
+- **Local reference repos**: when `./aiosonic`, `./llm-async`, or `./aiogram` directories maybe exist in the current working directory, we may look up references there; these are expected to be cloned repositories provided for reference purposes only. For convenience the corresponding public HTTPS URLs (cloneable for more information) are:
   - `https://github.com/sonic182/aiosonic`
   - `https://github.com/sonic182/llm-async`
   - `https://github.com/aiogram/aiogram`
