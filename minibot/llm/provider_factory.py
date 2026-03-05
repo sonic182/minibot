@@ -14,7 +14,7 @@ from minibot.llm.services.client_bootstrap import (
     resolve_openrouter_reasoning_enabled,
 )
 from minibot.llm.services.compaction import compact_response as compact_response_via_service
-from minibot.llm.services.compaction import continue_incomplete_response
+from minibot.llm.services.generation_loop import generate_with_tools
 from minibot.llm.services.models import (
     LLMCompaction,
     LLMCompletionStep,
@@ -26,26 +26,13 @@ from minibot.llm.services.provider_registry import is_responses_provider_instanc
 from minibot.llm.services.request_builder import (
     RequestContext,
     build_complete_once_call_kwargs,
-    build_generate_extra_kwargs,
-    build_generate_step_call_kwargs,
-    build_messages,
 )
 from minibot.llm.services.schema_fallback import complete_with_schema_fallback
 from minibot.llm.services.schema_policy import normalize_response_schema, prepare_tool_specs
-from minibot.llm.services.tool_executor import execute_tool_calls, execute_tool_calls_for_runtime, tool_name_from_call
-from minibot.llm.services.tool_loop_guard import (
-    MAX_REPEATED_TOOL_ITERATIONS,
-    assistant_message_for_followup,
-    tool_iteration_signature,
-    tool_loop_fallback_payload,
-)
+from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
 from minibot.llm.services.usage_parser import (
-    UsageAccumulator,
     extract_response_id,
     extract_total_tokens,
-    extract_usage_from_response,
-    parse_structured_payload,
-    should_auto_continue_incomplete,
 )
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.retries import AsyncRetriesService
@@ -89,156 +76,29 @@ class LLMClient:
         system_prompt_override: str | None = None,
     ) -> LLMGeneration:
         system_prompt = system_prompt_override or self._system_prompt
-        messages = build_messages(
-            history=history,
-            user_message=user_message,
-            user_content=user_content,
-            system_prompt=system_prompt,
-        )
-
         if not self._provider.api_key:
             self._logger.warning("LLM provider key missing, falling back to echo", extra={"component": "llm"})
             return LLMGeneration(f"Echo: {user_message}")
 
-        conversation = list(messages)
-        tool_bindings = list(tools or [])
-        tool_specs = prepare_tool_specs(tool_bindings, self._model)
-        context = tool_context or ToolContext()
-        iterations = 0
-        last_tool_messages: list[dict[str, Any]] = []
-        recent_tool_names: list[str] = []
-        last_iteration_signature: str | None = None
-        repeated_iteration_count = 0
-        strict_response_schema = normalize_response_schema(response_schema, self._model)
-        request_ctx = self._request_context()
-        extra_kwargs = build_generate_extra_kwargs(
-            ctx=request_ctx,
+        return await generate_with_tools(
+            history=history,
+            user_message=user_message,
+            user_content=user_content,
+            system_prompt=system_prompt,
+            tools=tools,
+            tool_context=tool_context,
+            response_schema=response_schema,
             prompt_cache_key=prompt_cache_key,
             previous_response_id=previous_response_id,
-            system_prompt=system_prompt,
+            model=self._model,
+            request_ctx=self._request_context(),
+            is_responses_provider=self._is_responses_provider,
+            max_new_tokens=self._max_new_tokens,
+            max_tool_iterations=self._max_tool_iterations,
+            provider_name=self.provider_name(),
+            logger=self._logger,
+            complete_with_schema_fallback=self._complete_with_schema_fallback,
         )
-        usage_accumulator = UsageAccumulator()
-
-        while True:
-            call_kwargs = build_generate_step_call_kwargs(
-                ctx=request_ctx,
-                conversation=conversation,
-                tool_specs=tool_specs,
-                strict_response_schema=strict_response_schema,
-                extra_kwargs=extra_kwargs,
-            )
-            response = await self._complete_with_schema_fallback(call_kwargs)
-            usage = extract_usage_from_response(response)
-            usage_tokens = extract_total_tokens(response)
-            usage_accumulator.add_step(usage, usage_tokens)
-
-            message = response.main_response
-            if not message:
-                raise RuntimeError("LLM did not return a completion")
-            self._logger.debug(
-                "llm completion received",
-                extra={
-                    "tool_calls": len(getattr(message, "tool_calls", None) or []),
-                    "step_tokens": humanize_token_count(usage_tokens) if isinstance(usage_tokens, int) else "0",
-                    "cumulative_tokens": humanize_token_count(usage_accumulator.total_tokens_used),
-                    "provider": self.provider_name(),
-                    "response_status": usage.status,
-                    "incomplete_reason": usage.incomplete_reason,
-                    "applied_max_output_tokens": self._max_new_tokens if self._is_responses_provider else None,
-                },
-            )
-            if not message.tool_calls or not tool_bindings:
-                payload = message.content
-                response_id = extract_response_id(response)
-                status = usage.status
-                incomplete_reason = usage.incomplete_reason
-                if self._is_responses_provider and response_id and should_auto_continue_incomplete(usage):
-                    continuation = await continue_incomplete_response(
-                        complete_with_schema_fallback=self._complete_with_schema_fallback,
-                        ctx=request_ctx,
-                        previous_response_id=response_id,
-                        prompt_cache_key=prompt_cache_key,
-                        system_prompt=system_prompt,
-                        response_schema=strict_response_schema,
-                        logger=self._logger,
-                    )
-                    continuation_payload = (
-                        continuation.payload if isinstance(continuation.payload, str) else str(continuation.payload)
-                    )
-                    payload = f"{payload}{continuation_payload}"
-                    usage_accumulator.add_generation(continuation)
-                    response_id = continuation.response_id or response_id
-                    status = continuation.status
-                    incomplete_reason = continuation.incomplete_reason
-                if response_schema and isinstance(payload, str):
-                    try:
-                        parsed = parse_structured_payload(payload)
-                        return usage_accumulator.build_generation(
-                            payload=parsed,
-                            response_id=response_id,
-                            status=status,
-                            incomplete_reason=incomplete_reason,
-                        )
-                    except Exception:
-                        self._logger.warning("failed to parse structured response; falling back to text")
-                return usage_accumulator.build_generation(
-                    payload=payload,
-                    response_id=response_id,
-                    status=status,
-                    incomplete_reason=incomplete_reason,
-                )
-
-            tool_messages = await execute_tool_calls(
-                message.tool_calls,
-                tool_bindings,
-                context,
-                responses_mode=self._is_responses_provider,
-                logger=self._logger,
-            )
-            iteration_signature = tool_iteration_signature(message.tool_calls, tool_messages)
-            if iteration_signature and iteration_signature == last_iteration_signature:
-                repeated_iteration_count += 1
-            else:
-                repeated_iteration_count = 1
-            last_iteration_signature = iteration_signature
-            last_tool_messages = tool_messages
-            recent_tool_names.extend(tool_name_from_call(call) for call in message.tool_calls)
-            if repeated_iteration_count >= MAX_REPEATED_TOOL_ITERATIONS:
-                self._logger.warning(
-                    "tool loop repeated identical outputs; returning fallback",
-                    extra={
-                        "tool_names": recent_tool_names[-10:],
-                        "repeated_count": repeated_iteration_count,
-                    },
-                )
-                response_id = extract_response_id(response)
-                payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
-                return LLMGeneration(
-                    payload,
-                    response_id,
-                    total_tokens=usage_accumulator.total_tokens_used or None,
-                )
-            if self._is_responses_provider:
-                response_id = extract_response_id(response)
-                if response_id:
-                    extra_kwargs["previous_response_id"] = response_id
-                conversation = tool_messages
-            else:
-                conversation.append(assistant_message_for_followup(message))
-                conversation.extend(tool_messages)
-            iterations += 1
-            if iterations >= self._max_tool_iterations:
-                self._logger.warning(
-                    "tool call loop exceeded maximum iterations; returning fallback",
-                    extra={"tool_names": recent_tool_names[-10:]},
-                )
-                response_id = extract_response_id(response)
-                payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
-                return LLMGeneration(
-                    payload,
-                    response_id,
-                    total_tokens=usage_accumulator.total_tokens_used or None,
-                )
 
     def is_responses_provider(self) -> bool:
         return self._is_responses_provider
