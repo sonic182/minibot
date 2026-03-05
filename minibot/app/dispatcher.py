@@ -13,6 +13,7 @@ from minibot.app.handlers.services import (
     AudioAutoTranscribePolicy,
     AudioAutoTranscriptionService,
     ToolBindingAudioTranscriptionExecutor,
+    build_llm_turn_service,
 )
 from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
@@ -66,7 +67,7 @@ class Dispatcher:
             enabled=auto_transcribe_enabled,
             max_duration_seconds=auto_transcribe_max_duration_seconds,
         )
-        self._handler = LLMMessageHandler(
+        turn_service = build_llm_turn_service(
             memory=memory_backend,
             llm_client=llm_client,
             tools=main_agent_tools_view.tools,
@@ -80,6 +81,7 @@ class Dispatcher:
             managed_files_root=settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
             audio_auto_transcription_service=audio_auto_transcription_service,
         )
+        self._handler = LLMMessageHandler(turn_service)
         self._logger = logging.getLogger("minibot.dispatcher")
         self._main_agent_tool_names = sorted(binding.tool.name for binding in main_agent_tools_view.tools)
         self._logger.info(

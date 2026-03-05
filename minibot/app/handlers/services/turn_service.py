@@ -13,6 +13,7 @@ from minibot.app.handlers.services.recent_file_tracking_service import RecentFil
 from minibot.app.handlers.services.runtime_service import RuntimeOrchestrationService
 from minibot.app.handlers.services.session_state_service import SessionStateService
 from minibot.app.incoming_files_context import build_history_user_entry
+from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.response_parser import extract_answer, plain_render
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.channels import ChannelMessage, ChannelResponse
@@ -364,3 +365,78 @@ def _prompt_cache_key(message: ChannelMessage) -> str | None:
     if message.channel:
         return f"{message.channel}:{session_key}"
     return session_key
+
+
+def build_llm_turn_service(
+    *,
+    memory: MemoryBackend,
+    llm_client: LLMClient,
+    tools: Sequence[ToolBinding] | None = None,
+    default_owner_id: str | None = None,
+    max_history_messages: int | None = None,
+    max_history_tokens: int | None = None,
+    notify_compaction_updates: bool = False,
+    agent_timeout_seconds: int = 120,
+    environment_prompt_fragment: str = "",
+    tool_use_guardrail: ToolUseGuardrail,
+    managed_files_root: str | None = None,
+    audio_auto_transcription_service: AudioAutoTranscriptionService | None = None,
+    logger: logging.Logger | None = None,
+) -> LLMTurnService:
+    service_logger = logger or logging.getLogger("minibot.handler")
+    tool_bindings = list(tools or [])
+    session_state = SessionStateService()
+    metadata_service = ResponseMetadataService(llm_client=llm_client)
+    input_service = UserInputService(llm_client=llm_client)
+    prompt_service = PromptService(
+        llm_client=llm_client,
+        tools=tool_bindings,
+        environment_prompt_fragment=environment_prompt_fragment,
+        logger=service_logger,
+    )
+    compaction_service = HistoryCompactionService(
+        memory=memory,
+        llm_client=llm_client,
+        session_state=session_state,
+        prompt_service=prompt_service,
+        logger=service_logger,
+        max_history_tokens=max_history_tokens,
+        compaction_user_request="Please compact the current conversation memory.",
+    )
+    recent_file_tracking_service = RecentFileTrackingService(
+        session_state=session_state,
+        managed_files_root=managed_files_root,
+    )
+    profile = LLMExecutionProfile.from_client(llm_client)
+    runtime = None
+    if profile.supports_agent_runtime:
+        runtime = AgentRuntime(
+            llm_client=llm_client,
+            tools=tool_bindings,
+            limits=build_runtime_limits(
+                llm_client=llm_client,
+                timeout_seconds=agent_timeout_seconds,
+                min_timeout_seconds=120,
+            ),
+            allowed_append_message_tools=["self_insert_artifact"],
+            allow_system_inserts=False,
+            managed_files_root=managed_files_root,
+        )
+    return LLMTurnService(
+        memory=memory,
+        llm_client=llm_client,
+        tools=tool_bindings,
+        default_owner_id=default_owner_id,
+        max_history_messages=max_history_messages,
+        notify_compaction_updates=notify_compaction_updates,
+        tool_use_guardrail=tool_use_guardrail,
+        audio_auto_transcription_service=audio_auto_transcription_service,
+        session_state=session_state,
+        metadata_service=metadata_service,
+        input_service=input_service,
+        prompt_service=prompt_service,
+        compaction_service=compaction_service,
+        recent_file_tracking_service=recent_file_tracking_service,
+        logger=service_logger,
+        runtime=runtime,
+    )
