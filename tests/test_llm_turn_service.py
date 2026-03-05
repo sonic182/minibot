@@ -197,7 +197,14 @@ def _service(
     **kwargs: Any,
 ) -> tuple[LLMTurnService, StubLLMClient, StubMemory]:
     stub_memory = memory or StubMemory()
-    client = StubLLMClient(llm_payload, response_id=response_id, is_responses=responses_provider, provider=provider)
+    responses_state_mode = kwargs.pop("responses_state_mode", "full_messages")
+    client = StubLLMClient(
+        llm_payload,
+        response_id=response_id,
+        is_responses=responses_provider,
+        provider=provider,
+        responses_state_mode=responses_state_mode,
+    )
     service = build_llm_turn_service(
         memory=cast(Any, stub_memory),
         llm_client=cast(LLMClient, client),
@@ -259,6 +266,7 @@ async def test_turn_service_compaction_endpoint_updates_previous_response_id() -
         response_id="resp-1",
         responses_provider=True,
         provider="openai_responses",
+        responses_state_mode="previous_response_id",
         max_history_tokens=50,
         notify_compaction_updates=True,
     )

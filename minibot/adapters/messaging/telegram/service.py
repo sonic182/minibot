@@ -2,33 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import importlib
-import io
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import FSInputFile, Message as TelegramMessage
+from aiogram.types import Message as TelegramMessage
 
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
-from minibot.adapters.messaging.telegram.incoming_media_mapper import TelegramIncomingMediaMapper
+from minibot.adapters.messaging.telegram.authorization import is_authorized
+from minibot.adapters.messaging.telegram.incoming_media_collector import TelegramIncomingMediaCollector
+from minibot.adapters.messaging.telegram.outbound_sender import TelegramOutboundSender
 from minibot.app.event_bus import EventBus
-from minibot.core.channels import ChannelMessage, ChannelResponse, IncomingFileRef, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent, OutboundFormatRepairEvent
-from minibot.shared.path_utils import to_posix_relative
-
-
-telegram_markdownify: Any | None = None
+from minibot.core.channels import ChannelMessage
+from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
 
 
 class TelegramService:
-    _MAX_MESSAGE_LENGTH = 4000
-
     def __init__(
         self,
         config: TelegramChannelConfig,
@@ -47,6 +38,20 @@ class TelegramService:
         self._logger = logging.getLogger("minibot.telegram")
         self._bot = Bot(token=config.bot_token)
         self._dp = Dispatcher()
+        self._incoming_media_collector = TelegramIncomingMediaCollector(
+            bot=self._bot,
+            config=self._config,
+            file_storage_config=self._file_storage_config,
+            local_storage=self._local_storage,
+            managed_root_dir=self._managed_root_dir,
+            logger=self._logger,
+        )
+        self._outbound_sender = TelegramOutboundSender(
+            bot=self._bot,
+            event_bus=self._event_bus,
+            config=self._config,
+            logger=self._logger,
+        )
         self._poll_task: Optional[asyncio.Task[None]] = None
         self._outgoing_task: Optional[asyncio.Task[None]] = None
         self._outgoing_subscription = event_bus.subscribe()
@@ -59,7 +64,7 @@ class TelegramService:
         self._outgoing_task = asyncio.create_task(self._publish_outgoing())
 
     async def _handle_message(self, message: TelegramMessage) -> None:
-        if not self._is_authorized(message):
+        if not is_authorized(self._config, message):
             user_id = message.from_user.id if message.from_user else None
             chat_id = message.chat.id
             self._logger.warning(
@@ -72,7 +77,7 @@ class TelegramService:
             )
             return
 
-        incoming_files, incoming_errors = await self._collect_incoming_files(message)
+        incoming_files, incoming_errors = await self._incoming_media_collector.collect(message)
         if incoming_files:
             self._logger.info(
                 "received telegram managed incoming files",
@@ -119,357 +124,12 @@ class TelegramService:
         )
         await self._event_bus.publish(MessageEvent(message=channel_message))
 
-    async def _collect_incoming_files(self, message: TelegramMessage) -> tuple[list[IncomingFileRef], list[str]]:
-        if not self._config.media_enabled:
-            return [], []
-        if not self._file_storage_config.enabled:
-            return [], ["file_storage_disabled"]
-
-        files: list[IncomingFileRef] = []
-        errors: list[str] = []
-        total_size = 0
-        temp_dir = self._local_storage.resolve_dir(self._file_storage_config.incoming_temp_subdir, create=True)
-        mapper = TelegramIncomingMediaMapper(
-            temp_dir=temp_dir,
-            chat_id=message.chat.id,
-            message_id=message.message_id,
-            caption=getattr(message, "caption", None),
-            relative_to_root=self._relative_to_root,
-            upload_filename=self._upload_filename,
-        )
-
-        if message.photo and len(files) < self._config.max_attachments_per_message:
-            photo = message.photo[-1]
-            photo_bytes = await self._download_media_bytes(photo)
-            if photo_bytes is None:
-                errors.append("photo_download_failed")
-            elif len(photo_bytes) > self._config.max_photo_bytes:
-                errors.append("photo_too_large")
-            elif total_size + len(photo_bytes) > self._config.max_total_media_bytes:
-                errors.append("total_media_too_large")
-            else:
-                saved = await self._save_uploaded_bytes(mapper.photo_target(), photo_bytes)
-                if saved is not None:
-                    total_size += len(photo_bytes)
-                    files.append(
-                        mapper.to_incoming_file(
-                            saved=saved,
-                            mime="image/jpeg",
-                            size_bytes=len(photo_bytes),
-                            source="photo",
-                        )
-                    )
-
-        if message.document and len(files) < self._config.max_attachments_per_message:
-            document = message.document
-            mime_type = document.mime_type or "application/octet-stream"
-            if not self._is_allowed_document_mime(mime_type):
-                errors.append("document_mime_not_allowed")
-                return files, errors
-            document_bytes = await self._download_media_bytes(document)
-            if document_bytes is None:
-                errors.append("document_download_failed")
-            elif len(document_bytes) > self._config.max_document_bytes:
-                errors.append("document_too_large")
-            elif total_size + len(document_bytes) > self._config.max_total_media_bytes:
-                errors.append("total_media_too_large")
-            else:
-                saved = await self._save_uploaded_bytes(
-                    mapper.document_target(file_name=document.file_name, file_unique_id=document.file_unique_id),
-                    document_bytes,
-                )
-                if saved is not None:
-                    total_size += len(document_bytes)
-                    files.append(
-                        mapper.to_incoming_file(
-                            saved=saved,
-                            mime=mime_type,
-                            size_bytes=len(document_bytes),
-                            source="document",
-                        )
-                    )
-
-        if message.audio and len(files) < self._config.max_attachments_per_message:
-            audio = message.audio
-            mime_type = audio.mime_type or "application/octet-stream"
-            if not self._is_allowed_document_mime(mime_type):
-                errors.append("audio_mime_not_allowed")
-                return files, errors
-            audio_bytes = await self._download_media_bytes(audio)
-            if audio_bytes is None:
-                errors.append("audio_download_failed")
-            elif len(audio_bytes) > self._config.max_document_bytes:
-                errors.append("audio_too_large")
-            elif total_size + len(audio_bytes) > self._config.max_total_media_bytes:
-                errors.append("total_media_too_large")
-            else:
-                saved = await self._save_uploaded_bytes(
-                    mapper.audio_target(
-                        file_name=audio.file_name,
-                        file_unique_id=audio.file_unique_id,
-                        mime_type=mime_type,
-                    ),
-                    audio_bytes,
-                )
-                if saved is not None:
-                    total_size += len(audio_bytes)
-                    files.append(
-                        mapper.to_incoming_file(
-                            saved=saved,
-                            mime=mime_type,
-                            size_bytes=len(audio_bytes),
-                            source="audio",
-                            duration_seconds=getattr(audio, "duration", None),
-                        )
-                    )
-
-        if message.voice and len(files) < self._config.max_attachments_per_message:
-            voice = message.voice
-            mime_type = voice.mime_type or "audio/ogg"
-            if not self._is_allowed_document_mime(mime_type):
-                errors.append("voice_mime_not_allowed")
-                return files, errors
-            voice_bytes = await self._download_media_bytes(voice)
-            if voice_bytes is None:
-                errors.append("voice_download_failed")
-            elif len(voice_bytes) > self._config.max_document_bytes:
-                errors.append("voice_too_large")
-            elif total_size + len(voice_bytes) > self._config.max_total_media_bytes:
-                errors.append("total_media_too_large")
-            else:
-                saved = await self._save_uploaded_bytes(mapper.voice_target(mime_type=mime_type), voice_bytes)
-                if saved is not None:
-                    total_size += len(voice_bytes)
-                    files.append(
-                        mapper.to_incoming_file(
-                            saved=saved,
-                            mime=mime_type,
-                            size_bytes=len(voice_bytes),
-                            source="voice",
-                            duration_seconds=getattr(voice, "duration", None),
-                        )
-                    )
-
-        return files, errors
-
-    async def _download_media_bytes(self, media: Any) -> bytes | None:
-        buffer = io.BytesIO()
-        try:
-            await self._bot.download(media, destination=buffer)
-        except Exception:
-            self._logger.exception("telegram media download failed")
-            return None
-        return buffer.getvalue()
-
-    def _is_allowed_document_mime(self, mime_type: str) -> bool:
-        allowed = [entry.strip().lower() for entry in self._config.allowed_document_mime_types if entry.strip()]
-        if not allowed:
-            return True
-        return mime_type.lower() in allowed
-
     async def _publish_outgoing(self) -> None:
         async for event in self._outgoing_subscription:
             if isinstance(event, OutboundEvent) and event.response.channel == "telegram":
-                await self._send_text_response(event.response)
+                await self._outbound_sender.send_text_response(event.response)
             if isinstance(event, OutboundFileEvent) and event.response.channel == "telegram":
-                await self._send_file_response(event)
-
-    async def _send_text_response(self, response: ChannelResponse) -> None:
-        render = self._resolve_render(response)
-        self._logger.info(
-            "sending response",
-            extra={"chat_id": response.chat_id, "kind": render.kind},
-        )
-        self._logger.debug(
-            "telegram response render resolved",
-            extra={
-                "chat_id": response.chat_id,
-                "kind": render.kind,
-                "text_length": len(render.text),
-                "meta_keys": sorted(render.meta.keys()),
-            },
-        )
-        sent, parse_error = await self._send_render_chunks(chat_id=response.chat_id, render=render)
-        if sent or render.kind == "text":
-            return
-        if self._should_trigger_format_repair(response=response, render=render, parse_error=parse_error):
-            attempt = int(response.metadata.get("format_repair_attempt", 0)) + 1
-            self._logger.warning(
-                "telegram rich text format repair requested",
-                extra={"chat_id": response.chat_id, "kind": render.kind, "attempt": attempt},
-            )
-            await self._event_bus.publish(
-                OutboundFormatRepairEvent(
-                    response=response,
-                    parse_error=parse_error or "unknown parse error",
-                    attempt=attempt,
-                    chat_id=response.chat_id,
-                    channel=response.channel,
-                    user_id=self._extract_user_id(response),
-                )
-            )
-            return
-        fallback_render = RenderableResponse(kind="text", text=render.text)
-        self._logger.warning(
-            "telegram rich text fallback to plain text",
-            extra={"chat_id": response.chat_id, "kind": render.kind},
-        )
-        await self._send_render_chunks(chat_id=response.chat_id, render=fallback_render)
-
-    def _resolve_render(self, response: ChannelResponse) -> RenderableResponse:
-        if response.render is None:
-            return RenderableResponse(kind="text", text=response.text)
-        render = response.render
-        if render.kind not in {"text", "html", "markdown"}:
-            return RenderableResponse(kind="text", text=render.text)
-        return render
-
-    async def _send_render_chunks(self, chat_id: int, render: RenderableResponse) -> tuple[bool, str | None]:
-        if render.kind == "html":
-            self._logger.debug("telegram renderer applying html parse mode", extra={"chat_id": chat_id})
-        elif render.kind == "markdown":
-            self._logger.debug("telegram renderer applying markdown parse mode", extra={"chat_id": chat_id})
-        else:
-            self._logger.debug("telegram renderer applying plain text mode", extra={"chat_id": chat_id})
-        return await self._send_parse_mode_chunks(chat_id=chat_id, render=render)
-
-    async def _send_parse_mode_chunks(self, chat_id: int, render: RenderableResponse) -> tuple[bool, str | None]:
-        text_to_send = render.text
-        parse_mode: ParseMode | None = None
-        if render.kind == "html":
-            parse_mode = ParseMode.HTML
-        elif render.kind == "markdown":
-            text_to_send, parse_mode = self._prepare_markdown_payload(chat_id=chat_id, markdown_text=render.text)
-
-        chunks = self._chunk_text(text_to_send, self._MAX_MESSAGE_LENGTH)
-
-        disable_preview = bool(render.meta.get("disable_link_preview", False))
-        self._logger.debug(
-            "prepared telegram response chunks",
-            extra={
-                "chat_id": chat_id,
-                "kind": render.kind,
-                "chunk_count": len(chunks),
-                "text_length": len(text_to_send),
-            },
-        )
-        for index, chunk in enumerate(chunks, start=1):
-            try:
-                await self._bot.send_message(
-                    chat_id=chat_id,
-                    text=chunk,
-                    parse_mode=parse_mode,
-                    disable_web_page_preview=disable_preview,
-                )
-            except TelegramBadRequest as exc:
-                self._logger.exception(
-                    "failed to send telegram response chunk",
-                    exc_info=exc,
-                    extra={
-                        "chat_id": chat_id,
-                        "kind": render.kind,
-                        "chunk_index": index,
-                        "chunk_length": len(chunk),
-                        "chunk_count": len(chunks),
-                    },
-                )
-                return False, str(exc)
-        return True, None
-
-    def _prepare_markdown_payload(self, *, chat_id: int, markdown_text: str) -> tuple[str, ParseMode | None]:
-        markdownify = self._resolve_markdownify()
-        if markdownify is None:
-            self._logger.warning(
-                "telegramify-markdown unavailable; using raw markdown content",
-                extra={"chat_id": chat_id},
-            )
-            # ParseMode.MARKDOWN_V2 is the Telegram API constant; kind="markdown" is the internal concept
-            return markdown_text, ParseMode.MARKDOWN_V2
-        try:
-            formatted = markdownify(markdown_text)
-        except Exception:
-            self._logger.exception(
-                "failed to convert markdown with telegramify-markdown; falling back to plain text",
-                extra={"chat_id": chat_id},
-            )
-            return markdown_text, None
-        if not isinstance(formatted, str) or not formatted:
-            self._logger.warning(
-                "telegramify-markdown returned invalid payload; falling back to plain text",
-                extra={"chat_id": chat_id},
-            )
-            return markdown_text, None
-        return formatted, ParseMode.MARKDOWN_V2
-
-    @staticmethod
-    def _resolve_markdownify() -> Any | None:
-        global telegram_markdownify
-        if telegram_markdownify is not None:
-            return telegram_markdownify
-        with contextlib.suppress(Exception):
-            telegram_markdownify = getattr(importlib.import_module("telegramify_markdown"), "markdownify", None)
-        return telegram_markdownify
-
-    def _should_trigger_format_repair(
-        self,
-        *,
-        response: ChannelResponse,
-        render: RenderableResponse,
-        parse_error: str | None,
-    ) -> bool:
-        if not self._config.format_repair_enabled:
-            return False
-        if render.kind not in {"html", "markdown"}:
-            return False
-        if not parse_error or "can't parse entities" not in parse_error.lower():
-            return False
-        attempt = int(response.metadata.get("format_repair_attempt", 0))
-        return attempt < self._config.format_repair_max_attempts
-
-    @staticmethod
-    def _extract_user_id(response: ChannelResponse) -> int | None:
-        value = response.metadata.get("source_user_id")
-        if isinstance(value, int):
-            return value
-        return None
-
-    async def _send_file_response(self, event: OutboundFileEvent) -> None:
-        file_path = Path(event.response.file_path)
-        if not file_path.exists() or not file_path.is_file():
-            self._logger.warning(
-                "outbound telegram file not found",
-                extra={"chat_id": event.response.chat_id, "file_path": str(file_path)},
-            )
-            return
-        try:
-            await self._bot.send_document(
-                chat_id=event.response.chat_id,
-                document=FSInputFile(path=str(file_path)),
-                caption=event.response.caption,
-            )
-        except TelegramBadRequest as exc:
-            self._logger.exception(
-                "failed to send telegram file",
-                exc_info=exc,
-                extra={"chat_id": event.response.chat_id, "file_path": str(file_path)},
-            )
-
-    async def _save_uploaded_bytes(self, path: Path, payload: bytes) -> Path | None:
-        try:
-            path.write_bytes(payload)
-        except Exception:
-            self._logger.exception("failed to persist inbound telegram file", extra={"path": str(path)})
-            return None
-        self._logger.info("saved inbound telegram file", extra={"path": str(path), "bytes": len(payload)})
-        return path
-
-    def _relative_to_root(self, path: Path) -> str:
-        return to_posix_relative(path, self._managed_root_dir)
-
-    @staticmethod
-    def _upload_filename(prefix: str, message_id: int, chat_id: int, suffix: str) -> str:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        return f"{prefix}_{chat_id}_{message_id}_{timestamp}{suffix}"
+                await self._outbound_sender.send_file_response(event)
 
     async def stop(self) -> None:
         if self._poll_task:
@@ -487,58 +147,3 @@ class TelegramService:
                 await self._outgoing_task
 
         await self._bot.session.close()
-
-    def _is_authorized(self, message: TelegramMessage) -> bool:
-        allowed_chats = self._config.allowed_chat_ids
-        allowed_users = self._config.allowed_user_ids
-
-        chat_allowed = True if not allowed_chats else message.chat.id in allowed_chats
-        user_allowed = True
-        if allowed_users:
-            if message.from_user:
-                user_allowed = message.from_user.id in allowed_users
-            else:
-                user_allowed = False
-
-        if self._config.require_authorized:
-            # require both at least one list populated and match
-            chat_check = chat_allowed and bool(allowed_chats)
-            user_check = user_allowed and bool(allowed_users)
-            # if both lists provided require both matches, else require whichever list exists
-            if allowed_chats and allowed_users:
-                return chat_check and user_check
-            if allowed_chats:
-                return chat_check
-            if allowed_users:
-                return user_check
-            return False
-
-        return chat_allowed and user_allowed
-
-    @classmethod
-    def _chunk_text(cls, text: str, max_length: int) -> list[str]:
-        if max_length < 1:
-            raise ValueError("max_length must be >= 1")
-        if not text:
-            return [""]
-        if len(text) <= max_length:
-            return [text]
-
-        chunks: list[str] = []
-        remaining = text
-        while remaining:
-            if len(remaining) <= max_length:
-                chunks.append(remaining)
-                break
-
-            split_at = remaining.rfind("\n", 0, max_length + 1)
-            if split_at <= 0:
-                split_at = max_length
-            chunk = remaining[:split_at]
-            chunks.append(chunk)
-
-            remaining = remaining[split_at:]
-            if remaining.startswith("\n"):
-                remaining = remaining[1:]
-
-        return chunks
