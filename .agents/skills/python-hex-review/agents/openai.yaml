@@ -1,0 +1,7 @@
+interface:
+  display_name: "Python Hex Review"
+  short_description: "Review Minibot Python architecture boundaries"
+  default_prompt: "Use $python-hex-review to review or refactor Minibot code without breaking mini-hex boundaries."
+
+policy:
+  allow_implicit_invocation: true
