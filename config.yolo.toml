@@ -86,6 +86,18 @@ min_recurrence_interval_seconds = 60
 pool_size = 5
 echo = false
 
+[jobs]
+enabled = true
+sqlite_url = "sqlite+aiosqlite:///./data/agent_jobs.db"
+poll_interval_seconds = 5
+lease_timeout_seconds = 300
+batch_size = 5
+default_job_timeout_seconds = 600
+max_concurrent_workers = 2
+stale_after_seconds = 900
+worker_start_timeout_seconds = 10
+pool_size = 5
+
 [tools.kv_memory]
 enabled = true
 sqlite_url = "sqlite+aiosqlite:///./data/kv_memory.db"

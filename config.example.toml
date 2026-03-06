@@ -164,6 +164,27 @@ min_recurrence_interval_seconds = 60
 pool_size = 5
 echo = false
 
+# Background delegated-agent jobs used by async `invoke_agent`.
+[jobs]
+enabled = false
+sqlite_url = "sqlite+aiosqlite:///./data/agent_jobs.db"
+# Poll cadence for scanning queued jobs.
+poll_interval_seconds = 5
+# Lease window for claimed jobs before crash-recovery can reconsider them on next startup.
+lease_timeout_seconds = 120
+# Max queued jobs leased per poll cycle.
+batch_size = 5
+# Default timeout applied to delegated worker jobs.
+default_job_timeout_seconds = 180
+# Max delegated worker subprocesses running in parallel.
+max_concurrent_workers = 2
+# Startup crash-recovery threshold for stale leased/running jobs.
+stale_after_seconds = 300
+# Max wait for a worker process to boot and begin handling a job.
+worker_start_timeout_seconds = 15
+pool_size = 5
+echo = false
+
 # Optional key/value memory tool.
 [tools.kv_memory]
 enabled = false
