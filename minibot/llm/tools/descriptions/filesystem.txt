@@ -13,3 +13,5 @@ Managed workspace file operations. Use the action field to select the operation:
 - action=delete: Delete a file or folder. Requires path. Use target=file|folder|any to restrict what can be deleted. Set recursive=true to delete non-empty folders. CAUTION: deletion is permanent.
 
 - action=send: Deliver a file to the user in the active conversation channel (the same chat/session as the current request). Requires path and supports optional caption. Use this when the user asks to receive/download/view a file. Do NOT read file contents first unless the user explicitly asks for analysis/summary. For Telegram: images are sent as photos and other files as documents. For Console: the resolved file path is shown because file transfer is not supported.
+
+This tool is for file management. For code/text inspection, prefer `code_read`; for text search, use `grep`; for targeted edits, use `apply_patch`.

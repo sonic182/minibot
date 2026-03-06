@@ -1,3 +1,5 @@
 Search text in files using regex or literal matching within managed storage paths.
 Use this when you need line-level matches across one file or a directory tree.
 Supports recursive search, case-insensitive mode, fixed-string mode, and optional context lines.
+
+Use `grep` to locate candidate files or regions quickly, then switch to `code_read` for bounded sequential inspection and `apply_patch` for edits.
