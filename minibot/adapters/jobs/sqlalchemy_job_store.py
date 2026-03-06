@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, or_, select, update
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, delete, or_, select, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
@@ -332,6 +332,43 @@ class SQLAlchemyAgentJobStore(AgentJobRepository):
             )
             result = await session.execute(stmt)
             return [self._to_domain(model) for model in result.scalars().all()]
+
+    async def delete_jobs(
+        self,
+        *,
+        owner_id: str | None = None,
+        channel: str | None = None,
+        chat_id: int | None = None,
+        user_id: int | None = None,
+        statuses: Sequence[AgentJobStatus] | None = None,
+        limit: int = 100,
+    ) -> int:
+        filters = []
+        if owner_id is not None:
+            filters.append(AgentJobModel.owner_id == owner_id)
+        if channel is not None:
+            filters.append(AgentJobModel.channel == channel)
+        if chat_id is not None:
+            filters.append(AgentJobModel.chat_id == chat_id)
+        if user_id is not None:
+            filters.append(AgentJobModel.user_id == user_id)
+        if statuses:
+            filters.append(AgentJobModel.status.in_([status.value for status in statuses]))
+        async with self._session_factory() as session:
+            select_stmt = (
+                select(AgentJobModel.id)
+                .where(*filters)
+                .order_by(AgentJobModel.created_at.desc())
+                .limit(max(1, min(limit, 1000)))
+            )
+            result = await session.execute(select_stmt)
+            job_ids = list(result.scalars().all())
+            if not job_ids:
+                return 0
+            delete_stmt = delete(AgentJobModel).where(AgentJobModel.id.in_(job_ids))
+            delete_result = await session.execute(delete_stmt)
+            await session.commit()
+            return int(getattr(delete_result, "rowcount", 0) or 0)
 
     async def _update_job(self, job_id: str, values: Mapping[str, Any]) -> None:
         payload = dict(values)

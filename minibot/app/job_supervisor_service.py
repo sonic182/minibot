@@ -95,6 +95,11 @@ class JobSupervisorService:
 
     async def _spawn_worker(self, job: AgentJob) -> None:
         worker_id = uuid4().hex
+        started_at = utcnow()
+        running_lease_seconds = max(
+            int(job.timeout_seconds or self._config.default_job_timeout_seconds),
+            self._config.lease_timeout_seconds,
+        )
         payload = {
             "job_id": job.id,
             "agent_name": job.agent_name,
@@ -116,8 +121,8 @@ class JobSupervisorService:
             job.id,
             worker_id=worker_id,
             process_pid=process.pid,
-            started_at=utcnow(),
-            lease_expires_at=utcnow() + timedelta(seconds=self._config.lease_timeout_seconds),
+            started_at=started_at,
+            lease_expires_at=started_at + timedelta(seconds=running_lease_seconds),
         )
         assert process.stdin is not None
         process.stdin.write(json.dumps(payload).encode("utf-8"))
@@ -253,41 +258,44 @@ class JobSupervisorService:
                 await worker.task
 
     async def _cancel_requested_workers(self) -> None:
-        active_jobs = await self._repository.list_jobs(
-            statuses=[AgentJobStatus.QUEUED, AgentJobStatus.LEASED, AgentJobStatus.RUNNING],
-            cancel_requested_only=True,
-            limit=1000,
-        )
         now = utcnow()
-        for job in active_jobs:
-            if job.cancel_requested_at is None:
-                continue
-            running = self._workers.get(job.id)
-            if running is not None:
-                running.process.terminate()
-                with contextlib.suppress(ProcessLookupError):
-                    await running.process.wait()
-                if not running.task.done():
-                    running.task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await running.task
-                self._workers.pop(job.id, None)
-            await self._repository.mark_canceled(
-                job.id,
-                error_payload={"error_code": "job_canceled", "error": "job was canceled"},
-                finished_at=now,
+        while True:
+            active_jobs = await self._repository.list_jobs(
+                statuses=[AgentJobStatus.QUEUED, AgentJobStatus.LEASED, AgentJobStatus.RUNNING],
+                cancel_requested_only=True,
+                limit=100,
             )
-            await self._event_bus.publish(
-                AgentJobCanceledEvent(
-                    job_id=job.id,
-                    agent_name=job.agent_name,
-                    channel=job.channel,
-                    chat_id=job.chat_id,
-                    user_id=job.user_id,
-                    input_payload=job.input_payload,
+            if not active_jobs:
+                return
+            for job in active_jobs:
+                if job.cancel_requested_at is None:
+                    continue
+                running = self._workers.get(job.id)
+                if running is not None:
+                    running.process.terminate()
+                    with contextlib.suppress(ProcessLookupError):
+                        await running.process.wait()
+                    if not running.task.done():
+                        running.task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await running.task
+                    self._workers.pop(job.id, None)
+                await self._repository.mark_canceled(
+                    job.id,
                     error_payload={"error_code": "job_canceled", "error": "job was canceled"},
+                    finished_at=now,
                 )
-            )
+                await self._event_bus.publish(
+                    AgentJobCanceledEvent(
+                        job_id=job.id,
+                        agent_name=job.agent_name,
+                        channel=job.channel,
+                        chat_id=job.chat_id,
+                        user_id=job.user_id,
+                        input_payload=job.input_payload,
+                        error_payload={"error_code": "job_canceled", "error": "job was canceled"},
+                    )
+                )
 
     @staticmethod
     def _config_path() -> Path:

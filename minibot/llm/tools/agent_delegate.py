@@ -16,7 +16,7 @@ from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidat
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
-from minibot.core.jobs import AgentJobCreate
+from minibot.core.jobs import AgentJobCreate, AgentJobStatus
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.services.response_schemas import delegated_agent_response_schema
 from minibot.llm.tools.arg_utils import int_with_default, optional_bool, optional_str, require_non_empty_str
@@ -108,6 +108,7 @@ class AgentDelegateTool:
                 [
                     ToolBinding(tool=self._list_agent_jobs_schema(), handler=self._list_agent_jobs),
                     ToolBinding(tool=self._cancel_agent_job_schema(), handler=self._cancel_agent_job),
+                    ToolBinding(tool=self._prune_agent_jobs_schema(), handler=self._prune_agent_jobs),
                 ]
             )
         return bindings
@@ -159,6 +160,26 @@ class AgentDelegateTool:
             parameters=strict_object(
                 properties={"job_id": string_field("Delegated job id.")},
                 required=["job_id"],
+            ),
+        )
+
+    def _prune_agent_jobs_schema(self) -> Tool:
+        return Tool(
+            name="prune_agent_jobs",
+            description="Delete terminal delegated agent jobs for the current conversation.",
+            parameters=strict_object(
+                properties={
+                    "statuses": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["completed", "failed", "timed_out", "canceled"],
+                        },
+                        "description": "Terminal job statuses to prune. Defaults to all terminal statuses.",
+                    },
+                    "limit": integer_field(minimum=1, description="Maximum rows to delete."),
+                },
+                required=[],
             ),
         )
 
@@ -277,6 +298,18 @@ class AgentDelegateTool:
         if self._job_service is None:
             return {"ok": False, "error_code": "job_service_unavailable"}
         return await self._job_service.request_cancel(job_id=require_non_empty_str(payload, "job_id"))
+
+    async def _prune_agent_jobs(self, payload: dict[str, object], context: ToolContext) -> dict[str, object]:
+        if self._job_service is None:
+            return {"ok": False, "error_code": "job_service_unavailable"}
+        return await self._job_service.prune_jobs(
+            owner_id=context.owner_id,
+            channel=context.channel,
+            chat_id=context.chat_id,
+            user_id=context.user_id,
+            statuses=_parse_prune_statuses(payload.get("statuses")),
+            limit=int_with_default(payload.get("limit"), default=100, field="limit", min_value=1, max_value=1000),
+        )
 
     async def run_agent(
         self,
@@ -451,7 +484,7 @@ class AgentDelegateTool:
 
     def _scoped_tools(self, spec: AgentSpec) -> list[ToolBinding]:
         scoped = filter_tools_for_agent(self._tools, spec)
-        blocked = {"invoke_agent", "list_agent_jobs", "cancel_agent_job"}
+        blocked = {"invoke_agent", "list_agent_jobs", "cancel_agent_job", "prune_agent_jobs"}
         return [binding for binding in scoped if binding.tool.name not in blocked]
 
     def _build_state(
@@ -538,6 +571,30 @@ def _delegation_result_status(outcome: _DelegationOutcome) -> str:
     if outcome.should_answer_to_user is False:
         return "not_user_answerable"
     return "success"
+
+
+def _parse_prune_statuses(value: Any) -> list[AgentJobStatus]:
+    terminal_statuses = [
+        AgentJobStatus.COMPLETED,
+        AgentJobStatus.FAILED,
+        AgentJobStatus.TIMED_OUT,
+        AgentJobStatus.CANCELED,
+    ]
+    if value is None:
+        return terminal_statuses
+    if not isinstance(value, list):
+        raise ValueError("statuses must be an array of terminal job statuses")
+    allowed = {status.value: status for status in terminal_statuses}
+    parsed: list[AgentJobStatus] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("statuses must contain strings")
+        status = allowed.get(item.strip().lower())
+        if status is None:
+            raise ValueError("statuses must only contain terminal job statuses")
+        if status not in parsed:
+            parsed.append(status)
+    return parsed or terminal_statuses
 
 
 def _agent_prompt_cache_key(*, llm_client: Any, context: ToolContext, agent_name: str) -> str | None:

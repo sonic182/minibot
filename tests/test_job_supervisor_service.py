@@ -165,6 +165,12 @@ async def test_spawn_worker_passes_parent_config(monkeypatch: pytest.MonkeyPatch
     await service._reap_finished_workers()
 
     assert captured_env["MINIBOT_CONFIG"] == config_path.as_posix()
+    assert len(repo.mark_running_calls) == 1
+    lease_expires_at = repo.mark_running_calls[0]["lease_expires_at"]
+    started_at = repo.mark_running_calls[0]["started_at"]
+    assert isinstance(lease_expires_at, datetime)
+    assert isinstance(started_at, datetime)
+    assert lease_expires_at >= started_at + timedelta(seconds=30)
 
 
 @pytest.mark.asyncio

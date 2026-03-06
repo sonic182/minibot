@@ -127,3 +127,53 @@ async def test_list_jobs_can_filter_cancel_requested_only(job_store: SQLAlchemyA
     assert requested is True
     assert [job.id for job in jobs] == [first.id]
 
+
+@pytest.mark.asyncio
+async def test_delete_jobs_prunes_only_requested_terminal_rows(job_store: SQLAlchemyAgentJobStore) -> None:
+    completed = await job_store.create_job(
+        AgentJobCreate(
+            agent_name="worker-completed",
+            owner_id="owner",
+            channel="console",
+            chat_id=1,
+            user_id=2,
+            input_payload={"task": "done"},
+        )
+    )
+    failed = await job_store.create_job(
+        AgentJobCreate(
+            agent_name="worker-failed",
+            owner_id="owner",
+            channel="console",
+            chat_id=1,
+            user_id=2,
+            input_payload={"task": "failed"},
+        )
+    )
+    queued = await job_store.create_job(
+        AgentJobCreate(
+            agent_name="worker-queued",
+            owner_id="owner",
+            channel="console",
+            chat_id=1,
+            user_id=2,
+            input_payload={"task": "queued"},
+        )
+    )
+    now = _utcnow()
+    await job_store.mark_completed(completed.id, result_payload={"ok": True}, finished_at=now)
+    await job_store.mark_failed(failed.id, error_payload={"error_code": "boom"}, finished_at=now)
+
+    deleted = await job_store.delete_jobs(
+        owner_id="owner",
+        channel="console",
+        chat_id=1,
+        user_id=2,
+        statuses=[AgentJobStatus.COMPLETED, AgentJobStatus.FAILED],
+        limit=10,
+    )
+
+    assert deleted == 2
+    assert await job_store.get_job(completed.id) is None
+    assert await job_store.get_job(failed.id) is None
+    assert await job_store.get_job(queued.id) is not None

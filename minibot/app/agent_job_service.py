@@ -63,3 +63,27 @@ class AgentJobService:
             "status": job.status.value,
             "cancel_requested": requested,
         }
+
+    async def prune_jobs(
+        self,
+        *,
+        owner_id: str | None,
+        channel: str | None,
+        chat_id: int | None,
+        user_id: int | None,
+        statuses: list[AgentJobStatus],
+        limit: int,
+    ) -> dict[str, Any]:
+        deleted_count = await self._repository.delete_jobs(
+            owner_id=owner_id,
+            channel=channel,
+            chat_id=chat_id,
+            user_id=user_id,
+            statuses=statuses,
+            limit=limit,
+        )
+        return {
+            "ok": True,
+            "deleted_count": deleted_count,
+            "statuses": [status.value for status in statuses],
+        }

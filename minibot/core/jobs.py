@@ -237,3 +237,14 @@ class AgentJobRepository(Protocol):
         limit: int = 20,
         offset: int = 0,
     ) -> Sequence[AgentJob]: ...
+
+    async def delete_jobs(
+        self,
+        *,
+        owner_id: str | None = None,
+        channel: str | None = None,
+        chat_id: int | None = None,
+        user_id: int | None = None,
+        statuses: Sequence[AgentJobStatus] | None = None,
+        limit: int = 100,
+    ) -> int: ...
