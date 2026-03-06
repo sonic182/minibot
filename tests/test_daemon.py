@@ -69,6 +69,11 @@ class _Settings:
     tools = _ToolSettings()
     scheduler = _SchedulerSettings()
 
+    class _Jobs:
+        enabled = False
+
+    jobs = _Jobs()
+
 
 class _TelegramConfig:
     def __init__(self, enabled: bool, bot_token: str) -> None:
@@ -104,6 +109,10 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
         @classmethod
         def get_scheduled_prompt_service(cls) -> _Probe:
             return scheduler_probe
+
+        @classmethod
+        def get_job_supervisor_service(cls):
+            return None
 
         @classmethod
         def get_telegram_config(cls) -> _TelegramConfig:
@@ -184,6 +193,10 @@ async def test_run_skips_telegram_when_disabled(monkeypatch: pytest.MonkeyPatch)
 
         @classmethod
         def get_scheduled_prompt_service(cls):
+            return None
+
+        @classmethod
+        def get_job_supervisor_service(cls):
             return None
 
         @classmethod

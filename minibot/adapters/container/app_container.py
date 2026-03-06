@@ -5,9 +5,12 @@ import inspect
 from pathlib import Path
 from typing import Optional
 
+from minibot.adapters.jobs import SQLAlchemyAgentJobStore
 from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_job_service import AgentJobService
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.job_supervisor_service import JobSupervisorService
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.core.memory import KeyValueMemory, MemoryBackend
@@ -31,6 +34,9 @@ class AppContainer:
     _agent_registry: Optional[AgentRegistry] = None
     _prompt_store: Optional[SQLAlchemyScheduledPromptStore] = None
     _prompt_service: Optional[ScheduledPromptService] = None
+    _job_store: Optional[SQLAlchemyAgentJobStore] = None
+    _job_service: Optional[AgentJobService] = None
+    _job_supervisor: Optional[JobSupervisorService] = None
 
     @classmethod
     def configure(cls, config_path: Path | None = None) -> None:
@@ -57,6 +63,15 @@ class AppContainer:
         else:
             cls._prompt_store = None
             cls._prompt_service = None
+        jobs_config = cls._settings.jobs
+        if jobs_config.enabled:
+            cls._job_store = SQLAlchemyAgentJobStore(jobs_config)
+            cls._job_service = AgentJobService(cls._job_store, cls._event_bus)
+            cls._job_supervisor = JobSupervisorService(cls._job_store, cls._event_bus, jobs_config)
+        else:
+            cls._job_store = None
+            cls._job_service = None
+            cls._job_supervisor = None
 
     @classmethod
     def get_settings(cls) -> Settings:
@@ -109,6 +124,14 @@ class AppContainer:
         return cls._prompt_service
 
     @classmethod
+    def get_agent_job_service(cls) -> AgentJobService | None:
+        return cls._job_service
+
+    @classmethod
+    def get_job_supervisor_service(cls) -> JobSupervisorService | None:
+        return cls._job_supervisor
+
+    @classmethod
     def get_telegram_config(cls) -> TelegramChannelConfig:
         return cls.get_settings().channels.get("telegram")  # type: ignore[return-value]
 
@@ -119,6 +142,8 @@ class AppContainer:
             await cls._initialize_backend(cls._kv_memory_backend)
         if cls._prompt_store is not None:
             await cls._initialize_backend(cls._prompt_store)
+        if cls._job_store is not None:
+            await cls._initialize_backend(cls._job_store)
 
     @classmethod
     async def _initialize_backend(cls, backend: object) -> None:

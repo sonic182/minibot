@@ -7,6 +7,7 @@ from typing import Any, Literal, Sequence
 from llm_async.models import Tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from minibot.app.agent_job_service import AgentJobService
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
@@ -15,12 +16,13 @@ from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidat
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
+from minibot.core.jobs import AgentJobCreate
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.services.response_schemas import delegated_agent_response_schema
-from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
+from minibot.llm.tools.arg_utils import int_with_default, optional_bool, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
-from minibot.llm.tools.schema_utils import empty_object_schema, strict_object, string_field
+from minibot.llm.tools.schema_utils import empty_object_schema, integer_field, strict_object, string_field
 from minibot.shared.assistant_response import (
     validate_attachments,
 )
@@ -83,6 +85,7 @@ class AgentDelegateTool:
         llm_factory: LLMClientFactory,
         tools: Sequence[ToolBinding],
         default_timeout_seconds: int,
+        job_service: AgentJobService | None = None,
         delegated_tool_call_policy: Literal["auto", "always", "never"] = "auto",
         environment_prompt_fragment: str = "",
     ) -> None:
@@ -90,15 +93,24 @@ class AgentDelegateTool:
         self._llm_factory = llm_factory
         self._tools = list(tools)
         self._default_timeout_seconds = default_timeout_seconds
+        self._job_service = job_service
         self._delegated_tool_call_policy = delegated_tool_call_policy
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
         self._logger = logging.getLogger("minibot.agent_delegate")
 
     def bindings(self) -> list[ToolBinding]:
-        return [
+        bindings = [
             ToolBinding(tool=self._list_agents_schema(), handler=self._list_agents),
             ToolBinding(tool=self._invoke_agent_schema(), handler=self._invoke_agent),
         ]
+        if self._job_service is not None:
+            bindings.extend(
+                [
+                    ToolBinding(tool=self._list_agent_jobs_schema(), handler=self._list_agent_jobs),
+                    ToolBinding(tool=self._cancel_agent_job_schema(), handler=self._cancel_agent_job),
+                ]
+            )
+        return bindings
 
     def _list_agents_schema(self) -> Tool:
         return Tool(
@@ -116,8 +128,37 @@ class AgentDelegateTool:
                     "agent_name": string_field("Exact name returned by list_agents."),
                     "task": string_field("Concrete delegated task for the specialist."),
                     "context": string_field("Optional supporting context for the specialist."),
+                    "mode": {
+                        "type": "string",
+                        "enum": ["async", "sync"],
+                        "description": "Delegation mode. Omit to use async background execution.",
+                    },
                 },
                 required=["agent_name", "task"],
+            ),
+        )
+
+    def _list_agent_jobs_schema(self) -> Tool:
+        return Tool(
+            name="list_agent_jobs",
+            description="List delegated agent jobs for the current conversation.",
+            parameters=strict_object(
+                properties={
+                    "active_only": {"type": "boolean", "description": "When true, only active jobs are returned."},
+                    "limit": integer_field(minimum=1, description="Maximum jobs to return."),
+                    "offset": integer_field(minimum=0, description="Pagination offset."),
+                },
+                required=[],
+            ),
+        )
+
+    def _cancel_agent_job_schema(self) -> Tool:
+        return Tool(
+            name="cancel_agent_job",
+            description="Cancel a delegated agent job by id.",
+            parameters=strict_object(
+                properties={"job_id": string_field("Delegated job id.")},
+                required=["job_id"],
             ),
         )
 
@@ -129,6 +170,11 @@ class AgentDelegateTool:
         agent_name = require_non_empty_str(payload, "agent_name")
         task = require_non_empty_str(payload, "task")
         details = optional_str(payload.get("context"), error_message="context must be a string")
+        requested_mode = optional_str(payload.get("mode"), error_message="mode must be a string")
+        default_mode = "async" if self._job_service is not None else "sync"
+        mode = (requested_mode or default_mode).lower()
+        if mode not in {"async", "sync"}:
+            raise ValueError("mode must be 'async' or 'sync'")
         spec = self._registry.get(agent_name)
         if spec is None:
             return {
@@ -137,11 +183,114 @@ class AgentDelegateTool:
                 "error_code": "agent_not_found",
                 "error": f"agent '{agent_name}' is not available",
             }
+        if mode == "async":
+            if not context.can_enqueue_agent_jobs:
+                return {
+                    "ok": False,
+                    "agent": agent_name,
+                    "error_code": "async_delegation_not_allowed_from_specialist",
+                    "error": "async delegated jobs can only be created by the main agent",
+                }
+            if self._job_service is None:
+                return {
+                    "ok": False,
+                    "agent": agent_name,
+                    "error_code": "job_service_unavailable",
+                    "error": "async delegated jobs are not enabled",
+                }
+            job = await self._job_service.create_job(
+                AgentJobCreate(
+                    agent_name=agent_name,
+                    input_payload={
+                        "agent_name": agent_name,
+                        "task": task,
+                        "context": details,
+                        "owner_id": context.owner_id,
+                        "channel": context.channel,
+                        "chat_id": context.chat_id,
+                        "user_id": context.user_id,
+                        "created_by_session_id": context.session_id,
+                        "created_by_message_id": context.message_id,
+                        "correlation_id": context.session_id,
+                    },
+                    owner_id=context.owner_id,
+                    channel=context.channel,
+                    chat_id=context.chat_id,
+                    user_id=context.user_id,
+                    created_by_session_id=context.session_id,
+                    created_by_message_id=context.message_id,
+                    correlation_id=context.session_id,
+                    requested_mode="async",
+                    max_attempts=1,
+                    timeout_seconds=self._default_timeout_seconds,
+                )
+            )
+            return {
+                "ok": True,
+                "agent": agent_name,
+                "job_id": job.id,
+                "status": job.status.value,
+                "created_at": job.created_at.isoformat(),
+                "mode": "async",
+                "execution_mode": "background",
+                "result_status": "queued",
+                "should_answer_to_user": True,
+                "result": f"Background job {job.id} queued for {agent_name}.",
+            }
+        return await self.run_agent(spec=spec, task=task, details=details, context=context)
 
+    async def _list_agent_jobs(self, payload: dict[str, object], context: ToolContext) -> dict[str, object]:
+        if self._job_service is None:
+            return {"ok": False, "error_code": "job_service_unavailable"}
+        jobs = await self._job_service.list_jobs(
+            owner_id=context.owner_id,
+            channel=context.channel,
+            chat_id=context.chat_id,
+            user_id=context.user_id,
+            active_only=optional_bool(
+                payload.get("active_only"),
+                default=True,
+                error_message="active_only must be a boolean",
+            ),
+            limit=int_with_default(payload.get("limit"), default=20, field="limit", min_value=1, max_value=100),
+            offset=int_with_default(payload.get("offset"), default=0, field="offset", min_value=0, max_value=10000),
+        )
+        return {
+            "ok": True,
+            "count": len(jobs),
+            "jobs": [
+                {
+                    "job_id": job.id,
+                    "agent_name": job.agent_name,
+                    "status": job.status.value,
+                    "created_at": job.created_at.isoformat(),
+                    "started_at": job.started_at.isoformat() if job.started_at else None,
+                    "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+                    "requested_mode": job.requested_mode,
+                    "cancel_requested_at": job.cancel_requested_at.isoformat() if job.cancel_requested_at else None,
+                }
+                for job in jobs
+            ],
+        }
+
+    async def _cancel_agent_job(self, payload: dict[str, object], context: ToolContext) -> dict[str, object]:
+        del context
+        if self._job_service is None:
+            return {"ok": False, "error_code": "job_service_unavailable"}
+        return await self._job_service.request_cancel(job_id=require_non_empty_str(payload, "job_id"))
+
+    async def run_agent(
+        self,
+        *,
+        spec: AgentSpec,
+        task: str,
+        details: str | None,
+        context: ToolContext,
+    ) -> dict[str, object]:
         self._logger.debug(
             "delegated agent invocation started",
             extra={
-                "agent": agent_name,
+                "agent": spec.name,
                 "task_preview": task[:240],
                 "has_context": bool(details),
             },
@@ -169,10 +318,20 @@ class AgentDelegateTool:
         prompt_cache_key = _agent_prompt_cache_key(llm_client=llm_client, context=context, agent_name=spec.name)
         state_mode_getter = getattr(llm_client, "responses_state_mode", None)
         use_previous_response_id = callable(state_mode_getter) and state_mode_getter() == "previous_response_id"
+        delegated_context = ToolContext(
+            owner_id=context.owner_id,
+            channel=context.channel,
+            chat_id=context.chat_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+            message_id=context.message_id,
+            agent_name=spec.name,
+            can_enqueue_agent_jobs=False,
+        )
         try:
             generation = await runtime.run(
                 state=state,
-                tool_context=context,
+                tool_context=delegated_context,
                 response_schema=_agent_response_schema(),
                 prompt_cache_key=prompt_cache_key,
                 initial_previous_response_id=previous_response_id,
@@ -203,7 +362,7 @@ class AgentDelegateTool:
                 )
                 generation = await runtime.run(
                     state=retry_state,
-                    tool_context=context,
+                    tool_context=delegated_context,
                     response_schema=_agent_response_schema(),
                     prompt_cache_key=prompt_cache_key,
                     initial_previous_response_id=previous_response_id,
@@ -293,7 +452,8 @@ class AgentDelegateTool:
 
     def _scoped_tools(self, spec: AgentSpec) -> list[ToolBinding]:
         scoped = filter_tools_for_agent(self._tools, spec)
-        return [binding for binding in scoped if binding.tool.name != "invoke_agent"]
+        blocked = {"invoke_agent", "list_agent_jobs", "cancel_agent_job"}
+        return [binding for binding in scoped if binding.tool.name not in blocked]
 
     def _build_state(
         self,

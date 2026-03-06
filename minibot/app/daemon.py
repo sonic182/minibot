@@ -32,6 +32,8 @@ async def run() -> None:
         enabled_tools.append("file_storage")
     if settings.scheduler.prompts.enabled:
         enabled_tools.append("scheduler")
+    if settings.jobs.enabled:
+        enabled_tools.append("async_agent_jobs")
     logger.info(
         "tool configuration loaded",
         extra={"tools_enabled": enabled_tools or ["none"]},
@@ -40,6 +42,7 @@ async def run() -> None:
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
     scheduler_service = AppContainer.get_scheduled_prompt_service()
+    job_supervisor = AppContainer.get_job_supervisor_service()
     telegram_config = AppContainer.get_telegram_config()
     telegram_service = None
     if telegram_config.enabled and telegram_config.bot_token:
@@ -50,6 +53,8 @@ async def run() -> None:
         services.append(telegram_service)
     if scheduler_service is not None:
         services.append(scheduler_service)
+    if job_supervisor is not None:
+        services.append(job_supervisor)
 
     async with _graceful_shutdown(services, logger) as stop_event:
         await AppContainer.initialize_storage()
@@ -58,6 +63,9 @@ async def run() -> None:
         if scheduler_service is not None:
             logger.info("starting scheduler service", extra={"component": "scheduler"})
             await scheduler_service.start()
+        if job_supervisor is not None:
+            logger.info("starting job supervisor", extra={"component": "jobs"})
+            await job_supervisor.start()
         if telegram_service is not None:
             logger.info("starting telegram service", extra={"component": "telegram"})
             await telegram_service.start()

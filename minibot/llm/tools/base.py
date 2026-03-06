@@ -16,6 +16,10 @@ class ToolContext:
     channel: str | None = None
     chat_id: int | None = None
     user_id: int | None = None
+    session_id: str | None = None
+    message_id: int | None = None
+    agent_name: str | None = None
+    can_enqueue_agent_jobs: bool = True
 
 
 ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[ToolResult | Any]]

@@ -368,6 +368,20 @@ class SchedulerConfig(BaseModel):
     prompts: ScheduledPromptsConfig = ScheduledPromptsConfig()
 
 
+class JobsConfig(BaseModel):
+    enabled: bool = False
+    sqlite_url: str = "sqlite+aiosqlite:///./data/agent_jobs.db"
+    poll_interval_seconds: PositiveInt = 5
+    lease_timeout_seconds: PositiveInt = 120
+    batch_size: PositiveInt = 5
+    default_job_timeout_seconds: PositiveInt = 180
+    max_concurrent_workers: PositiveInt = 2
+    stale_after_seconds: PositiveInt = 300
+    worker_start_timeout_seconds: PositiveInt = 15
+    pool_size: PositiveInt = 5
+    echo: bool = False
+
+
 class LoggingConfig(BaseModel):
     structured: bool = True
     logfmt_enabled: bool = True
@@ -387,6 +401,7 @@ class Settings(BaseModel):
     memory: MemoryConfig = MemoryConfig()
     tools: ToolsConfig = ToolsConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
+    jobs: JobsConfig = JobsConfig()
     logging: LoggingConfig = LoggingConfig()
 
     model_config = ConfigDict(extra="forbid")

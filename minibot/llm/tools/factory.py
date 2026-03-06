@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
 from minibot.adapters.config.schema import Settings
+from minibot.app.agent_job_service import AgentJobService
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
@@ -37,6 +38,7 @@ def build_enabled_tools(
     memory: MemoryBackend,
     kv_memory: KeyValueMemory | None,
     prompt_scheduler: ScheduledPromptService | None = None,
+    agent_job_service: AgentJobService | None = None,
     event_bus: EventBus | None = None,
     agent_registry: AgentRegistry | None = None,
     llm_factory: LLMClientFactory | None = None,
@@ -153,6 +155,7 @@ def build_enabled_tools(
             llm_factory=llm_factory,
             tools=tools,
             default_timeout_seconds=settings.orchestration.default_timeout_seconds,
+            job_service=agent_job_service,
             delegated_tool_call_policy=settings.orchestration.delegated_tool_call_policy,
             environment_prompt_fragment=environment_prompt_fragment,
         )

@@ -38,6 +38,59 @@ class OutboundFormatRepairEvent(BaseEvent):
     user_id: int | None = None
 
 
+class AgentJobQueuedEvent(BaseEvent):
+    event_type: str = "agent_job_queued"
+    job_id: str
+    agent_name: str
+    channel: str | None = None
+    chat_id: int | None = None
+    user_id: int | None = None
+
+
+class AgentJobCompletedEvent(BaseEvent):
+    event_type: str = "agent_job_completed"
+    job_id: str
+    agent_name: str
+    channel: str | None = None
+    chat_id: int | None = None
+    user_id: int | None = None
+    input_payload: dict
+    result_payload: dict
+
+
+class AgentJobFailedEvent(BaseEvent):
+    event_type: str = "agent_job_failed"
+    job_id: str
+    agent_name: str
+    channel: str | None = None
+    chat_id: int | None = None
+    user_id: int | None = None
+    input_payload: dict
+    error_payload: dict
+
+
+class AgentJobTimedOutEvent(BaseEvent):
+    event_type: str = "agent_job_timed_out"
+    job_id: str
+    agent_name: str
+    channel: str | None = None
+    chat_id: int | None = None
+    user_id: int | None = None
+    input_payload: dict
+    error_payload: dict
+
+
+class AgentJobCanceledEvent(BaseEvent):
+    event_type: str = "agent_job_canceled"
+    job_id: str
+    agent_name: str
+    channel: str | None = None
+    chat_id: int | None = None
+    user_id: int | None = None
+    input_payload: dict
+    error_payload: dict | None = None
+
+
 class SystemEvent(BaseEvent):
     event_type: str = "system"
     payload: Optional[dict] = None

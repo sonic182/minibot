@@ -18,7 +18,15 @@ from minibot.app.handlers.services import (
 from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.core.channels import ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
+from minibot.core.events import (
+    AgentJobCanceledEvent,
+    AgentJobCompletedEvent,
+    AgentJobFailedEvent,
+    AgentJobTimedOutEvent,
+    MessageEvent,
+    OutboundEvent,
+    OutboundFormatRepairEvent,
+)
 from minibot.llm.tools.factory import build_enabled_tools
 from minibot.shared.utils import humanize_token_count
 
@@ -32,11 +40,13 @@ class Dispatcher:
         memory_backend = AppContainer.get_memory_backend()
         agent_registry = AppContainer.get_agent_registry()
         llm_factory = AppContainer.get_llm_factory()
+        agent_job_service = AppContainer.get_agent_job_service()
         tools = build_enabled_tools(
             settings,
             memory_backend,
             AppContainer.get_kv_memory_backend(),
             prompt_service,
+            agent_job_service,
             event_bus,
             agent_registry,
             llm_factory,
@@ -124,6 +134,11 @@ class Dispatcher:
             if isinstance(event, OutboundFormatRepairEvent):
                 self._logger.info("processing outbound format repair event", extra={"event_id": event.event_id})
                 await self._handle_format_repair(event)
+            if isinstance(
+                event,
+                AgentJobCompletedEvent | AgentJobFailedEvent | AgentJobTimedOutEvent | AgentJobCanceledEvent,
+            ):
+                await self._handle_agent_job_terminal(event)
 
     async def _handle_message(self, event: MessageEvent) -> None:
         try:
@@ -235,12 +250,59 @@ class Dispatcher:
             except Exception as publish_exc:
                 self._logger.exception("failed to publish format repair fallback", exc_info=publish_exc)
 
+    async def _handle_agent_job_terminal(
+        self,
+        event: AgentJobCompletedEvent | AgentJobFailedEvent | AgentJobTimedOutEvent | AgentJobCanceledEvent,
+    ) -> None:
+        if event.channel is None or event.chat_id is None:
+            return
+        prompt = _job_completion_prompt(event)
+        message = MessageEvent(
+            message={
+                "channel": event.channel,
+                "user_id": event.user_id,
+                "chat_id": event.chat_id,
+                "message_id": None,
+                "text": prompt,
+                "metadata": {
+                    "job_completion": True,
+                    "job_id": event.job_id,
+                    "source_agent": event.agent_name,
+                    "job_status": event.event_type,
+                },
+            }
+        )
+        await self._handle_message(message)
+
     async def stop(self) -> None:
         await self._subscription.close()
         if self._task:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+
+
+def _job_completion_prompt(
+    event: AgentJobCompletedEvent | AgentJobFailedEvent | AgentJobTimedOutEvent | AgentJobCanceledEvent,
+) -> str:
+    original_task = event.input_payload.get("task")
+    original_context = event.input_payload.get("context")
+    if isinstance(event, AgentJobCompletedEvent):
+        payload = event.result_payload
+        outcome = "completed"
+    else:
+        payload = event.error_payload
+        outcome = event.event_type.replace("agent_job_", "")
+    return (
+        "A background specialist job for this conversation has finished.\n\n"
+        f"Job ID: {event.job_id}\n"
+        f"Agent: {event.agent_name}\n"
+        f"Outcome: {outcome}\n\n"
+        f"Original task:\n{original_task}\n\n"
+        f"Original context:\n{original_context or '(none)'}\n\n"
+        f"Structured payload:\n{payload}\n\n"
+        "Use this result to answer the user now in a normal user-facing style."
+    )
 
 
 def _build_audio_auto_transcription_service(
