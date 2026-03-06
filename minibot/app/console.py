@@ -39,6 +39,8 @@ async def run(
     _configure_console_file_only_logging(logger)
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
+    scheduler_service = AppContainer.get_scheduled_prompt_service()
+    job_supervisor = AppContainer.get_job_supervisor_service()
     main_agent_tools_enabled = getattr(dispatcher, "main_agent_tool_names", None) or ["none"]
     _log_info(
         logger,
@@ -48,6 +50,10 @@ async def run(
     console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
     await AppContainer.initialize_storage()
     await dispatcher.start()
+    if scheduler_service is not None:
+        await scheduler_service.start()
+    if job_supervisor is not None:
+        await job_supervisor.start()
     await console_service.start()
 
     try:
@@ -94,6 +100,10 @@ async def run(
             )
     finally:
         await console_service.stop()
+        if job_supervisor is not None:
+            await job_supervisor.stop()
+        if scheduler_service is not None:
+            await scheduler_service.stop()
         await dispatcher.stop()
 
 

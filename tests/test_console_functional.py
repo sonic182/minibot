@@ -12,6 +12,7 @@ from tests.fixtures.llm.mock_client import ScriptedLLMClient, ScriptedLLMFactory
 
 
 def _reset_container() -> None:
+    AppContainer._config_path = None
     AppContainer._settings = None
     AppContainer._logger = None
     AppContainer._event_bus = None
@@ -22,6 +23,9 @@ def _reset_container() -> None:
     AppContainer._agent_registry = None
     AppContainer._prompt_store = None
     AppContainer._prompt_service = None
+    AppContainer._job_store = None
+    AppContainer._job_service = None
+    AppContainer._job_supervisor = None
 
 
 def _write_config(tmp_path: Path, provider: str = "openai", with_agents: bool = False) -> Path:
@@ -175,6 +179,7 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
             "arguments": {
                 "agent_name": "worker",
                 "task": "answer delegated task",
+                "mode": "sync",
             },
             "response_id": "main-agent-1",
             "total_tokens": 8,

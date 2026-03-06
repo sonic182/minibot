@@ -8,6 +8,7 @@ from minibot.adapters.config.schema import LLMMConfig, Settings
 
 
 def _reset_container(module) -> None:
+    module.AppContainer._config_path = None
     module.AppContainer._settings = None
     module.AppContainer._logger = None
     module.AppContainer._event_bus = None
@@ -18,6 +19,9 @@ def _reset_container(module) -> None:
     module.AppContainer._agent_registry = None
     module.AppContainer._prompt_store = None
     module.AppContainer._prompt_service = None
+    module.AppContainer._job_store = None
+    module.AppContainer._job_service = None
+    module.AppContainer._job_supervisor = None
 
 
 def test_app_container_getters_fail_when_not_configured() -> None:

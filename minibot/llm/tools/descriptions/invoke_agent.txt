@@ -10,6 +10,6 @@ Provide:
 - context: optional supporting details that improve execution quality.
 - mode: optional `async` or `sync`. Omit it to use `async`.
 
-Use `async` for long-running work. It queues a background job and returns immediately with a job id, so you should tell the user the task was started and results will arrive later.
+Use `async` for long-running work. It queues a background job and returns immediately with a job id, so you should tell the user the task was started and results will arrive later. If async jobs are not enabled in the runtime, the tool returns an explicit error instead of silently switching modes.
 
 Use `sync` only for short work that must finish in the same turn. In that mode, wait for the delegated result and then continue with your own final response to the user.

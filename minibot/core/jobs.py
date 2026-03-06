@@ -233,6 +233,7 @@ class AgentJobRepository(Protocol):
         chat_id: int | None = None,
         user_id: int | None = None,
         statuses: Sequence[AgentJobStatus] | None = None,
+        cancel_requested_only: bool = False,
         limit: int = 20,
         offset: int = 0,
     ) -> Sequence[AgentJob]: ...

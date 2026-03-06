@@ -313,6 +313,37 @@ class MCPClient:
     def call_tool_blocking(self, tool_name: str, payload: dict[str, Any]) -> MCPToolCallResult:
         return self._blocking_runner.run(lambda: self.call_tool(tool_name, payload))
 
+    async def aclose(self) -> None:
+        process = self._stdio_process
+        self._stdio_process = None
+        self._initialized = False
+        self._stdio_read_buffer.clear()
+        self._stdio_loop = None
+        self._stdio_lock = None
+        self._stdio_start_lock = None
+        if process is not None and process.returncode is None:
+            if process.stdin is not None:
+                with suppress(Exception):
+                    process.stdin.close()
+            with suppress(ProcessLookupError):
+                process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=2)
+            except asyncio.TimeoutError:
+                with suppress(ProcessLookupError):
+                    process.kill()
+                with suppress(ProcessLookupError):
+                    await process.wait()
+
+    def close_blocking(self) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self.aclose())
+        else:
+            self._blocking_runner.run(self.aclose)
+        self._blocking_runner.close()
+
 
 class _BlockingLoopRunner:
     def __init__(self) -> None:
@@ -351,6 +382,17 @@ class _BlockingLoopRunner:
         if self._loop is None:
             raise RuntimeError("failed to start blocking loop runner")
         return self._loop
+
+    def close(self) -> None:
+        with self._lock:
+            loop = self._loop
+            thread = self._thread
+            self._loop = None
+            self._thread = None
+            self._ready.clear()
+        if loop is not None and thread is not None and thread.is_alive():
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join(timeout=1)
 
 
 def _parse_jsonrpc_payload(raw_payload: str) -> dict[str, Any]:

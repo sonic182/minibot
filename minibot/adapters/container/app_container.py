@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from minibot.adapters.jobs import SQLAlchemyAgentJobStore
+from minibot.adapters.config.loader import load_settings, resolve_settings_path
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_job_service import AgentJobService
 from minibot.app.agent_registry import AgentRegistry
@@ -15,7 +16,6 @@ from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.llm.provider_factory import LLMClient
-from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings, TelegramChannelConfig
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
@@ -24,6 +24,7 @@ from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemySchedul
 
 
 class AppContainer:
+    _config_path: Optional[Path] = None
     _settings: Optional[Settings] = None
     _logger: Optional[logging.Logger] = None
     _event_bus: Optional[EventBus] = None
@@ -40,7 +41,8 @@ class AppContainer:
 
     @classmethod
     def configure(cls, config_path: Path | None = None) -> None:
-        cls._settings = load_settings(config_path)
+        cls._config_path = resolve_settings_path(config_path)
+        cls._settings = load_settings(cls._config_path)
         cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
         cls._event_bus = EventBus()
@@ -78,6 +80,12 @@ class AppContainer:
         if cls._settings is None:
             raise RuntimeError("container not configured")
         return cls._settings
+
+    @classmethod
+    def get_config_path(cls) -> Path:
+        if cls._config_path is None:
+            raise RuntimeError("container not configured")
+        return cls._config_path
 
     @classmethod
     def get_logger(cls) -> logging.Logger:

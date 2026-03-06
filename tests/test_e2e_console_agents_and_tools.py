@@ -35,6 +35,7 @@ pytestmark = [
 
 
 def _reset_container() -> None:
+    AppContainer._config_path = None
     AppContainer._settings = None
     AppContainer._logger = None
     AppContainer._event_bus = None
@@ -45,6 +46,9 @@ def _reset_container() -> None:
     AppContainer._agent_registry = None
     AppContainer._prompt_store = None
     AppContainer._prompt_service = None
+    AppContainer._job_store = None
+    AppContainer._job_service = None
+    AppContainer._job_supervisor = None
 
 
 def _array(items: list[str]) -> str:
@@ -460,7 +464,7 @@ async def test_e2e_console_agent_offload_workspace_file_workflow(tmp_path: Path)
     response = await _run_console_turn(
         config_path=config_path,
         text=(
-            "Use invoke_agent with agent_name workspace_manager_agent. "
+            "Use invoke_agent with agent_name workspace_manager_agent and mode=sync. "
             "Create notes/e2e-offload.txt with exact content E2E_OFFLOAD_OK. "
             "Then provide a short confirmation."
         ),
@@ -522,7 +526,7 @@ async def test_e2e_console_agent_offload_browser_playwright_workflow(tmp_path: P
     response = await _run_console_turn_with_retry(
         config_path=config_path,
         text=(
-            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent. "
+            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent and mode=sync. "
             "Task: use browser_run_code once on https://www.example.com and return "
             "title plus meta description in one line. "
             "If any browser tool fails, stop immediately and return exactly: browser unavailable. "
@@ -609,7 +613,7 @@ async def test_e2e_console_main_agent_delegates_example_screenshot_and_reports_w
     response = await _run_console_turn_with_retry(
         config_path=config_path,
         text=(
-            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent. "
+            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent and mode=sync. "
             "Task: use browser_run_code once to open https://www.example.com/, take one screenshot, "
             "and return screenshot path plus workspace folder. "
             "Do not call filesystem. "
@@ -663,7 +667,7 @@ async def test_e2e_console_screenshot_delegation_with_attachments_reports_path(
     response = await _run_console_turn_with_retry(
         config_path=config_path,
         text=(
-            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent. "
+            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent and mode=sync. "
             "Task: take a screenshot of https://www.example.com/. "
             "After receiving the delegation result, report the screenshot file path "
             "in a user-friendly console message format like 'Screenshot saved at: <path>'. "
@@ -725,7 +729,7 @@ async def test_e2e_console_top5_spanish_ai_youtubers_with_browser_and_llm_classi
     )
 
     request_text = (
-        "Usa invoke_agent exactamente una vez con agent_name=playwright_mcp_agent para investigar en web. "
+        "Usa invoke_agent exactamente una vez con agent_name=playwright_mcp_agent y mode=sync para investigar en web. "
         "No llames otras tools despues de eso. "
         "Necesito un top de al menos 5 youtubers que hablen en espanol sobre agentes AI y automatizaciones; "
         "si puedes recomendar mas de 5, esta bien. "

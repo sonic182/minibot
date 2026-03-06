@@ -171,8 +171,7 @@ class AgentDelegateTool:
         task = require_non_empty_str(payload, "task")
         details = optional_str(payload.get("context"), error_message="context must be a string")
         requested_mode = optional_str(payload.get("mode"), error_message="mode must be a string")
-        default_mode = "async" if self._job_service is not None else "sync"
-        mode = (requested_mode or default_mode).lower()
+        mode = (requested_mode or "async").lower()
         if mode not in {"async", "sync"}:
             raise ValueError("mode must be 'async' or 'sync'")
         spec = self._registry.get(agent_name)

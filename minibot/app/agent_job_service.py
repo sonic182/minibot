@@ -46,6 +46,7 @@ class AgentJobService:
             chat_id=chat_id,
             user_id=user_id,
             statuses=statuses,
+            cancel_requested_only=False,
             limit=limit,
             offset=offset,
         )

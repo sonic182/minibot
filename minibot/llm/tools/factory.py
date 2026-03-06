@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from typing import Callable
 from typing import TYPE_CHECKING
 
 from minibot.adapters.files.local_storage import LocalFileStorage
@@ -42,6 +44,7 @@ def build_enabled_tools(
     event_bus: EventBus | None = None,
     agent_registry: AgentRegistry | None = None,
     llm_factory: LLMClientFactory | None = None,
+    cleanup_callbacks: list[Callable[[], None]] | None = None,
 ) -> list[ToolBinding]:
     tools: list[ToolBinding] = []
     environment_prompt_fragment = build_environment_prompt_fragment(settings)
@@ -69,6 +72,9 @@ def build_enabled_tools(
             max_write_bytes=settings.tools.file_storage.max_write_bytes,
             allow_outside_root=settings.tools.file_storage.allow_outside_root,
         )
+        browser_output_dir = settings.tools.browser.output_dir.strip()
+        if browser_output_dir:
+            Path(browser_output_dir).mkdir(parents=True, exist_ok=True)
     if settings.tools.python_exec.enabled:
         python_exec_tool = HostPythonExecTool(settings.tools.python_exec, storage=managed_storage)
         tools.extend(python_exec_tool.bindings())
@@ -147,6 +153,8 @@ def build_enabled_tools(
             )
             try:
                 tools.extend(bridge.build_bindings())
+                if cleanup_callbacks is not None:
+                    cleanup_callbacks.append(client.close_blocking)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
     if agent_registry is not None and llm_factory is not None and not agent_registry.is_empty():

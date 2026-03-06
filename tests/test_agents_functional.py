@@ -12,6 +12,7 @@ from tests.fixtures.llm.mock_client import ScriptedLLMClient, ScriptedLLMFactory
 
 
 def _reset_container() -> None:
+    AppContainer._config_path = None
     AppContainer._settings = None
     AppContainer._logger = None
     AppContainer._event_bus = None
@@ -22,6 +23,9 @@ def _reset_container() -> None:
     AppContainer._agent_registry = None
     AppContainer._prompt_store = None
     AppContainer._prompt_service = None
+    AppContainer._job_store = None
+    AppContainer._job_service = None
+    AppContainer._job_supervisor = None
 
 
 def _write_config(
@@ -152,6 +156,7 @@ async def test_main_agent_invokes_specialist_via_tool(tmp_path: Path, provider: 
             "arguments": {
                 "agent_name": "workspace_manager_agent",
                 "task": "Calculate 2+3 and return only result",
+                "mode": "sync",
             },
             "call_id": "delegate-1",
             "response_id": "main-step-1",
@@ -229,6 +234,7 @@ async def test_disabled_agent_is_not_invokable(tmp_path: Path, provider: str) ->
             "arguments": {
                 "agent_name": "workspace_manager_agent",
                 "task": "Try a task",
+                "mode": "sync",
             },
             "call_id": "delegate-missing",
             "response_id": "main-step-1",
@@ -283,6 +289,7 @@ async def test_exclusive_ownership_hides_specialist_tool_from_main_agent(tmp_pat
             "arguments": {
                 "agent_name": "workspace_manager_agent",
                 "task": "calculate 2+3",
+                "mode": "sync",
             },
             "call_id": "delegate-exclusive",
             "response_id": "main-step-1",
@@ -354,6 +361,7 @@ async def test_delegated_agent_without_tool_calls_triggers_fallback(tmp_path: Pa
             "arguments": {
                 "agent_name": "workspace_manager_agent",
                 "task": "calculate 2+3",
+                "mode": "sync",
             },
             "call_id": "delegate-no-tool",
             "response_id": "main-step-1",

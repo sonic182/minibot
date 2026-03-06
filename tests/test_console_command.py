@@ -13,6 +13,18 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
     from minibot.app import console as console_module
 
     calls: dict[str, object] = {}
+    scheduler_probe = {"started": 0, "stopped": 0}
+    jobs_probe = {"started": 0, "stopped": 0}
+
+    class _Probe:
+        def __init__(self, probe: dict[str, int]) -> None:
+            self._probe = probe
+
+        async def start(self) -> None:
+            self._probe["started"] += 1
+
+        async def stop(self) -> None:
+            self._probe["stopped"] += 1
 
     class _FakeContainer:
         @classmethod
@@ -33,6 +45,14 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
         @classmethod
         def get_event_bus(cls):
             return object()
+
+        @classmethod
+        def get_scheduled_prompt_service(cls):
+            return _Probe(scheduler_probe)
+
+        @classmethod
+        def get_job_supervisor_service(cls):
+            return _Probe(jobs_probe)
 
         @classmethod
         async def initialize_storage(cls) -> None:
@@ -87,6 +107,8 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
     assert calls["dispatcher_stopped"] is True
     assert calls["service_started"] is True
     assert calls["service_stopped"] is True
+    assert scheduler_probe == {"started": 1, "stopped": 1}
+    assert jobs_probe == {"started": 1, "stopped": 1}
 
 
 @pytest.mark.asyncio
@@ -114,6 +136,14 @@ async def test_console_run_once_reads_stdin_when_dash(monkeypatch: pytest.Monkey
         @classmethod
         def get_event_bus(cls):
             return object()
+
+        @classmethod
+        def get_scheduled_prompt_service(cls):
+            return None
+
+        @classmethod
+        def get_job_supervisor_service(cls):
+            return None
 
         @classmethod
         async def initialize_storage(cls) -> None:
@@ -191,6 +221,14 @@ async def test_console_repl_requires_double_ctrl_c_to_exit(monkeypatch: pytest.M
         @classmethod
         def get_event_bus(cls):
             return object()
+
+        @classmethod
+        def get_scheduled_prompt_service(cls):
+            return None
+
+        @classmethod
+        def get_job_supervisor_service(cls):
+            return None
 
         @classmethod
         async def initialize_storage(cls) -> None:
@@ -278,6 +316,14 @@ async def test_console_run_once_timeout_shows_warning_without_crash(monkeypatch:
         @classmethod
         def get_event_bus(cls):
             return object()
+
+        @classmethod
+        def get_scheduled_prompt_service(cls):
+            return None
+
+        @classmethod
+        def get_job_supervisor_service(cls):
+            return None
 
         @classmethod
         async def initialize_storage(cls) -> None:

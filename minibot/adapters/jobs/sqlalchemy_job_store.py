@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, and_, or_, select, update
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, or_, select, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
@@ -116,14 +116,7 @@ class SQLAlchemyAgentJobStore(AgentJobRepository):
             stmt = (
                 select(AgentJobModel)
                 .where(
-                    or_(
-                        AgentJobModel.status == AgentJobStatus.QUEUED.value,
-                        and_(
-                            AgentJobModel.status.in_([AgentJobStatus.LEASED.value, AgentJobStatus.RUNNING.value]),
-                            AgentJobModel.lease_expires_at.is_not(None),
-                            AgentJobModel.lease_expires_at <= ensure_utc(now),
-                        ),
-                    )
+                    AgentJobModel.status == AgentJobStatus.QUEUED.value,
                 )
                 .where(AgentJobModel.cancel_requested_at.is_(None))
                 .order_by(AgentJobModel.created_at.asc())
@@ -138,16 +131,7 @@ class SQLAlchemyAgentJobStore(AgentJobRepository):
                 update_stmt = (
                     update(AgentJobModel)
                     .where(AgentJobModel.id == record.id)
-                    .where(
-                        or_(
-                            AgentJobModel.status == AgentJobStatus.QUEUED.value,
-                            and_(
-                                AgentJobModel.status.in_([AgentJobStatus.LEASED.value, AgentJobStatus.RUNNING.value]),
-                                AgentJobModel.lease_expires_at.is_not(None),
-                                AgentJobModel.lease_expires_at <= ensure_utc(now),
-                            ),
-                        )
-                    )
+                    .where(AgentJobModel.status == AgentJobStatus.QUEUED.value)
                     .where(AgentJobModel.cancel_requested_at.is_(None))
                     .values(
                         status=AgentJobStatus.LEASED.value,
@@ -321,6 +305,7 @@ class SQLAlchemyAgentJobStore(AgentJobRepository):
         chat_id: int | None = None,
         user_id: int | None = None,
         statuses: Sequence[AgentJobStatus] | None = None,
+        cancel_requested_only: bool = False,
         limit: int = 20,
         offset: int = 0,
     ) -> Sequence[AgentJob]:
@@ -335,6 +320,8 @@ class SQLAlchemyAgentJobStore(AgentJobRepository):
             filters.append(AgentJobModel.user_id == user_id)
         if statuses:
             filters.append(AgentJobModel.status.in_([status.value for status in statuses]))
+        if cancel_requested_only:
+            filters.append(AgentJobModel.cancel_requested_at.is_not(None))
         async with self._session_factory() as session:
             stmt = (
                 select(AgentJobModel)

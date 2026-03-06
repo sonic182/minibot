@@ -8,6 +8,7 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import timedelta
+from pathlib import Path
 from uuid import uuid4
 
 from minibot.adapters.config.schema import JobsConfig
@@ -101,6 +102,7 @@ class JobSupervisorService:
             "timeout_seconds": job.timeout_seconds or self._config.default_job_timeout_seconds,
         }
         env = os.environ.copy()
+        env["MINIBOT_CONFIG"] = self._config_path().as_posix()
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
@@ -137,7 +139,6 @@ class JobSupervisorService:
         worker_id: str,
         process: asyncio.subprocess.Process,
     ) -> None:
-        finished_at = utcnow()
         timeout_seconds = max(1, int(job.timeout_seconds or self._config.default_job_timeout_seconds))
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
@@ -164,6 +165,7 @@ class JobSupervisorService:
             )
             return
 
+        finished_at = utcnow()
         stdout_text = stdout.decode("utf-8", errors="replace").strip()
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
         if process.returncode not in (0, None):
@@ -253,7 +255,8 @@ class JobSupervisorService:
     async def _cancel_requested_workers(self) -> None:
         active_jobs = await self._repository.list_jobs(
             statuses=[AgentJobStatus.QUEUED, AgentJobStatus.LEASED, AgentJobStatus.RUNNING],
-            limit=100,
+            cancel_requested_only=True,
+            limit=1000,
         )
         now = utcnow()
         for job in active_jobs:
@@ -285,3 +288,9 @@ class JobSupervisorService:
                     error_payload={"error_code": "job_canceled", "error": "job was canceled"},
                 )
             )
+
+    @staticmethod
+    def _config_path() -> Path:
+        from minibot.adapters.container.app_container import AppContainer
+
+        return AppContainer.get_config_path()
