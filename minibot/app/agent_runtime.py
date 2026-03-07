@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import json
 from typing import Any, Sequence
 
-from ratchet_sm import FailAction, RetryAction, ValidAction
+from ratchet_sm import FailAction, RetryAction, ToolCallMissingAction, ValidAction
 
 from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
 from minibot.app.response_parser import continue_loop_requested
@@ -20,11 +20,15 @@ from minibot.core.agent_runtime import (
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.continue_loop import CONTINUE_LOOP_RETRY_PATCH
 from minibot.llm.services.ratchet_support import (
-    ToolCallMissingAction,
     build_tool_call_recovery_machine,
     recovered_tool_call_from_payload,
 )
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
+from minibot.llm.services.tool_loop_guard import (
+    MAX_REPEATED_TOOL_ITERATIONS,
+    tool_iteration_signature,
+    tool_loop_fallback_payload,
+)
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import humanize_token_count
 
@@ -74,6 +78,8 @@ class AgentRuntime:
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
         repeated_failure_counts: dict[str, int] = {}
+        repeated_iteration_count = 0
+        last_iteration_signature: str | None = None
         repeated_continue_loop_count = 0
         last_continue_loop_signature: str | None = None
         _validator = structured_validator if response_schema is not None else None
@@ -132,27 +138,29 @@ class AgentRuntime:
                 )
                 previous_response_id = completion.response_id
 
-                tool_calls = getattr(completion.message, "tool_calls", None) or []
-                recovered_tool_calls = []
-                if self._tools and not tool_calls and isinstance(getattr(completion.message, "content", None), str):
-                    tool_action = tool_recovery_machine.receive(completion.message.content)
+                tool_calls = list(getattr(completion.message, "tool_calls", None) or [])
+                if self._tools:
+                    raw_message_content = (
+                        completion.message.content if isinstance(completion.message.content, str) else ""
+                    )
+                    tool_action = tool_recovery_machine.receive(raw_message_content, tool_calls=tool_calls)
                     if isinstance(tool_action, ValidAction):
-                        recovered_tool_calls = [recovered_tool_call_from_payload(tool_action.parsed)]
+                        if tool_action.format_detected != "native_tool_call":
+                            tool_calls = [recovered_tool_call_from_payload(tool_action.parsed)]
                         tool_recovery_machine.reset()
-                    elif (
-                        isinstance(tool_action, ToolCallMissingAction)
-                        and tool_action.reason == "pseudo_tool_call_in_text"
-                    ):
-                        retry_patch = (tool_action.prompt_patch or "").strip()
-                        state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
-                        if retry_patch:
-                            state.messages.append(
-                                AgentMessage(
-                                    role="user",
-                                    content=[MessagePart(type="text", text=retry_patch)],
+                    elif isinstance(tool_action, ToolCallMissingAction):
+                        if tool_action.reason == "pseudo_tool_call_in_text":
+                            retry_patch = (tool_action.prompt_patch or "").strip()
+                            state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
+                            if retry_patch:
+                                state.messages.append(
+                                    AgentMessage(
+                                        role="user",
+                                        content=[MessagePart(type="text", text=retry_patch)],
+                                    )
                                 )
-                            )
-                        continue
+                            continue
+                        tool_recovery_machine.reset()
                     elif isinstance(tool_action, FailAction):
                         return RuntimeResult(
                             payload=self._repeated_failure_payload(
@@ -163,8 +171,6 @@ class AgentRuntime:
                             state=state,
                             total_tokens=total_tokens,
                         )
-                if recovered_tool_calls:
-                    tool_calls = recovered_tool_calls
                 if not tool_calls:
                     assistant_message = self._message_renderer.from_provider_assistant_message(completion.message)
                     state.messages.append(assistant_message)
@@ -373,6 +379,34 @@ class AgentRuntime:
                         responses_followup_messages.extend(
                             self._message_renderer.render_messages(AgentState(messages=applied_directive_messages))
                         )
+                iteration_signature = tool_iteration_signature(
+                    tool_calls,
+                    [execution.message_payload for execution in executions],
+                )
+                if iteration_signature and iteration_signature == last_iteration_signature:
+                    repeated_iteration_count += 1
+                else:
+                    repeated_iteration_count = 1
+                last_iteration_signature = iteration_signature
+                if repeated_iteration_count >= MAX_REPEATED_TOOL_ITERATIONS:
+                    self._logger.warning(
+                        "agent runtime repeated identical tool outputs; returning fallback",
+                        extra={
+                            "step": step,
+                            "response_id": completion.response_id,
+                            "repeated_count": repeated_iteration_count,
+                        },
+                    )
+                    return RuntimeResult(
+                        payload=tool_loop_fallback_payload(
+                            [execution.message_payload for execution in executions],
+                            [execution.tool_name for execution in executions],
+                            response_schema,
+                        ),
+                        response_id=completion.response_id,
+                        state=state,
+                        total_tokens=total_tokens,
+                    )
                 step += 1
 
     @staticmethod

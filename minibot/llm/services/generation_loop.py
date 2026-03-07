@@ -4,7 +4,7 @@ import logging
 import json
 from typing import Any, Awaitable, Callable, Sequence
 
-from ratchet_sm import FailAction, ValidAction
+from ratchet_sm import FailAction, ToolCallMissingAction, ValidAction
 
 from minibot.core.memory import MemoryEntry
 from minibot.llm.services.continue_loop import CONTINUE_LOOP_RETRY_PATCH, should_continue_tool_loop
@@ -13,7 +13,6 @@ from minibot.llm.services.debug_logging import log_provider_response
 from minibot.llm.services.models import LLMGeneration
 from minibot.llm.services.ratchet_support import (
     StructuredOutputValidator,
-    ToolCallMissingAction,
     build_tool_call_recovery_machine,
     recovered_tool_call_from_payload,
 )
@@ -130,22 +129,25 @@ async def generate_with_tools(
                 "applied_max_output_tokens": max_new_tokens if is_responses_provider else None,
             },
         )
-        recovered_tool_calls = None
-        if (
-            tool_bindings
-            and not message.tool_calls
-            and isinstance(message.content, str)
-            and tool_recovery_machine is not None
-        ):
-            tool_action = tool_recovery_machine.receive(message.content)
+        message_tool_calls = list(message.tool_calls or [])
+        effective_tool_calls = message_tool_calls
+        if tool_bindings and tool_recovery_machine is not None:
+            raw_message_content = message.content if isinstance(message.content, str) else ""
+            tool_action = tool_recovery_machine.receive(raw_message_content, tool_calls=message_tool_calls)
             if isinstance(tool_action, ValidAction):
-                recovered_tool_calls = [recovered_tool_call_from_payload(tool_action.parsed)]
+                if tool_action.format_detected == "native_tool_call":
+                    effective_tool_calls = message_tool_calls
+                else:
+                    effective_tool_calls = [recovered_tool_call_from_payload(tool_action.parsed)]
                 tool_recovery_machine.reset()
-            elif isinstance(tool_action, ToolCallMissingAction) and tool_action.reason == "pseudo_tool_call_in_text":
-                conversation.append(assistant_message_for_followup(message))
-                if tool_action.prompt_patch:
-                    conversation.append({"role": "user", "content": tool_action.prompt_patch})
-                continue
+            elif isinstance(tool_action, ToolCallMissingAction):
+                if tool_action.reason == "pseudo_tool_call_in_text":
+                    conversation.append(assistant_message_for_followup(message))
+                    if tool_action.prompt_patch:
+                        conversation.append({"role": "user", "content": tool_action.prompt_patch})
+                    continue
+                tool_recovery_machine.reset()
+                effective_tool_calls = []
             elif isinstance(tool_action, FailAction):
                 logger.warning(
                     "tool call recovery exceeded maximum attempts; returning fallback",
@@ -158,8 +160,6 @@ async def generate_with_tools(
                     response_id,
                     total_tokens=usage_accumulator.total_tokens_used or None,
                 )
-
-        effective_tool_calls = recovered_tool_calls or list(message.tool_calls or [])
         if not effective_tool_calls or not tool_bindings:
             payload = message.content
             response_id = extract_response_id(response)

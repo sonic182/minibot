@@ -43,7 +43,9 @@ async def http_server(unused_tcp_port: int) -> AsyncGenerator[Dict[str, Any], No
 @pytest.mark.asyncio
 async def test_http_tool_fetches_data(http_server: Dict[str, Any]) -> None:
     config = HTTPClientToolConfig(enabled=True, timeout_seconds=5, max_bytes=1024)
-    binding = HTTPClientTool(config).bindings()[0]
+    bindings = HTTPClientTool(config).bindings()
+    assert [binding.tool.name for binding in bindings] == ["http_request"]
+    binding = bindings[0]
     result = await binding.handler(
         {"method": "GET", "url": http_server["url"]},
         ToolContext(owner_id="tester"),

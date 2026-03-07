@@ -185,6 +185,7 @@ def test_build_enabled_tools_includes_optional_toolsets() -> None:
     assert "user_memory_search" not in names
     assert "user_memory_delete" not in names
     assert "http_request" in names
+    assert "http_client" not in names
     assert {
         "schedule_prompt",
         "cancel_scheduled_prompt",

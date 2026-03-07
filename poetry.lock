@@ -2406,27 +2406,23 @@ files = [
 
 [[package]]
 name = "ratchet-sm"
-version = "0.0.1"
+version = "0.1.0"
 description = "A provider-agnostic state machine for handling, normalizing, and recovering structured LLM outputs."
 optional = false
-python-versions = "^3.10"
-files = []
-develop = false
+python-versions = "<4.0,>=3.10"
+files = [
+    {file = "ratchet_sm-0.1.0-py3-none-any.whl", hash = "sha256:ae1c76980f8f0289732174388bce6c9ee834e9fc35192b7a83f381793eba1743"},
+    {file = "ratchet_sm-0.1.0.tar.gz", hash = "sha256:29f994654d1cacb4204849115c2a6d98aa17e953fb52cffd1773c1e1b82409c7"},
+]
 
 [package.dependencies]
-pydantic = {version = ">=2.0", optional = true}
+pydantic = {version = ">=2.0", optional = true, markers = "extra == \"pydantic\" or extra == \"all\""}
 
 [package.extras]
 all = ["pydantic (>=2.0)", "python-frontmatter", "pyyaml"]
 frontmatter = ["python-frontmatter"]
 pydantic = ["pydantic (>=2.0)"]
 yaml = ["pyyaml"]
-
-[package.source]
-type = "git"
-url = "https://github.com/sonic182/ratchet"
-reference = "feature/new_tools_actions"
-resolved_reference = "9dae99674a705019ee8841b1d46fc669229d2919"
 
 [[package]]
 name = "referencing"
@@ -3090,4 +3086,4 @@ stt = ["faster-whisper"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.12,<3.15"
-content-hash = "cd74fc6894a9ce29da7378b847aa4dd834091c73100fba70c53fa66c1c186b3b"
+content-hash = "cd67fb0265b54bd8da62e69e52e4021c4fd058d1707b14b32cf22b5b107b74e2"

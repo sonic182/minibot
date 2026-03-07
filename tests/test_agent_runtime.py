@@ -81,6 +81,24 @@ async def test_runtime_returns_final_message_without_tool_calls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_returns_final_message_without_tool_retry_when_tools_are_available() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[LLMCompletionStep(message=_FakeMessage(content="hello"), response_id="resp-1", total_tokens=7)],
+        executions=[],
+    )
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[cast(Any, object())])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(state=state, tool_context=ToolContext(owner_id="1"))
+
+    assert result.payload == "hello"
+    assert result.response_id == "resp-1"
+    assert result.total_tokens == 7
+    assert llm_client.complete_once_calls == 1
+    assert llm_client.execute_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_runtime_applies_append_message_directive_for_trusted_tool() -> None:
     tool_call = _FakeToolCall(id="call-1", function={"name": "self_insert_artifact", "arguments": "{}"})
     steps = [
@@ -458,6 +476,71 @@ async def test_runtime_stops_on_repeated_identical_tool_failure_signatures() -> 
     assert llm_client.complete_once_calls == 2
     assert isinstance(result.payload, dict)
     assert "same tool error repeatedly" in result.payload["answer"]["content"]
+    assert result.payload["should_answer_to_user"] is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_stops_on_repeated_identical_successful_tool_outputs() -> None:
+    legacy_tool_call = _FakeToolCall(id="call-1", function={"name": "http_client", "arguments": "{}"})
+    canonical_tool_call = _FakeToolCall(id="call-1", function={"name": "http_request", "arguments": "{}"})
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[legacy_tool_call]),
+            response_id="resp-1",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[canonical_tool_call]),
+            response_id="resp-2",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[legacy_tool_call]),
+            response_id="resp-3",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-4", total_tokens=3),
+    ]
+    executions = [
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"{\\"bitcoin\\":{\\"usd\\":1}}"}'},
+                result=ToolResult(content={"status": 200, "body": '{"bitcoin":{"usd":1}}'}),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"{\\"bitcoin\\":{\\"usd\\":1}}"}'},
+                result=ToolResult(content={"status": 200, "body": '{"bitcoin":{"usd":1}}'}),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"{\\"bitcoin\\":{\\"usd\\":1}}"}'},
+                result=ToolResult(content={"status": 200, "body": '{"bitcoin":{"usd":1}}'}),
+            )
+        ],
+    ]
+    llm_client = _StubRuntimeLLMClient(steps=steps, executions=executions)
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    runtime._tools = [cast(Any, object())]
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert llm_client.complete_once_calls == 3
+    assert isinstance(result.payload, dict)
+    assert "tool-loop safeguard" in result.payload["answer"]
     assert result.payload["should_answer_to_user"] is True
 
 

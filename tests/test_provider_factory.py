@@ -15,6 +15,7 @@ from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.tool_executor import (
+    canonical_tool_name,
     normalize_tool_args_for_signature,
     parse_tool_call,
     sanitize_tool_arguments_for_log,
@@ -1113,6 +1114,23 @@ def test_parse_tool_call_repairs_unclosed_json_object() -> None:
 
     assert tool_name == "http_request"
     assert arguments == {"url": "https://www.ecosbox.com", "method": "GET"}
+
+
+def test_parse_tool_call_normalizes_legacy_http_client_alias() -> None:
+    call = _FakeToolCall(
+        id="tc-1",
+        function={"name": "http_client", "arguments": '{"url": "https://example.com", "method": "GET"}'},
+    )
+
+    tool_name, arguments = parse_tool_call(call)
+
+    assert tool_name == "http_request"
+    assert arguments == {"url": "https://example.com", "method": "GET"}
+
+
+def test_canonical_tool_name_normalizes_legacy_http_client_alias() -> None:
+    assert canonical_tool_name("http_client") == "http_request"
+    assert canonical_tool_name("http_request") == "http_request"
 
 
 def test_normalize_tool_args_for_signature_is_stable_across_dict_order() -> None:

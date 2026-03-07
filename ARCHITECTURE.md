@@ -346,7 +346,7 @@ Current notes:
   - agent delegation (`list_agents`, `invoke_agent`),
   - chat memory management (`chat_history_info`, `chat_history_trim`),
   - calculator (`calculator`, `calculate_expression`),
-  - HTTP client (`http_client`, `http_request`),
+  - HTTP client (`http_request`),
   - user/KV memory (`memory` action facade),
   - Python execution (`python_execute`, `python_environment_info`),
   - shell execution (`bash`),

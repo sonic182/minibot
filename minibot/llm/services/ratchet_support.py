@@ -2,77 +2,52 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
 from llm_async.models.tool_call import ToolCall
 from pydantic import BaseModel
-from ratchet_sm import FailAction, RetryAction, State, StateMachine, ValidAction
+from ratchet_sm import FailAction, RetryAction, State, StateMachine, ToolCallMissingAction, ValidAction
 from ratchet_sm.strategies.base import FailureContext
 from ratchet_sm.strategies.validation_feedback import ValidationFeedback
 
 from minibot.shared.parse_utils import parse_json_with_fenced_fallback
 
 
-@dataclass(frozen=True)
-class ToolCallMissingAction:
-    attempts: int
-    state_name: str
-    raw: str
-    prompt_patch: str | None
-    errors: tuple[str, ...]
-    reason: str
-
-
 class ToolCallRecoveryMachine:
     def __init__(self, *, max_attempts: int, state_name: str = "tool_call") -> None:
-        self._max_attempts = max_attempts
         self._state_name = state_name
-        self._attempts = 0
-        self._history: list[ToolCallMissingAction] = []
-
-    def receive(self, raw: str) -> ValidAction | ToolCallMissingAction | FailAction:
-        self._attempts += 1
-        if self._attempts > self._max_attempts:
-            return FailAction(
-                attempts=self._attempts,
-                state_name=self._state_name,
-                raw=raw,
-                history=tuple(self._history),
-                reason=f"Exceeded max_attempts ({self._max_attempts})",
-            )
-        parsed = _extract_pseudo_tool_call(raw)
-        if parsed is not None and _looks_like_tool_call_payload(parsed):
-            return ValidAction(
-                attempts=self._attempts,
-                state_name=self._state_name,
-                raw=raw,
-                parsed=parsed,
-                format_detected="pseudo_tool_call",
-                was_cleaned=False,
-            )
-        reason = "pseudo_tool_call_in_text" if _has_pseudo_tool_call_tag(raw) else "no_tool_call"
-        prompt_patch = (
-            "Your previous response attempted a tool call in text. "
-            "Do not wrap tool calls in text or tags. Use the provider's native tool call format."
-            if reason == "pseudo_tool_call_in_text"
-            else "If you need to use a tool, call it using the provider's native tool call format."
+        self._machine = StateMachine(
+            states={
+                state_name: State(
+                    name=state_name,
+                    max_attempts=max_attempts,
+                    requires_tool_call=True,
+                )
+            },
+            transitions={},
+            initial=state_name,
         )
-        action = ToolCallMissingAction(
-            attempts=self._attempts,
+
+    def receive(
+        self,
+        raw: str,
+        *,
+        tool_calls: Sequence[Any] | None = None,
+    ) -> ValidAction | ToolCallMissingAction | FailAction:
+        action = self._machine.receive(raw, tool_calls=list(tool_calls) if tool_calls is not None else None)
+        if isinstance(action, ValidAction | ToolCallMissingAction | FailAction):
+            return action
+        return FailAction(
+            attempts=1,
             state_name=self._state_name,
             raw=raw,
-            prompt_patch=prompt_patch,
-            errors=(f"No tool call found in response (reason: {reason}).",),
-            reason=reason,
+            history=(),
+            reason=f"Unsupported ratchet action type: {type(action).__name__}",
         )
-        self._history.append(action)
-        return action
 
     def reset(self) -> None:
-        self._attempts = 0
-        self._history = []
+        self._machine.reset()
 
 
 def build_tool_call_recovery_machine(*, max_attempts: int) -> ToolCallRecoveryMachine:
@@ -331,57 +306,3 @@ def _coerce_argument_object(value: Any) -> dict[str, Any] | None:
         if isinstance(decoded, Mapping):
             return dict(decoded)
     return None
-
-
-def _has_pseudo_tool_call_tag(raw: str) -> bool:
-    markers = (
-        "<tool_call>",
-        "</tool_call>",
-        "<function_call>",
-        "</function_call>",
-        "```tool_call",
-        "```function_call",
-        "[TOOL_CALL]",
-        "[/TOOL_CALL]",
-    )
-    lowered = raw.lower()
-    return any(marker.lower() in lowered for marker in markers)
-
-
-def _extract_pseudo_tool_call(raw: str) -> dict[str, Any] | None:
-    candidates = [raw.strip()]
-    tag_pairs = (
-        ("<tool_call>", "</tool_call>"),
-        ("<function_call>", "</function_call>"),
-        ("[tool_call]", "[/tool_call]"),
-    )
-    lowered = raw.lower()
-    for start, end in tag_pairs:
-        start_index = lowered.find(start)
-        end_index = lowered.find(end)
-        if start_index != -1 and end_index != -1 and end_index > start_index:
-            body = raw[start_index + len(start) : end_index].strip()
-            if body:
-                candidates.append(body)
-    if lowered.startswith("```tool_call") or lowered.startswith("```function_call"):
-        lines = raw.splitlines()
-        if len(lines) >= 3 and lines[-1].strip() == "```":
-            candidates.append("\n".join(lines[1:-1]).strip())
-
-    for candidate in candidates:
-        try:
-            parsed = parse_json_with_fenced_fallback(candidate)
-        except Exception:
-            continue
-        if isinstance(parsed, Mapping):
-            return dict(parsed)
-    return None
-
-
-def _looks_like_tool_call_payload(payload: Mapping[str, Any]) -> bool:
-    if any(isinstance(payload.get(key), str) and payload.get(key) for key in ("name", "tool", "tool_name")):
-        return True
-    function = payload.get("function")
-    if isinstance(function, Mapping) and isinstance(function.get("name"), str) and function.get("name"):
-        return True
-    return False

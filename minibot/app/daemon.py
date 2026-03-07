@@ -17,7 +17,7 @@ async def run() -> None:
     if settings.tools.kv_memory.enabled:
         enabled_tools.append("kv_memory")
     if settings.tools.http_client.enabled:
-        enabled_tools.append("http_client")
+        enabled_tools.append("http_request")
     if settings.tools.time.enabled:
         enabled_tools.append("time")
     if settings.tools.calculator.enabled:

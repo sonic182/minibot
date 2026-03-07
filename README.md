@@ -671,7 +671,7 @@ To enable optional speech-to-text tooling, install the `stt` extra (`poetry inst
 - ⏰ Scheduler tools: `schedule` action facade (`create`/`list`/`cancel`/`delete`) plus granular aliases (`schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`).
 - 🗂️ File tools: `filesystem` action facade (`list`/`glob`/`info`/`write`/`move`/`delete`/`send`), `glob_files`, `read_file`, `grep`.
 - 🧩 `self_insert_artifact`: inject managed files (`tools.file_storage.root_dir` relative path) into runtime directives for in-loop multimodal analysis.
-- 🧮 `calculator` + alias `calculate_expression`, 🕒 `current_datetime`, and 🌐 `http_client` for utility and fetch workflows.
+- 🧮 `calculator` + alias `calculate_expression`, 🕒 `current_datetime`, and 🌐 `http_request` for utility and fetch workflows.
 - 🐍 `python_execute` + `python_environment_info`: optional host Python execution and runtime/package inspection, including optional artifact export into managed files (`save_artifacts=true`) so outputs can be sent via the `filesystem` tool.
 - 💻 `bash`: optional host shell execution via `/bin/bash -lc` for command pipelines and CLI workflows.
 - 🧩 `apply_patch`: optional structured file edits via patch envelopes (`*** Begin Patch ... *** End Patch`) with add/update/delete/move operations.
