@@ -566,8 +566,10 @@ async def test_generate_stops_after_tool_loop_limit(monkeypatch: pytest.MonkeyPa
     )
 
     assert isinstance(result.payload, dict)
-    assert "tool-loop safeguard" in result.payload["answer"]
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
     assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
 
 
 @pytest.mark.asyncio
@@ -593,8 +595,10 @@ async def test_generate_stops_when_tool_outputs_repeat_identically(monkeypatch: 
     result = await client.generate([], "hello", tools=[binding], response_schema={"type": "object"})
 
     assert isinstance(result.payload, dict)
-    assert "tool-loop safeguard" in result.payload["answer"]
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
     assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
     assert len(client._provider.calls) == 3
 
 
@@ -1144,9 +1148,8 @@ def test_tool_failure_signature_is_stable_across_dict_order() -> None:
     args_one = {"headers": {"B": "2", "A": "1"}, "url": "https://example.com"}
     args_two = {"url": "https://example.com", "headers": {"A": "1", "B": "2"}}
 
-    assert (
-        tool_failure_signature("http_request", args_one, "tool_execution_failed", "boom")
-        == tool_failure_signature("http_request", args_two, "tool_execution_failed", "boom")
+    assert tool_failure_signature("http_request", args_one, "tool_execution_failed", "boom") == tool_failure_signature(
+        "http_request", args_two, "tool_execution_failed", "boom"
     )
 
 
@@ -1183,9 +1186,11 @@ async def test_generate_surfaces_invalid_tool_arguments_for_retry(monkeypatch: p
     result = await client.generate([], "time", tools=[binding], response_schema={"type": "object"})
 
     assert isinstance(result.payload, dict)
-    assert "tool-loop safeguard" in result.payload["answer"]
-    assert "current_datetime" in result.payload["answer"]
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
+    assert "current_datetime" in result.payload["answer"]["content"]
     assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
     assert len(client._provider.calls) == 2
 
 

@@ -248,7 +248,9 @@ async def test_runtime_continues_loop_when_structured_payload_requests_it() -> N
                 total_tokens=3,
             ),
             LLMCompletionStep(
-                message=_FakeMessage(content='{"answer":{"kind":"text","content":"done"},"should_answer_to_user":true}'),
+                message=_FakeMessage(
+                    content='{"answer":{"kind":"text","content":"done"},"should_answer_to_user":true}'
+                ),
                 response_id="resp-3",
                 total_tokens=2,
             ),
@@ -382,9 +384,7 @@ async def test_runtime_retries_do_not_consume_step_budget() -> None:
 @pytest.mark.asyncio
 async def test_runtime_custom_validator_honors_caller_schema() -> None:
     """P1 fix: a custom validator with _DelegatedPayload must accept kind='json' without retrying."""
-    delegated_json = (
-        '{"answer":{"kind":"json","content":"{\\"key\\":\\"value\\"}"},"should_answer_to_user":true}'
-    )
+    delegated_json = '{"answer":{"kind":"json","content":"{\\"key\\":\\"value\\"}"},"should_answer_to_user":true}'
     llm_client = _StubRuntimeLLMClient(
         steps=[
             LLMCompletionStep(
@@ -540,8 +540,75 @@ async def test_runtime_stops_on_repeated_identical_successful_tool_outputs() -> 
 
     assert llm_client.complete_once_calls == 3
     assert isinstance(result.payload, dict)
-    assert "tool-loop safeguard" in result.payload["answer"]
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
     assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_tool_loop_fallback_payload_stays_structured() -> None:
+    tool_call = _FakeToolCall(id="call-1", function={"name": "http_request", "arguments": "{}"})
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-1",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-2",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-3",
+            total_tokens=3,
+        ),
+    ]
+    executions = [
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"ok"}'},
+                result=ToolResult(content={"status": 200, "body": "ok"}),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"ok"}'},
+                result=ToolResult(content={"status": 200, "body": "ok"}),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"ok"}'},
+                result=ToolResult(content={"status": 200, "body": "ok"}),
+            )
+        ],
+    ]
+    llm_client = _StubRuntimeLLMClient(steps=steps, executions=executions)
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[cast(Any, object())])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
+    assert "http_request" in result.payload["answer"]["content"]
+    assert '{"status":200,"body":"ok"}' in result.payload["answer"]["content"]
+    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
 
 
 @pytest.mark.asyncio

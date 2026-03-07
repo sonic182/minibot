@@ -48,8 +48,12 @@ def tool_loop_fallback_payload(
     )
     if response_schema:
         return {
-            "answer": answer,
+            "answer": {
+                "kind": "text",
+                "content": answer,
+            },
             "should_answer_to_user": True,
+            "attachments": [],
         }
     return answer
 
