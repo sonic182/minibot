@@ -105,7 +105,13 @@ async def _get_entry(
     entry_id = optional_str(payload.get("entry_id"))
     title = optional_str(payload.get("title"))
     if not entry_id and not title:
-        return {"ok": False, "error": "entry_id or title is required to retrieve an entry", "action": "get"}
+        return {
+            "ok": False,
+            "error": "entry_id or title is required. Use action=list_titles to discover available entries first.",
+            "action": "get",
+            "is_repeated_failure_candidate": True,
+            "failure_signature": "memory:get:missing_required_fields",
+        }
     entry = await memory.get_entry(owner_id=owner_id, entry_id=entry_id, title=title)
     if not entry:
         response: dict[str, Any] = {"message": "Entry not found", "owner_id": owner_id}
@@ -212,13 +218,16 @@ async def _list_titles(
         }
         for entry in entries
     ]
-    return {
+    result: dict[str, Any] = {
         "owner_id": owner_id,
         "total": len(titles) if query else total,
         "limit": requested_limit,
         "offset": requested_offset,
         "titles": titles,
     }
+    if not titles:
+        result["hint"] = "No memory entries found. Do not retry — proceed using your own knowledge or ask the user."
+    return result
 
 
 async def _suggest_titles(memory: KeyValueMemory, owner_id: str, title: str) -> list[str]:

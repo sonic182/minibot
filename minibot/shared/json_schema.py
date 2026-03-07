@@ -84,3 +84,50 @@ def _has_null_option(options: list[Any]) -> bool:
         if isinstance(option_type, list) and "null" in option_type:
             return True
     return False
+
+
+def to_relaxed_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Return a schema without strict-mode constraints (for models that struggle with them)."""
+    if not isinstance(schema, dict):
+        raise ValueError("schema must be an object")
+    result = _relax_schema(schema)
+    if not isinstance(result, dict):
+        raise ValueError("schema must relax to an object")
+    return result
+
+
+def _relax_schema(node: Any) -> Any:
+    if isinstance(node, list):
+        return [_relax_schema(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+
+    relaxed: dict[str, Any] = {key: _relax_schema(value) for key, value in node.items()}
+
+    properties = relaxed.get("properties")
+    is_object_schema = relaxed.get("type") == "object" or isinstance(properties, dict)
+    if is_object_schema:
+        relaxed.pop("additionalProperties", None)
+        original_required = relaxed.get("required")
+        if isinstance(original_required, list) and isinstance(properties, dict):
+            relaxed["required"] = [
+                name for name in original_required
+                if isinstance(name, str) and not _is_nullable(properties.get(name))
+            ]
+
+    return relaxed
+
+
+def _is_nullable(schema: Any) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    type_value = schema.get("type")
+    if isinstance(type_value, list) and "null" in type_value:
+        return True
+    if type_value == "null":
+        return True
+    for combinator in ("anyOf", "oneOf"):
+        options = schema.get(combinator)
+        if isinstance(options, list) and _has_null_option(options):
+            return True
+    return False

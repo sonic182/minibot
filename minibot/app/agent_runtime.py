@@ -7,6 +7,7 @@ import json
 from typing import Any, Sequence
 
 from ratchet_sm import FailAction, RetryAction, ToolCallMissingAction, ValidAction
+from ratchet_sm.normalizers.extract_dsml_tool_call import parse_dsml_tool_call
 
 from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
 from minibot.app.response_parser import continue_loop_requested
@@ -17,6 +18,7 @@ from minibot.core.agent_runtime import (
     MessagePart,
     RuntimeLimits,
 )
+from llm_async.models.tool_call import ToolCall
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.continue_loop import CONTINUE_LOOP_RETRY_PATCH
 from minibot.llm.services.ratchet_support import (
@@ -147,6 +149,8 @@ class AgentRuntime:
                     if isinstance(tool_action, ValidAction):
                         if tool_action.format_detected != "native_tool_call":
                             tool_calls = [recovered_tool_call_from_payload(tool_action.parsed)]
+                        else:
+                            tool_calls = _supplement_native_tool_calls_from_dsml(tool_calls, raw_message_content)
                         tool_recovery_machine.reset()
                     elif isinstance(tool_action, ToolCallMissingAction):
                         if tool_action.reason == "pseudo_tool_call_in_text":
@@ -470,3 +474,65 @@ class AgentRuntime:
                 )
                 appended.append(stamped_message)
         return appended
+
+
+def _supplement_native_tool_calls_from_dsml(
+    tool_calls: list[Any],
+    raw_content: str,
+) -> list[Any]:
+    """If raw_content has a DSML tool call matching the native tool name with more args, merge."""
+    if not raw_content or not tool_calls:
+        return tool_calls
+
+    dsml_parsed = parse_dsml_tool_call(raw_content)
+    if dsml_parsed is None:
+        return tool_calls
+
+    dsml_name = dsml_parsed.get("name", "")
+    dsml_args = dsml_parsed.get("arguments", {})
+    if not dsml_name or not isinstance(dsml_args, dict):
+        return tool_calls
+
+    first_tc = tool_calls[0]
+
+    # Extract native name
+    native_name = getattr(first_tc, "name", None)
+    if native_name is None:
+        fn = getattr(first_tc, "function", None)
+        if isinstance(fn, dict):
+            native_name = fn.get("name")
+
+    # Extract native args
+    native_input: dict[str, Any] = getattr(first_tc, "input", None) or {}
+    if not native_input:
+        fn = getattr(first_tc, "function", None)
+        if isinstance(fn, dict):
+            fn_args = fn.get("arguments")
+            if isinstance(fn_args, str):
+                try:
+                    native_input = json.loads(fn_args)
+                except (json.JSONDecodeError, ValueError):
+                    native_input = {}
+            elif isinstance(fn_args, dict):
+                native_input = dict(fn_args)
+    if not isinstance(native_input, dict):
+        native_input = {}
+
+    # Guard: only merge when tool names match
+    if dsml_name != native_name:
+        return tool_calls
+
+    # Guard: only supplement if DSML has strictly more keys
+    if not (set(dsml_args.keys()) - set(native_input.keys())):
+        return tool_calls
+
+    merged_args = {**native_input, **dsml_args}
+    supplemented = recovered_tool_call_from_payload({"name": dsml_name, "arguments": merged_args})
+    final = ToolCall(
+        id=getattr(first_tc, "id", supplemented.id),
+        type=supplemented.type,
+        name=supplemented.name,
+        input=supplemented.input,
+        function=supplemented.function,
+    )
+    return [final] + list(tool_calls[1:])
