@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 import logging
+import json
 from typing import Any, Awaitable, Callable, Sequence
 
+from ratchet_sm import FailAction, ValidAction
+
 from minibot.core.memory import MemoryEntry
+from minibot.llm.services.continue_loop import CONTINUE_LOOP_RETRY_PATCH, should_continue_tool_loop
 from minibot.llm.services.compaction import continue_incomplete_response
+from minibot.llm.services.debug_logging import log_provider_response
 from minibot.llm.services.models import LLMGeneration
+from minibot.llm.services.ratchet_support import (
+    StructuredOutputValidator,
+    ToolCallMissingAction,
+    build_tool_call_recovery_machine,
+    recovered_tool_call_from_payload,
+)
 from minibot.llm.services.request_builder import (
     RequestContext,
     build_generate_extra_kwargs,
@@ -25,7 +36,6 @@ from minibot.llm.services.usage_parser import (
     extract_response_id,
     extract_total_tokens,
     extract_usage_from_response,
-    parse_structured_payload,
     should_auto_continue_incomplete,
 )
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -75,6 +85,16 @@ async def generate_with_tools(
         system_prompt=system_prompt,
     )
     usage_accumulator = UsageAccumulator()
+    repeated_continue_loop_count = 0
+    last_continue_loop_signature: str | None = None
+    tool_recovery_machine = (
+        build_tool_call_recovery_machine(max_attempts=max_tool_iterations) if tool_bindings else None
+    )
+    structured_validator = (
+        StructuredOutputValidator(max_attempts=max_tool_iterations, schema=response_schema)
+        if response_schema
+        else None
+    )
 
     while True:
         call_kwargs = build_generate_step_call_kwargs(
@@ -85,6 +105,12 @@ async def generate_with_tools(
             extra_kwargs=extra_kwargs,
         )
         response = await complete_with_schema_fallback(call_kwargs)
+        log_provider_response(
+            logger=logger,
+            response=response,
+            context="generate_with_tools",
+            provider_name=provider_name,
+        )
         usage = extract_usage_from_response(response)
         usage_tokens = extract_total_tokens(response)
         usage_accumulator.add_step(usage, usage_tokens)
@@ -104,7 +130,37 @@ async def generate_with_tools(
                 "applied_max_output_tokens": max_new_tokens if is_responses_provider else None,
             },
         )
-        if not message.tool_calls or not tool_bindings:
+        recovered_tool_calls = None
+        if (
+            tool_bindings
+            and not message.tool_calls
+            and isinstance(message.content, str)
+            and tool_recovery_machine is not None
+        ):
+            tool_action = tool_recovery_machine.receive(message.content)
+            if isinstance(tool_action, ValidAction):
+                recovered_tool_calls = [recovered_tool_call_from_payload(tool_action.parsed)]
+                tool_recovery_machine.reset()
+            elif isinstance(tool_action, ToolCallMissingAction) and tool_action.reason == "pseudo_tool_call_in_text":
+                conversation.append(assistant_message_for_followup(message))
+                if tool_action.prompt_patch:
+                    conversation.append({"role": "user", "content": tool_action.prompt_patch})
+                continue
+            elif isinstance(tool_action, FailAction):
+                logger.warning(
+                    "tool call recovery exceeded maximum attempts; returning fallback",
+                    extra={"tool_names": recent_tool_names[-10:]},
+                )
+                response_id = extract_response_id(response)
+                payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
+                return LLMGeneration(
+                    payload,
+                    response_id,
+                    total_tokens=usage_accumulator.total_tokens_used or None,
+                )
+
+        effective_tool_calls = recovered_tool_calls or list(message.tool_calls or [])
+        if not effective_tool_calls or not tool_bindings:
             payload = message.content
             response_id = extract_response_id(response)
             status = usage.status
@@ -127,17 +183,60 @@ async def generate_with_tools(
                 response_id = continuation.response_id or response_id
                 status = continuation.status
                 incomplete_reason = continuation.incomplete_reason
-            if response_schema and isinstance(payload, str):
-                try:
-                    parsed = parse_structured_payload(payload)
+            if response_schema and structured_validator is not None:
+                action = structured_validator.receive(payload)
+                if isinstance(action, ValidAction):
+                    parsed_payload = structured_validator.valid_payload(action)
+                    if tool_bindings and should_continue_tool_loop(parsed_payload):
+                        continue_signature = json.dumps(
+                            parsed_payload,
+                            sort_keys=True,
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                            default=str,
+                        )
+                        if continue_signature == last_continue_loop_signature:
+                            repeated_continue_loop_count += 1
+                        else:
+                            repeated_continue_loop_count = 1
+                        last_continue_loop_signature = continue_signature
+                        structured_validator.reset()
+                        if repeated_continue_loop_count >= 2:
+                            logger.warning("repeated identical continue_loop payload; returning fallback")
+                            return usage_accumulator.build_generation(
+                                payload=tool_loop_fallback_payload(
+                                    last_tool_messages,
+                                    [*recent_tool_names, "continue_loop"],
+                                    response_schema,
+                                ),
+                                response_id=response_id,
+                                status=status,
+                                incomplete_reason=incomplete_reason,
+                            )
+                        conversation.append(assistant_message_for_followup(message))
+                        conversation.append({"role": "user", "content": CONTINUE_LOOP_RETRY_PATCH})
+                        continue
                     return usage_accumulator.build_generation(
-                        payload=parsed,
+                        payload=parsed_payload,
                         response_id=response_id,
                         status=status,
                         incomplete_reason=incomplete_reason,
                     )
-                except Exception:
-                    logger.warning("failed to parse structured response; falling back to text")
+                if isinstance(action, ToolCallMissingAction):
+                    logger.warning("unexpected structured validator action", extra={"action": type(action).__name__})
+                if isinstance(action, FailAction):
+                    logger.warning("structured response validation failed; returning raw fallback")
+                    fallback_payload = payload if isinstance(payload, dict) else {"raw_response": payload}
+                    return usage_accumulator.build_generation(
+                        payload=fallback_payload,
+                        response_id=response_id,
+                        status=status,
+                        incomplete_reason=incomplete_reason,
+                    )
+                conversation.append(assistant_message_for_followup(message))
+                if action.prompt_patch:
+                    conversation.append({"role": "user", "content": action.prompt_patch})
+                continue
             return usage_accumulator.build_generation(
                 payload=payload,
                 response_id=response_id,
@@ -146,20 +245,20 @@ async def generate_with_tools(
             )
 
         tool_messages = await execute_tool_calls(
-            message.tool_calls,
+            effective_tool_calls,
             tool_bindings,
             context,
             responses_mode=is_responses_provider,
             logger=logger,
         )
-        iteration_signature = tool_iteration_signature(message.tool_calls, tool_messages)
+        iteration_signature = tool_iteration_signature(effective_tool_calls, tool_messages)
         if iteration_signature and iteration_signature == last_iteration_signature:
             repeated_iteration_count += 1
         else:
             repeated_iteration_count = 1
         last_iteration_signature = iteration_signature
         last_tool_messages = tool_messages
-        recent_tool_names.extend(tool_name_from_call(call) for call in message.tool_calls)
+        recent_tool_names.extend(tool_name_from_call(call) for call in effective_tool_calls)
         if repeated_iteration_count >= MAX_REPEATED_TOOL_ITERATIONS:
             logger.warning(
                 "tool loop repeated identical outputs; returning fallback",

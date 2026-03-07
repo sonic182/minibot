@@ -11,7 +11,8 @@ Return valid structured output JSON with this shape:
     "content": "string",
     "meta": { "disable_link_preview": boolean }
   },
-  "should_answer_to_user": boolean
+  "should_answer_to_user": boolean,
+  "continue_loop": boolean
 }
 
 Formatting rules:
@@ -42,7 +43,42 @@ Telegram MarkdownV2 rules:
 General:
 - `answer.content` must be non-empty.
 - Set `should_answer_to_user=true` unless you intentionally need silence.
+- Use `continue_loop=true` only when tools are available, you still need another internal iteration, and you are not
+  ready to answer the user yet. In that case also set `should_answer_to_user=false`.
+- Do not send "working on it", "one moment", or "I'll do that now" as a final user-facing reply when a tool call should
+  happen first.
+- If the user asked for an action that has not executed yet, the response is not final. In that case do not use
+  `should_answer_to_user=true`.
+- For unfinished work, the preferred structured output is:
+  - `should_answer_to_user=false`
+  - `continue_loop=true`
 - Keep replies concise and directly renderable in Telegram.
+
+Examples:
+
+Good unfinished response:
+```json
+{
+  "answer": {
+    "kind": "text",
+    "content": "Continuing internal work."
+  },
+  "should_answer_to_user": false,
+  "continue_loop": true
+}
+```
+
+Bad unfinished response:
+```json
+{
+  "answer": {
+    "kind": "text",
+    "content": "I'll open the browser now."
+  },
+  "should_answer_to_user": true,
+  "continue_loop": false
+}
+```
 
 Attachment handling for delegations (CRITICAL):
 - NEVER ask browser agent for base64 or encoded data - this wastes tokens

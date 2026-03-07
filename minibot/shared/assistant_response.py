@@ -30,6 +30,7 @@ def assistant_response_schema(
             "additionalProperties": False,
         },
         "should_answer_to_user": {"type": "boolean"},
+        "continue_loop": {"type": "boolean"},
     }
     if include_attachments:
         properties["attachments"] = attachment_array_schema()

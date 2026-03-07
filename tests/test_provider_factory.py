@@ -645,6 +645,38 @@ async def test_generate_sanitizes_assistant_message_before_tool_followup(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_generate_recovers_pseudo_tool_call_from_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import provider_registry
+
+    class _PseudoToolProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return _FakeResponse(
+                    main_response=_FakeMessage(content='<tool_call>{"name":"noop","arguments":{}}</tool_call>'),
+                    original={"id": "resp-1"},
+                )
+            return _FakeResponse(main_response=_FakeMessage(content="done"), original={"id": "resp-2"})
+
+    async def _noop_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"ok": True}
+
+    tool = Tool(name="noop", description="noop", parameters={"type": "object", "properties": {}, "required": []})
+    binding = ToolBinding(tool=tool, handler=_noop_handler)
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openai", _PseudoToolProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+
+    result = await client.generate([], "hello", tools=[binding])
+
+    assert result.payload == "done"
+    assert len(client._provider.calls) == 2
+    followup_messages = client._provider.calls[1]["messages"]
+    assert followup_messages[-1]["role"] == "tool"
+    assert followup_messages[-1]["name"] == "noop"
+
+
+@pytest.mark.asyncio
 async def test_generate_uses_user_content_when_provided(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm.services import provider_registry
 
@@ -740,6 +772,28 @@ async def test_generate_includes_openrouter_routing_fields(monkeypatch: pytest.M
     assert call["provider"]["data_collection"] == "deny"
     assert call["provider"]["custom_hint"] == "value"
     assert call["plugins"] == [{"id": "file-parser", "pdf": {"engine": "pdf-text"}}]
+
+
+@pytest.mark.asyncio
+async def test_generate_includes_openrouter_reasoning_payload_when_effort_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from minibot.llm.services import provider_registry
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _FakeProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openrouter",
+            api_key="secret",
+            model="openrouter/auto",
+            reasoning_effort="high",
+        )
+    )
+
+    await client.generate([], "hello")
+
+    call = client._provider.calls[-1]
+    assert call["reasoning"] == {"enabled": True, "effort": "high"}
 
 
 def test_media_support_modes() -> None:
@@ -1153,17 +1207,20 @@ async def test_generate_does_not_force_tool_choice_for_explicit_tool_request(
 
 
 @pytest.mark.asyncio
-async def test_generate_ignores_continue_loop_hint_when_no_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_generate_continues_loop_when_structured_payload_requests_it(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm.services import provider_registry
 
     class _ContinueLoopProvider(_FakeProvider):
         async def acomplete(self, **kwargs: Any) -> _FakeResponse:
             self.calls.append(kwargs)
-            payload = {
-                "answer": "I will continue with tools.",
-                "should_answer_to_user": False,
-                "continue_loop": True,
-            }
+            if len(self.calls) == 1:
+                payload = {
+                    "answer": {"kind": "text", "content": "I will continue with tools."},
+                    "should_answer_to_user": False,
+                    "continue_loop": True,
+                }
+                return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
+            payload = {"answer": {"kind": "text", "content": "done"}, "should_answer_to_user": True}
             return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
 
     async def _time_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
@@ -1181,8 +1238,34 @@ async def test_generate_ignores_continue_loop_hint_when_no_tool_call(monkeypatch
 
     result = await client.generate([], "continue", tools=[binding], response_schema={"type": "object"})
 
+    assert result.payload == {"answer": {"kind": "text", "content": "done"}, "should_answer_to_user": True}
+    assert len(client._provider.calls) == 2
+    second_call_messages = client._provider.calls[1]["messages"]
+    assert second_call_messages[-1]["role"] == "user"
+    assert "call a tool now" in second_call_messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_generate_ignores_continue_loop_when_no_tools_are_attached(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import provider_registry
+
+    class _ContinueLoopProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            payload = {
+                "answer": {"kind": "text", "content": "I will continue with tools."},
+                "should_answer_to_user": False,
+                "continue_loop": True,
+            }
+            return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _ContinueLoopProvider)
+    client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
+
+    result = await client.generate([], "continue", response_schema={"type": "object"})
+
     assert result.payload == {
-        "answer": "I will continue with tools.",
+        "answer": {"kind": "text", "content": "I will continue with tools."},
         "should_answer_to_user": False,
         "continue_loop": True,
     }

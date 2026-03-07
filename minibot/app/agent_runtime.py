@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+import json
 from typing import Any, Sequence
 
 from ratchet_sm import FailAction, RetryAction, ValidAction
 
 from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
+from minibot.app.response_parser import continue_loop_requested
 from minibot.core.agent_runtime import (
     AgentMessage,
     AgentState,
@@ -16,6 +18,12 @@ from minibot.core.agent_runtime import (
     RuntimeLimits,
 )
 from minibot.llm.provider_factory import LLMClient
+from minibot.llm.services.continue_loop import CONTINUE_LOOP_RETRY_PATCH
+from minibot.llm.services.ratchet_support import (
+    ToolCallMissingAction,
+    build_tool_call_recovery_machine,
+    recovered_tool_call_from_payload,
+)
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import humanize_token_count
@@ -66,9 +74,12 @@ class AgentRuntime:
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
         repeated_failure_counts: dict[str, int] = {}
+        repeated_continue_loop_count = 0
+        last_continue_loop_signature: str | None = None
         _validator = structured_validator if response_schema is not None else None
         if _validator is None and response_schema is not None:
-            _validator = RuntimeStructuredOutputValidator(max_attempts=3)
+            _validator = RuntimeStructuredOutputValidator(max_attempts=3, schema_model=response_schema)
+        tool_recovery_machine = build_tool_call_recovery_machine(max_attempts=self._limits.max_tool_calls)
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
@@ -122,12 +133,84 @@ class AgentRuntime:
                 previous_response_id = completion.response_id
 
                 tool_calls = getattr(completion.message, "tool_calls", None) or []
+                recovered_tool_calls = []
+                if self._tools and not tool_calls and isinstance(getattr(completion.message, "content", None), str):
+                    tool_action = tool_recovery_machine.receive(completion.message.content)
+                    if isinstance(tool_action, ValidAction):
+                        recovered_tool_calls = [recovered_tool_call_from_payload(tool_action.parsed)]
+                        tool_recovery_machine.reset()
+                    elif (
+                        isinstance(tool_action, ToolCallMissingAction)
+                        and tool_action.reason == "pseudo_tool_call_in_text"
+                    ):
+                        retry_patch = (tool_action.prompt_patch or "").strip()
+                        state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
+                        if retry_patch:
+                            state.messages.append(
+                                AgentMessage(
+                                    role="user",
+                                    content=[MessagePart(type="text", text=retry_patch)],
+                                )
+                            )
+                        continue
+                    elif isinstance(tool_action, FailAction):
+                        return RuntimeResult(
+                            payload=self._repeated_failure_payload(
+                                response_schema=response_schema,
+                                tool_name="tool_recovery",
+                            ),
+                            response_id=completion.response_id,
+                            state=state,
+                            total_tokens=total_tokens,
+                        )
+                if recovered_tool_calls:
+                    tool_calls = recovered_tool_calls
                 if not tool_calls:
                     assistant_message = self._message_renderer.from_provider_assistant_message(completion.message)
                     state.messages.append(assistant_message)
                     if _validator is not None:
                         action = _validator.receive(getattr(completion.message, "content", ""))
                         if isinstance(action, ValidAction):
+                            payload = _validator.valid_payload(action)
+                            if self._tools and continue_loop_requested(payload):
+                                continue_signature = json.dumps(
+                                    payload,
+                                    sort_keys=True,
+                                    ensure_ascii=True,
+                                    separators=(",", ":"),
+                                    default=str,
+                                )
+                                if continue_signature == last_continue_loop_signature:
+                                    repeated_continue_loop_count += 1
+                                else:
+                                    repeated_continue_loop_count = 1
+                                last_continue_loop_signature = continue_signature
+                                _validator.reset()
+                                if repeated_continue_loop_count >= 2:
+                                    self._logger.warning(
+                                        "agent runtime repeated identical continue_loop payload; returning fallback",
+                                        extra={"step": step, "response_id": completion.response_id},
+                                    )
+                                    return RuntimeResult(
+                                        payload=self._repeated_failure_payload(
+                                            response_schema=response_schema,
+                                            tool_name="continue_loop",
+                                        ),
+                                        response_id=completion.response_id,
+                                        state=state,
+                                        total_tokens=total_tokens,
+                                    )
+                                self._logger.debug(
+                                    "agent runtime structured output requested continue_loop",
+                                    extra={"step": step, "response_id": completion.response_id},
+                                )
+                                state.messages.append(
+                                    AgentMessage(
+                                        role="user",
+                                        content=[MessagePart(type="text", text=CONTINUE_LOOP_RETRY_PATCH)],
+                                    )
+                                )
+                                continue
                             self._logger.debug(
                                 "agent runtime structured output validated",
                                 extra={
@@ -138,7 +221,7 @@ class AgentRuntime:
                                 },
                             )
                             return RuntimeResult(
-                                payload=_validator.valid_payload(action),
+                                payload=payload,
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,

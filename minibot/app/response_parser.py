@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from minibot.core.channels import RenderableResponse
+from minibot.llm.services.continue_loop import should_continue_tool_loop
 from minibot.shared.parse_utils import parse_json_with_fenced_fallback
 
 
@@ -31,6 +32,11 @@ def extract_answer(payload: Any, *, logger: logging.Logger) -> tuple[RenderableR
     if isinstance(payload, str):
         return plain_render(payload), True
     return plain_render(str(payload)), True
+
+
+def continue_loop_requested(payload: Any) -> bool:
+    payload_obj = payload_to_object(payload)
+    return should_continue_tool_loop(payload_obj)
 
 
 def render_from_payload(value: Any) -> RenderableResponse | None:

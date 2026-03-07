@@ -35,6 +35,7 @@ allowed_document_mime_types = []
 [llm]
 provider = "openai_responses"
 model = "gpt-5-mini"
+# reasoning_effort = "medium"
 # Enable HTTP/2 for provider HTTP clients when supported (recommended for OpenAI Responses).
 http2 = true
 max_tool_iterations = 60
@@ -110,14 +111,10 @@ name = "minibot"
 # Note: with tool_ownership_mode="exclusive_mcp", only claimed MCP tools are hidden from main.
 tools_deny = ["mcp*"]
 
-# Optional request params. Omit keys to avoid sending them.
-# temperature = 0.2
-# max_new_tokens = 512
-# reasoning_effort = "medium"
-
 # Optional OpenRouter-specific routing configuration.
 # Applied only when `llm.provider = "openrouter"`.
 [llm.openrouter]
+# reasoning_enabled = true
 # Optional model pool for fallback routing.
 # models = ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
 # Optional OpenRouter plugins (for example PDF parsing engine).
