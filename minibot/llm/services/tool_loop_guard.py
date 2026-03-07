@@ -42,10 +42,8 @@ def tool_loop_fallback_payload(
 ) -> Any:
     summary = summarize_tool_outputs(tool_messages)
     tools_used = ", ".join(tool_names[-4:]) if tool_names else "tools"
-    answer = (
-        "I executed tool calls but hit an internal tool-loop safeguard before finalizing. "
-        f"Recent tools: {tools_used}. Last tool output: {summary}"
-    )
+    _ = tools_used, summary  # available for debugging if needed
+    answer = "I wasn't able to complete this request. Please try again or rephrase your message."
     if response_schema:
         return {
             "answer": {

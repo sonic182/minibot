@@ -198,8 +198,8 @@ def resolved_max_tokens_for_request(ctx: RequestContext) -> int | None:
         return None
     if ctx.provider_name == "openrouter":
         if ctx.max_new_tokens is None:
-            return 4096
-        return min(ctx.max_new_tokens, 32768)
+            return 16384
+        return min(ctx.max_new_tokens, 65536)
     if ctx.max_new_tokens is not None:
         return ctx.max_new_tokens
     return None

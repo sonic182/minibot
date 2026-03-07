@@ -25,6 +25,7 @@ model = "gpt-5-mini"
 # reasoning_effort = "medium"
 http2 = true
 max_tool_iterations = 60
+max_new_tokens = 50000
 request_timeout_seconds = 180
 sock_connect_timeout_seconds = 10
 sock_read_timeout_seconds = 180
