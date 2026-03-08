@@ -14,9 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded runtime tests covering structured-output success, retry recovery, retry exhaustion fallback, step-budget retry behavior, and custom validator schemas.
 - New `memory(action="list_titles")` operation for lightweight memory discovery (`id`, `title`, `updated_at`, `source`) with optional query filtering.
 - Optional tool suite additions: `bash`, `apply_patch`, `grep`, and `transcribe_audio` (with dedicated tool descriptions and patch-engine support).
+- New `code_read` managed-file tool for bounded line-window reads (`path`, `offset`, `limit`).
 - Audio transcription runtime support via optional `faster-whisper` (`stt` extra) plus auto-transcribe of short incoming Telegram audio/voice attachments.
 - Telegram incoming media mapper for consistent photo/document/audio/voice file naming and attachment metadata (including `duration_seconds` for audio inputs).
 - New tool/config surfaces for `[tools.bash]`, `[tools.apply_patch]`, `[tools.grep]`, `[tools.audio_transcription]`, and `tools.file_storage.allow_outside_root`.
+- `minibot-console --verbose` option to mirror runtime logs to stdout for local debugging.
 - `config.yolo.toml`, `docker-requirements.txt`, and container runtime updates to support full-capability local stacks (including Playwright MCP and STT prerequisites).
 
 ### Changed
@@ -32,12 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tool-use guardrail classification now uses a ratchet-backed validator and is skipped when tools already executed in the same runtime pass.
 - OpenRouter request building now carries reasoning `effort` in provider kwargs and auto-enables reasoning when effort is present.
 - Environment prompt fragments now include cwd plus resolved filesystem root/path-mode guidance.
+- Main handler orchestration was further decomposed into `LLMTurnService` plus focused collaborators for input, prompting, runtime execution, compaction, and metadata assembly.
+- Telegram channel plumbing was split into dedicated authorization, incoming-media collection, and outbound-sender components to isolate responsibilities.
+- LLM generation/runtime loops now apply targeted recovery for truncated tool arguments and pseudo tool-call tags before hitting fallback behavior.
+- Tool registration now uses feature-based assembly and canonical tool-label reporting, and auto-enables `code_read` whenever file storage tooling is enabled.
 
 ### Fixed
 
 - Console command startup no longer assumes a full `logging.Logger` interface in tests; info-level startup logging is now defensive for lightweight logger doubles.
 - `memory(action="get")` misses by title now return `suggested_titles` when similar entries exist, improving memory recall and follow-up selection.
 - Tool execution error payloads now include deterministic failure signatures, improving repeated-failure diagnostics in tool loops.
+- Agent runtime now short-circuits repeated identical tool failures/iterations earlier, returning deterministic fallback payloads instead of looping.
+- Runtime tool execution now normalizes legacy tool aliases (`http_client`, `calculator`, `datetime_now`, `artifact_insert`) to canonical names for compatibility.
 
 ## [0.0.7] - 2026-02-25
 
