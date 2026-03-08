@@ -1138,6 +1138,19 @@ def test_canonical_tool_name_normalizes_legacy_http_client_alias() -> None:
     assert canonical_tool_name("http_request") == "http_request"
 
 
+@pytest.mark.parametrize(
+    ("legacy_name", "canonical_name"),
+    [
+        ("calculator", "calculate_expression"),
+        ("datetime_now", "current_datetime"),
+        ("artifact_insert", "self_insert_artifact"),
+    ],
+)
+def test_canonical_tool_name_normalizes_additional_legacy_aliases(legacy_name: str, canonical_name: str) -> None:
+    assert canonical_tool_name(legacy_name) == canonical_name
+    assert canonical_tool_name(canonical_name) == canonical_name
+
+
 def test_normalize_tool_args_for_signature_is_stable_across_dict_order() -> None:
     left = {"b": 2, "a": {"y": 2, "x": 1}}
     right = {"a": {"x": 1, "y": 2}, "b": 2}

@@ -13,14 +13,7 @@ class CurrentTimeTool:
         self._default_format = default_format
 
     def bindings(self) -> list[ToolBinding]:
-        return [
-            ToolBinding(tool=self._datetime_now_schema(), handler=self._handle),
-            ToolBinding(tool=self._schema(), handler=self._handle),
-        ]
-
-    def _datetime_now_schema(self) -> Tool:
-        base = self._schema()
-        return Tool(name="datetime_now", description=base.description, parameters=base.parameters)
+        return [ToolBinding(tool=self._schema(), handler=self._handle)]
 
     def _schema(self) -> Tool:
         return Tool(

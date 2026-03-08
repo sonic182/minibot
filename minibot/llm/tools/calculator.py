@@ -27,14 +27,7 @@ class CalculatorTool:
         self._max_exponent_abs = max(max_exponent_abs, 1)
 
     def bindings(self) -> list[ToolBinding]:
-        return [
-            ToolBinding(tool=self._calculator_schema(), handler=self._handle),
-            ToolBinding(tool=self._schema(), handler=self._handle),
-        ]
-
-    def _calculator_schema(self) -> Tool:
-        schema = self._schema()
-        return Tool(name="calculator", description=schema.description, parameters=schema.parameters)
+        return [ToolBinding(tool=self._schema(), handler=self._handle)]
 
     def _schema(self) -> Tool:
         return Tool(

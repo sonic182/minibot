@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from llm_async.models.tool_call import ToolCall
@@ -27,7 +28,17 @@ _SENSITIVE_ARGUMENT_KEY_PARTS = (
 )
 _TOOL_NAME_ALIASES = {
     "http_client": "http_request",
+    "calculator": "calculate_expression",
+    "datetime_now": "current_datetime",
+    "artifact_insert": "self_insert_artifact",
 }
+
+
+@dataclass(frozen=True)
+class _PreparedToolCall:
+    call_id: str
+    tool_name: str
+    arguments: dict[str, Any]
 
 
 def canonical_tool_name(name: str) -> str:
@@ -200,6 +211,69 @@ def _normalize_signature_value(value: Any) -> Any:
     return str(value)
 
 
+def _build_tool_map(tools: Sequence[ToolBinding]) -> dict[str, ToolBinding]:
+    return {canonical_tool_name(binding.tool.name): binding for binding in tools}
+
+
+def _resolve_call_id(call: ToolCall, *, responses_mode: bool) -> str:
+    call_id = call.id
+    if responses_mode and isinstance(call.input, dict):
+        input_call_id = call.input.get("call_id")
+        if isinstance(input_call_id, str) and input_call_id:
+            return input_call_id
+    return call_id
+
+
+def _prepare_tool_call(call: ToolCall, *, responses_mode: bool) -> _PreparedToolCall:
+    return _PreparedToolCall(
+        call_id=_resolve_call_id(call, responses_mode=responses_mode),
+        tool_name=tool_name_from_call(call),
+        arguments={},
+    )
+
+
+def _build_failure_result(
+    *,
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    exc: Exception,
+) -> ToolResult:
+    error_code = "tool_execution_failed"
+    if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
+        error_code = "invalid_tool_arguments"
+    signature = tool_failure_signature(
+        tool_name=tool_name,
+        arguments=arguments,
+        error_code=error_code,
+        error=str(exc),
+    )
+    return ToolResult(
+        content={
+            "ok": False,
+            "tool": tool_name,
+            "error_code": error_code,
+            "error": str(exc),
+            "failure_signature": signature,
+            "is_repeated_failure_candidate": True,
+        }
+    )
+
+
+def _build_message_payload(*, responses_mode: bool, call_id: str, tool_name: str, content: Any) -> dict[str, Any]:
+    if responses_mode:
+        return {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": stringify_result(content),
+        }
+    return {
+        "role": "tool",
+        "tool_call_id": call_id,
+        "name": tool_name,
+        "content": stringify_result(content),
+    }
+
+
 async def execute_tool_calls_for_runtime(
     tool_calls: Sequence[ToolCall],
     tools: Sequence[ToolBinding],
@@ -208,16 +282,13 @@ async def execute_tool_calls_for_runtime(
     responses_mode: bool,
     logger: logging.Logger,
 ) -> list[ToolExecutionRecord]:
-    tool_map = {canonical_tool_name(binding.tool.name): binding for binding in tools}
+    tool_map = _build_tool_map(tools)
     records: list[ToolExecutionRecord] = []
     for call in tool_calls:
-        call_id = call.id
-        if responses_mode and isinstance(call.input, dict):
-            input_call_id = call.input.get("call_id")
-            if isinstance(input_call_id, str) and input_call_id:
-                call_id = input_call_id
-        tool_name = tool_name_from_call(call)
-        arguments: dict[str, Any] = {}
+        prepared = _prepare_tool_call(call, responses_mode=responses_mode)
+        call_id = prepared.call_id
+        tool_name = prepared.tool_name
+        arguments = prepared.arguments
         try:
             tool_name, arguments = parse_tool_call(call)
             binding = tool_map.get(tool_name)
@@ -244,15 +315,6 @@ async def execute_tool_calls_for_runtime(
                 },
             )
         except Exception as exc:
-            error_code = "tool_execution_failed"
-            if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
-                error_code = "invalid_tool_arguments"
-            signature = tool_failure_signature(
-                tool_name=tool_name,
-                arguments=arguments,
-                error_code=error_code,
-                error=str(exc),
-            )
             logger.exception(
                 "tool execution failed",
                 extra={
@@ -260,29 +322,13 @@ async def execute_tool_calls_for_runtime(
                     "owner_id": context.owner_id,
                 },
             )
-            result = ToolResult(
-                content={
-                    "ok": False,
-                    "tool": tool_name,
-                    "error_code": error_code,
-                    "error": str(exc),
-                    "failure_signature": signature,
-                    "is_repeated_failure_candidate": True,
-                }
-            )
-        if responses_mode:
-            payload = {
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": stringify_result(result.content),
-            }
-        else:
-            payload = {
-                "role": "tool",
-                "tool_call_id": call_id,
-                "name": tool_name,
-                "content": stringify_result(result.content),
-            }
+            result = _build_failure_result(tool_name=tool_name, arguments=arguments, exc=exc)
+        payload = _build_message_payload(
+            responses_mode=responses_mode,
+            call_id=call_id,
+            tool_name=tool_name,
+            content=result.content,
+        )
         records.append(
             ToolExecutionRecord(
                 tool_name=tool_name,
