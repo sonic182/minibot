@@ -3,14 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-import json
 from typing import Any, Sequence
 
 from ratchet_sm import FailAction, RetryAction, ValidAction
 from ratchet_sm.normalizers.extract_pseudo_tool_call import has_pseudo_tool_call_tag
 
 from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
-from minibot.app.response_parser import continue_loop_requested
 from minibot.core.agent_runtime import (
     AgentMessage,
     AgentState,
@@ -19,7 +17,6 @@ from minibot.core.agent_runtime import (
     RuntimeLimits,
 )
 from minibot.llm.provider_factory import LLMClient
-from minibot.llm.services.continue_loop import CONTINUE_LOOP_RETRY_PATCH
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
 from minibot.llm.services.tool_loop_guard import (
     MAX_REPEATED_TOOL_ITERATIONS,
@@ -85,8 +82,6 @@ class AgentRuntime:
         repeated_failure_counts: dict[str, int] = {}
         repeated_iteration_count = 0
         last_iteration_signature: str | None = None
-        repeated_continue_loop_count = 0
-        last_continue_loop_signature: str | None = None
         _validator = structured_validator if response_schema is not None else None
         if _validator is None and response_schema is not None:
             _validator = RuntimeStructuredOutputValidator(max_attempts=3, schema_model=response_schema)
@@ -178,45 +173,6 @@ class AgentRuntime:
                         action = _validator.receive(getattr(completion.message, "content", ""))
                         if isinstance(action, ValidAction):
                             payload = _validator.valid_payload(action)
-                            if self._tools and continue_loop_requested(payload):
-                                continue_signature = json.dumps(
-                                    payload,
-                                    sort_keys=True,
-                                    ensure_ascii=True,
-                                    separators=(",", ":"),
-                                    default=str,
-                                )
-                                if continue_signature == last_continue_loop_signature:
-                                    repeated_continue_loop_count += 1
-                                else:
-                                    repeated_continue_loop_count = 1
-                                last_continue_loop_signature = continue_signature
-                                _validator.reset()
-                                if repeated_continue_loop_count >= 2:
-                                    self._logger.warning(
-                                        "agent runtime repeated identical continue_loop payload; returning fallback",
-                                        extra={"step": step, "response_id": completion.response_id},
-                                    )
-                                    return RuntimeResult(
-                                        payload=self._repeated_failure_payload(
-                                            response_schema=response_schema,
-                                            tool_name="continue_loop",
-                                        ),
-                                        response_id=completion.response_id,
-                                        state=state,
-                                        total_tokens=total_tokens,
-                                    )
-                                self._logger.debug(
-                                    "agent runtime structured output requested continue_loop",
-                                    extra={"step": step, "response_id": completion.response_id},
-                                )
-                                state.messages.append(
-                                    AgentMessage(
-                                        role="user",
-                                        content=[MessagePart(type="text", text=CONTINUE_LOOP_RETRY_PATCH)],
-                                    )
-                                )
-                                continue
                             self._logger.debug(
                                 "agent runtime structured output validated",
                                 extra={

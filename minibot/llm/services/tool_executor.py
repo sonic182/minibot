@@ -92,6 +92,15 @@ def decode_tool_arguments(arguments_payload: str) -> dict[str, Any]:
         if fenced:
             candidates.append(fenced)
 
+    repaired_candidates: list[str] = []
+    for candidate in candidates:
+        text = candidate.strip()
+        if text.startswith("{"):
+            missing = text.count("{") - text.count("}")
+            if missing > 0:
+                repaired_candidates.append(text + ("}" * missing))
+    candidates.extend(repaired_candidates)
+
     for candidate in candidates:
         parsed = parse_json_maybe_python_object(candidate)
         if parsed is None:

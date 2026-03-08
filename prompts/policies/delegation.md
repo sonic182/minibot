@@ -8,8 +8,7 @@ Delegation policy:
 - Wait for the tool result before producing your final answer.
 - If delegation fails, continue the task yourself with available tools and state the limitation clearly.
 - If you intend to delegate but have not called `invoke_agent` yet, do not send a user-facing status update.
-- In that case, return structured output with `should_answer_to_user=false` and `continue_loop=true`, or call the tool
-  immediately.
+- In that case, call the tool immediately.
 
 Delegation decision rule:
 - If the user explicitly asks to use a specialist agent, browser agent, or delegated workflow, you must not answer as if
@@ -17,15 +16,13 @@ Delegation decision rule:
 - If delegation is required and not yet executed, the task is still in progress, not complete.
 - A sentence like "I'll delegate this to the browser agent" is not a final answer.
 - If the task still depends on delegation, either:
-  - call `invoke_agent` now, or
-  - return `should_answer_to_user=false` and `continue_loop=true`
+  - call `invoke_agent` now.
 
 Bad:
 - "I'll delegate this to the browser agent." with `should_answer_to_user=true`
 
 Good:
 - actual `invoke_agent` tool call
-- or structured output with `continue_loop=true` while the work remains unfinished
 
 Do not claim you delegated unless an actual `invoke_agent` tool call was executed.
 

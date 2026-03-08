@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Sequence
 
 from llm_async.models.tool_call import ToolCall
 
-from minibot.llm.services.tool_executor import stringify_result, tool_name_from_call
+from minibot.llm.services.tool_executor import decode_tool_arguments, stringify_result, tool_name_from_call
 
 
 MAX_REPEATED_TOOL_ITERATIONS = 3
@@ -20,8 +19,8 @@ def any_tool_call_truncated(tool_calls: Sequence[Any]) -> bool:
         if not isinstance(args, str) or not args.strip():
             continue
         try:
-            json.loads(args)
-        except (json.JSONDecodeError, ValueError):
+            decode_tool_arguments(args)
+        except ValueError:
             return True
     return False
 
@@ -58,8 +57,10 @@ def tool_loop_fallback_payload(
 ) -> Any:
     summary = summarize_tool_outputs(tool_messages)
     tools_used = ", ".join(tool_names[-4:]) if tool_names else "tools"
-    _ = tools_used, summary  # available for debugging if needed
-    answer = "I wasn't able to complete this request. Please try again or rephrase your message."
+    answer = (
+        "I executed tool calls but hit an internal tool-loop safeguard before finalizing. "
+        f"Recent tools: {tools_used}. Last tool output: {summary}"
+    )
     if response_schema:
         return {
             "answer": {

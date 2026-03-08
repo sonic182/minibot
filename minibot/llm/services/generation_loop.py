@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import logging
-import json
 from typing import Any, Awaitable, Callable, Sequence
 
 from ratchet_sm import FailAction, ToolCallMissingAction, ValidAction
 from ratchet_sm.normalizers.extract_pseudo_tool_call import has_pseudo_tool_call_tag
 
 from minibot.core.memory import MemoryEntry
-from minibot.llm.services.continue_loop import CONTINUE_LOOP_RETRY_PATCH, should_continue_tool_loop
 from minibot.llm.services.compaction import continue_incomplete_response
 from minibot.llm.services.debug_logging import log_provider_response
 from minibot.llm.services.models import LLMGeneration
@@ -89,8 +87,6 @@ async def generate_with_tools(
         system_prompt=system_prompt,
     )
     usage_accumulator = UsageAccumulator()
-    repeated_continue_loop_count = 0
-    last_continue_loop_signature: str | None = None
     truncated_count = 0
     structured_validator = (
         StructuredOutputValidator(max_attempts=max_tool_iterations, schema=response_schema)
@@ -144,7 +140,11 @@ async def generate_with_tools(
                         extra={"tool_names": recent_tool_names[-10:]},
                     )
                     response_id = extract_response_id(response)
-                    payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
+                    attempted_tool_names = [
+                        *recent_tool_names,
+                        *(tool_name_from_call(call) for call in message_tool_calls),
+                    ]
+                    payload = tool_loop_fallback_payload(last_tool_messages, attempted_tool_names, response_schema)
                     return LLMGeneration(
                         payload,
                         response_id,
@@ -184,35 +184,6 @@ async def generate_with_tools(
                 action = structured_validator.receive(payload)
                 if isinstance(action, ValidAction):
                     parsed_payload = structured_validator.valid_payload(action)
-                    if tool_bindings and should_continue_tool_loop(parsed_payload):
-                        continue_signature = json.dumps(
-                            parsed_payload,
-                            sort_keys=True,
-                            ensure_ascii=True,
-                            separators=(",", ":"),
-                            default=str,
-                        )
-                        if continue_signature == last_continue_loop_signature:
-                            repeated_continue_loop_count += 1
-                        else:
-                            repeated_continue_loop_count = 1
-                        last_continue_loop_signature = continue_signature
-                        structured_validator.reset()
-                        if repeated_continue_loop_count >= 2:
-                            logger.warning("repeated identical continue_loop payload; returning fallback")
-                            return usage_accumulator.build_generation(
-                                payload=tool_loop_fallback_payload(
-                                    last_tool_messages,
-                                    [*recent_tool_names, "continue_loop"],
-                                    response_schema,
-                                ),
-                                response_id=response_id,
-                                status=status,
-                                incomplete_reason=incomplete_reason,
-                            )
-                        conversation.append(assistant_message_for_followup(message))
-                        conversation.append({"role": "user", "content": CONTINUE_LOOP_RETRY_PATCH})
-                        continue
                     return usage_accumulator.build_generation(
                         payload=parsed_payload,
                         response_id=response_id,

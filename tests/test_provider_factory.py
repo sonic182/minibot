@@ -1231,20 +1231,18 @@ async def test_generate_does_not_force_tool_choice_for_explicit_tool_request(
 
 
 @pytest.mark.asyncio
-async def test_generate_continues_loop_when_structured_payload_requests_it(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_generate_returns_non_user_answerable_payload_without_retry_when_tools_attached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from minibot.llm.services import provider_registry
 
-    class _ContinueLoopProvider(_FakeProvider):
+    class _NotAnswerableProvider(_FakeProvider):
         async def acomplete(self, **kwargs: Any) -> _FakeResponse:
             self.calls.append(kwargs)
-            if len(self.calls) == 1:
-                payload = {
-                    "answer": {"kind": "text", "content": "I will continue with tools."},
-                    "should_answer_to_user": False,
-                    "continue_loop": True,
-                }
-                return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
-            payload = {"answer": {"kind": "text", "content": "done"}, "should_answer_to_user": True}
+            payload = {
+                "answer": {"kind": "text", "content": "I still need to run tools."},
+                "should_answer_to_user": False,
+            }
             return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
 
     async def _time_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
@@ -1257,41 +1255,41 @@ async def test_generate_continues_loop_when_structured_payload_requests_it(monke
     )
     binding = ToolBinding(tool=tool, handler=_time_handler)
 
-    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _ContinueLoopProvider)
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _NotAnswerableProvider)
     client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
 
     result = await client.generate([], "continue", tools=[binding], response_schema={"type": "object"})
 
-    assert result.payload == {"answer": {"kind": "text", "content": "done"}, "should_answer_to_user": True}
-    assert len(client._provider.calls) == 2
-    second_call_messages = client._provider.calls[1]["messages"]
-    assert second_call_messages[-1]["role"] == "user"
-    assert "call a tool now" in second_call_messages[-1]["content"]
+    assert result.payload == {
+        "answer": {"kind": "text", "content": "I still need to run tools."},
+        "should_answer_to_user": False,
+    }
+    assert len(client._provider.calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_generate_ignores_continue_loop_when_no_tools_are_attached(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_generate_returns_non_user_answerable_payload_without_retry_when_no_tools_are_attached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from minibot.llm.services import provider_registry
 
-    class _ContinueLoopProvider(_FakeProvider):
+    class _NotAnswerableProvider(_FakeProvider):
         async def acomplete(self, **kwargs: Any) -> _FakeResponse:
             self.calls.append(kwargs)
             payload = {
-                "answer": {"kind": "text", "content": "I will continue with tools."},
+                "answer": {"kind": "text", "content": "I still need to run tools."},
                 "should_answer_to_user": False,
-                "continue_loop": True,
             }
             return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
 
-    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _ContinueLoopProvider)
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _NotAnswerableProvider)
     client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
 
     result = await client.generate([], "continue", response_schema={"type": "object"})
 
     assert result.payload == {
-        "answer": {"kind": "text", "content": "I will continue with tools."},
+        "answer": {"kind": "text", "content": "I still need to run tools."},
         "should_answer_to_user": False,
-        "continue_loop": True,
     }
     assert len(client._provider.calls) == 1
 
