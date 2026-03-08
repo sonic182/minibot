@@ -27,6 +27,9 @@ _SENSITIVE_ARGUMENT_KEY_PARTS = (
 )
 _TOOL_NAME_ALIASES = {
     "http_client": "http_request",
+    "calculator": "calculate_expression",
+    "datetime_now": "current_datetime",
+    "artifact_insert": "self_insert_artifact",
 }
 
 

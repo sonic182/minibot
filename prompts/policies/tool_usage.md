@@ -13,7 +13,7 @@ Tool routing hints:
 - File workspace operations: `filesystem` with `action` = `list|glob|info|write|move|delete|send`.
 - Incremental code/text inspection: `code_read`.
 - Existing-file edits/refactors: `apply_patch` first; use `code_read` or `grep` for context before patching.
-- Artifact context injection: `artifact_insert`.
+- Artifact context injection: `self_insert_artifact`.
 - After filesystem operations, reuse canonical path fields from tool output (`path_relative`, `path_absolute`, `path_scope`) in later tool calls.
 - In yolo mode (`allow_outside_root=true`), use absolute paths for files outside managed root.
 - Disambiguation: treat "memory" as `history` only when the user explicitly asks about chat/conversation/messages history.

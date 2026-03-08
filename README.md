@@ -204,7 +204,7 @@ Top features
 - 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
 - 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
 - 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
-- 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, calculator, current_datetime, optional Python execution, optional Bash execution, optional apply_patch editing, optional speech-to-text, and MCP server bridges.
+- 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, `calculate_expression`, `current_datetime`, optional Python execution, optional Bash execution, optional apply_patch editing, optional speech-to-text, and MCP server bridges.
 - 🗂️ Managed file workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `grep`, and `self_insert_artifact` (directive-based artifact insertion).
 - 🌐 Optional browser automation via MCP servers (for example Playwright MCP tools).
 - ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
@@ -671,7 +671,7 @@ To enable optional speech-to-text tooling, install the `stt` extra (`poetry inst
 - ⏰ Scheduler tools: `schedule` action facade (`create`/`list`/`cancel`/`delete`) plus granular aliases (`schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`).
 - 🗂️ File tools: `filesystem` action facade (`list`/`glob`/`info`/`write`/`move`/`delete`/`send`), `glob_files`, `read_file`, `grep`.
 - 🧩 `self_insert_artifact`: inject managed files (`tools.file_storage.root_dir` relative path) into runtime directives for in-loop multimodal analysis.
-- 🧮 `calculator` + alias `calculate_expression`, 🕒 `current_datetime`, and 🌐 `http_request` for utility and fetch workflows.
+- 🧮 `calculate_expression`, 🕒 `current_datetime`, and 🌐 `http_request` for utility and fetch workflows.
 - 🐍 `python_execute` + `python_environment_info`: optional host Python execution and runtime/package inspection, including optional artifact export into managed files (`save_artifacts=true`) so outputs can be sent via the `filesystem` tool.
 - 💻 `bash`: optional host shell execution via `/bin/bash -lc` for command pipelines and CLI workflows.
 - 🧩 `apply_patch`: optional structured file edits via patch envelopes (`*** Begin Patch ... *** End Patch`) with add/update/delete/move operations.

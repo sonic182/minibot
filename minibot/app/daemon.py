@@ -7,31 +7,14 @@ from typing import Any
 from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.dispatcher import Dispatcher
+from minibot.llm.tools.factory import configured_tool_labels
 
 
 async def run() -> None:
     AppContainer.configure()
     logger = AppContainer.get_logger()
     settings = AppContainer.get_settings()
-    enabled_tools = []
-    if settings.tools.kv_memory.enabled:
-        enabled_tools.append("kv_memory")
-    if settings.tools.http_client.enabled:
-        enabled_tools.append("http_request")
-    if settings.tools.time.enabled:
-        enabled_tools.append("time")
-    if settings.tools.calculator.enabled:
-        enabled_tools.append("calculator")
-    if settings.tools.python_exec.enabled:
-        enabled_tools.append("python_exec")
-    if settings.tools.bash.enabled:
-        enabled_tools.append("bash")
-    if settings.tools.apply_patch.enabled:
-        enabled_tools.append("apply_patch")
-    if settings.tools.file_storage.enabled:
-        enabled_tools.append("file_storage")
-    if settings.scheduler.prompts.enabled:
-        enabled_tools.append("scheduler")
+    enabled_tools = configured_tool_labels(settings)
     logger.info(
         "tool configuration loaded",
         extra={"tools_enabled": enabled_tools or ["none"]},

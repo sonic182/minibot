@@ -393,55 +393,53 @@ class FileStorageTool:
 
     async def _filesystem(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any] | ToolResult:
         action = (optional_str(payload.get("action")) or "").lower()
-        if action == "list":
-            return await self._list_files({"folder": payload.get("folder")}, context)
-        if action == "glob":
-            return await self._glob_files(
+        handlers = {
+            "list": lambda: self._list_files({"folder": payload.get("folder")}, context),
+            "glob": lambda: self._glob_files(
                 {
                     "pattern": payload.get("pattern"),
                     "folder": payload.get("folder"),
                     "limit": payload.get("limit"),
                 },
                 context,
-            )
-        if action == "info":
-            return await self._file_info({"path": payload.get("path")}, context)
-        if action == "write":
-            return await self._create_file(
+            ),
+            "info": lambda: self._file_info({"path": payload.get("path")}, context),
+            "write": lambda: self._create_file(
                 {
                     "path": payload.get("path"),
                     "content": payload.get("content"),
                     "overwrite": payload.get("overwrite"),
                 },
                 context,
-            )
-        if action == "move":
-            return await self._move_file(
+            ),
+            "move": lambda: self._move_file(
                 {
                     "source_path": payload.get("source_path"),
                     "destination_path": payload.get("destination_path"),
                     "overwrite": payload.get("overwrite"),
                 },
                 context,
-            )
-        if action == "delete":
-            return await self._delete_file(
+            ),
+            "delete": lambda: self._delete_file(
                 {
                     "path": payload.get("path"),
                     "target": payload.get("target"),
                     "recursive": payload.get("recursive"),
                 },
                 context,
-            )
-        if action == "send":
-            return await self._send_file(
+            ),
+            "send": lambda: self._send_file(
                 {
                     "path": payload.get("path"),
                     "caption": payload.get("caption"),
                 },
                 context,
-            )
-        raise ValueError("action must be one of: list, glob, info, write, move, delete, send")
+            ),
+        }
+        handler = handlers.get(action)
+        if handler is None:
+            raise ValueError("action must be one of: list, glob, info, write, move, delete, send")
+        return await handler()
 
     @staticmethod
     def _resolve_mime(path: Path, mime_hint: str | None) -> str:

@@ -146,7 +146,9 @@ def test_build_enabled_tools_defaults_to_chat_memory_and_time() -> None:
     assert "chat_history_info" in names
     assert "chat_history_trim" in names
     assert "current_datetime" in names
+    assert "datetime_now" not in names
     assert "calculate_expression" in names
+    assert "calculator" not in names
     assert "python_execute" in names
     assert "python_environment_info" in names
     assert "bash" not in names

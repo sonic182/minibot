@@ -327,15 +327,16 @@ class SchedulePromptTool:
 
     async def _handle_schedule_unified(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         action = _require_string(payload.get("action"), "action").lower()
-        if action == "create":
-            return await self._handle_schedule(payload, context)
-        if action == "list":
-            return await self._handle_list(payload, context)
-        if action == "cancel":
-            return await self._handle_cancel(payload, context)
-        if action == "delete":
-            return await self._handle_delete(payload, context)
-        raise ValueError("action must be one of: create, list, cancel, delete")
+        handlers = {
+            "create": self._handle_schedule,
+            "list": self._handle_list,
+            "cancel": self._handle_cancel,
+            "delete": self._handle_delete,
+        }
+        handler = handlers.get(action)
+        if handler is None:
+            raise ValueError("action must be one of: create, list, cancel, delete")
+        return await handler(payload, context)
 
 
 def _require_string(value: Any, field: str) -> str:
