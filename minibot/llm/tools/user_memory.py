@@ -165,7 +165,7 @@ async def _delete_entry(
     entry_id = optional_str(payload.get("entry_id"))
     title = optional_str(payload.get("title"))
     if not entry_id and not title:
-        return {"ok": False, "error": "entry_id or title is required to delete an entry", "action": "delete"}
+        raise ValueError("entry_id or title is required")
     deleted = await memory.delete_entry(owner_id=owner_id, entry_id=entry_id, title=title)
     return {
         "owner_id": owner_id,
