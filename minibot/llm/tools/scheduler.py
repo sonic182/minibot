@@ -8,6 +8,7 @@ from llm_async.models import Tool
 from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.core.jobs import PromptRecurrence, PromptRole, ScheduledPromptStatus
 from minibot.llm.tools.arg_utils import enum_by_value, optional_bool, optional_int, require_channel, require_owner
+from minibot.llm.tools.action_dispatcher import dispatch_action
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.schema_utils import (
     job_id_property,
@@ -24,6 +25,12 @@ class SchedulePromptTool:
     def __init__(self, service: ScheduledPromptService, min_recurrence_interval_seconds: int = 60) -> None:
         self._service = service
         self._min_recurrence_interval_seconds = max(1, min_recurrence_interval_seconds)
+        self._unified_handlers = {
+            "create": self._handle_schedule,
+            "list": self._handle_list,
+            "cancel": self._handle_cancel,
+            "delete": self._handle_delete,
+        }
 
     def bindings(self) -> list[ToolBinding]:
         return [
@@ -327,16 +334,13 @@ class SchedulePromptTool:
 
     async def _handle_schedule_unified(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         action = _require_string(payload.get("action"), "action").lower()
-        handlers = {
-            "create": self._handle_schedule,
-            "list": self._handle_list,
-            "cancel": self._handle_cancel,
-            "delete": self._handle_delete,
-        }
-        handler = handlers.get(action)
-        if handler is None:
-            raise ValueError("action must be one of: create, list, cancel, delete")
-        return await handler(payload, context)
+        return await dispatch_action(
+            action=action,
+            payload=payload,
+            context=context,
+            handlers=self._unified_handlers,
+            error_message="action must be one of: create, list, cancel, delete",
+        )
 
 
 def _require_string(value: Any, field: str) -> str:

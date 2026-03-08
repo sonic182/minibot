@@ -14,6 +14,7 @@ from minibot.core.agent_runtime import AgentMessage, AppendMessageDirective, Mes
 from minibot.core.channels import ChannelFileResponse
 from minibot.core.events import OutboundFileEvent
 from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str
+from minibot.llm.tools.action_dispatcher import dispatch_action
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_boolean, nullable_integer, nullable_string, strict_object
@@ -31,6 +32,15 @@ class FileStorageTool:
         self._storage = storage
         self._event_bus = event_bus
         self._logger = logging.getLogger("minibot.tools.file_storage")
+        self._filesystem_handlers = {
+            "list": self._filesystem_list,
+            "glob": self._filesystem_glob,
+            "info": self._filesystem_info,
+            "write": self._filesystem_write,
+            "move": self._filesystem_move,
+            "delete": self._filesystem_delete,
+            "send": self._filesystem_send,
+        }
 
     def bindings(self) -> list[ToolBinding]:
         return [
@@ -391,55 +401,70 @@ class FileStorageTool:
             directives=directives,
         )
 
+    async def _filesystem_list(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._list_files({"folder": payload.get("folder")}, context)
+
+    async def _filesystem_glob(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._glob_files(
+            {
+                "pattern": payload.get("pattern"),
+                "folder": payload.get("folder"),
+                "limit": payload.get("limit"),
+            },
+            context,
+        )
+
+    async def _filesystem_info(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._file_info({"path": payload.get("path")}, context)
+
+    async def _filesystem_write(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._create_file(
+            {
+                "path": payload.get("path"),
+                "content": payload.get("content"),
+                "overwrite": payload.get("overwrite"),
+            },
+            context,
+        )
+
+    async def _filesystem_move(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._move_file(
+            {
+                "source_path": payload.get("source_path"),
+                "destination_path": payload.get("destination_path"),
+                "overwrite": payload.get("overwrite"),
+            },
+            context,
+        )
+
+    async def _filesystem_delete(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._delete_file(
+            {
+                "path": payload.get("path"),
+                "target": payload.get("target"),
+                "recursive": payload.get("recursive"),
+            },
+            context,
+        )
+
+    async def _filesystem_send(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._send_file(
+            {
+                "path": payload.get("path"),
+                "caption": payload.get("caption"),
+            },
+            context,
+        )
+
     async def _filesystem(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any] | ToolResult:
         action = (optional_str(payload.get("action")) or "").lower()
-        handlers = {
-            "list": lambda: self._list_files({"folder": payload.get("folder")}, context),
-            "glob": lambda: self._glob_files(
-                {
-                    "pattern": payload.get("pattern"),
-                    "folder": payload.get("folder"),
-                    "limit": payload.get("limit"),
-                },
-                context,
-            ),
-            "info": lambda: self._file_info({"path": payload.get("path")}, context),
-            "write": lambda: self._create_file(
-                {
-                    "path": payload.get("path"),
-                    "content": payload.get("content"),
-                    "overwrite": payload.get("overwrite"),
-                },
-                context,
-            ),
-            "move": lambda: self._move_file(
-                {
-                    "source_path": payload.get("source_path"),
-                    "destination_path": payload.get("destination_path"),
-                    "overwrite": payload.get("overwrite"),
-                },
-                context,
-            ),
-            "delete": lambda: self._delete_file(
-                {
-                    "path": payload.get("path"),
-                    "target": payload.get("target"),
-                    "recursive": payload.get("recursive"),
-                },
-                context,
-            ),
-            "send": lambda: self._send_file(
-                {
-                    "path": payload.get("path"),
-                    "caption": payload.get("caption"),
-                },
-                context,
-            ),
-        }
-        handler = handlers.get(action)
-        if handler is None:
-            raise ValueError("action must be one of: list, glob, info, write, move, delete, send")
-        return await handler()
+        return await dispatch_action(
+            action=action,
+            payload=payload,
+            context=context,
+            handlers=self._filesystem_handlers,
+            error_message="action must be one of: list, glob, info, write, move, delete, send",
+        )
 
     @staticmethod
     def _resolve_mime(path: Path, mime_hint: str | None) -> str:

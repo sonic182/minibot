@@ -7,6 +7,7 @@ from llm_async.models import Tool
 
 from minibot.core.memory import KeyValueEntry, KeyValueMemory
 from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str, require_owner
+from minibot.llm.tools.action_dispatcher import dispatch_action
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import (
@@ -60,18 +61,21 @@ def _memory_tool() -> Tool:
 
 
 async def _memory_action(memory: KeyValueMemory, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-    action = optional_str(payload.get("action"))
-    if action == "save":
-        return await _save_entry(memory, payload, context)
-    if action == "get":
-        return await _get_entry(memory, payload, context)
-    if action == "search":
-        return await _search_entries(memory, payload, context)
-    if action == "delete":
-        return await _delete_entry(memory, payload, context)
-    if action == "list_titles":
-        return await _list_titles(memory, payload, context)
-    raise ValueError("action must be one of: save, get, search, delete, list_titles")
+    action = (optional_str(payload.get("action")) or "").lower()
+    handlers = {
+        "save": lambda pl, ctx: _save_entry(memory, pl, ctx),
+        "get": lambda pl, ctx: _get_entry(memory, pl, ctx),
+        "search": lambda pl, ctx: _search_entries(memory, pl, ctx),
+        "delete": lambda pl, ctx: _delete_entry(memory, pl, ctx),
+        "list_titles": lambda pl, ctx: _list_titles(memory, pl, ctx),
+    }
+    return await dispatch_action(
+        action=action,
+        payload=payload,
+        context=context,
+        handlers=handlers,
+        error_message="action must be one of: save, get, search, delete, list_titles",
+    )
 
 
 async def _save_entry(
