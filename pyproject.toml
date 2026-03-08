@@ -29,7 +29,7 @@ include = [
 [tool.poetry.dependencies]
 python = ">=3.12,<3.15"
 aiosonic = "^0.31.0"
-llm-async = "^0.4.0"
+llm-async = "0.5.1"
 aiogram = "^3.24.0"
 pydantic = "^2.12.5"
 pydantic-settings = "^2.12.0"
@@ -39,7 +39,7 @@ logfmter = "^0.0.11"
 rich = "^14.2.0"
 mcp = {version = ">=1.0.0,<2.0.0", optional = true}
 telegramify-markdown = "^0.5.4"
-ratchet-sm = {version = "^0.0.1", extras = ["pydantic"]}
+ratchet-sm = "^0.1.0"
 faster-whisper = {version = ">=1.0.0,<2.0.0", optional = true}
 
 [tool.poetry.group.dev.dependencies]

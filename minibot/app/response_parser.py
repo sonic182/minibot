@@ -32,7 +32,6 @@ def extract_answer(payload: Any, *, logger: logging.Logger) -> tuple[RenderableR
         return plain_render(payload), True
     return plain_render(str(payload)), True
 
-
 def render_from_payload(value: Any) -> RenderableResponse | None:
     if not isinstance(value, dict):
         return None

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from ratchet_sm import FailAction, RetryAction, ValidAction
+from ratchet_sm.normalizers.extract_pseudo_tool_call import has_pseudo_tool_call_tag
 
 from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
 from minibot.core.agent_runtime import (
@@ -17,8 +18,21 @@ from minibot.core.agent_runtime import (
 )
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
+from minibot.llm.services.tool_loop_guard import (
+    MAX_REPEATED_TOOL_ITERATIONS,
+    any_tool_call_truncated,
+    tool_iteration_signature,
+    tool_loop_fallback_payload,
+)
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import humanize_token_count
+
+
+_TRUNCATED_PATCH = (
+    "Your previous response was truncated. "
+    "Please resend your complete tool call with all required arguments."
+)
+_PSEUDO_TOOL_PATCH = "Please use the tool calling interface instead of embedding tool calls in text."
 
 
 @dataclass(frozen=True)
@@ -66,9 +80,12 @@ class AgentRuntime:
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
         repeated_failure_counts: dict[str, int] = {}
+        repeated_iteration_count = 0
+        last_iteration_signature: str | None = None
         _validator = structured_validator if response_schema is not None else None
         if _validator is None and response_schema is not None:
-            _validator = RuntimeStructuredOutputValidator(max_attempts=3)
+            _validator = RuntimeStructuredOutputValidator(max_attempts=3, schema_model=response_schema)
+        truncated_tool_call_count = 0
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
@@ -121,13 +138,41 @@ class AgentRuntime:
                 )
                 previous_response_id = completion.response_id
 
-                tool_calls = getattr(completion.message, "tool_calls", None) or []
+                tool_calls = list(getattr(completion.message, "tool_calls", None) or [])
+                if self._tools:
+                    raw_message_content = (
+                        completion.message.content if isinstance(completion.message.content, str) else ""
+                    )
+                    if tool_calls and any_tool_call_truncated(tool_calls):
+                        truncated_tool_call_count += 1
+                        if truncated_tool_call_count >= 3:
+                            return RuntimeResult(
+                                payload=self._repeated_failure_payload(
+                                    response_schema=response_schema,
+                                    tool_name="truncated_tool_call",
+                                ),
+                                response_id=completion.response_id,
+                                state=state,
+                                total_tokens=total_tokens,
+                            )
+                        state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
+                        state.messages.append(
+                            AgentMessage(role="user", content=[MessagePart(type="text", text=_TRUNCATED_PATCH)])
+                        )
+                        continue
+                    if not tool_calls and has_pseudo_tool_call_tag(raw_message_content):
+                        state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
+                        state.messages.append(
+                            AgentMessage(role="user", content=[MessagePart(type="text", text=_PSEUDO_TOOL_PATCH)])
+                        )
+                        continue
                 if not tool_calls:
                     assistant_message = self._message_renderer.from_provider_assistant_message(completion.message)
                     state.messages.append(assistant_message)
                     if _validator is not None:
                         action = _validator.receive(getattr(completion.message, "content", ""))
                         if isinstance(action, ValidAction):
+                            payload = _validator.valid_payload(action)
                             self._logger.debug(
                                 "agent runtime structured output validated",
                                 extra={
@@ -138,7 +183,7 @@ class AgentRuntime:
                                 },
                             )
                             return RuntimeResult(
-                                payload=_validator.valid_payload(action),
+                                payload=payload,
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,
@@ -290,6 +335,34 @@ class AgentRuntime:
                         responses_followup_messages.extend(
                             self._message_renderer.render_messages(AgentState(messages=applied_directive_messages))
                         )
+                iteration_signature = tool_iteration_signature(
+                    tool_calls,
+                    [execution.message_payload for execution in executions],
+                )
+                if iteration_signature and iteration_signature == last_iteration_signature:
+                    repeated_iteration_count += 1
+                else:
+                    repeated_iteration_count = 1
+                last_iteration_signature = iteration_signature
+                if repeated_iteration_count >= MAX_REPEATED_TOOL_ITERATIONS:
+                    self._logger.warning(
+                        "agent runtime repeated identical tool outputs; returning fallback",
+                        extra={
+                            "step": step,
+                            "response_id": completion.response_id,
+                            "repeated_count": repeated_iteration_count,
+                        },
+                    )
+                    return RuntimeResult(
+                        payload=tool_loop_fallback_payload(
+                            [execution.message_payload for execution in executions],
+                            [execution.tool_name for execution in executions],
+                            response_schema,
+                        ),
+                        response_id=completion.response_id,
+                        state=state,
+                        total_tokens=total_tokens,
+                    )
                 step += 1
 
     @staticmethod

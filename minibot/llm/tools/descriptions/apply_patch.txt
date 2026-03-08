@@ -12,3 +12,4 @@ Patch format:
 
 Use this tool when making targeted file edits from diff-like instructions.
 For edits to existing files, this is the preferred tool over filesystem write.
+Use `code_read` or `grep` first when you need more context before preparing the patch.

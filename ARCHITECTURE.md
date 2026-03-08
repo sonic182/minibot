@@ -128,6 +128,7 @@ and emit outbound responses back to the active channel adapter.
 │   │       ├── base.py
 │   │       ├── calculator.py
 │   │       ├── chat_memory.py
+│   │       ├── code_read.py
 │   │       ├── description_loader.py
 │   │       ├── factory.py
 │   │       ├── file_storage.py
@@ -345,12 +346,12 @@ Current notes:
   - agent delegation (`list_agents`, `invoke_agent`),
   - chat memory management (`chat_history_info`, `chat_history_trim`),
   - calculator (`calculator`, `calculate_expression`),
-  - HTTP client (`http_client`, `http_request`),
+  - HTTP client (`http_request`),
   - user/KV memory (`memory` action facade),
   - Python execution (`python_execute`, `python_environment_info`),
   - shell execution (`bash`),
   - structured patch editing (`apply_patch`),
-  - file storage/workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `grep`, `self_insert_artifact` (path confinement defaults to `tools.file_storage.root_dir` and can be relaxed with `allow_outside_root`),
+  - file storage/workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `code_read`, `grep`, `self_insert_artifact` (path confinement defaults to `tools.file_storage.root_dir` and can be relaxed with `allow_outside_root`),
   - audio transcription: `transcribe_audio` (backed by `audio_transcription_facade.py` for model lifecycle/transcription normalization),
   - scheduler controls (`schedule` action facade, `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`),
   - time helpers (`current_datetime`, `datetime_now`).

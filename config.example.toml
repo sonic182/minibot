@@ -34,11 +34,12 @@ allowed_document_mime_types = []
 # LLM provider and generation settings.
 [llm]
 provider = "openai_responses"
-base_url = ""
 model = "gpt-5-mini"
+# reasoning_effort = "medium"
 # Enable HTTP/2 for provider HTTP clients when supported (recommended for OpenAI Responses).
 http2 = true
 max_tool_iterations = 60
+max_new_tokens = 50000
 request_timeout_seconds = 180
 sock_connect_timeout_seconds = 10
 sock_read_timeout_seconds = 180
@@ -111,14 +112,10 @@ name = "minibot"
 # Note: with tool_ownership_mode="exclusive_mcp", only claimed MCP tools are hidden from main.
 tools_deny = ["mcp*"]
 
-# Optional request params. Omit keys to avoid sending them.
-# temperature = 0.2
-# max_new_tokens = 512
-# reasoning_effort = "medium"
-
 # Optional OpenRouter-specific routing configuration.
 # Applied only when `llm.provider = "openrouter"`.
 [llm.openrouter]
+# reasoning_enabled = true
 # Optional model pool for fallback routing.
 # models = ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
 # Optional OpenRouter plugins (for example PDF parsing engine).
@@ -263,7 +260,7 @@ env_allowlist = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"]
 [tools.apply_patch]
 enabled = false
 restrict_to_workspace = true
-workspace_root = "."
+workspace_root = "./data/files/"
 allow_outside_workspace = false
 preserve_trailing_newline = true
 max_patch_bytes = "256KB"
@@ -303,24 +300,6 @@ record_separator = " "
 enabled = false
 name_prefix = "mcp"
 timeout_seconds = 30
-
-# [[tools.mcp.servers]]
-# name = "dice_cli"
-# transport = "stdio"
-# command = "python"
-# args = ["tests/fixtures/mcp/stdio_dice_server.py"]
-# env = {}
-# cwd = "."
-# enabled_tools = []
-# disabled_tools = []
-
-# [[tools.mcp.servers]]
-# name = "dice_http"
-# transport = "http"
-# url = "http://127.0.0.1:8765/mcp"
-# headers = {}
-# enabled_tools = []
-# disabled_tools = []
 
 # Playwright MCP server example (Chromium CLI bridge):
 # Requires Node.js and npx on the host running MiniBot.

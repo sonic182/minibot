@@ -196,6 +196,47 @@ class LocalFileStorage:
             "truncated": truncated,
         }
 
+    def read_text_lines(self, path: str, *, offset: int, limit: int) -> dict[str, str | int | bool | None]:
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+
+        target = self.resolve_existing_file(path)
+        selected_lines: list[str] = []
+        total_lines = 0
+
+        try:
+            with target.open("r", encoding="utf-8") as handle:
+                for index, line in enumerate(handle):
+                    total_lines = index + 1
+                    if index < offset:
+                        continue
+                    if len(selected_lines) >= limit:
+                        continue
+                    selected_lines.append(line.rstrip("\r\n"))
+        except UnicodeDecodeError as exc:
+            raise ValueError("file is not valid UTF-8 text") from exc
+
+        has_more = offset + len(selected_lines) < total_lines
+        if selected_lines:
+            start_line = offset + 1
+            end_line = offset + len(selected_lines)
+        else:
+            start_line = None
+            end_line = None
+
+        return {
+            "path": self._relative_to_root(target),
+            "offset": offset,
+            "limit": limit,
+            "start_line": start_line,
+            "end_line": end_line,
+            "total_lines": total_lines,
+            "has_more": has_more,
+            "content": "\n".join(selected_lines),
+        }
+
     def file_info(self, path: str) -> dict[str, str | int | bool]:
         target = self.resolve_existing_file(path)
         stat = target.stat()

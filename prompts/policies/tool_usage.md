@@ -11,7 +11,8 @@ Tool routing hints:
 - Long-term user Memory (default meaning of "memory" / "memoria" / equivalent terms): `memory` with `action` = `search|get|delete|save`.
 - Conversation transcript/history: `history` with `action` = `info|trim`.
 - File workspace operations: `filesystem` with `action` = `list|glob|info|write|move|delete|send`.
-- Existing-file edits/refactors: `apply_patch` first; use `read_file` only as context input before patching.
+- Incremental code/text inspection: `code_read`.
+- Existing-file edits/refactors: `apply_patch` first; use `code_read` or `grep` for context before patching.
 - Artifact context injection: `artifact_insert`.
 - After filesystem operations, reuse canonical path fields from tool output (`path_relative`, `path_absolute`, `path_scope`) in later tool calls.
 - In yolo mode (`allow_outside_root=true`), use absolute paths for files outside managed root.

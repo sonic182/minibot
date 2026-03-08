@@ -1,0 +1,21 @@
+Read a UTF-8 text file by line window for source inspection and large-text workflows.
+
+Use this when you need a bounded slice of a file instead of the entire contents, especially for code, logs, configs, or long notes.
+
+Arguments:
+- `path`: required managed file path.
+- `offset`: optional zero-based starting line offset. Default is 0.
+- `limit`: optional number of lines to return. Default is 200. Large requests are clamped to the tool maximum.
+
+Response:
+- `start_line` and `end_line` are one-based line numbers for the returned window.
+- `total_lines` is the total number of lines in the file.
+- `has_more=true` means there are more lines after this window.
+- `content` contains exactly the returned lines joined with `\n`.
+
+Preferred usage:
+- Use `code_read` to inspect source files before planning edits.
+- Use `grep` first when you need to find the relevant file or region.
+- Use `apply_patch` after you have enough context to edit.
+
+Do NOT use this for binary files or for sending files to the user. Use `filesystem action=send` for delivery and `self_insert_artifact` for image/document inspection in conversation context.

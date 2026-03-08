@@ -18,6 +18,7 @@ from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
 from minibot.llm.tools.bash import BashTool
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
+from minibot.llm.tools.code_read import CodeReadTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
@@ -86,6 +87,7 @@ def build_enabled_tools(
             event_bus=event_bus,
         )
         tools.extend(file_storage_tool.bindings())
+        tools.extend(CodeReadTool(storage=file_storage).bindings())
     if settings.tools.audio_transcription.enabled:
         if not settings.tools.file_storage.enabled:
             raise ValueError("tools.audio_transcription.enabled requires tools.file_storage.enabled")

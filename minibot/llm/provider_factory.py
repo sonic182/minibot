@@ -14,6 +14,7 @@ from minibot.llm.services.client_bootstrap import (
     resolve_openrouter_reasoning_enabled,
 )
 from minibot.llm.services.compaction import compact_response as compact_response_via_service
+from minibot.llm.services.debug_logging import log_provider_response
 from minibot.llm.services.generation_loop import generate_with_tools
 from minibot.llm.services.models import (
     LLMCompaction,
@@ -152,6 +153,12 @@ class LLMClient:
         )
 
         response = await self._complete_with_schema_fallback(call_kwargs)
+        log_provider_response(
+            logger=self._logger,
+            response=response,
+            context="complete_once",
+            provider_name=self.provider_name(),
+        )
         message = response.main_response
         if not message:
             raise RuntimeError("LLM did not return a completion")

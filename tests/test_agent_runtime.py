@@ -81,6 +81,24 @@ async def test_runtime_returns_final_message_without_tool_calls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_returns_final_message_without_tool_retry_when_tools_are_available() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[LLMCompletionStep(message=_FakeMessage(content="hello"), response_id="resp-1", total_tokens=7)],
+        executions=[],
+    )
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[cast(Any, object())])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(state=state, tool_context=ToolContext(owner_id="1"))
+
+    assert result.payload == "hello"
+    assert result.response_id == "resp-1"
+    assert result.total_tokens == 7
+    assert llm_client.complete_once_calls == 1
+    assert llm_client.execute_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_runtime_applies_append_message_directive_for_trusted_tool() -> None:
     tool_call = _FakeToolCall(id="call-1", function={"name": "self_insert_artifact", "arguments": "{}"})
     steps = [
@@ -119,6 +137,33 @@ async def test_runtime_applies_append_message_directive_for_trusted_tool() -> No
     assert result.total_tokens == 10
     assert any(message.metadata.get("synthetic") is True for message in result.state.messages)
     assert any(message.metadata.get("source_tool") == "self_insert_artifact" for message in result.state.messages)
+
+
+@pytest.mark.asyncio
+async def test_runtime_recovers_pseudo_tool_call_from_text() -> None:
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content='<tool_call>{"name":"http_request","arguments":{}}</tool_call>'),
+            response_id="resp-1",
+            total_tokens=4,
+        ),
+        LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-2", total_tokens=5),
+    ]
+    llm_client = _StubRuntimeLLMClient(steps=steps, executions=[])
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    runtime._tools = [cast(Any, object())]
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(state=state, tool_context=ToolContext(owner_id="1"))
+
+    assert result.payload == "done"
+    assert llm_client.complete_once_calls == 2
+    assert llm_client.execute_calls == 0
+    second_call_messages = llm_client.complete_once_kwargs[1]["messages"]
+    assert any(
+        message["role"] == "user" and "tool calling interface" in message["content"]
+        for message in second_call_messages
+    )
 
 
 @pytest.mark.asyncio
@@ -181,6 +226,35 @@ async def test_runtime_retries_invalid_structured_output_then_succeeds() -> None
 
 
 @pytest.mark.asyncio
+async def test_runtime_returns_non_user_answerable_structured_payload_without_retry() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[
+            LLMCompletionStep(
+                message=_FakeMessage(
+                    content='{"answer":{"kind":"text","content":"still working"},"should_answer_to_user":false}'
+                ),
+                response_id="resp-1",
+                total_tokens=2,
+            ),
+        ],
+        executions=[],
+    )
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[cast(Any, object())])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert result.payload["answer"]["kind"] == "text"
+    assert result.payload["answer"]["content"] == "still working"
+    assert result.payload["should_answer_to_user"] is False
+    assert llm_client.complete_once_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_runtime_returns_fallback_after_structured_output_exhausted_retries() -> None:
     llm_client = _StubRuntimeLLMClient(
         steps=[
@@ -240,9 +314,7 @@ async def test_runtime_retries_do_not_consume_step_budget() -> None:
 @pytest.mark.asyncio
 async def test_runtime_custom_validator_honors_caller_schema() -> None:
     """P1 fix: a custom validator with _DelegatedPayload must accept kind='json' without retrying."""
-    delegated_json = (
-        '{"answer":{"kind":"json","content":"{\\"key\\":\\"value\\"}"},"should_answer_to_user":true}'
-    )
+    delegated_json = '{"answer":{"kind":"json","content":"{\\"key\\":\\"value\\"}"},"should_answer_to_user":true}'
     llm_client = _StubRuntimeLLMClient(
         steps=[
             LLMCompletionStep(
@@ -335,6 +407,138 @@ async def test_runtime_stops_on_repeated_identical_tool_failure_signatures() -> 
     assert isinstance(result.payload, dict)
     assert "same tool error repeatedly" in result.payload["answer"]["content"]
     assert result.payload["should_answer_to_user"] is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_stops_on_repeated_identical_successful_tool_outputs() -> None:
+    legacy_tool_call = _FakeToolCall(id="call-1", function={"name": "http_client", "arguments": "{}"})
+    canonical_tool_call = _FakeToolCall(id="call-1", function={"name": "http_request", "arguments": "{}"})
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[legacy_tool_call]),
+            response_id="resp-1",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[canonical_tool_call]),
+            response_id="resp-2",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[legacy_tool_call]),
+            response_id="resp-3",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-4", total_tokens=3),
+    ]
+    executions = [
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"{\\"bitcoin\\":{\\"usd\\":1}}"}'},
+                result=ToolResult(content={"status": 200, "body": '{"bitcoin":{"usd":1}}'}),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"{\\"bitcoin\\":{\\"usd\\":1}}"}'},
+                result=ToolResult(content={"status": 200, "body": '{"bitcoin":{"usd":1}}'}),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"{\\"bitcoin\\":{\\"usd\\":1}}"}'},
+                result=ToolResult(content={"status": 200, "body": '{"bitcoin":{"usd":1}}'}),
+            )
+        ],
+    ]
+    llm_client = _StubRuntimeLLMClient(steps=steps, executions=executions)
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    runtime._tools = [cast(Any, object())]
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert llm_client.complete_once_calls == 3
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
+    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_tool_loop_fallback_payload_stays_structured() -> None:
+    tool_call = _FakeToolCall(id="call-1", function={"name": "http_request", "arguments": "{}"})
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-1",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-2",
+            total_tokens=3,
+        ),
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="resp-3",
+            total_tokens=3,
+        ),
+    ]
+    executions = [
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"ok"}'},
+                result=ToolResult(content={"status": 200, "body": "ok"}),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"ok"}'},
+                result=ToolResult(content={"status": 200, "body": "ok"}),
+            )
+        ],
+        [
+            ToolExecutionRecord(
+                tool_name="http_request",
+                call_id="call-1",
+                message_payload={"role": "tool", "content": '{"status":200,"body":"ok"}'},
+                result=ToolResult(content={"status": 200, "body": "ok"}),
+            )
+        ],
+    ]
+    llm_client = _StubRuntimeLLMClient(steps=steps, executions=executions)
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[cast(Any, object())])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
+    assert "http_request" in result.payload["answer"]["content"]
+    assert '{"status":200,"body":"ok"}' in result.payload["answer"]["content"]
+    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
 
 
 @pytest.mark.asyncio

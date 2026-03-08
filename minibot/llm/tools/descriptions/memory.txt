@@ -22,3 +22,8 @@ Use the action field to select the operation:
 - action=list_titles: List lightweight memory titles (id, title, updated_at, source) so you can quickly discover candidate entries before get/search. Prefer this when exact title is unknown and the title list is small enough to scan.
 
 - action=delete: Remove stale or outdated memory by entry_id or title when user asks to forget something or when replacing incorrect/outdated facts.
+
+Empty results policy:
+- If list_titles or search returns zero results, do NOT retry with the same parameters. Proceed using your own knowledge or ask the user directly.
+- If get is called without entry_id or title, use action=list_titles first to discover available entries.
+- Repeating identical calls with the same parameters is wasteful and will be aborted automatically.

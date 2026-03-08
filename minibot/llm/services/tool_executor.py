@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from typing import Any, Mapping, Sequence
 
 from llm_async.models.tool_call import ToolCall
@@ -24,15 +25,25 @@ _SENSITIVE_ARGUMENT_KEY_PARTS = (
     "authorization",
     "cookie",
 )
+_TOOL_NAME_ALIASES = {
+    "http_client": "http_request",
+}
+
+
+def canonical_tool_name(name: str) -> str:
+    normalized = name.strip()
+    if not normalized:
+        return "unknown_tool"
+    return _TOOL_NAME_ALIASES.get(normalized, normalized)
 
 
 def tool_name_from_call(call: ToolCall) -> str:
     if call.function:
         function_name = call.function.get("name")
         if isinstance(function_name, str) and function_name:
-            return function_name
+            return canonical_tool_name(function_name)
     if call.name:
-        return call.name
+        return canonical_tool_name(call.name)
     return "unknown_tool"
 
 
@@ -65,7 +76,7 @@ def parse_tool_call(call: ToolCall) -> tuple[str, dict[str, Any]]:
         raise ValueError("Tool call missing name")
     if not isinstance(arguments_dict, dict):
         raise ValueError("Tool call arguments must be an object")
-    return func_name, arguments_dict
+    return canonical_tool_name(func_name), arguments_dict
 
 
 def decode_tool_arguments(arguments_payload: str) -> dict[str, Any]:
@@ -195,9 +206,9 @@ async def execute_tool_calls_for_runtime(
     context: ToolContext,
     *,
     responses_mode: bool,
-    logger: Any,
+    logger: logging.Logger,
 ) -> list[ToolExecutionRecord]:
-    tool_map = {binding.tool.name: binding for binding in tools}
+    tool_map = {canonical_tool_name(binding.tool.name): binding for binding in tools}
     records: list[ToolExecutionRecord] = []
     for call in tool_calls:
         call_id = call.id
@@ -289,7 +300,7 @@ async def execute_tool_calls(
     context: ToolContext,
     *,
     responses_mode: bool,
-    logger: Any,
+    logger: logging.Logger,
 ) -> list[dict[str, Any]]:
     records = await execute_tool_calls_for_runtime(
         tool_calls,

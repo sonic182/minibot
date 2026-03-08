@@ -4,10 +4,25 @@ from typing import Any, Sequence
 
 from llm_async.models.tool_call import ToolCall
 
-from minibot.llm.services.tool_executor import stringify_result, tool_name_from_call
+from minibot.llm.services.tool_executor import decode_tool_arguments, stringify_result, tool_name_from_call
 
 
 MAX_REPEATED_TOOL_ITERATIONS = 3
+
+
+def any_tool_call_truncated(tool_calls: Sequence[Any]) -> bool:
+    for call in tool_calls:
+        fn = getattr(call, "function", None)
+        if not isinstance(fn, dict):
+            continue
+        args = fn.get("arguments")
+        if not isinstance(args, str) or not args.strip():
+            continue
+        try:
+            decode_tool_arguments(args)
+        except ValueError:
+            return True
+    return False
 
 
 def assistant_message_for_followup(message: Any) -> dict[str, Any]:
@@ -48,8 +63,12 @@ def tool_loop_fallback_payload(
     )
     if response_schema:
         return {
-            "answer": answer,
+            "answer": {
+                "kind": "text",
+                "content": answer,
+            },
             "should_answer_to_user": True,
+            "attachments": [],
         }
     return answer
 

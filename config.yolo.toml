@@ -22,8 +22,10 @@ allowed_document_mime_types = []
 provider = "openai_responses"
 base_url = ""
 model = "gpt-5-mini"
+# reasoning_effort = "medium"
 http2 = true
 max_tool_iterations = 60
+max_new_tokens = 50000
 request_timeout_seconds = 180
 sock_connect_timeout_seconds = 10
 sock_read_timeout_seconds = 180
@@ -35,6 +37,12 @@ prompt_cache_enabled = true
 system_prompt = "You are Minibot, a helpful assistant."
 system_prompt_file = "./prompts/main_agent_system.md"
 prompts_dir = "./prompts"
+
+[llm.openrouter]
+# reasoning_enabled = true
+
+[llm.openrouter.provider]
+# only = ["deepinfra", "novita"]
 
 [providers.openai]
 api_key = ""

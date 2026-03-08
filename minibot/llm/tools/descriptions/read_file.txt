@@ -2,6 +2,8 @@ Read the UTF-8 text content of a single file from managed workspace. Returns fil
 
 Use this sparingly. Preferred use is very small text notes/snippets where reading the raw text is directly required.
 
+For source code, large files, or iterative inspection workflows, prefer `code_read`.
+
 Do NOT use read_file before sending files to the user. If user wants the file delivered, use filesystem action=send directly.
 
 Do NOT use this for large files, binary files, or general inspection workflows. For images/documents to analyze in context, use self_insert_artifact. For metadata checks, use filesystem action=info.

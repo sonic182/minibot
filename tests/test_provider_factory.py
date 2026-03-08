@@ -15,6 +15,7 @@ from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.tool_executor import (
+    canonical_tool_name,
     normalize_tool_args_for_signature,
     parse_tool_call,
     sanitize_tool_arguments_for_log,
@@ -565,8 +566,10 @@ async def test_generate_stops_after_tool_loop_limit(monkeypatch: pytest.MonkeyPa
     )
 
     assert isinstance(result.payload, dict)
-    assert "tool-loop safeguard" in result.payload["answer"]
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
     assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
 
 
 @pytest.mark.asyncio
@@ -592,8 +595,10 @@ async def test_generate_stops_when_tool_outputs_repeat_identically(monkeypatch: 
     result = await client.generate([], "hello", tools=[binding], response_schema={"type": "object"})
 
     assert isinstance(result.payload, dict)
-    assert "tool-loop safeguard" in result.payload["answer"]
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
     assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
     assert len(client._provider.calls) == 3
 
 
@@ -642,6 +647,39 @@ async def test_generate_sanitizes_assistant_message_before_tool_followup(monkeyp
     assert assistant_message["role"] == "assistant"
     assert assistant_message["tool_calls"][0]["function"]["name"] == "noop"
     assert "reasoning" not in assistant_message
+
+
+@pytest.mark.asyncio
+async def test_generate_recovers_pseudo_tool_call_from_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import provider_registry
+
+    class _PseudoToolProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return _FakeResponse(
+                    main_response=_FakeMessage(content='<tool_call>{"name":"noop","arguments":{}}</tool_call>'),
+                    original={"id": "resp-1"},
+                )
+            return _FakeResponse(main_response=_FakeMessage(content="done"), original={"id": "resp-2"})
+
+    async def _noop_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"ok": True}
+
+    tool = Tool(name="noop", description="noop", parameters={"type": "object", "properties": {}, "required": []})
+    binding = ToolBinding(tool=tool, handler=_noop_handler)
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openai", _PseudoToolProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+
+    result = await client.generate([], "hello", tools=[binding])
+
+    assert result.payload == "done"
+    assert len(client._provider.calls) == 2
+    followup_messages = client._provider.calls[1]["messages"]
+    assert followup_messages[-2]["role"] == "assistant"
+    assert followup_messages[-1]["role"] == "user"
+    assert "tool calling interface" in followup_messages[-1]["content"]
 
 
 @pytest.mark.asyncio
@@ -740,6 +778,28 @@ async def test_generate_includes_openrouter_routing_fields(monkeypatch: pytest.M
     assert call["provider"]["data_collection"] == "deny"
     assert call["provider"]["custom_hint"] == "value"
     assert call["plugins"] == [{"id": "file-parser", "pdf": {"engine": "pdf-text"}}]
+
+
+@pytest.mark.asyncio
+async def test_generate_includes_openrouter_reasoning_payload_when_effort_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from minibot.llm.services import provider_registry
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _FakeProvider)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openrouter",
+            api_key="secret",
+            model="openrouter/auto",
+            reasoning_effort="high",
+        )
+    )
+
+    await client.generate([], "hello")
+
+    call = client._provider.calls[-1]
+    assert call["reasoning"] == {"enabled": True, "effort": "high"}
 
 
 def test_media_support_modes() -> None:
@@ -1061,6 +1121,23 @@ def test_parse_tool_call_repairs_unclosed_json_object() -> None:
     assert arguments == {"url": "https://www.ecosbox.com", "method": "GET"}
 
 
+def test_parse_tool_call_normalizes_legacy_http_client_alias() -> None:
+    call = _FakeToolCall(
+        id="tc-1",
+        function={"name": "http_client", "arguments": '{"url": "https://example.com", "method": "GET"}'},
+    )
+
+    tool_name, arguments = parse_tool_call(call)
+
+    assert tool_name == "http_request"
+    assert arguments == {"url": "https://example.com", "method": "GET"}
+
+
+def test_canonical_tool_name_normalizes_legacy_http_client_alias() -> None:
+    assert canonical_tool_name("http_client") == "http_request"
+    assert canonical_tool_name("http_request") == "http_request"
+
+
 def test_normalize_tool_args_for_signature_is_stable_across_dict_order() -> None:
     left = {"b": 2, "a": {"y": 2, "x": 1}}
     right = {"a": {"x": 1, "y": 2}, "b": 2}
@@ -1072,9 +1149,8 @@ def test_tool_failure_signature_is_stable_across_dict_order() -> None:
     args_one = {"headers": {"B": "2", "A": "1"}, "url": "https://example.com"}
     args_two = {"url": "https://example.com", "headers": {"A": "1", "B": "2"}}
 
-    assert (
-        tool_failure_signature("http_request", args_one, "tool_execution_failed", "boom")
-        == tool_failure_signature("http_request", args_two, "tool_execution_failed", "boom")
+    assert tool_failure_signature("http_request", args_one, "tool_execution_failed", "boom") == tool_failure_signature(
+        "http_request", args_two, "tool_execution_failed", "boom"
     )
 
 
@@ -1111,9 +1187,11 @@ async def test_generate_surfaces_invalid_tool_arguments_for_retry(monkeypatch: p
     result = await client.generate([], "time", tools=[binding], response_schema={"type": "object"})
 
     assert isinstance(result.payload, dict)
-    assert "tool-loop safeguard" in result.payload["answer"]
-    assert "current_datetime" in result.payload["answer"]
+    assert result.payload["answer"]["kind"] == "text"
+    assert "tool-loop safeguard" in result.payload["answer"]["content"]
+    assert "current_datetime" in result.payload["answer"]["content"]
     assert result.payload["should_answer_to_user"] is True
+    assert result.payload["attachments"] == []
     assert len(client._provider.calls) == 2
 
 
@@ -1153,16 +1231,17 @@ async def test_generate_does_not_force_tool_choice_for_explicit_tool_request(
 
 
 @pytest.mark.asyncio
-async def test_generate_ignores_continue_loop_hint_when_no_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_generate_returns_non_user_answerable_payload_without_retry_when_tools_attached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from minibot.llm.services import provider_registry
 
-    class _ContinueLoopProvider(_FakeProvider):
+    class _NotAnswerableProvider(_FakeProvider):
         async def acomplete(self, **kwargs: Any) -> _FakeResponse:
             self.calls.append(kwargs)
             payload = {
-                "answer": "I will continue with tools.",
+                "answer": {"kind": "text", "content": "I still need to run tools."},
                 "should_answer_to_user": False,
-                "continue_loop": True,
             }
             return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
 
@@ -1176,15 +1255,41 @@ async def test_generate_ignores_continue_loop_hint_when_no_tool_call(monkeypatch
     )
     binding = ToolBinding(tool=tool, handler=_time_handler)
 
-    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _ContinueLoopProvider)
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _NotAnswerableProvider)
     client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
 
     result = await client.generate([], "continue", tools=[binding], response_schema={"type": "object"})
 
     assert result.payload == {
-        "answer": "I will continue with tools.",
+        "answer": {"kind": "text", "content": "I still need to run tools."},
         "should_answer_to_user": False,
-        "continue_loop": True,
+    }
+    assert len(client._provider.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_returns_non_user_answerable_payload_without_retry_when_no_tools_are_attached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from minibot.llm.services import provider_registry
+
+    class _NotAnswerableProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            payload = {
+                "answer": {"kind": "text", "content": "I still need to run tools."},
+                "should_answer_to_user": False,
+            }
+            return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openrouter", _NotAnswerableProvider)
+    client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
+
+    result = await client.generate([], "continue", response_schema={"type": "object"})
+
+    assert result.payload == {
+        "answer": {"kind": "text", "content": "I still need to run tools."},
+        "should_answer_to_user": False,
     }
     assert len(client._provider.calls) == 1
 
