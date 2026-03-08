@@ -1364,13 +1364,13 @@ referencing = ">=0.31.0"
 
 [[package]]
 name = "llm-async"
-version = "0.4.3"
+version = "0.5.1"
 description = "Multi-LLM Provider Library"
 optional = false
 python-versions = "<4.0,>=3.10"
 files = [
-    {file = "llm_async-0.4.3-py3-none-any.whl", hash = "sha256:533c02656f53f578fc3fe6385022234a045e9fa1bd569d01d033c6b89cf442bd"},
-    {file = "llm_async-0.4.3.tar.gz", hash = "sha256:7402cecab4cc07245bc9a9d4061db52734c7d89ab7d7a501956b0cc327b65e90"},
+    {file = "llm_async-0.5.1-py3-none-any.whl", hash = "sha256:067b064487e005a88c7b8912e34cee4f9d47134f32751f66b1534929207e8f00"},
+    {file = "llm_async-0.5.1.tar.gz", hash = "sha256:bc4de62a1031f294293e0cae94ae93fe01af37c58a358f139828b9955ff9c93b"},
 ]
 
 [package.dependencies]
@@ -2409,22 +2409,17 @@ name = "ratchet-sm"
 version = "0.1.0"
 description = "A provider-agnostic state machine for handling, normalizing, and recovering structured LLM outputs."
 optional = false
-python-versions = "^3.10"
-files = []
-develop = true
-
-[package.dependencies]
-pydantic = {version = ">=2.0", optional = true}
+python-versions = "<4.0,>=3.10"
+files = [
+    {file = "ratchet_sm-0.1.0-py3-none-any.whl", hash = "sha256:ae1c76980f8f0289732174388bce6c9ee834e9fc35192b7a83f381793eba1743"},
+    {file = "ratchet_sm-0.1.0.tar.gz", hash = "sha256:29f994654d1cacb4204849115c2a6d98aa17e953fb52cffd1773c1e1b82409c7"},
+]
 
 [package.extras]
 all = ["pydantic (>=2.0)", "python-frontmatter", "pyyaml"]
 frontmatter = ["python-frontmatter"]
 pydantic = ["pydantic (>=2.0)"]
 yaml = ["pyyaml"]
-
-[package.source]
-type = "directory"
-url = "../ratchet"
 
 [[package]]
 name = "referencing"
@@ -3088,4 +3083,4 @@ stt = ["faster-whisper"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.12,<3.15"
-content-hash = "1a69686ad96168a466c7c882c20aa87d1daaa5ae4b8246a8e20d6b7c82d7ae42"
+content-hash = "6adbeace40527008a54830a884003642b22b2bb304e52c4b91ea6e6ae5ab865a"
