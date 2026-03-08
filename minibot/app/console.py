@@ -20,6 +20,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--user-id", type=int, default=1)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
     parser.add_argument("--config", type=str, default=None, help="Optional config.toml path.")
+    parser.add_argument("--verbose", action="store_true", default=False, help="Also log to stdout.")
     return parser
 
 
@@ -30,13 +31,14 @@ async def run(
     user_id: int,
     timeout_seconds: float,
     config_path: str | None,
+    verbose: bool = False,
 ) -> None:
     console = CompatConsole()
     effective_timeout_seconds = max(120.0, float(timeout_seconds))
     resolved_config_path = Path(config_path).expanduser() if config_path else None
     AppContainer.configure(resolved_config_path)
     logger = AppContainer.get_logger()
-    _configure_console_file_only_logging(logger)
+    _configure_console_file_only_logging(logger, verbose=verbose)
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
     main_agent_tools_enabled = getattr(dispatcher, "main_agent_tool_names", None) or ["none"]
@@ -107,6 +109,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                 user_id=args.user_id,
                 timeout_seconds=args.timeout_seconds,
                 config_path=args.config,
+                verbose=args.verbose,
             )
         )
     except KeyboardInterrupt:
@@ -132,11 +135,7 @@ async def _wait_for_response_or_warn(
         return False
 
 
-if __name__ == "__main__":
-    main()
-
-
-def _configure_console_file_only_logging(logger: object) -> None:
+def _configure_console_file_only_logging(logger: object, *, verbose: bool = False) -> None:
     if not isinstance(logger, logging.Logger):
         return
     file_handler = next(
@@ -149,10 +148,19 @@ def _configure_console_file_only_logging(logger: object) -> None:
         file_handler = logging.FileHandler(log_dir / "minibot.log")
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
         file_handler.setFormatter(formatter)
-    logger.handlers = [file_handler]
+    handlers: list[logging.Handler] = [file_handler]
+    if verbose:
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        handlers.append(stream_handler)
+    logger.handlers = handlers
 
 
 def _log_info(logger: object, message: str, **kwargs: object) -> None:
     info_method = getattr(logger, "info", None)
     if callable(info_method):
         info_method(message, **kwargs)
+
+
+if __name__ == "__main__":
+    main()

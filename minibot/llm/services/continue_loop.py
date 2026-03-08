@@ -12,6 +12,4 @@ CONTINUE_LOOP_RETRY_PATCH = (
 def should_continue_tool_loop(payload: Any) -> bool:
     if not isinstance(payload, dict):
         return False
-    if payload.get("continue_loop") is not True:
-        return False
     return payload.get("should_answer_to_user") is False

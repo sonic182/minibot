@@ -3,67 +3,13 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any
-from uuid import uuid4
 
-from llm_async.models.tool_call import ToolCall
 from pydantic import BaseModel
-from ratchet_sm import FailAction, RetryAction, State, StateMachine, ToolCallMissingAction, ValidAction
+from ratchet_sm import FailAction, RetryAction, State, StateMachine, ValidAction
 from ratchet_sm.strategies.base import FailureContext
 from ratchet_sm.strategies.validation_feedback import ValidationFeedback
 
 from minibot.shared.parse_utils import parse_json_with_fenced_fallback
-
-
-class ToolCallRecoveryMachine:
-    def __init__(self, *, max_attempts: int, state_name: str = "tool_call") -> None:
-        self._state_name = state_name
-        self._machine = StateMachine(
-            states={
-                state_name: State(
-                    name=state_name,
-                    max_attempts=max_attempts,
-                    requires_tool_call=True,
-                )
-            },
-            transitions={},
-            initial=state_name,
-        )
-
-    def receive(
-        self,
-        raw: str,
-        *,
-        tool_calls: Sequence[Any] | None = None,
-    ) -> ValidAction | ToolCallMissingAction | FailAction:
-        action = self._machine.receive(raw, tool_calls=list(tool_calls) if tool_calls is not None else None)
-        if isinstance(action, ValidAction | ToolCallMissingAction | FailAction):
-            return action
-        return FailAction(
-            attempts=1,
-            state_name=self._state_name,
-            raw=raw,
-            history=(),
-            reason=f"Unsupported ratchet action type: {type(action).__name__}",
-        )
-
-    def reset(self) -> None:
-        self._machine.reset()
-
-
-def build_tool_call_recovery_machine(*, max_attempts: int) -> ToolCallRecoveryMachine:
-    return ToolCallRecoveryMachine(max_attempts=max_attempts)
-
-
-def recovered_tool_call_from_payload(payload: Mapping[str, Any]) -> ToolCall:
-    name = _coerce_tool_name(payload)
-    arguments = _coerce_tool_arguments(payload)
-    return ToolCall(
-        id=f"ratchet-{uuid4().hex}",
-        type="function",
-        name=name,
-        input=arguments,
-        function={"name": name, "arguments": json.dumps(arguments, ensure_ascii=True)},
-    )
 
 
 class StructuredOutputValidator:
@@ -271,38 +217,3 @@ def _to_raw_text(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=True, default=str)
 
 
-def _coerce_tool_name(payload: Mapping[str, Any]) -> str:
-    for key in ("name", "tool", "tool_name"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    function = payload.get("function")
-    if isinstance(function, Mapping):
-        value = function.get("name")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    raise ValueError("Recovered tool call missing name")
-
-
-def _coerce_tool_arguments(payload: Mapping[str, Any]) -> dict[str, Any]:
-    for key in ("arguments", "args", "input", "parameters"):
-        value = payload.get(key)
-        coerced = _coerce_argument_object(value)
-        if coerced is not None:
-            return coerced
-    function = payload.get("function")
-    if isinstance(function, Mapping):
-        coerced = _coerce_argument_object(function.get("arguments"))
-        if coerced is not None:
-            return coerced
-    return {}
-
-
-def _coerce_argument_object(value: Any) -> dict[str, Any] | None:
-    if isinstance(value, Mapping):
-        return dict(value)
-    if isinstance(value, str) and value.strip():
-        decoded = parse_json_with_fenced_fallback(value)
-        if isinstance(decoded, Mapping):
-            return dict(decoded)
-    return None

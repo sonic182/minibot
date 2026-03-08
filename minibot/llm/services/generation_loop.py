@@ -5,17 +5,14 @@ import json
 from typing import Any, Awaitable, Callable, Sequence
 
 from ratchet_sm import FailAction, ToolCallMissingAction, ValidAction
+from ratchet_sm.normalizers.extract_pseudo_tool_call import has_pseudo_tool_call_tag
 
 from minibot.core.memory import MemoryEntry
 from minibot.llm.services.continue_loop import CONTINUE_LOOP_RETRY_PATCH, should_continue_tool_loop
 from minibot.llm.services.compaction import continue_incomplete_response
 from minibot.llm.services.debug_logging import log_provider_response
 from minibot.llm.services.models import LLMGeneration
-from minibot.llm.services.ratchet_support import (
-    StructuredOutputValidator,
-    build_tool_call_recovery_machine,
-    recovered_tool_call_from_payload,
-)
+from minibot.llm.services.ratchet_support import StructuredOutputValidator
 from minibot.llm.services.request_builder import (
     RequestContext,
     build_generate_extra_kwargs,
@@ -26,6 +23,7 @@ from minibot.llm.services.schema_policy import normalize_response_schema, prepar
 from minibot.llm.services.tool_executor import execute_tool_calls, tool_name_from_call
 from minibot.llm.services.tool_loop_guard import (
     MAX_REPEATED_TOOL_ITERATIONS,
+    any_tool_call_truncated,
     assistant_message_for_followup,
     tool_iteration_signature,
     tool_loop_fallback_payload,
@@ -39,6 +37,13 @@ from minibot.llm.services.usage_parser import (
 )
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import humanize_token_count
+
+
+_TRUNCATED_PATCH = (
+    "Your previous response was truncated. "
+    "Please resend your complete tool call with all required arguments."
+)
+_PSEUDO_TOOL_PATCH = "Please use the tool calling interface instead of embedding tool calls in text."
 
 
 async def generate_with_tools(
@@ -86,9 +91,7 @@ async def generate_with_tools(
     usage_accumulator = UsageAccumulator()
     repeated_continue_loop_count = 0
     last_continue_loop_signature: str | None = None
-    tool_recovery_machine = (
-        build_tool_call_recovery_machine(max_attempts=max_tool_iterations) if tool_bindings else None
-    )
+    truncated_count = 0
     structured_validator = (
         StructuredOutputValidator(max_attempts=max_tool_iterations, schema=response_schema)
         if response_schema
@@ -131,35 +134,29 @@ async def generate_with_tools(
         )
         message_tool_calls = list(message.tool_calls or [])
         effective_tool_calls = message_tool_calls
-        if tool_bindings and tool_recovery_machine is not None:
-            raw_message_content = message.content if isinstance(message.content, str) else ""
-            tool_action = tool_recovery_machine.receive(raw_message_content, tool_calls=message_tool_calls)
-            if isinstance(tool_action, ValidAction):
-                if tool_action.format_detected == "native_tool_call":
-                    effective_tool_calls = message_tool_calls
-                else:
-                    effective_tool_calls = [recovered_tool_call_from_payload(tool_action.parsed)]
-                tool_recovery_machine.reset()
-            elif isinstance(tool_action, ToolCallMissingAction):
-                if tool_action.reason == "pseudo_tool_call_in_text":
-                    conversation.append(assistant_message_for_followup(message))
-                    if tool_action.prompt_patch:
-                        conversation.append({"role": "user", "content": tool_action.prompt_patch})
-                    continue
-                tool_recovery_machine.reset()
-                effective_tool_calls = []
-            elif isinstance(tool_action, FailAction):
-                logger.warning(
-                    "tool call recovery exceeded maximum attempts; returning fallback",
-                    extra={"tool_names": recent_tool_names[-10:]},
-                )
-                response_id = extract_response_id(response)
-                payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
-                return LLMGeneration(
-                    payload,
-                    response_id,
-                    total_tokens=usage_accumulator.total_tokens_used or None,
-                )
+        if tool_bindings:
+            raw_content = message.content if isinstance(message.content, str) else ""
+            if message_tool_calls and any_tool_call_truncated(message_tool_calls):
+                truncated_count += 1
+                if truncated_count >= max_tool_iterations:
+                    logger.warning(
+                        "truncated tool call exceeded maximum attempts; returning fallback",
+                        extra={"tool_names": recent_tool_names[-10:]},
+                    )
+                    response_id = extract_response_id(response)
+                    payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
+                    return LLMGeneration(
+                        payload,
+                        response_id,
+                        total_tokens=usage_accumulator.total_tokens_used or None,
+                    )
+                conversation.append(assistant_message_for_followup(message))
+                conversation.append({"role": "user", "content": _TRUNCATED_PATCH})
+                continue
+            if not message_tool_calls and has_pseudo_tool_call_tag(raw_content):
+                conversation.append(assistant_message_for_followup(message))
+                conversation.append({"role": "user", "content": _PSEUDO_TOOL_PATCH})
+                continue
         if not effective_tool_calls or not tool_bindings:
             payload = message.content
             response_id = extract_response_id(response)

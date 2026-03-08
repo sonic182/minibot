@@ -23,8 +23,19 @@ class RuntimeMessageRenderer:
 
     def from_provider_assistant_message(self, message: Any) -> AgentMessage:
         content = getattr(message, "content", "")
+        reasoning = getattr(message, "reasoning", None)
+        reasoning_details = getattr(message, "reasoning_details", None)
+        metadata: dict[str, Any] = {}
+        if reasoning:
+            metadata["reasoning"] = reasoning
+        if reasoning_details:
+            metadata["reasoning_details"] = reasoning_details
         if isinstance(content, str):
-            return AgentMessage(role="assistant", content=[MessagePart(type="text", text=content)])
+            return AgentMessage(
+                role="assistant",
+                content=[MessagePart(type="text", text=content)],
+                metadata=metadata or None,
+            )
         if isinstance(content, list):
             parts: list[MessagePart] = []
             for part in content:
@@ -38,13 +49,23 @@ class RuntimeMessageRenderer:
                     parts.append(MessagePart(type="json", value=part.get("value")))
                     continue
                 parts.append(MessagePart(type="json", value=part))
-            return AgentMessage(role="assistant", content=parts or [MessagePart(type="text", text="")])
-        return AgentMessage(role="assistant", content=[MessagePart(type="text", text=str(content))])
+            return AgentMessage(
+                role="assistant",
+                content=parts or [MessagePart(type="text", text="")],
+                metadata=metadata or None,
+            )
+        return AgentMessage(
+            role="assistant",
+            content=[MessagePart(type="text", text=str(content))],
+            metadata=metadata or None,
+        )
 
     def from_provider_assistant_tool_call_message(self, message: Any) -> AgentMessage:
         content = getattr(message, "content", "")
         text = content if isinstance(content, str) else ""
         tool_calls = getattr(message, "tool_calls", None)
+        reasoning = getattr(message, "reasoning", None)
+        reasoning_details = getattr(message, "reasoning_details", None)
         metadata: dict[str, Any] = {}
         if tool_calls:
             metadata["tool_calls"] = [
@@ -57,6 +78,10 @@ class RuntimeMessageRenderer:
                 }
                 for call in tool_calls
             ]
+        if reasoning:
+            metadata["reasoning"] = reasoning
+        if reasoning_details:
+            metadata["reasoning_details"] = reasoning_details
         return AgentMessage(role="assistant", content=[MessagePart(type="text", text=text)], metadata=metadata)
 
     def render_messages(self, state: AgentState) -> list[dict[str, Any]]:
@@ -81,6 +106,12 @@ class RuntimeMessageRenderer:
                     else self._render_non_tool_content(message.content)
                 ),
             }
+            reasoning = message.metadata.get("reasoning") if message.metadata else None
+            reasoning_details = message.metadata.get("reasoning_details") if message.metadata else None
+            if reasoning:
+                payload["reasoning"] = reasoning
+            if reasoning_details:
+                payload["reasoning_details"] = reasoning_details
             tool_calls = message.metadata.get("tool_calls") if message.metadata else None
             if tool_calls:
                 payload["tool_calls"] = tool_calls

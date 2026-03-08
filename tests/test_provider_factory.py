@@ -677,8 +677,9 @@ async def test_generate_recovers_pseudo_tool_call_from_text(monkeypatch: pytest.
     assert result.payload == "done"
     assert len(client._provider.calls) == 2
     followup_messages = client._provider.calls[1]["messages"]
-    assert followup_messages[-1]["role"] == "tool"
-    assert followup_messages[-1]["name"] == "noop"
+    assert followup_messages[-2]["role"] == "assistant"
+    assert followup_messages[-1]["role"] == "user"
+    assert "tool calling interface" in followup_messages[-1]["content"]
 
 
 @pytest.mark.asyncio

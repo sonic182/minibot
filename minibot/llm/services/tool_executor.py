@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from typing import Any, Mapping, Sequence
 
 from llm_async.models.tool_call import ToolCall
@@ -90,15 +91,6 @@ def decode_tool_arguments(arguments_payload: str) -> dict[str, Any]:
         fenced = "\n".join(lines).strip()
         if fenced:
             candidates.append(fenced)
-
-    repaired_candidates: list[str] = []
-    for candidate in candidates:
-        text = candidate.strip()
-        if text.startswith("{"):
-            missing = text.count("{") - text.count("}")
-            if missing > 0:
-                repaired_candidates.append(text + ("}" * missing))
-    candidates.extend(repaired_candidates)
 
     for candidate in candidates:
         parsed = parse_json_maybe_python_object(candidate)
@@ -205,7 +197,7 @@ async def execute_tool_calls_for_runtime(
     context: ToolContext,
     *,
     responses_mode: bool,
-    logger: Any,
+    logger: logging.Logger,
 ) -> list[ToolExecutionRecord]:
     tool_map = {canonical_tool_name(binding.tool.name): binding for binding in tools}
     records: list[ToolExecutionRecord] = []
@@ -299,7 +291,7 @@ async def execute_tool_calls(
     context: ToolContext,
     *,
     responses_mode: bool,
-    logger: Any,
+    logger: logging.Logger,
 ) -> list[dict[str, Any]]:
     records = await execute_tool_calls_for_runtime(
         tool_calls,

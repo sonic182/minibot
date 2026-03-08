@@ -6,8 +6,8 @@ from dataclasses import dataclass
 import json
 from typing import Any, Sequence
 
-from ratchet_sm import FailAction, RetryAction, ToolCallMissingAction, ValidAction
-from ratchet_sm.normalizers.extract_dsml_tool_call import parse_dsml_tool_call
+from ratchet_sm import FailAction, RetryAction, ValidAction
+from ratchet_sm.normalizers.extract_pseudo_tool_call import has_pseudo_tool_call_tag
 
 from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
 from minibot.app.response_parser import continue_loop_requested
@@ -18,21 +18,24 @@ from minibot.core.agent_runtime import (
     MessagePart,
     RuntimeLimits,
 )
-from llm_async.models.tool_call import ToolCall
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.continue_loop import CONTINUE_LOOP_RETRY_PATCH
-from minibot.llm.services.ratchet_support import (
-    build_tool_call_recovery_machine,
-    recovered_tool_call_from_payload,
-)
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
 from minibot.llm.services.tool_loop_guard import (
     MAX_REPEATED_TOOL_ITERATIONS,
+    any_tool_call_truncated,
     tool_iteration_signature,
     tool_loop_fallback_payload,
 )
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import humanize_token_count
+
+
+_TRUNCATED_PATCH = (
+    "Your previous response was truncated. "
+    "Please resend your complete tool call with all required arguments."
+)
+_PSEUDO_TOOL_PATCH = "Please use the tool calling interface instead of embedding tool calls in text."
 
 
 @dataclass(frozen=True)
@@ -87,7 +90,7 @@ class AgentRuntime:
         _validator = structured_validator if response_schema is not None else None
         if _validator is None and response_schema is not None:
             _validator = RuntimeStructuredOutputValidator(max_attempts=3, schema_model=response_schema)
-        tool_recovery_machine = build_tool_call_recovery_machine(max_attempts=self._limits.max_tool_calls)
+        truncated_tool_call_count = 0
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
@@ -145,36 +148,29 @@ class AgentRuntime:
                     raw_message_content = (
                         completion.message.content if isinstance(completion.message.content, str) else ""
                     )
-                    tool_action = tool_recovery_machine.receive(raw_message_content, tool_calls=tool_calls)
-                    if isinstance(tool_action, ValidAction):
-                        if tool_action.format_detected != "native_tool_call":
-                            tool_calls = [recovered_tool_call_from_payload(tool_action.parsed)]
-                        else:
-                            tool_calls = _supplement_native_tool_calls_from_dsml(tool_calls, raw_message_content)
-                        tool_recovery_machine.reset()
-                    elif isinstance(tool_action, ToolCallMissingAction):
-                        if tool_action.reason == "pseudo_tool_call_in_text":
-                            retry_patch = (tool_action.prompt_patch or "").strip()
-                            state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
-                            if retry_patch:
-                                state.messages.append(
-                                    AgentMessage(
-                                        role="user",
-                                        content=[MessagePart(type="text", text=retry_patch)],
-                                    )
-                                )
-                            continue
-                        tool_recovery_machine.reset()
-                    elif isinstance(tool_action, FailAction):
-                        return RuntimeResult(
-                            payload=self._repeated_failure_payload(
-                                response_schema=response_schema,
-                                tool_name="tool_recovery",
-                            ),
-                            response_id=completion.response_id,
-                            state=state,
-                            total_tokens=total_tokens,
+                    if tool_calls and any_tool_call_truncated(tool_calls):
+                        truncated_tool_call_count += 1
+                        if truncated_tool_call_count >= 3:
+                            return RuntimeResult(
+                                payload=self._repeated_failure_payload(
+                                    response_schema=response_schema,
+                                    tool_name="truncated_tool_call",
+                                ),
+                                response_id=completion.response_id,
+                                state=state,
+                                total_tokens=total_tokens,
+                            )
+                        state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
+                        state.messages.append(
+                            AgentMessage(role="user", content=[MessagePart(type="text", text=_TRUNCATED_PATCH)])
                         )
+                        continue
+                    if not tool_calls and has_pseudo_tool_call_tag(raw_message_content):
+                        state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
+                        state.messages.append(
+                            AgentMessage(role="user", content=[MessagePart(type="text", text=_PSEUDO_TOOL_PATCH)])
+                        )
+                        continue
                 if not tool_calls:
                     assistant_message = self._message_renderer.from_provider_assistant_message(completion.message)
                     state.messages.append(assistant_message)
@@ -474,65 +470,3 @@ class AgentRuntime:
                 )
                 appended.append(stamped_message)
         return appended
-
-
-def _supplement_native_tool_calls_from_dsml(
-    tool_calls: list[Any],
-    raw_content: str,
-) -> list[Any]:
-    """If raw_content has a DSML tool call matching the native tool name with more args, merge."""
-    if not raw_content or not tool_calls:
-        return tool_calls
-
-    dsml_parsed = parse_dsml_tool_call(raw_content)
-    if dsml_parsed is None:
-        return tool_calls
-
-    dsml_name = dsml_parsed.get("name", "")
-    dsml_args = dsml_parsed.get("arguments", {})
-    if not dsml_name or not isinstance(dsml_args, dict):
-        return tool_calls
-
-    first_tc = tool_calls[0]
-
-    # Extract native name
-    native_name = getattr(first_tc, "name", None)
-    if native_name is None:
-        fn = getattr(first_tc, "function", None)
-        if isinstance(fn, dict):
-            native_name = fn.get("name")
-
-    # Extract native args
-    native_input: dict[str, Any] = getattr(first_tc, "input", None) or {}
-    if not native_input:
-        fn = getattr(first_tc, "function", None)
-        if isinstance(fn, dict):
-            fn_args = fn.get("arguments")
-            if isinstance(fn_args, str):
-                try:
-                    native_input = json.loads(fn_args)
-                except (json.JSONDecodeError, ValueError):
-                    native_input = {}
-            elif isinstance(fn_args, dict):
-                native_input = dict(fn_args)
-    if not isinstance(native_input, dict):
-        native_input = {}
-
-    # Guard: only merge when tool names match
-    if dsml_name != native_name:
-        return tool_calls
-
-    # Guard: only supplement if DSML has strictly more keys
-    if not (set(dsml_args.keys()) - set(native_input.keys())):
-        return tool_calls
-
-    merged_args = {**native_input, **dsml_args}
-    supplemented = recovered_tool_call_from_payload({"name": dsml_name, "arguments": merged_args})
-    final = ToolCall(
-        id=getattr(first_tc, "id", supplemented.id),
-        type=supplemented.type,
-        name=supplemented.name,
-        input=supplemented.input,
-        function=supplemented.function,
-    )
-    return [final] + list(tool_calls[1:])

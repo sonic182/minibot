@@ -40,7 +40,8 @@ class AssistantRuntimePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answer: AssistantAnswer
-    should_answer_to_user: bool
+    should_answer_to_user: bool = True
+    continue_loop: bool = False
     attachments: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("attachments", mode="before")

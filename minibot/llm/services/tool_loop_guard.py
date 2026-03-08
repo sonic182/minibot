@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Sequence
 
 from llm_async.models.tool_call import ToolCall
@@ -8,6 +9,21 @@ from minibot.llm.services.tool_executor import stringify_result, tool_name_from_
 
 
 MAX_REPEATED_TOOL_ITERATIONS = 3
+
+
+def any_tool_call_truncated(tool_calls: Sequence[Any]) -> bool:
+    for call in tool_calls:
+        fn = getattr(call, "function", None)
+        if not isinstance(fn, dict):
+            continue
+        args = fn.get("arguments")
+        if not isinstance(args, str) or not args.strip():
+            continue
+        try:
+            json.loads(args)
+        except (json.JSONDecodeError, ValueError):
+            return True
+    return False
 
 
 def assistant_message_for_followup(message: Any) -> dict[str, Any]:

@@ -149,17 +149,7 @@ async def test_runtime_recovers_pseudo_tool_call_from_text() -> None:
         ),
         LLMCompletionStep(message=_FakeMessage(content="done"), response_id="resp-2", total_tokens=5),
     ]
-    executions = [
-        [
-            ToolExecutionRecord(
-                tool_name="http_request",
-                call_id="call-1",
-                message_payload={"role": "tool", "tool_call_id": "call-1", "name": "http_request", "content": "{}"},
-                result=ToolResult(content={"ok": True}),
-            )
-        ]
-    ]
-    llm_client = _StubRuntimeLLMClient(steps=steps, executions=executions)
+    llm_client = _StubRuntimeLLMClient(steps=steps, executions=[])
     runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
     runtime._tools = [cast(Any, object())]
     state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
@@ -167,7 +157,13 @@ async def test_runtime_recovers_pseudo_tool_call_from_text() -> None:
     result = await runtime.run(state=state, tool_context=ToolContext(owner_id="1"))
 
     assert result.payload == "done"
-    assert llm_client.execute_calls == 1
+    assert llm_client.complete_once_calls == 2
+    assert llm_client.execute_calls == 0
+    second_call_messages = llm_client.complete_once_kwargs[1]["messages"]
+    assert any(
+        message["role"] == "user" and "tool calling interface" in message["content"]
+        for message in second_call_messages
+    )
 
 
 @pytest.mark.asyncio
