@@ -18,6 +18,7 @@ def _reset_container(module) -> None:
     module.AppContainer._agent_registry = None
     module.AppContainer._prompt_store = None
     module.AppContainer._prompt_service = None
+    module.AppContainer._token_autoconfig_applied = False
 
 
 def test_app_container_getters_fail_when_not_configured() -> None:
@@ -86,6 +87,10 @@ async def test_app_container_configures_and_initializes_backends(monkeypatch: py
     monkeypatch.setattr(app_container, "ScheduledPromptService", _PromptService)
     monkeypatch.setattr(app_container, "LLMClientFactory", _LLMFactory)
     monkeypatch.setattr(app_container, "load_agent_specs", lambda *_: [])
+    async def _noop_autoconfig(*, settings, agent_specs, logger):
+        return agent_specs
+
+    monkeypatch.setattr(app_container, "apply_runtime_token_autoconfig_async", _noop_autoconfig)
 
     app_container.AppContainer.configure()
     await app_container.AppContainer.initialize_storage()

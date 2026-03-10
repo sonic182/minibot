@@ -39,6 +39,9 @@ provider_extra = { custom_hint = "value" }
 
 [channels.telegram]
 bot_token = "token"
+
+[memory]
+context_ratio_before_compact = 0.9
 """
     )
 
@@ -62,6 +65,7 @@ bot_token = "token"
     assert settings.llm.openrouter.provider.order == ["anthropic", "openai"]
     assert settings.llm.openrouter.provider.provider_extra["custom_hint"] == "value"
     assert settings.channels["telegram"].bot_token == "token"
+    assert settings.memory.context_ratio_before_compact == 0.9
     assert settings.tools.browser.output_dir == "./data/files/browser"
 
 

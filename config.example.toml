@@ -40,6 +40,8 @@ model = "gpt-5-mini"
 # - "provider_with_fallback": use provider-native schema first, then downgrade to prompt-only if unsupported
 # - "prompt_only": never send provider structured-output params; rely on prompt instructions + local validation
 # - "provider_strict": require provider-native structured outputs and fail instead of downgrading
+# Recommendation: for smaller/less schema-reliable models, prefer "prompt_only".
+# Examples: kimi-k2.5, glm-5, minimax-m2.5.
 structured_output_mode = "provider_with_fallback"
 # Enable HTTP/2 for provider HTTP clients when supported (recommended for OpenAI Responses).
 http2 = true
@@ -147,6 +149,10 @@ tools_deny = ["mcp*"]
 backend = "sqlite"
 sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
 max_history_messages = 200
+# Startup auto-config: when models.dev has limits for the current model/provider,
+# MiniBot overrides max_history_tokens and llm/agent max_new_tokens in memory for this run.
+# If lookup fails, configured values are kept.
+context_ratio_before_compact = 0.95
 max_history_tokens = 140000
 notify_compaction_updates = false
 

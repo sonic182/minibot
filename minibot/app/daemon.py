@@ -12,6 +12,7 @@ from minibot.llm.tools.factory import configured_tool_labels
 
 async def run() -> None:
     AppContainer.configure()
+    await AppContainer.initialize_storage()
     logger = AppContainer.get_logger()
     settings = AppContainer.get_settings()
     enabled_tools = configured_tool_labels(settings)
@@ -35,7 +36,6 @@ async def run() -> None:
         services.append(scheduler_service)
 
     async with _graceful_shutdown(services, logger) as stop_event:
-        await AppContainer.initialize_storage()
         logger.info("starting dispatcher", extra={"component": "dispatcher"})
         await dispatcher.start()
         if scheduler_service is not None:
