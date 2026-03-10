@@ -10,6 +10,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.scheduler_service import ScheduledPromptService
+from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.llm.provider_factory import LLMClient
 from minibot.adapters.config.loader import load_settings
@@ -37,6 +38,12 @@ class AppContainer:
         cls._settings = load_settings(config_path)
         cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
+        agent_specs = load_agent_specs(cls._settings.orchestration.directory)
+        agent_specs = apply_runtime_token_autoconfig(
+            settings=cls._settings,
+            agent_specs=agent_specs,
+            logger=cls._logger,
+        )
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
         if cls._settings.tools.kv_memory.enabled:
@@ -45,7 +52,7 @@ class AppContainer:
             cls._kv_memory_backend = None
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
-        cls._agent_registry = AgentRegistry(load_agent_specs(cls._settings.orchestration.directory))
+        cls._agent_registry = AgentRegistry(agent_specs)
         prompts_config = cls._settings.scheduler.prompts
         if prompts_config.enabled:
             cls._prompt_store = SQLAlchemyScheduledPromptStore(prompts_config)

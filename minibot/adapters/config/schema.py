@@ -189,6 +189,7 @@ class MemoryConfig(BaseModel):
     sqlite_url: str = "sqlite+aiosqlite:///./data/minibot.db"
     max_history_messages: int | None = Field(default=None, ge=1)
     max_history_tokens: int | None = Field(default=None, ge=1)
+    context_ratio_before_compact: float = Field(default=0.95, gt=0, le=1)
     notify_compaction_updates: bool = False
 
 

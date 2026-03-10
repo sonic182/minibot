@@ -86,6 +86,11 @@ async def test_app_container_configures_and_initializes_backends(monkeypatch: py
     monkeypatch.setattr(app_container, "ScheduledPromptService", _PromptService)
     monkeypatch.setattr(app_container, "LLMClientFactory", _LLMFactory)
     monkeypatch.setattr(app_container, "load_agent_specs", lambda *_: [])
+    monkeypatch.setattr(
+        app_container,
+        "apply_runtime_token_autoconfig",
+        lambda *, settings, agent_specs, logger: agent_specs,
+    )
 
     app_container.AppContainer.configure()
     await app_container.AppContainer.initialize_storage()
