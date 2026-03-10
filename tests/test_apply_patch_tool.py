@@ -99,6 +99,43 @@ async def test_apply_patch_tool_accepts_unified_hunk_headers(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_apply_patch_tool_accumulates_multiple_update_hunks_for_same_file(tmp_path: Path) -> None:
+    target = tmp_path / "file.txt"
+    target.write_text("import sys\n\nvalue = 1\nprint(value)\n", encoding="utf-8")
+
+    binding = _binding(ApplyPatchToolConfig(workspace_root=str(tmp_path)))
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {
+                "patch_text": (
+                    "*** Begin Patch\n"
+                    "*** Update File: file.txt\n"
+                    "@@ -1,4 +1,5 @@\n"
+                    " import sys\n"
+                    "+import logging\n"
+                    " \n"
+                    " value = 1\n"
+                    " print(value)\n"
+                    "*** Update File: file.txt\n"
+                    "@@ -2,4 +2,4 @@\n"
+                    " import logging\n"
+                    " \n"
+                    "-value = 1\n"
+                    "+value = 2\n"
+                    " print(value)\n"
+                    "*** End Patch"
+                )
+            },
+            ToolContext(),
+        ),
+    )
+
+    assert result["ok"] is True
+    assert target.read_text(encoding="utf-8") == "import sys\nimport logging\n\nvalue = 2\nprint(value)\n"
+
+
+@pytest.mark.asyncio
 async def test_apply_patch_tool_reports_expected_update_header_forms() -> None:
     binding = _binding(ApplyPatchToolConfig())
     with pytest.raises(ValueError, match=r"Use an update chunk header in one of these forms") as exc_info:
