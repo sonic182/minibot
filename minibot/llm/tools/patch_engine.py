@@ -12,6 +12,10 @@ class UpdateFileChunk:
     new_lines: list[str]
     change_context: str | None = None
     is_end_of_file: bool = False
+    old_start: int | None = None
+    old_count: int | None = None
+    new_start: int | None = None
+    new_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,19 @@ class ApplyResult:
 
 
 _HEREDOC_RE = re.compile(r"^(?:cat\s+)?<<['\"]?(\w+)['\"]?\s*\n([\s\S]*?)\n\1\s*$")
+_UNIFIED_HUNK_RE = re.compile(
+    r"^@@\s+-(?P<old_start>\d+)(?:,(?P<old_count>\d+))?\s+\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))?\s+@@(?:\s+(?P<context>.*))?$"
+)
+_ANCHOR_SEARCH_RADIUS = 3
+
+
+@dataclass(frozen=True)
+class ParsedUpdateChunkHeader:
+    change_context: str | None = None
+    old_start: int | None = None
+    old_count: int | None = None
+    new_start: int | None = None
+    new_count: int | None = None
 
 
 def strip_heredoc(text: str) -> str:
@@ -131,8 +148,10 @@ def parse_patch(patch_text: str) -> PatchParseResult:
             chunks: list[UpdateFileChunk] = []
             while i < end_idx and not lines[i].startswith("***"):
                 if not lines[i].startswith("@@"):
-                    raise ValueError(f"Invalid update hunk for {file_path}: expected '@@' header")
-                context = lines[i][2:].strip() or None
+                    raise ValueError(
+                        f"Invalid update hunk for {file_path}: expected '@@', '@@ <context>', or '@@ -a,b +c,d @@'"
+                    )
+                header = _parse_update_hunk_header(lines[i], file_path)
                 i += 1
                 old_lines: list[str] = []
                 new_lines: list[str] = []
@@ -159,8 +178,12 @@ def parse_patch(patch_text: str) -> PatchParseResult:
                     UpdateFileChunk(
                         old_lines=old_lines,
                         new_lines=new_lines,
-                        change_context=context,
+                        change_context=header.change_context,
                         is_end_of_file=eof_anchor,
+                        old_start=header.old_start,
+                        old_count=header.old_count,
+                        new_start=header.new_start,
+                        new_count=header.new_count,
                     )
                 )
 
@@ -181,6 +204,7 @@ def plan_patch_actions(
     preserve_trailing_newline: bool,
 ) -> list[PatchAction]:
     actions: list[PatchAction] = []
+    working_contents: dict[Path, str] = {}
 
     for hunk in hunks:
         if hunk.type == "add":
@@ -214,7 +238,9 @@ def plan_patch_actions(
         if not source.exists() or not source.is_file():
             raise ValueError(f"Failed to read file to update: {source}")
 
-        original_content = source.read_text(encoding="utf-8")
+        original_content = working_contents.get(source)
+        if original_content is None:
+            original_content = source.read_text(encoding="utf-8")
         new_content = derive_new_contents_from_chunks(source, hunk.chunks, original_content=original_content)
         if preserve_trailing_newline:
             new_content = _with_newline(new_content)
@@ -230,6 +256,9 @@ def plan_patch_actions(
             )
             moved = True
 
+        working_contents[target] = new_content
+        if moved and source != target:
+            working_contents.pop(source, None)
         actions.append(UpdateAction(type="update", source=source, target=target, contents=new_content, moved=moved))
 
     return actions
@@ -277,25 +306,49 @@ def _compute_replacements(
     line_index = 0
 
     for chunk in chunks:
+        preferred_index = _preferred_chunk_index(chunk)
         if chunk.change_context:
-            context_idx = _seek_sequence(original_lines, [chunk.change_context], line_index, eof=False)
+            context_idx = _seek_sequence(
+                original_lines,
+                [chunk.change_context],
+                line_index,
+                eof=False,
+                preferred_index=preferred_index,
+                file_path=file_path,
+            )
             if context_idx == -1:
                 raise ValueError(f"Failed to find context '{chunk.change_context}' in {file_path}")
             line_index = context_idx + 1
 
         if not chunk.old_lines:
             insertion_idx = line_index
+            if preferred_index is not None:
+                insertion_idx = max(line_index, preferred_index)
             replacements.append((insertion_idx, 0, chunk.new_lines))
             continue
 
         pattern = list(chunk.old_lines)
         new_slice = list(chunk.new_lines)
-        found = _seek_sequence(original_lines, pattern, line_index, eof=chunk.is_end_of_file)
+        found = _seek_sequence(
+            original_lines,
+            pattern,
+            line_index,
+            eof=chunk.is_end_of_file,
+            preferred_index=preferred_index,
+            file_path=file_path,
+        )
         if found == -1 and pattern and pattern[-1] == "":
             pattern = pattern[:-1]
             if new_slice and new_slice[-1] == "":
                 new_slice = new_slice[:-1]
-            found = _seek_sequence(original_lines, pattern, line_index, eof=chunk.is_end_of_file)
+            found = _seek_sequence(
+                original_lines,
+                pattern,
+                line_index,
+                eof=chunk.is_end_of_file,
+                preferred_index=preferred_index,
+                file_path=file_path,
+            )
 
         if found == -1:
             raise ValueError(f"Failed to find expected lines in {file_path}:\n" + "\n".join(chunk.old_lines))
@@ -316,9 +369,29 @@ def _apply_replacements(lines: list[str], replacements: list[tuple[int, int, lis
     return result
 
 
-def _seek_sequence(lines: list[str], pattern: list[str], start_index: int, *, eof: bool) -> int:
+def _seek_sequence(
+    lines: list[str],
+    pattern: list[str],
+    start_index: int,
+    *,
+    eof: bool,
+    preferred_index: int | None = None,
+    file_path: Path | None = None,
+) -> int:
     if not pattern:
         return -1
+
+    if preferred_index is not None:
+        anchored_match = _seek_sequence_near_anchor(
+            lines,
+            pattern,
+            start_index,
+            preferred_index=preferred_index,
+            eof=eof,
+            file_path=file_path,
+        )
+        if anchored_match != -1:
+            return anchored_match
 
     comparators = (
         lambda a, b: a == b,
@@ -332,6 +405,73 @@ def _seek_sequence(lines: list[str], pattern: list[str], start_index: int, *, eo
         if found != -1:
             return found
     return -1
+
+
+def _seek_sequence_near_anchor(
+    lines: list[str],
+    pattern: list[str],
+    start_index: int,
+    *,
+    preferred_index: int,
+    eof: bool,
+    file_path: Path | None,
+) -> int:
+    window_start = max(start_index, preferred_index - _ANCHOR_SEARCH_RADIUS)
+    window_end = preferred_index + _ANCHOR_SEARCH_RADIUS
+    matches = _collect_match_indexes(lines, pattern, window_start, window_end, eof=eof)
+    if preferred_index in matches:
+        return preferred_index
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        target = file_path or "<unknown file>"
+        raise ValueError(f"Unified hunk location is ambiguous near line {preferred_index + 1} in {target}")
+    if file_path is not None:
+        raise ValueError(f"Unified hunk location did not match near line {preferred_index + 1} in {file_path}")
+    return -1
+
+
+def _collect_match_indexes(
+    lines: list[str],
+    pattern: list[str],
+    start_index: int,
+    end_index: int,
+    *,
+    eof: bool,
+) -> list[int]:
+    matches: set[int] = set()
+    comparators = (
+        lambda a, b: a == b,
+        lambda a, b: a.rstrip() == b.rstrip(),
+        lambda a, b: a.strip() == b.strip(),
+        lambda a, b: _normalize_unicode(a.strip()) == _normalize_unicode(b.strip()),
+    )
+    for compare in comparators:
+        matches.update(_collect_matches_for_comparator(lines, pattern, start_index, end_index, compare, eof=eof))
+    return sorted(matches)
+
+
+def _collect_matches_for_comparator(
+    lines: list[str],
+    pattern: list[str],
+    start_index: int,
+    end_index: int,
+    compare,
+    *,
+    eof: bool,
+) -> list[int]:
+    matches: list[int] = []
+    if eof:
+        from_end = len(lines) - len(pattern)
+        if start_index <= from_end <= end_index:
+            if all(compare(lines[from_end + j], pattern[j]) for j in range(len(pattern))):
+                matches.append(from_end)
+
+    max_start = min(len(lines) - len(pattern), end_index)
+    for i in range(start_index, max_start + 1):
+        if all(compare(lines[i + j], pattern[j]) for j in range(len(pattern))):
+            matches.append(i)
+    return matches
 
 
 def _try_match(lines: list[str], pattern: list[str], start_index: int, compare, *, eof: bool) -> int:
@@ -410,3 +550,35 @@ def _find_line(lines: list[str], marker: str) -> int:
         if line.strip() == marker:
             return index
     return -1
+
+
+def _parse_update_hunk_header(line: str, file_path: str) -> ParsedUpdateChunkHeader:
+    stripped = line.strip()
+    if stripped == "@@":
+        return ParsedUpdateChunkHeader()
+
+    unified_match = _UNIFIED_HUNK_RE.fullmatch(stripped)
+    if unified_match is not None:
+        context = unified_match.group("context")
+        return ParsedUpdateChunkHeader(
+            change_context=context.strip() or None if context is not None else None,
+            old_start=int(unified_match.group("old_start")),
+            old_count=int(unified_match.group("old_count") or "1"),
+            new_start=int(unified_match.group("new_start")),
+            new_count=int(unified_match.group("new_count") or "1"),
+        )
+
+    if stripped.startswith("@@ "):
+        context = stripped[2:].strip()
+        if context:
+            return ParsedUpdateChunkHeader(change_context=context)
+
+    raise ValueError(
+        f"Invalid update hunk for {file_path}: expected '@@', '@@ <context>', or '@@ -a,b +c,d @@'"
+    )
+
+
+def _preferred_chunk_index(chunk: UpdateFileChunk) -> int | None:
+    if chunk.old_start is None:
+        return None
+    return max(chunk.old_start - 1, 0)

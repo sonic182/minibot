@@ -18,6 +18,11 @@ from minibot.llm.services.request_builder import (
     build_messages,
 )
 from minibot.llm.services.schema_policy import normalize_response_schema, prepare_tool_specs
+from minibot.llm.services.structured_output_policy import (
+    augment_system_prompt_with_structured_output,
+    normalize_structured_output_mode,
+    should_send_response_schema,
+)
 from minibot.llm.services.tool_executor import execute_tool_calls, tool_name_from_call
 from minibot.llm.services.tool_loop_guard import (
     MAX_REPEATED_TOOL_ITERATIONS,
@@ -61,14 +66,19 @@ async def generate_with_tools(
     max_new_tokens: int,
     max_tool_iterations: int,
     provider_name: str,
+    structured_output_mode: str | None,
     logger: logging.Logger,
     complete_with_schema_fallback: Callable[[dict[str, Any]], Awaitable[Any]],
 ) -> LLMGeneration:
+    mode = normalize_structured_output_mode(structured_output_mode)
+    effective_system_prompt = system_prompt
+    if response_schema and not should_send_response_schema(mode):
+        effective_system_prompt = augment_system_prompt_with_structured_output(system_prompt, response_schema)
     messages = build_messages(
         history=history,
         user_message=user_message,
         user_content=user_content,
-        system_prompt=system_prompt,
+        system_prompt=effective_system_prompt,
     )
     conversation = list(messages)
     tool_bindings = list(tools or [])
@@ -79,12 +89,16 @@ async def generate_with_tools(
     recent_tool_names: list[str] = []
     last_iteration_signature: str | None = None
     repeated_iteration_count = 0
-    strict_response_schema = normalize_response_schema(response_schema, model)
+    strict_response_schema = (
+        normalize_response_schema(response_schema, model)
+        if response_schema and should_send_response_schema(mode)
+        else None
+    )
     extra_kwargs = build_generate_extra_kwargs(
         ctx=request_ctx,
         prompt_cache_key=prompt_cache_key,
         previous_response_id=previous_response_id,
-        system_prompt=system_prompt,
+        system_prompt=effective_system_prompt,
     )
     usage_accumulator = UsageAccumulator()
     truncated_count = 0
@@ -102,6 +116,8 @@ async def generate_with_tools(
             strict_response_schema=strict_response_schema,
             extra_kwargs=extra_kwargs,
         )
+        if response_schema:
+            call_kwargs["_structured_output_prompt_schema"] = response_schema
         response = await complete_with_schema_fallback(call_kwargs)
         log_provider_response(
             logger=logger,
@@ -168,8 +184,9 @@ async def generate_with_tools(
                     ctx=request_ctx,
                     previous_response_id=response_id,
                     prompt_cache_key=prompt_cache_key,
-                    system_prompt=system_prompt,
+                    system_prompt=effective_system_prompt,
                     response_schema=strict_response_schema,
+                    prompt_response_schema=response_schema,
                     logger=logger,
                 )
                 continuation_payload = (

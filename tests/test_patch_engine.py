@@ -66,7 +66,7 @@ def test_parse_patch_rejects_update_hunk_without_header() -> None:
         "*** End Patch"
     )
 
-    with pytest.raises(ValueError, match="expected '@@' header"):
+    with pytest.raises(ValueError, match="expected '@@'"):
         parse_patch(patch)
 
 
@@ -177,3 +177,115 @@ def test_apply_patch_context_only_addition_respects_matched_location(tmp_path: P
     apply_patch_actions(actions, tmp_path)
 
     assert target.read_text(encoding="utf-8") == "a\nb\ninserted\nc\n"
+
+
+def test_apply_patch_supports_unified_hunk_headers(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("line1\nline2\nline3\n", encoding="utf-8")
+
+    parsed = parse_patch(
+        "*** Begin Patch\n"
+        "*** Update File: sample.txt\n"
+        "@@ -1,3 +1,3 @@\n"
+        " line1\n"
+        "-line2\n"
+        "+changed\n"
+        " line3\n"
+        "*** End Patch"
+    )
+
+    actions = plan_patch_actions(
+        hunks=parsed.hunks,
+        workspace_root=tmp_path,
+        restrict_to_workspace=True,
+        allow_outside_workspace=False,
+        preserve_trailing_newline=True,
+    )
+    apply_patch_actions(actions, tmp_path)
+
+    assert target.read_text(encoding="utf-8") == "line1\nchanged\nline3\n"
+
+
+def test_apply_patch_accumulates_multiple_update_hunks_for_same_file(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("import sys\n\nvalue = 1\nprint(value)\n", encoding="utf-8")
+
+    parsed = parse_patch(
+        "*** Begin Patch\n"
+        "*** Update File: sample.txt\n"
+        "@@ -1,4 +1,5 @@\n"
+        " import sys\n"
+        "+import logging\n"
+        " \n"
+        " value = 1\n"
+        " print(value)\n"
+        "*** Update File: sample.txt\n"
+        "@@ -2,4 +2,4 @@\n"
+        " import logging\n"
+        " \n"
+        "-value = 1\n"
+        "+value = 2\n"
+        " print(value)\n"
+        "*** End Patch"
+    )
+
+    actions = plan_patch_actions(
+        hunks=parsed.hunks,
+        workspace_root=tmp_path,
+        restrict_to_workspace=True,
+        allow_outside_workspace=False,
+        preserve_trailing_newline=True,
+    )
+    apply_patch_actions(actions, tmp_path)
+
+    assert target.read_text(encoding="utf-8") == "import sys\nimport logging\n\nvalue = 2\nprint(value)\n"
+
+
+def test_apply_patch_rejects_ambiguous_unified_hunk_location(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("alpha\nrepeat\nvalue = 1\nrepeat\nvalue = 1\n", encoding="utf-8")
+
+    parsed = parse_patch(
+        "*** Begin Patch\n"
+        "*** Update File: sample.txt\n"
+        "@@ -3,2 +3,2 @@\n"
+        " repeat\n"
+        "-value = 1\n"
+        "+value = 2\n"
+        "*** End Patch"
+    )
+
+    with pytest.raises(ValueError, match="Unified hunk location"):
+        plan_patch_actions(
+            hunks=parsed.hunks,
+            workspace_root=tmp_path,
+            restrict_to_workspace=True,
+            allow_outside_workspace=False,
+            preserve_trailing_newline=True,
+        )
+
+
+def test_apply_patch_honors_exact_unified_hunk_offset_for_repeated_blocks(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("alpha\nrepeat\nvalue = 1\nrepeat\nvalue = 1\n", encoding="utf-8")
+
+    parsed = parse_patch(
+        "*** Begin Patch\n"
+        "*** Update File: sample.txt\n"
+        "@@ -4,2 +4,2 @@\n"
+        " repeat\n"
+        "-value = 1\n"
+        "+value = 2\n"
+        "*** End Patch"
+    )
+
+    actions = plan_patch_actions(
+        hunks=parsed.hunks,
+        workspace_root=tmp_path,
+        restrict_to_workspace=True,
+        allow_outside_workspace=False,
+        preserve_trailing_newline=True,
+    )
+    apply_patch_actions(actions, tmp_path)
+
+    assert target.read_text(encoding="utf-8") == "alpha\nrepeat\nvalue = 1\nrepeat\nvalue = 2\n"

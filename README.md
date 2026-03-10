@@ -72,6 +72,7 @@ Example using `openai` provider:
 [llm]
 provider = "openai"
 model = "qwen3.5:35b"
+structured_output_mode = "provider_with_fallback"
 
 [providers.openai]
 api_key = "dummy"
@@ -84,6 +85,7 @@ Example using `openai_responses` provider:
 [llm]
 provider = "openai_responses"
 model = "qwen3.5:35b"
+structured_output_mode = "provider_with_fallback"
 
 [providers.openai_responses]
 api_key = "dummy"
@@ -234,7 +236,8 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 
 - `[runtime]`: global flags such as log level and environment.
 - `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
-- `[llm]`: configures default model/provider behavior for the main agent and specialist agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, and `prompts_dir`). Responses API tuning includes `http2`, per-role state strategy (`main_responses_state_mode`, `agent_responses_state_mode`), and prompt-cache controls (`prompt_cache_enabled`, optional `prompt_cache_retention`). Request params are only sent when present in `config.toml`.
+- `[llm]`: configures default model/provider behavior for the main agent and specialist agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, `prompts_dir`, and main-agent `structured_output_mode`). Responses API tuning includes `http2`, per-role state strategy (`main_responses_state_mode`, `agent_responses_state_mode`), and prompt-cache controls (`prompt_cache_enabled`, optional `prompt_cache_retention`). Request params are only sent when present in `config.toml`.
+  - `structured_output_mode` applies to the main/orchestrator agent only: `provider_with_fallback` (default), `prompt_only`, or `provider_strict`.
   - OpenRouter note: when `reasoning_effort` is set, MiniBot sends `reasoning.enabled = true` together with `reasoning.effort`.
 - `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
 - `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`), fully specialist-owned (`exclusive`), or only specialist-owned for MCP tools (`exclusive_mcp`). `main_tool_use_guardrail` enables an optional LLM-based tool-routing classifier per main-agent turn (`"disabled"` by default; set to `"llm_classifier"` to enable).

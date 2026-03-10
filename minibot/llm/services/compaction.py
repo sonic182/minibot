@@ -81,6 +81,7 @@ async def continue_incomplete_response(
     prompt_cache_key: str | None,
     system_prompt: str,
     response_schema: dict[str, Any] | None,
+    prompt_response_schema: dict[str, Any] | None,
     logger: Any,
 ) -> LLMGeneration:
     call_kwargs = build_continue_call_kwargs(
@@ -90,6 +91,8 @@ async def continue_incomplete_response(
         system_prompt=system_prompt,
         response_schema=response_schema,
     )
+    if prompt_response_schema:
+        call_kwargs["_structured_output_prompt_schema"] = prompt_response_schema
     logger.warning(
         "responses output incomplete; attempting one continuation",
         extra={"model": ctx.model, "response_id": previous_response_id},
