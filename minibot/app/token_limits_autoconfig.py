@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 import json
 from logging import Logger
 from typing import Any
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+
+import aiosonic
 
 from minibot.adapters.config.schema import Settings
 from minibot.core.agents import AgentSpec
@@ -22,13 +24,13 @@ _BASE_URL_PROVIDER_ALIAS = {
 }
 
 
-def apply_runtime_token_autoconfig(
+async def apply_runtime_token_autoconfig_async(
     *,
     settings: Settings,
     agent_specs: list[AgentSpec],
     logger: Logger,
 ) -> list[AgentSpec]:
-    payload = _fetch_models_catalog(logger)
+    payload = await _fetch_models_catalog(logger)
     if payload is None:
         return agent_specs
 
@@ -106,17 +108,24 @@ def apply_runtime_token_autoconfig(
     return adjusted_specs
 
 
-def _fetch_models_catalog(logger: Logger) -> dict[str, Any] | None:
-    request = Request(
-        _MODELS_API_URL,
-        headers={
-            "User-Agent": "minibot-startup-token-autoconfig/1.0",
-            "Accept": "application/json",
-        },
+def apply_runtime_token_autoconfig(
+    *,
+    settings: Settings,
+    agent_specs: list[AgentSpec],
+    logger: Logger,
+) -> list[AgentSpec]:
+    return asyncio.run(
+        apply_runtime_token_autoconfig_async(
+            settings=settings,
+            agent_specs=agent_specs,
+            logger=logger,
+        )
     )
+
+
+async def _fetch_models_catalog(logger: Logger) -> dict[str, Any] | None:
     try:
-        with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = await _fetch_models_catalog_async()
         if not isinstance(payload, dict):
             logger.warning(
                 "token auto-config skipped: unexpected models catalog payload type",
@@ -130,6 +139,22 @@ def _fetch_models_catalog(logger: Logger) -> dict[str, Any] | None:
             extra={"component": "startup", "url": _MODELS_API_URL, "error": str(exc)},
         )
         return None
+
+
+async def _fetch_models_catalog_async() -> object:
+    client = aiosonic.HTTPClient()
+    response = await asyncio.wait_for(
+        client.get(
+            _MODELS_API_URL,
+            headers={
+                "User-Agent": "minibot-startup-token-autoconfig/1.0",
+                "Accept": "application/json",
+            },
+        ),
+        timeout=_REQUEST_TIMEOUT_SECONDS,
+    )
+    body = await asyncio.wait_for(response.content(), timeout=_REQUEST_TIMEOUT_SECONDS)
+    return json.loads(body.decode("utf-8"))
 
 
 def _resolve_limits(

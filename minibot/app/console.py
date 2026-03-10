@@ -37,6 +37,7 @@ async def run(
     effective_timeout_seconds = max(120.0, float(timeout_seconds))
     resolved_config_path = Path(config_path).expanduser() if config_path else None
     AppContainer.configure(resolved_config_path)
+    await AppContainer.initialize_storage()
     logger = AppContainer.get_logger()
     _configure_console_file_only_logging(logger, verbose=verbose)
     event_bus = AppContainer.get_event_bus()
@@ -48,7 +49,6 @@ async def run(
         extra={"main_agent_tools_enabled": main_agent_tools_enabled},
     )
     console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
-    await AppContainer.initialize_storage()
     await dispatcher.start()
     await console_service.start()
 
