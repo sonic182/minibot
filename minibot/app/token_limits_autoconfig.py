@@ -151,13 +151,7 @@ def _resolve_limits(
         context_limit = min(hit["context"] for hit in provider_hits)
         output_limit = min(hit["output"] for hit in provider_hits)
         return {"catalog_provider": target_provider, "context": context_limit, "output": output_limit}
-
-    global_hits = _hits_global(payload=payload, model_candidates=model_candidates)
-    if not global_hits:
-        return None
-    context_limit = min(hit["context"] for hit in global_hits)
-    output_limit = min(hit["output"] for hit in global_hits)
-    return {"catalog_provider": "global_fallback", "context": context_limit, "output": output_limit}
+    return None
 
 
 def _catalog_provider_key(*, provider_name: str, base_url: str | None) -> str:
@@ -223,21 +217,6 @@ def _hits_for_provider(
         parsed = _parse_model_limits(model)
         if parsed is not None:
             hits.append(parsed)
-    return hits
-
-
-def _hits_global(*, payload: dict[str, Any], model_candidates: list[str]) -> list[dict[str, int]]:
-    hits: list[dict[str, int]] = []
-    for provider_payload in payload.values():
-        if not isinstance(provider_payload, dict):
-            continue
-        models = provider_payload.get("models")
-        if not isinstance(models, dict):
-            continue
-        for model_id in model_candidates:
-            parsed = _parse_model_limits(models.get(model_id))
-            if parsed is not None:
-                hits.append(parsed)
     return hits
 
 
