@@ -263,3 +263,29 @@ def test_apply_patch_rejects_ambiguous_unified_hunk_location(tmp_path: Path) -> 
             allow_outside_workspace=False,
             preserve_trailing_newline=True,
         )
+
+
+def test_apply_patch_honors_exact_unified_hunk_offset_for_repeated_blocks(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("alpha\nrepeat\nvalue = 1\nrepeat\nvalue = 1\n", encoding="utf-8")
+
+    parsed = parse_patch(
+        "*** Begin Patch\n"
+        "*** Update File: sample.txt\n"
+        "@@ -4,2 +4,2 @@\n"
+        " repeat\n"
+        "-value = 1\n"
+        "+value = 2\n"
+        "*** End Patch"
+    )
+
+    actions = plan_patch_actions(
+        hunks=parsed.hunks,
+        workspace_root=tmp_path,
+        restrict_to_workspace=True,
+        allow_outside_workspace=False,
+        preserve_trailing_newline=True,
+    )
+    apply_patch_actions(actions, tmp_path)
+
+    assert target.read_text(encoding="utf-8") == "alpha\nrepeat\nvalue = 1\nrepeat\nvalue = 2\n"
