@@ -74,6 +74,9 @@ class ApplyResult:
 
 
 _HEREDOC_RE = re.compile(r"^(?:cat\s+)?<<['\"]?(\w+)['\"]?\s*\n([\s\S]*?)\n\1\s*$")
+_UNIFIED_HUNK_RE = re.compile(
+    r"^@@\s+-(?P<old_start>\d+)(?:,(?P<old_count>\d+))?\s+\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))?\s+@@(?:\s+(?P<context>.*))?$"
+)
 
 
 def strip_heredoc(text: str) -> str:
@@ -131,8 +134,10 @@ def parse_patch(patch_text: str) -> PatchParseResult:
             chunks: list[UpdateFileChunk] = []
             while i < end_idx and not lines[i].startswith("***"):
                 if not lines[i].startswith("@@"):
-                    raise ValueError(f"Invalid update hunk for {file_path}: expected '@@' header")
-                context = lines[i][2:].strip() or None
+                    raise ValueError(
+                        f"Invalid update hunk for {file_path}: expected '@@', '@@ <context>', or '@@ -a,b +c,d @@'"
+                    )
+                context = _parse_update_hunk_header(lines[i], file_path)
                 i += 1
                 old_lines: list[str] = []
                 new_lines: list[str] = []
@@ -410,3 +415,25 @@ def _find_line(lines: list[str], marker: str) -> int:
         if line.strip() == marker:
             return index
     return -1
+
+
+def _parse_update_hunk_header(line: str, file_path: str) -> str | None:
+    stripped = line.strip()
+    if stripped == "@@":
+        return None
+
+    unified_match = _UNIFIED_HUNK_RE.fullmatch(stripped)
+    if unified_match is not None:
+        context = unified_match.group("context")
+        if context is None:
+            return None
+        return context.strip() or None
+
+    if stripped.startswith("@@ "):
+        context = stripped[2:].strip()
+        if context:
+            return context
+
+    raise ValueError(
+        f"Invalid update hunk for {file_path}: expected '@@', '@@ <context>', or '@@ -a,b +c,d @@'"
+    )

@@ -66,7 +66,7 @@ def test_parse_patch_rejects_update_hunk_without_header() -> None:
         "*** End Patch"
     )
 
-    with pytest.raises(ValueError, match="expected '@@' header"):
+    with pytest.raises(ValueError, match="expected '@@'"):
         parse_patch(patch)
 
 
@@ -177,3 +177,30 @@ def test_apply_patch_context_only_addition_respects_matched_location(tmp_path: P
     apply_patch_actions(actions, tmp_path)
 
     assert target.read_text(encoding="utf-8") == "a\nb\ninserted\nc\n"
+
+
+def test_apply_patch_supports_unified_hunk_headers(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("line1\nline2\nline3\n", encoding="utf-8")
+
+    parsed = parse_patch(
+        "*** Begin Patch\n"
+        "*** Update File: sample.txt\n"
+        "@@ -1,3 +1,4 @@\n"
+        " line1\n"
+        "-line2\n"
+        "+changed\n"
+        " line3\n"
+        "*** End Patch"
+    )
+
+    actions = plan_patch_actions(
+        hunks=parsed.hunks,
+        workspace_root=tmp_path,
+        restrict_to_workspace=True,
+        allow_outside_workspace=False,
+        preserve_trailing_newline=True,
+    )
+    apply_patch_actions(actions, tmp_path)
+
+    assert target.read_text(encoding="utf-8") == "line1\nchanged\nline3\n"

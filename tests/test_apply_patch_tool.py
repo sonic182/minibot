@@ -67,3 +67,51 @@ async def test_apply_patch_tool_respects_workspace_restriction(tmp_path: Path) -
             {"patch_text": "*** Begin Patch\n*** Add File: ../escape.txt\n+x\n*** End Patch"},
             ToolContext(),
         )
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_tool_accepts_unified_hunk_headers(tmp_path: Path) -> None:
+    target = tmp_path / "file.txt"
+    target.write_text("line1\nline2\nline3\n", encoding="utf-8")
+
+    binding = _binding(ApplyPatchToolConfig(workspace_root=str(tmp_path)))
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {
+                "patch_text": (
+                    "*** Begin Patch\n"
+                    "*** Update File: file.txt\n"
+                    "@@ -1,3 +1,3 @@\n"
+                    " line1\n"
+                    "-line2\n"
+                    "+changed\n"
+                    " line3\n"
+                    "*** End Patch"
+                )
+            },
+            ToolContext(),
+        ),
+    )
+
+    assert result["ok"] is True
+    assert target.read_text(encoding="utf-8") == "line1\nchanged\nline3\n"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_tool_reports_expected_update_header_forms() -> None:
+    binding = _binding(ApplyPatchToolConfig())
+    with pytest.raises(ValueError, match=r"Use an update chunk header in one of these forms") as exc_info:
+        await binding.handler(
+            {
+                "patch_text": (
+                    "*** Begin Patch\n"
+                    "*** Update File: file.txt\n"
+                    "not-a-header\n"
+                    "*** End Patch"
+                )
+            },
+            ToolContext(),
+        )
+
+    assert "@@ -a,b +c,d @@" in str(exc_info.value)

@@ -36,6 +36,11 @@ allowed_document_mime_types = []
 provider = "openai_responses"
 model = "gpt-5-mini"
 # reasoning_effort = "medium"
+# Structured-output mode for the main/orchestrator agent:
+# - "provider_with_fallback": use provider-native schema first, then downgrade to prompt-only if unsupported
+# - "prompt_only": never send provider structured-output params; rely on prompt instructions + local validation
+# - "provider_strict": require provider-native structured outputs and fail instead of downgrading
+structured_output_mode = "provider_with_fallback"
 # Enable HTTP/2 for provider HTTP clients when supported (recommended for OpenAI Responses).
 http2 = true
 max_tool_iterations = 60

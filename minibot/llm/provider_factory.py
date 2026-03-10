@@ -30,6 +30,11 @@ from minibot.llm.services.request_builder import (
 )
 from minibot.llm.services.schema_fallback import complete_with_schema_fallback
 from minibot.llm.services.schema_policy import normalize_response_schema, prepare_tool_specs
+from minibot.llm.services.structured_output_policy import (
+    apply_structured_output_prompt,
+    normalize_structured_output_mode,
+    should_send_response_schema,
+)
 from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
 from minibot.llm.services.usage_parser import (
     extract_response_id,
@@ -49,6 +54,9 @@ class LLMClient:
         self._max_tool_iterations = config.max_tool_iterations
         self._system_prompt = load_system_prompt(config)
         self._prompts_dir = getattr(config, "prompts_dir", "./prompts")
+        self._structured_output_mode = normalize_structured_output_mode(
+            getattr(config, "structured_output_mode", "provider_with_fallback")
+        )
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
         self._responses_state_mode = getattr(config, "responses_state_mode", "full_messages")
         self._prompt_cache_enabled = bool(getattr(config, "prompt_cache_enabled", True))
@@ -97,6 +105,7 @@ class LLMClient:
             max_new_tokens=self._max_new_tokens,
             max_tool_iterations=self._max_tool_iterations,
             provider_name=self.provider_name(),
+            structured_output_mode=self._structured_output_mode,
             logger=self._logger,
             complete_with_schema_fallback=self._complete_with_schema_fallback,
         )
@@ -140,7 +149,11 @@ class LLMClient:
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
     ) -> LLMCompletionStep:
-        strict_response_schema = normalize_response_schema(response_schema, self._model)
+        strict_response_schema = (
+            normalize_response_schema(response_schema, self._model)
+            if response_schema and should_send_response_schema(self._structured_output_mode)
+            else None
+        )
         tool_specs = prepare_tool_specs(tools or [], self._model)
         request_ctx = self._request_context()
         call_kwargs = build_complete_once_call_kwargs(
@@ -151,6 +164,10 @@ class LLMClient:
             prompt_cache_key=prompt_cache_key,
             previous_response_id=previous_response_id,
         )
+        if response_schema:
+            call_kwargs["_structured_output_prompt_schema"] = response_schema
+        if response_schema and not should_send_response_schema(self._structured_output_mode):
+            call_kwargs = apply_structured_output_prompt(call_kwargs, response_schema)
 
         response = await self._complete_with_schema_fallback(call_kwargs)
         log_provider_response(
@@ -235,10 +252,10 @@ class LLMClient:
         return await complete_with_schema_fallback(
             provider=self._provider,
             call_kwargs=call_kwargs,
-            provider_name=self._provider_name,
             model=self._model,
             provider_display_name=self.provider_name(),
             logger=self._logger,
+            structured_output_mode=self._structured_output_mode,
         )
 
     def _request_context(self) -> RequestContext:
