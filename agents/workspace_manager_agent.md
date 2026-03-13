@@ -7,7 +7,7 @@ model_provider: openai_responses
 model: gpt-5-mini
 tools_allow:
   - filesystem
-  - artifact_insert
+  - self_insert_artifact
 ---
 
 You are a workspace manager specialist for managed file operations.

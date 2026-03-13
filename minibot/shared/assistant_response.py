@@ -1,8 +1,57 @@
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from minibot.llm.tools.schema_utils import attachment_array_schema
+
+
+class AssistantAnswerMeta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    disable_link_preview: bool | None = None
+
+
+class AssistantAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["text", "html", "markdown"]
+    content: str | None = None
+    meta: AssistantAnswerMeta = Field(default_factory=AssistantAnswerMeta)
+
+    @field_validator("meta", mode="before")
+    @classmethod
+    def _normalize_meta(cls, value: Any) -> Any:
+        if value is None:
+            return {}
+        return value
+
+
+class AssistantRuntimePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: AssistantAnswer | None = None
+    should_continue: bool = False
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("attachments", mode="before")
+    @classmethod
+    def _normalize_attachments(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        return value
+
+    @model_validator(mode="after")
+    def _validate_terminal_visibility(self) -> "AssistantRuntimePayload":
+        if self.should_continue:
+            return self
+        content = self.answer.content if self.answer is not None else None
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError(
+                "final responses with should_continue=false must include a non-empty answer.content"
+            )
+        return self
 
 
 def assistant_response_schema(
@@ -13,7 +62,7 @@ def assistant_response_schema(
 ) -> dict[str, Any]:
     answer_properties: dict[str, Any] = {
         "kind": {"type": "string", "enum": list(kinds)},
-        "content": {"type": "string"},
+        "content": {"type": ["string", "null"]},
     }
     if include_meta:
         answer_properties["meta"] = {
@@ -24,20 +73,59 @@ def assistant_response_schema(
         }
     properties: dict[str, Any] = {
         "answer": {
-            "type": "object",
-            "properties": answer_properties,
-            "required": ["kind", "content"],
-            "additionalProperties": False,
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": answer_properties,
+                    "required": ["kind"],
+                    "additionalProperties": False,
+                },
+                {"type": "null"},
+            ],
         },
-        "should_answer_to_user": {"type": "boolean"},
+        "should_continue": {"type": "boolean"},
     }
     if include_attachments:
         properties["attachments"] = attachment_array_schema()
     return {
         "type": "object",
         "properties": properties,
-        "required": ["answer", "should_answer_to_user"],
+        "required": ["should_continue"],
         "additionalProperties": False,
+        "allOf": [
+            {
+                "if": {
+                    "properties": {"should_continue": {"const": False}},
+                    "required": ["should_continue"],
+                },
+                "then": {
+                    "required": ["answer"],
+                    "properties": {
+                        "answer": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"type": "string", "enum": list(kinds)},
+                                "content": {"type": "string", "minLength": 1},
+                                **(
+                                    {
+                                        "meta": {
+                                            "type": "object",
+                                            "properties": {"disable_link_preview": {"type": "boolean"}},
+                                            "required": [],
+                                            "additionalProperties": False,
+                                        }
+                                    }
+                                    if include_meta
+                                    else {}
+                                ),
+                            },
+                            "required": ["kind", "content"],
+                            "additionalProperties": False,
+                        }
+                    },
+                },
+            }
+        ],
     }
 
 def validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:

@@ -84,7 +84,7 @@ class AgentRuntime:
         last_iteration_signature: str | None = None
         _validator = structured_validator if response_schema is not None else None
         if _validator is None and response_schema is not None:
-            _validator = RuntimeStructuredOutputValidator(max_attempts=3, schema_model=response_schema)
+            _validator = RuntimeStructuredOutputValidator(max_attempts=3)
         truncated_tool_call_count = 0
 
         async with asyncio.timeout(self._limits.timeout_seconds):
@@ -96,7 +96,7 @@ class AgentRuntime:
                                 "kind": "text",
                                 "content": "I reached the maximum execution steps before finishing.",
                             },
-                            "should_answer_to_user": True,
+                            "should_continue": False,
                             "attachments": [],
                         }
                         if response_schema
@@ -250,7 +250,7 @@ class AgentRuntime:
                     )
 
                 tool_calls_count += len(tool_calls)
-                self._logger.debug(
+                self._logger.info(
                     "agent runtime step requested tool calls",
                     extra={
                         "step": step,
@@ -265,7 +265,7 @@ class AgentRuntime:
                                 "kind": "text",
                                 "content": "I reached the maximum number of tool calls before finishing.",
                             },
-                            "should_answer_to_user": True,
+                            "should_continue": False,
                             "attachments": [],
                         }
                         if response_schema
@@ -286,7 +286,7 @@ class AgentRuntime:
                 )
                 applied_directive_messages: list[AgentMessage] = []
                 for execution in executions:
-                    self._logger.debug(
+                    self._logger.info(
                         "agent runtime tool execution result",
                         extra={
                             "tool": execution.tool_name,
@@ -335,6 +335,8 @@ class AgentRuntime:
                         responses_followup_messages.extend(
                             self._message_renderer.render_messages(AgentState(messages=applied_directive_messages))
                         )
+                if _validator is not None:
+                    _validator.reset()
                 iteration_signature = tool_iteration_signature(
                     tool_calls,
                     [execution.message_payload for execution in executions],
@@ -386,7 +388,7 @@ class AgentRuntime:
                 "kind": "text",
                 "content": answer,
             },
-            "should_answer_to_user": True,
+            "should_continue": False,
             "attachments": [],
         }
 

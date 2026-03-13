@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import logging
 from typing import Sequence
 
-from minibot.app.response_parser import extract_answer
+from minibot.app.response_parser import extract_answer, plain_render
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
 
@@ -135,7 +135,8 @@ class HistoryCompactionService:
                 session_id,
                 getattr(compact_generation, "total_tokens", None),
             )
-            compact_render, _ = extract_answer(compact_generation.payload, logger=self._logger)
+            compact_parsed = extract_answer(compact_generation.payload, logger=self._logger)
+            compact_render = compact_parsed.render or plain_render(str(compact_generation.payload))
             await self._memory.trim_history(session_id, 0)
             await self._memory.append_history(session_id, "user", self._compaction_user_request)
             await self._memory.append_history(session_id, "assistant", compact_render.text)

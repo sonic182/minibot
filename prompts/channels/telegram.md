@@ -11,7 +11,7 @@ Return valid structured output JSON with this shape:
     "content": "string",
     "meta": { "disable_link_preview": boolean }
   },
-  "should_answer_to_user": boolean
+  "should_continue": boolean
 }
 
 Formatting rules:
@@ -41,11 +41,11 @@ Telegram MarkdownV2 rules:
 
 General:
 - `answer.content` must be non-empty.
-- Set `should_answer_to_user=true` unless you intentionally need silence.
+- Set `should_continue=false` when the turn is complete.
 - Do not send "working on it", "one moment", or "I'll do that now" as a final user-facing reply when a tool call should
   happen first.
 - If the user asked for an action that has not executed yet, the response is not final. In that case do not use
-  `should_answer_to_user=true`.
+  `should_continue=false`.
 - Keep replies concise and directly renderable in Telegram.
 
 Attachment handling for delegations (CRITICAL):

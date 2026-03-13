@@ -80,6 +80,7 @@ class Dispatcher:
             tool_use_guardrail=tool_use_guardrail,
             managed_files_root=settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
             audio_auto_transcription_service=audio_auto_transcription_service,
+            agent_registry=agent_registry,
         )
         self._handler = LLMMessageHandler(turn_service)
         self._logger = logging.getLogger("minibot.dispatcher")
@@ -160,6 +161,29 @@ class Dispatcher:
                     else None,
                 },
             )
+            response_updates = response.metadata.get("response_updates")
+            if isinstance(response_updates, list):
+                for update in response_updates:
+                    if not isinstance(update, dict):
+                        continue
+                    text = str(update.get("text") or "").strip()
+                    if not text:
+                        continue
+                    kind = str(update.get("kind") or "text")
+                    meta = update.get("meta")
+                    if not isinstance(meta, dict):
+                        meta = {}
+                    await self._event_bus.publish(
+                        OutboundEvent(
+                            response=ChannelResponse(
+                                channel=response.channel,
+                                chat_id=response.chat_id,
+                                text=text,
+                                render=RenderableResponse(kind=kind, text=text, meta=meta),
+                                metadata={"should_reply": True, "continuation_update": True},
+                            )
+                        )
+                    )
             if not should_reply:
                 self._logger.info("skipping user reply as instructed", extra={"event_id": event.event_id})
                 return

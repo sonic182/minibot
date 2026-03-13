@@ -4,8 +4,8 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pydantic import BaseModel
-from ratchet_sm import FailAction, RetryAction, State, StateMachine, ValidAction
+from pydantic import BaseModel, ValidationError
+from ratchet_sm import FailAction, RetryAction, ValidAction
 from ratchet_sm.strategies.base import FailureContext
 from ratchet_sm.strategies.validation_feedback import ValidationFeedback
 
@@ -25,34 +25,9 @@ class StructuredOutputValidator:
         self._attempts = 0
         self._history: list[RetryAction] = []
         self._feedback = ValidationFeedback()
-        self._machine: StateMachine | None = None
-        if not isinstance(schema, dict):
-            self._machine = StateMachine(
-                states={
-                    state_name: State(
-                        name=state_name,
-                        schema=schema,
-                        max_attempts=max_attempts,
-                    )
-                },
-                transitions={},
-                initial=state_name,
-            )
         self._max_attempts = max_attempts
 
     def receive(self, payload: Any) -> ValidAction | RetryAction | FailAction:
-        if self._machine is not None:
-            action = self._machine.receive(_to_raw_text(payload))
-            if isinstance(action, ValidAction | RetryAction | FailAction):
-                return action
-            return FailAction(
-                attempts=1,
-                state_name=self._state_name,
-                raw=_to_raw_text(payload),
-                history=(),
-                reason=f"Unsupported ratchet action type: {type(action).__name__}",
-            )
-
         raw = _to_raw_text(payload)
         self._attempts += 1
         if self._attempts > self._max_attempts:
@@ -75,11 +50,23 @@ class StructuredOutputValidator:
             self._history.append(retry)
             return retry
 
-        errors = validate_json_schema_instance(parsed, self._schema)
-        if errors:
-            retry = self._retry_action(raw=raw, errors=errors, reason="validation_error")
-            self._history.append(retry)
-            return retry
+        if isinstance(self._schema, dict):
+            errors = validate_json_schema_instance(parsed, self._schema)
+            if errors:
+                retry = self._retry_action(raw=raw, errors=errors, reason="validation_error")
+                self._history.append(retry)
+                return retry
+        else:
+            try:
+                parsed = self._schema.model_validate(parsed)
+            except ValidationError as exc:
+                retry = self._retry_action(
+                    raw=raw,
+                    errors=_format_pydantic_errors(exc),
+                    reason="validation_error",
+                )
+                self._history.append(retry)
+                return retry
         return ValidAction(
             attempts=self._attempts,
             state_name=self._state_name,
@@ -92,8 +79,6 @@ class StructuredOutputValidator:
     def reset(self) -> None:
         self._attempts = 0
         self._history = []
-        if self._machine is not None:
-            self._machine.reset()
 
     @staticmethod
     def valid_payload(action: ValidAction) -> Any:
@@ -108,11 +93,13 @@ class StructuredOutputValidator:
             errors=errors,
             attempts=self._attempts,
             schema=self._schema if not isinstance(self._schema, dict) else None,
-            schema_format="json_schema",
+            schema_format="pydantic" if not isinstance(self._schema, dict) else "json_schema",
         )
         prompt_patch = self._feedback.on_failure(context)
         if isinstance(self._schema, dict):
             prompt_patch = _render_schema_retry_prompt(errors, self._schema)
+        else:
+            prompt_patch = _render_pydantic_retry_prompt(errors, self._schema)
         return RetryAction(
             attempts=self._attempts,
             state_name=self._state_name,
@@ -211,9 +198,31 @@ def _render_schema_retry_prompt(errors: list[str], schema: Mapping[str, Any]) ->
     )
 
 
+def _render_pydantic_retry_prompt(errors: list[str], model: type[BaseModel]) -> str:
+    errors_str = "\n".join(f"- {error}" for error in errors)
+    schema_str = json.dumps(model.model_json_schema(), ensure_ascii=True, indent=2, sort_keys=True)
+    return (
+        "Your previous response did not match the expected Pydantic model.\n"
+        f"Pydantic validation errors:\n{errors_str}\n\n"
+        f"Model JSON schema:\n{schema_str}\n\n"
+        "Please return a corrected JSON object that satisfies the model exactly."
+    )
+
+
+def _format_pydantic_errors(exc: ValidationError) -> list[str]:
+    formatted: list[str] = []
+    for error in exc.errors():
+        location = error.get("loc", ())
+        if isinstance(location, Sequence) and not isinstance(location, (str, bytes)):
+            path = ".".join(str(item) for item in location) or "$"
+        else:
+            path = str(location) or "$"
+        formatted.append(f"{path}: {error.get('msg', 'validation error')}")
+    return formatted
+
+
 def _to_raw_text(payload: Any) -> str:
     if isinstance(payload, str):
         return payload
     return json.dumps(payload, ensure_ascii=True, default=str)
-
 

@@ -1,0 +1,8 @@
+Fetch the full prompt instructions for a specific specialist agent.
+
+Use this when the available specialist roster suggests a likely match, but you want to inspect that agent's exact prompt before deciding to delegate.
+
+Provide:
+- agent_name: exact specialist name from the available specialists list in your system prompt.
+
+After fetching, either delegate with invoke_agent or continue directly if the specialist is not needed.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable, Sequence
 
+from pydantic import BaseModel
 from ratchet_sm import FailAction, ToolCallMissingAction, ValidAction
 from ratchet_sm.normalizers.extract_pseudo_tool_call import has_pseudo_tool_call_tag
 
@@ -57,6 +58,7 @@ async def generate_with_tools(
     tools: Sequence[ToolBinding] | None,
     tool_context: ToolContext | None,
     response_schema: dict[str, Any] | None,
+    local_response_model: type[BaseModel] | None,
     prompt_cache_key: str | None,
     previous_response_id: str | None,
     system_prompt: str,
@@ -103,7 +105,10 @@ async def generate_with_tools(
     usage_accumulator = UsageAccumulator()
     truncated_count = 0
     structured_validator = (
-        StructuredOutputValidator(max_attempts=max_tool_iterations, schema=response_schema)
+        StructuredOutputValidator(
+            max_attempts=max_tool_iterations,
+            schema=local_response_model or response_schema,
+        )
         if response_schema
         else None
     )
