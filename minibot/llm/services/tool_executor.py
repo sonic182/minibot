@@ -294,7 +294,7 @@ async def execute_tool_calls_for_runtime(
             binding = tool_map.get(tool_name)
             if not binding:
                 raise ValueError(f"tool {tool_name} is not registered")
-            logger.debug(
+            logger.info(
                 "executing tool",
                 extra={
                     "tool": tool_name,
@@ -306,7 +306,7 @@ async def execute_tool_calls_for_runtime(
             )
             raw_result = await binding.handler(arguments, context)
             result = normalize_tool_result(raw_result)
-            logger.debug(
+            logger.info(
                 "tool execution completed",
                 extra={
                     "tool": tool_name,

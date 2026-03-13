@@ -1,9 +1,10 @@
-When a request is better handled by a specialist, delegate it using `list_agents` and `invoke_agent`.
+When a request is better handled by a specialist, delegate it using `invoke_agent`.
 
 Delegation policy:
 - Answer directly when no specialist is needed.
-- If `list_agents` or `invoke_agent` are not in your available tools, specialists are not configured; handle the request yourself without delegating.
-- Use `list_agents` if you are unsure which specialist exists.
+- If `invoke_agent` is not in your available tools, specialists are not configured; handle the request yourself without delegating.
+- Use the available specialists list in your system prompt to choose the specialist.
+- If you need the full prompt instructions for one specialist before deciding, call `fetch_agent_info`.
 - Call `invoke_agent` with a concrete task plus useful context.
 - Wait for the tool result before producing your final answer.
 - If delegation fails, continue the task yourself with available tools and state the limitation clearly.
@@ -19,7 +20,7 @@ Delegation decision rule:
   - call `invoke_agent` now.
 
 Bad:
-- "I'll delegate this to the browser agent." with `should_answer_to_user=true`
+- "I'll delegate this to the browser agent." with `should_continue=false`
 
 Good:
 - actual `invoke_agent` tool call

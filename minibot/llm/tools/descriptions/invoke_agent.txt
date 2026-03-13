@@ -2,10 +2,8 @@ Invoke a specialist agent to handle a delegated task.
 
 Use this when the task is better handled by a domain specialist (for example, complex multi-step work or tasks tied to a known specialist capability).
 
-If you are not certain which specialist to use, call list_agents first.
-
 Provide:
-- agent_name: exact name from list_agents.
+- agent_name: exact specialist name from the available specialists list in your system prompt.
 - task: clear, concrete objective.
 - context: optional supporting details that improve execution quality.
 

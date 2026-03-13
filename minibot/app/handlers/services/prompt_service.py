@@ -4,6 +4,7 @@ import logging
 from typing import Any
 from typing import Sequence
 
+from minibot.app.agent_registry import AgentRegistry
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding
 from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
@@ -16,12 +17,14 @@ class PromptService:
         tools: Sequence[ToolBinding],
         environment_prompt_fragment: str,
         logger: logging.Logger,
+        agent_registry: AgentRegistry | None = None,
     ) -> None:
         self._profile = LLMExecutionProfile.from_client(llm_client)
         self._tools = list(tools)
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
         self._logger = logger
         self._prompts_dir = self._profile.prompts_dir
+        self._agent_registry = agent_registry
 
     @property
     def prompts_dir(self) -> str:
@@ -30,6 +33,9 @@ class PromptService:
     def compose_system_prompt(self, channel: str | None) -> str:
         fragments = [self._profile.system_prompt]
         fragments.extend(load_policy_prompts(self._prompts_dir))
+        specialist_roster = self._specialist_roster_fragment()
+        if specialist_roster:
+            fragments.append(specialist_roster)
         channel_prompt = load_channel_prompt(self._prompts_dir, channel)
         if channel_prompt:
             fragments.append(channel_prompt)
@@ -55,6 +61,23 @@ class PromptService:
                 "If the user only uploaded files and gave no clear instruction, ask a clarifying question."
             )
         return "\n\n".join(fragments)
+
+    def _specialist_roster_fragment(self) -> str:
+        if self._agent_registry is None or self._agent_registry.is_empty():
+            return ""
+        tool_names = {binding.tool.name for binding in self._tools}
+        if "invoke_agent" not in tool_names:
+            return ""
+        roster = self._agent_registry.prompt_roster()
+        if not roster:
+            return ""
+        if "fetch_agent_info" in tool_names:
+            return (
+                f"{roster}\n"
+                "If you need the full instructions for one specialist before delegating, call fetch_agent_info "
+                "with that exact agent name."
+            )
+        return roster
 
     def compact_system_prompt(self, system_prompt: str) -> str:
         compact_prompt = load_compact_prompt(self._prompts_dir)
