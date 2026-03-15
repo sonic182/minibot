@@ -44,7 +44,12 @@ def _load_from_paths(resolved: list[tuple[Path, bool]]) -> list[SkillSpec]:
     for base_path, is_project_level in resolved:
         if not base_path.exists() or not base_path.is_dir():
             continue
-        for skill_dir in sorted(p for p in base_path.iterdir() if p.is_dir()):
+        try:
+            subdirs = sorted(p for p in base_path.iterdir() if p.is_dir())
+        except OSError as exc:
+            logger.warning("could not list skills directory", extra={"path": str(base_path), "error": str(exc)})
+            continue
+        for skill_dir in subdirs:
             skill_file = skill_dir / "SKILL.md"
             if not skill_file.exists():
                 continue
@@ -67,9 +72,10 @@ def _load_from_paths(resolved: list[tuple[Path, bool]]) -> list[SkillSpec]:
                     )
                 else:
                     logger.warning(
-                        "skill name collision: later path overrides earlier",
-                        extra={"skill_name": spec.name, "replaced_path": str(existing_spec.skill_dir)},
+                        "skill name collision: earlier path takes precedence",
+                        extra={"skill_name": spec.name, "skipped_path": str(skill_file)},
                     )
+                    continue
             by_name[spec.name] = (spec, is_project_level)
     return [entry[0] for entry in by_name.values()]
 
