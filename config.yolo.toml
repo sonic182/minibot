@@ -218,4 +218,5 @@ disabled_tools = []
 # development skills bundled with the MiniBot project directory.
 [tools.skills]
 enabled = true
-# paths = ["/home/user/my-skills", "./my-project-skills"]
+# Recommended: create a ./skills directory and set paths to load only your own skills.
+# paths = ["./skills"]

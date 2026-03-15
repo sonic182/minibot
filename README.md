@@ -484,6 +484,26 @@ Project-level paths (1–2) take precedence over user-level paths (3–4). On a 
 
 > **Note:** The MiniBot repository itself ships development skills under `.agents/skills/` and `.claude/skills/`. These are picked up automatically when you run from the project directory. If you want to use only your own skills, set `paths` explicitly (see below).
 
+### Recommended setup: `./skills`
+
+The conventional place to add your own skills to a MiniBot deployment is a `./skills` directory at the project root. Set `paths` to point there so only your skills are loaded (no development skills from `.agents/skills/` or `.claude/skills/` are picked up):
+
+```toml
+[tools.skills]
+enabled = true
+paths = ["./skills"]
+```
+
+Then create one subdirectory per skill:
+
+```
+skills/
+  my-skill/
+    SKILL.md
+  another-skill/
+    SKILL.md
+```
+
 ### Overriding paths in `config.toml`
 
 Setting `paths` to a non-empty list **completely replaces** the default locations — only the listed directories are scanned:
@@ -491,8 +511,8 @@ Setting `paths` to a non-empty list **completely replaces** the default location
 ```toml
 [tools.skills]
 paths = [
-    "/home/user/my-skills",
-    "./project-skills",
+    "./skills",
+    "/home/user/shared-skills",
 ]
 ```
 
