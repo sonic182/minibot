@@ -17,13 +17,13 @@ production-practical bot with clear boundaries, predictable behavior, and enough
 Quickstart (Docker)
 -------------------
 
-1. `cp config.example.toml config.toml`
-2. Populate secrets in `config.toml` (`channels.telegram.bot_token`, allowlists, provider credentials under `[providers.<name>]`).
+1. `cp config.example.toml config.toml` or `cp config.example.lua config.lua`
+2. Populate secrets in your config file (`channels.telegram.bot_token`, allowlists, provider credentials under `[providers.<name>]`).
 3. `mkdir -p logs data`
 4. `docker compose up --build -d`
 5. `docker compose logs -f minibot`
 
-`docker-compose.yml` mounts `config.toml` by default.
+`docker-compose.yml` mounts `config.toml` by default. If you prefer Lua config, mount `config.lua` instead or set `MINIBOT_CONFIG`.
 `config.yolo.toml` is provided as a reference template for users who want an all-enabled profile (file storage, STT, HTTP/KV tools, MCP bridge, unrestricted Python runtime with `sandbox_mode = "none"`, unrestricted Bash execution, and patch-based file editing).
 
 Docker image includes:
@@ -38,8 +38,8 @@ Quickstart (Poetry)
 -------------------
 
 1. `poetry install --all-extras`
-2. `cp config.example.toml config.toml`
-3. Populate secrets in `config.toml` (bot token, allowed chat IDs, provider credentials under `[providers.<name>]`).
+2. `cp config.example.toml config.toml` or `cp config.example.lua config.lua`
+3. Populate secrets in your config file (bot token, allowed chat IDs, provider credentials under `[providers.<name>]`).
 4. `poetry run minibot`
 
 Console test channel
@@ -230,7 +230,7 @@ Why self-host
 Configuration Reference
 -----------------------
 
-Use `config.example.toml` as the source of truth—copy it to `config.toml` and update secrets before launching. Key sections:
+Use `config.example.toml` or `config.example.lua` as the source of truth, then update secrets before launching. Key sections:
 
 - Byte-size fields accept raw integers or quoted size strings; SI units are preferred in examples (for example `"16KB"`, `"5MB"`, `"2GB"`). IEC units are also accepted (for example `"16KiB"`, `"5MiB"`).
 
@@ -259,7 +259,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
-Every section has comments + defaults in `config.example.toml`—read that file for hints.
+Every section has comments + defaults in `config.example.toml` and `config.example.lua`—read the format you plan to use for hints.
 
 For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` if you want pre-enabled tools + Playwright MCP server.
 

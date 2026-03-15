@@ -26,6 +26,7 @@ and emit outbound responses back to the active channel adapter.
 ├── TODO.md
 ├── agents/              (specialist agent definition markdown files)
 ├── config.example.toml
+├── config.example.lua
 ├── config.yolo.toml
 ├── docker-requirements.txt
 ├── prompts/
@@ -311,7 +312,7 @@ Current notes:
 
 - Config:
   - `adapters/config/schema.py` holds Pydantic settings models.
-  - `adapters/config/loader.py` resolves TOML + environment placeholders.
+  - `adapters/config/loader.py` resolves config discovery and format-aware loading for TOML/Lua files.
 - Container:
   - `adapters/container/app_container.py` wires singleton-style service graph.
 - Shared SQLAlchemy utilities:
@@ -406,7 +407,7 @@ The scheduler currently focuses on scheduled prompts (not a generic task DAG eng
 
 ## Configuration Surface
 
-`config.example.toml` is the canonical reference (with inline notes for production-oriented values).
+`config.example.toml` and `config.example.lua` are reference configs (with production-oriented defaults).
 `config.yolo.toml` is a Docker-oriented full-capability profile (pre-enabled tools + Playwright MCP server).
 
 Main sections:

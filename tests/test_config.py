@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from minibot.adapters.config import schema as config_schema
 from minibot.adapters.config.loader import load_settings
 
 
@@ -192,3 +193,175 @@ auto_transcribe_max_duration_seconds = 30
     assert settings.tools.audio_transcription.vad_filter is False
     assert settings.tools.audio_transcription.auto_transcribe_short_incoming is True
     assert settings.tools.audio_transcription.auto_transcribe_max_duration_seconds == 30
+
+
+def test_load_settings_from_lua_file(tmp_path: Path) -> None:
+    pytest.importorskip("lupa")
+
+    config_file = tmp_path / "bot.lua"
+    config_file.write_text(
+        """
+return {
+  runtime = {
+    log_level = "DEBUG",
+    agent_timeout_seconds = 180,
+  },
+  llm = {
+    provider = "openai",
+    api_key = "secret",
+    http2 = true,
+    request_timeout_seconds = 50,
+    sock_connect_timeout_seconds = 12,
+    sock_read_timeout_seconds = 50,
+    retry_attempts = 4,
+    retry_delay_seconds = 2.0,
+    main_responses_state_mode = "full_messages",
+    agent_responses_state_mode = "previous_response_id",
+    prompt_cache_enabled = false,
+    prompt_cache_retention = "24h",
+    openrouter = {
+      models = { "anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b" },
+      plugins = {
+        {
+          id = "file-parser",
+          pdf = {
+            engine = "pdf-text",
+          },
+        },
+      },
+      provider = {
+        order = { "anthropic", "openai" },
+        allow_fallbacks = true,
+        data_collection = "deny",
+        provider_extra = {
+          custom_hint = "value",
+        },
+      },
+    },
+  },
+  channels = {
+    telegram = {
+      bot_token = "token",
+      allowed_chat_ids = {},
+      allowed_user_ids = {},
+      allowed_document_mime_types = {},
+    },
+  },
+  memory = {
+    context_ratio_before_compact = 0.9,
+  },
+}
+""",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_file)
+    assert settings.runtime.log_level == "DEBUG"
+    assert settings.runtime.agent_timeout_seconds == 180
+    assert settings.llm.api_key == "secret"
+    assert settings.llm.http2 is True
+    assert settings.llm.request_timeout_seconds == 50
+    assert settings.llm.sock_connect_timeout_seconds == 12
+    assert settings.llm.sock_read_timeout_seconds == 50
+    assert settings.llm.retry_attempts == 4
+    assert settings.llm.retry_delay_seconds == 2.0
+    assert settings.llm.main_responses_state_mode == "full_messages"
+    assert settings.llm.agent_responses_state_mode == "previous_response_id"
+    assert settings.llm.prompt_cache_enabled is False
+    assert settings.llm.prompt_cache_retention == "24h"
+    assert settings.llm.openrouter.models == ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]
+    assert settings.llm.openrouter.plugins == [{"id": "file-parser", "pdf": {"engine": "pdf-text"}}]
+    assert settings.llm.openrouter.provider is not None
+    assert settings.llm.openrouter.provider.order == ["anthropic", "openai"]
+    assert settings.llm.openrouter.provider.provider_extra["custom_hint"] == "value"
+    assert settings.channels["telegram"].bot_token == "token"
+    assert settings.channels["telegram"].allowed_chat_ids == []
+    assert settings.memory.context_ratio_before_compact == 0.9
+
+
+def test_load_settings_prefers_default_lua_when_toml_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("lupa")
+
+    config_file = tmp_path / "config.lua"
+    config_file.write_text(
+        """
+return {
+  llm = {
+    provider = "openai",
+    api_key = "lua-secret",
+  },
+  channels = {
+    telegram = {
+      bot_token = "token",
+    },
+  },
+}
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MINIBOT_CONFIG", raising=False)
+
+    settings = load_settings()
+    assert settings.llm.api_key == "lua-secret"
+    assert settings.channels["telegram"].bot_token == "token"
+
+
+def test_load_settings_lua_requires_lupa(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "bot.lua"
+    config_file.write_text("return {}", encoding="utf-8")
+
+    real_import_module = config_schema.importlib.import_module
+
+    def _import_module(name: str):
+        if name == "lupa":
+            raise ModuleNotFoundError(name)
+        return real_import_module(name)
+
+    monkeypatch.setattr(config_schema.importlib, "import_module", _import_module)
+
+    with pytest.raises(RuntimeError, match="poetry install --extras lua"):
+        load_settings(config_file)
+
+
+def test_load_settings_rejects_ambiguous_lua_table(tmp_path: Path) -> None:
+    pytest.importorskip("lupa")
+
+    config_file = tmp_path / "bot.lua"
+    config_file.write_text(
+        """
+return {
+  channels = {
+    telegram = {
+      bot_token = "token",
+    },
+  },
+  llm = {
+    provider = "openai",
+  },
+  providers = {
+    openai = {
+      api_key = "secret",
+    },
+  },
+  tools = {
+    mcp = {
+      servers = {
+        {
+          name = "bad",
+          env = {
+            TEST = "ok",
+            [1] = "not-allowed",
+          },
+        },
+      },
+    },
+  },
+}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="either string keys or consecutive integer keys"):
+        load_settings(config_file)

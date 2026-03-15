@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib
 import tomllib
+import types
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union, get_args, get_origin
 
 from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter, ValidationError
 from pydantic import model_validator
@@ -24,6 +26,101 @@ def _coerce_byte_size(value: Any) -> int:
         return int(_BYTE_SIZE_ADAPTER.validate_python(value))
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid byte size value") from exc
+
+
+def _load_file_data(path: Path) -> Dict[str, Any]:
+    suffix = path.suffix.lower()
+    if suffix == ".toml":
+        with path.open("rb") as fp:
+            data = tomllib.load(fp)
+        return data
+    if suffix == ".lua":
+        return _load_lua_file_data(path)
+    raise ValueError(f"unsupported config file type: {path.suffix or '<none>'}")
+
+
+def _load_lua_file_data(path: Path) -> Dict[str, Any]:
+    try:
+        lupa = importlib.import_module("lupa")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("Lua config support requires `lupa`; install with `poetry install --extras lua`") from exc
+
+    lua = lupa.LuaRuntime(unpack_returned_tuples=True)
+    result = lua.execute(path.read_text(encoding="utf-8"))
+    if isinstance(result, tuple):
+        raise ValueError("lua config must return a single table")
+    data = _lua_to_python(result)
+    if not isinstance(data, dict):
+        raise ValueError("lua config must return a top-level table")
+    return data
+
+
+def _lua_to_python(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_lua_to_python(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _lua_to_python(item) for key, item in value.items()}
+    if not hasattr(value, "items"):
+        return value
+
+    items = [(key, item) for key, item in value.items()]
+    if not items:
+        return {}
+
+    keys = [key for key, _ in items]
+    if all(isinstance(key, str) for key in keys):
+        return {key: _lua_to_python(item) for key, item in items}
+
+    if all(isinstance(key, int) and not isinstance(key, bool) and key > 0 for key in keys):
+        ordered_keys = sorted(keys)
+        expected_keys = list(range(1, len(keys) + 1))
+        if ordered_keys != expected_keys:
+            raise ValueError("lua config arrays must use consecutive integer keys starting at 1")
+        ordered_items = sorted(items, key=lambda item: item[0])
+        return [_lua_to_python(item) for _, item in ordered_items]
+
+    raise ValueError("lua config tables must use either string keys or consecutive integer keys")
+
+
+def _normalize_for_annotation(value: Any, annotation: Any) -> Any:
+    if annotation is Any:
+        return value
+
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _normalize_for_annotation(value, get_args(annotation)[0])
+
+    if origin in (Union, types.UnionType):
+        non_none_args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if value is None or not non_none_args:
+            return value
+        return _normalize_for_annotation(value, non_none_args[0])
+
+    if origin in (list, List):
+        item_annotation = get_args(annotation)[0] if get_args(annotation) else Any
+        if value == {}:
+            return []
+        if isinstance(value, list):
+            return [_normalize_for_annotation(item, item_annotation) for item in value]
+        return value
+
+    if origin in (dict, Dict):
+        args = get_args(annotation)
+        value_annotation = args[1] if len(args) == 2 else Any
+        if isinstance(value, dict):
+            return {key: _normalize_for_annotation(item, value_annotation) for key, item in value.items()}
+        return value
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel) and isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            field = annotation.model_fields.get(key)
+            normalized[key] = _normalize_for_annotation(item, field.annotation) if field is not None else item
+        return normalized
+
+    return value
 
 
 ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
@@ -403,12 +500,10 @@ class Settings(BaseModel):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Settings":
-        return cls.model_validate(data)
+        return cls.model_validate(_normalize_for_annotation(data, cls))
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> "Settings":
         if path is None:
             raise ValueError("config file path is required")
-        with path.open("rb") as fp:
-            data = tomllib.load(fp)
-        return cls.from_dict(data)
+        return cls.from_dict(_load_file_data(path))
