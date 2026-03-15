@@ -103,7 +103,7 @@ class _StubMemory:
 class _StubRuntime:
     async def run(self, **_: Any) -> RuntimeResult:
         return RuntimeResult(
-            payload='{"answer":{"kind":"text","content":"ignored"},"should_answer_to_user":true}',
+            payload='{"answer":{"kind":"text","content":"ignored"},"should_continue":false}',
             response_id="resp-1",
             state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
             total_tokens=4,
@@ -314,7 +314,7 @@ async def test_compaction_service_fallback_summary_updates_previous_response_id(
         async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
             _ = args, kwargs
             return LLMGeneration(
-                {"answer": {"kind": "text", "content": "summary via fallback"}, "should_answer_to_user": True},
+                {"answer": {"kind": "text", "content": "summary via fallback"}, "should_continue": False},
                 response_id="cmp-fallback",
                 total_tokens=7,
             )
@@ -364,7 +364,7 @@ async def test_compaction_service_fallback_summary_clears_previous_response_id_w
         async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
             _ = args, kwargs
             return LLMGeneration(
-                {"answer": {"kind": "text", "content": "summary via fallback"}, "should_answer_to_user": True},
+                {"answer": {"kind": "text", "content": "summary via fallback"}, "should_continue": False},
                 response_id=None,
                 total_tokens=7,
             )
@@ -440,7 +440,7 @@ async def test_runtime_service_skips_guardrail_when_tool_messages_exist() -> Non
     class _ToolRuntime:
         async def run(self, **_: Any) -> RuntimeResult:
             return RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"done"},"should_answer_to_user":true}',
+                payload='{"answer":{"kind":"text","content":"done"},"should_continue":false}',
                 response_id="resp-1",
                 state=AgentState(
                     messages=[
@@ -509,4 +509,3 @@ async def test_runtime_service_calls_guardrail_when_no_tool_messages() -> None:
     )
 
     assert guardrail.calls == 1
-

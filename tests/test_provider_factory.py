@@ -117,7 +117,7 @@ async def test_generate_parses_structured_json_payload(monkeypatch: pytest.Monke
             self.calls.append(kwargs)
             return _FakeResponse(
                 main_response=_FakeMessage(
-                    content='{"answer":"done","should_answer_to_user":false}',
+                    content='{"answer":"done","should_continue":false}',
                     tool_calls=None,
                 ),
                 original={"id": "resp-structured"},
@@ -128,7 +128,7 @@ async def test_generate_parses_structured_json_payload(monkeypatch: pytest.Monke
 
     result = await client.generate([], "hello", response_schema={"type": "object"})
 
-    assert result.payload == {"answer": "done", "should_answer_to_user": False}
+    assert result.payload == {"answer": "done", "should_continue": False}
     assert result.response_id == "resp-structured"
 
 
@@ -141,7 +141,7 @@ async def test_generate_parses_structured_json_from_fenced_block(monkeypatch: py
             self.calls.append(kwargs)
             return _FakeResponse(
                 main_response=_FakeMessage(
-                    content='```json\n{"answer":"done","should_answer_to_user":true}\n```',
+                    content='```json\n{"answer":"done","should_continue":false}\n```',
                     tool_calls=None,
                 ),
                 original={"id": "resp-fenced"},
@@ -152,7 +152,7 @@ async def test_generate_parses_structured_json_from_fenced_block(monkeypatch: py
 
     result = await client.generate([], "hello", response_schema={"type": "object"})
 
-    assert result.payload == {"answer": "done", "should_answer_to_user": True}
+    assert result.payload == {"answer": "done", "should_continue": False}
     assert result.response_id == "resp-fenced"
 
 
@@ -502,7 +502,7 @@ async def test_generate_auto_continues_incomplete_response_once(monkeypatch: pyt
                     },
                 )
             return _FakeResponse(
-                main_response=_FakeMessage(content=' world","should_answer_to_user":true}'),
+                main_response=_FakeMessage(content=' world","should_continue":false}'),
                 original={
                     "id": "resp-2",
                     "status": "completed",
@@ -516,7 +516,7 @@ async def test_generate_auto_continues_incomplete_response_once(monkeypatch: pyt
 
     result = await client.generate([], "hello", response_schema={"type": "object"})
 
-    assert result.payload == {"answer": "hello world", "should_answer_to_user": True}
+    assert result.payload == {"answer": "hello world", "should_continue": False}
     assert result.response_id == "resp-2"
     assert result.total_tokens == 32
     assert result.input_tokens == 23
@@ -568,7 +568,7 @@ async def test_generate_stops_after_tool_loop_limit(monkeypatch: pytest.MonkeyPa
     assert isinstance(result.payload, dict)
     assert result.payload["answer"]["kind"] == "text"
     assert "tool-loop safeguard" in result.payload["answer"]["content"]
-    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["should_continue"] is False
     assert result.payload["attachments"] == []
 
 
@@ -597,7 +597,7 @@ async def test_generate_stops_when_tool_outputs_repeat_identically(monkeypatch: 
     assert isinstance(result.payload, dict)
     assert result.payload["answer"]["kind"] == "text"
     assert "tool-loop safeguard" in result.payload["answer"]["content"]
-    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["should_continue"] is False
     assert result.payload["attachments"] == []
     assert len(client._provider.calls) == 3
 
@@ -628,7 +628,7 @@ async def test_generate_sanitizes_assistant_message_before_tool_followup(monkeyp
                     },
                 )
                 return _FakeResponse(main_response=message, original={"id": "resp-tool"})
-            return _FakeResponse(main_response=_FakeMessage(content='{"answer":"ok","should_answer_to_user":true}'))
+            return _FakeResponse(main_response=_FakeMessage(content='{"answer":"ok","should_continue":false}'))
 
     async def _noop_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
         return {"ok": True}
@@ -641,7 +641,7 @@ async def test_generate_sanitizes_assistant_message_before_tool_followup(monkeyp
 
     result = await client.generate([], "hello", tools=[binding], response_schema={"type": "object"})
 
-    assert result.payload == {"answer": "ok", "should_answer_to_user": True}
+    assert result.payload == {"answer": "ok", "should_continue": False}
     second_call_messages = client._provider.calls[1]["messages"]
     assistant_message = second_call_messages[-2]
     assert assistant_message["role"] == "assistant"
@@ -1203,7 +1203,7 @@ async def test_generate_surfaces_invalid_tool_arguments_for_retry(monkeypatch: p
     assert result.payload["answer"]["kind"] == "text"
     assert "tool-loop safeguard" in result.payload["answer"]["content"]
     assert "current_datetime" in result.payload["answer"]["content"]
-    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["should_continue"] is False
     assert result.payload["attachments"] == []
     assert len(client._provider.calls) == 2
 
@@ -1217,7 +1217,7 @@ async def test_generate_does_not_force_tool_choice_for_explicit_tool_request(
     class _RetryRequiredProvider(_FakeProvider):
         async def acomplete(self, **kwargs: Any) -> _FakeResponse:
             self.calls.append(kwargs)
-            return _FakeResponse(main_response=_FakeMessage(content='{"answer":"done","should_answer_to_user":true}'))
+            return _FakeResponse(main_response=_FakeMessage(content='{"answer":"done","should_continue":false}'))
 
     async def _time_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
         return {"timestamp": "2026-02-08T14:00:00Z"}
@@ -1239,7 +1239,7 @@ async def test_generate_does_not_force_tool_choice_for_explicit_tool_request(
         response_schema={"type": "object"},
     )
 
-    assert result.payload == {"answer": "done", "should_answer_to_user": True}
+    assert result.payload == {"answer": "done", "should_continue": False}
     assert len(client._provider.calls) == 1
 
 
@@ -1254,7 +1254,7 @@ async def test_generate_returns_non_user_answerable_payload_without_retry_when_t
             self.calls.append(kwargs)
             payload = {
                 "answer": {"kind": "text", "content": "I still need to run tools."},
-                "should_answer_to_user": False,
+                "should_continue": True,
             }
             return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
 
@@ -1275,7 +1275,7 @@ async def test_generate_returns_non_user_answerable_payload_without_retry_when_t
 
     assert result.payload == {
         "answer": {"kind": "text", "content": "I still need to run tools."},
-        "should_answer_to_user": False,
+        "should_continue": True,
     }
     assert len(client._provider.calls) == 1
 
@@ -1291,7 +1291,7 @@ async def test_generate_returns_non_user_answerable_payload_without_retry_when_n
             self.calls.append(kwargs)
             payload = {
                 "answer": {"kind": "text", "content": "I still need to run tools."},
-                "should_answer_to_user": False,
+                "should_continue": True,
             }
             return _FakeResponse(main_response=_FakeMessage(content=json.dumps(payload), tool_calls=None))
 
@@ -1302,7 +1302,7 @@ async def test_generate_returns_non_user_answerable_payload_without_retry_when_n
 
     assert result.payload == {
         "answer": {"kind": "text", "content": "I still need to run tools."},
-        "should_answer_to_user": False,
+        "should_continue": True,
     }
     assert len(client._provider.calls) == 1
 

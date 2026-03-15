@@ -38,4 +38,5 @@ class RuntimeStructuredOutputValidator:
                 "content": "I could not produce a valid structured response in this attempt. Please try again.",
             },
             "should_continue": False,
+            "attachments": [],
         }

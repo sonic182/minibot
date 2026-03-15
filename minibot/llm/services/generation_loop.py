@@ -215,8 +215,21 @@ async def generate_with_tools(
                 if isinstance(action, ToolCallMissingAction):
                     logger.warning("unexpected structured validator action", extra={"action": type(action).__name__})
                 if isinstance(action, FailAction):
-                    logger.warning("structured response validation failed; returning raw fallback")
-                    fallback_payload = payload if isinstance(payload, dict) else {"raw_response": payload}
+                    logger.warning("structured response validation failed; returning structured fallback")
+                    fallback_payload = {
+                        "answer": {
+                            "kind": "text",
+                            "content": (
+                                "I could not produce a valid structured response in this attempt. "
+                                "Please try again."
+                            ),
+                        },
+                        "should_continue": False,
+                    }
+                    if isinstance(response_schema, dict):
+                        properties = response_schema.get("properties")
+                        if isinstance(properties, dict) and "attachments" in properties:
+                            fallback_payload["attachments"] = []
                     return usage_accumulator.build_generation(
                         payload=fallback_payload,
                         response_id=response_id,

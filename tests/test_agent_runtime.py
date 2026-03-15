@@ -172,7 +172,7 @@ async def test_runtime_validates_structured_output_with_ratchet() -> None:
         steps=[
             LLMCompletionStep(
                 message=_FakeMessage(
-                    content='{"answer":{"kind":"markdown","content":"*done*"},"should_answer_to_user":true}'
+                    content='{"answer":{"kind":"markdown","content":"*done*"},"should_continue":false}'
                 ),
                 response_id="resp-1",
                 total_tokens=7,
@@ -192,7 +192,7 @@ async def test_runtime_validates_structured_output_with_ratchet() -> None:
     assert isinstance(result.payload, dict)
     assert result.payload["answer"]["kind"] == "markdown"
     assert result.payload["answer"]["content"] == "*done*"
-    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["should_continue"] is False
 
 
 @pytest.mark.asyncio
@@ -201,7 +201,7 @@ async def test_runtime_retries_invalid_structured_output_then_succeeds() -> None
         steps=[
             LLMCompletionStep(message=_FakeMessage(content="not-json"), response_id="resp-1", total_tokens=4),
             LLMCompletionStep(
-                message=_FakeMessage(content='{"answer":{"kind":"text","content":"ok"},"should_answer_to_user":true}'),
+                message=_FakeMessage(content='{"answer":{"kind":"text","content":"ok"},"should_continue":false}'),
                 response_id="resp-2",
                 total_tokens=5,
             ),
@@ -231,7 +231,7 @@ async def test_runtime_returns_non_user_answerable_structured_payload_without_re
         steps=[
             LLMCompletionStep(
                 message=_FakeMessage(
-                    content='{"answer":{"kind":"text","content":"still working"},"should_answer_to_user":false}'
+                    content='{"answer":{"kind":"text","content":"still working"},"should_continue":true}'
                 ),
                 response_id="resp-1",
                 total_tokens=2,
@@ -250,7 +250,7 @@ async def test_runtime_returns_non_user_answerable_structured_payload_without_re
 
     assert result.payload["answer"]["kind"] == "text"
     assert result.payload["answer"]["content"] == "still working"
-    assert result.payload["should_answer_to_user"] is False
+    assert result.payload["should_continue"] is True
     assert llm_client.complete_once_calls == 1
 
 
@@ -278,13 +278,13 @@ async def test_runtime_returns_fallback_after_structured_output_exhausted_retrie
     assert isinstance(result.payload, dict)
     assert result.payload["answer"]["kind"] == "text"
     assert "valid structured response" in result.payload["answer"]["content"]
-    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["should_continue"] is False
 
 
 @pytest.mark.asyncio
 async def test_runtime_retries_do_not_consume_step_budget() -> None:
     """M1 fix: RetryAction must not increment step; a retry should not use up the step budget."""
-    valid_json = '{"answer":{"kind":"text","content":"ok"},"should_answer_to_user":true}'
+    valid_json = '{"answer":{"kind":"text","content":"ok"},"should_continue":false}'
     llm_client = _StubRuntimeLLMClient(
         steps=[
             LLMCompletionStep(message=_FakeMessage(content="not-json"), response_id="resp-1", total_tokens=3),
@@ -314,7 +314,7 @@ async def test_runtime_retries_do_not_consume_step_budget() -> None:
 @pytest.mark.asyncio
 async def test_runtime_custom_validator_honors_caller_schema() -> None:
     """P1 fix: a custom validator with _DelegatedPayload must accept kind='json' without retrying."""
-    delegated_json = '{"answer":{"kind":"json","content":"{\\"key\\":\\"value\\"}"},"should_answer_to_user":true}'
+    delegated_json = '{"answer":{"kind":"json","content":"{\\"key\\":\\"value\\"}"},"should_continue":false}'
     llm_client = _StubRuntimeLLMClient(
         steps=[
             LLMCompletionStep(
@@ -406,7 +406,7 @@ async def test_runtime_stops_on_repeated_identical_tool_failure_signatures() -> 
     assert llm_client.complete_once_calls == 2
     assert isinstance(result.payload, dict)
     assert "same tool error repeatedly" in result.payload["answer"]["content"]
-    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["should_continue"] is False
 
 
 @pytest.mark.asyncio
@@ -472,7 +472,7 @@ async def test_runtime_stops_on_repeated_identical_successful_tool_outputs() -> 
     assert isinstance(result.payload, dict)
     assert result.payload["answer"]["kind"] == "text"
     assert "tool-loop safeguard" in result.payload["answer"]["content"]
-    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["should_continue"] is False
     assert result.payload["attachments"] == []
 
 
@@ -537,7 +537,7 @@ async def test_runtime_tool_loop_fallback_payload_stays_structured() -> None:
     assert "tool-loop safeguard" in result.payload["answer"]["content"]
     assert "http_request" in result.payload["answer"]["content"]
     assert '{"status":200,"body":"ok"}' in result.payload["answer"]["content"]
-    assert result.payload["should_answer_to_user"] is True
+    assert result.payload["should_continue"] is False
     assert result.payload["attachments"] == []
 
 
