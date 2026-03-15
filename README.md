@@ -5,6 +5,61 @@ MiniBot 🤖
 
 Your personal AI assistant for Telegram - self-hosted, auditable, and intentionally opinionated.
 
+## Table of Contents
+
+- [Top features](#top-features)
+- [Demo](#demo)
+- [Overview](#overview)
+- [Why self-host](#why-self-host)
+- [Quickstart (Docker)](#quickstart-docker)
+- [Quickstart (Poetry)](#quickstart-poetry)
+- [Up & Running with Telegram](#up--running-with-telegram)
+- [Console test channel](#console-test-channel)
+- [Using Ollama via OpenAI-Compatible API](#using-ollama-via-openai-compatible-api)
+- [Optional Lua Support](#optional-lua-support)
+- [Configuration Reference](#configuration-reference)
+- [Lua Config Notes](#lua-config-notes)
+- [Scheduler Guide](#scheduler-guide)
+- [Telegram Audio Transcription (faster-whisper)](#telegram-audio-transcription-faster-whisper)
+- [GPU Runtime Dependencies](#gpu-runtime-dependencies-debianubuntu-and-archmanjaro)
+- [Lua Custom Tools](#lua-custom-tools)
+- [MCP Bridge Guide](#mcp-bridge-guide)
+- [Agent Tool Scoping](#agent-tool-scoping)
+- [Agent Skills](#agent-skills)
+- [OpenRouter Agents Custom Params](#openrouter-agents-custom-params)
+- [Suggested model presets](#suggested-model-presets)
+- [Security & sandboxing](#security--sandboxing)
+- [Prompt Packs](#prompt-packs)
+- [Tooling](#tooling)
+- [Mini Hex Architecture](#mini-hex-architecture)
+- [Incoming Message Flow](#incoming-message-flow)
+- [Roadmap / Todos](#roadmap--todos)
+- [Stage 1 targets](#stage-1-targets)
+
+Top features
+------------
+
+- 🤖 Personal assistant, not SaaS: your chats, memory, and scheduled prompts stay in your instance.
+- 🎯 Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
+- 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment, including a full-capability `config.yolo.toml` profile.
+- 💻 Local console channel for development/testing with REPL and one-shot modes (`minibot-console`).
+- 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
+- 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
+- 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
+- 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, `calculate_expression`, `current_datetime`, optional Python execution, optional Bash execution, optional apply_patch editing, optional speech-to-text, and MCP server bridges.
+- 🗂️ Managed file workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `grep`, and `self_insert_artifact` (directive-based artifact insertion).
+- 🌐 Optional browser automation via MCP servers (for example Playwright MCP tools).
+- ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
+- 📊 Structured logfmt logs, request correlation IDs, and a focused test suite (`pytest` + `pytest-asyncio`).
+
+Demo
+----
+
+Example: generate images with the `python_execute` tool and receive them in the Telegram channel.
+
+![Generate image with python_execute (1)](demo_pics/gen_image_with_python_1.jpeg)
+![Generate image with python_execute (2)](demo_pics/gen_image_with_python_2.jpeg)
+
 Overview
 --------
 
@@ -13,6 +68,13 @@ who want reliable automation and chat assistance without a giant platform footpr
 
 The project is intentionally opinionated: Telegram-first, SQLite-first, async-first. You get a focused,
 production-practical bot with clear boundaries, predictable behavior, and enough tools to be useful daily.
+
+Why self-host
+-------------
+
+- Privacy & ownership: all transcripts, KV notes, and scheduled prompts are stored in your instance (SQLite files), not a third-party service.
+- Cost & provider control: pick where to route LLM calls and manage API usage independently.
+- Network & runtime control: deploy behind your firewall, restrict outbound access, and run the daemon as an unprivileged user.
 
 Quickstart (Docker)
 -------------------
@@ -42,15 +104,16 @@ Quickstart (Poetry)
 3. Populate secrets in your config file (bot token, allowed chat IDs, provider credentials under `[providers.<name>]`).
 4. `poetry run minibot`
 
-Optional Lua Support
---------------------
+Up & Running with Telegram
+---------------------------
 
-MiniBot supports Lua as an optional extension layer for both config files and custom tools.
-
-- Install it with `poetry install --extras lua` (or `poetry install --all-extras`).
-- Lua config files are supported via `config.example.lua` and `config.lua`.
-- Lua custom tools are loaded from a configured directory via `[tools.lua_custom]` / `tools.lua_custom`.
-- If the `lua` extra is not installed, the normal Python + TOML path still works; only Lua-backed features fail.
+1. Launch Telegram [`@BotFather`](https://t.me/BotFather) and create a bot to obtain a token.
+2. Update `config.toml`:
+   * set `channels.telegram.bot_token`
+   * populate `allowed_chat_ids` or `allowed_user_ids` with your ID numbers
+   * configure the LLM provider section (`provider`, `model`) and `[providers.<provider>]` credentials
+3. Run `poetry run minibot` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
+4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
 
 Console test channel
 --------------------
@@ -109,16 +172,84 @@ Notes:
 - When `base_url` uses `http://`, MiniBot automatically disables HTTP/2 for compatibility.
 - If a model/provider combination fails under `openai_responses`, switch to `openai` first.
 
-Up & Running with Telegram
----------------------------
+Optional Lua Support
+--------------------
 
-1. Launch Telegram [`@BotFather`](https://t.me/BotFather) and create a bot to obtain a token.
-2. Update `config.toml`:
-   * set `channels.telegram.bot_token`
-   * populate `allowed_chat_ids` or `allowed_user_ids` with your ID numbers
-   * configure the LLM provider section (`provider`, `model`) and `[providers.<provider>]` credentials
-3. Run `poetry run minibot` and send a message to your bot. Expect a simple synchronous reply (LLM, memory backed).
-4. Monitor `logs` (Logfmt via `logfmter`) and `htmlcov/index.html` for coverage during dev.
+MiniBot supports Lua as an optional extension layer for both config files and custom tools.
+
+- Install it with `poetry install --extras lua` (or `poetry install --all-extras`).
+- Lua config files are supported: copy `config.example.lua` → `config.lua` (gitignored, never committed), then populate your credentials.
+- Lua custom tools are loaded from a configured directory via `[tools.lua_custom]` / `tools.lua_custom`.
+- If the `lua` extra is not installed, the normal Python + TOML path still works; only Lua-backed features fail.
+
+Configuration Reference
+-----------------------
+
+Use `config.example.toml` or `config.example.lua` as the source of truth, then update secrets before launching. Key sections:
+
+- Byte-size fields accept raw integers or quoted size strings; SI units are preferred in examples (for example `"16KB"`, `"5MB"`, `"2GB"`). IEC units are also accepted (for example `"16KiB"`, `"5MiB"`).
+
+- `[runtime]`: global flags such as log level and environment.
+- `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
+- `[llm]`: configures default model/provider behavior for the main agent and specialist agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, `prompts_dir`, and main-agent `structured_output_mode`). Responses API tuning includes `http2`, per-role state strategy (`main_responses_state_mode`, `agent_responses_state_mode`), and prompt-cache controls (`prompt_cache_enabled`, optional `prompt_cache_retention`). Request params are only sent when present in `config.toml`.
+  - `structured_output_mode` applies to the main/orchestrator agent only: `provider_with_fallback` (default), `prompt_only`, or `provider_strict`.
+  - For smaller/less schema-reliable models, prefer `prompt_only` (for example: `kimi-k2.5`, `glm-5`, `minimax-m2.5`).
+  - OpenRouter note: when `reasoning_effort` is set, MiniBot sends `reasoning.enabled = true` together with `reasoning.effort`.
+- `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
+- `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`), fully specialist-owned (`exclusive`), or only specialist-owned for MCP tools (`exclusive_mcp`). `main_tool_use_guardrail` enables an optional LLM-based tool-routing classifier per main-agent turn (`"disabled"` by default; set to `"llm_classifier"` to enable).
+- `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; `max_history_tokens` triggers compaction once cumulative generation usage crosses the threshold; `context_ratio_before_compact` (default `0.95`) controls startup auto-derivation from `models.dev` limits; `notify_compaction_updates` controls whether compaction status messages are sent to end users.
+  - Startup auto-config fetches `https://models.dev/api.json` once and, when limits are resolved for the configured model/provider, overrides runtime `max_history_tokens` and main/agent `max_new_tokens` for that process. If lookup fails, configured values are kept.
+- `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
+- `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, and pagination defaults. Enable it only when you need tool-based memory storage.
+- `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` (raw byte cap), optional `max_chars` (LLM-facing char cap), and `response_processing_mode` (`auto`/`none`) for response shaping via [aiosonic].
+- `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
+- `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`), and optional artifact export controls (`artifacts_*`) to persist generated files into managed storage for later `send_file`.
+- `[tools.bash]`: optional host Bash execution (`/bin/bash -lc`) with timeout/output caps plus environment controls (`pass_parent_env`, `env_allowlist`).
+- `[tools.apply_patch]`: optional structured patch-editing tool using opencode-style `*** Begin Patch` format (`Add File`, `Update File`, `Delete File`, optional `Move to`), with configurable workspace restriction flags.
+- `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, optional root confinement override (`allow_outside_root`), and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
+- `[tools.grep]`: optional text-search tool over files managed by `tools.file_storage`, with limits for `max_matches` and `max_file_size_bytes`.
+- `[tools.audio_transcription]`: optional speech-to-text tool powered by `faster-whisper`; configure model/runtime defaults (`model`, `device`, `compute_type`, `beam_size`, `vad_filter`) plus short-audio auto-transcription policy (`auto_transcribe_short_incoming`, `auto_transcribe_max_duration_seconds`), and enable only when the `stt` extra is installed. Runtime decoding also requires ffmpeg available on the host.
+- `[tools.lua_custom]`: optional Lua-defined custom tools loaded from a configured directory. Enable it only when the `lua` extra is installed; each `*.lua` file must return one tool manifest with `name`, `description`, `parameters`, and `handler(args)`.
+- `[tools.browser]`: configures browser artifact paths used by prompts and Playwright MCP launch defaults. `output_dir` is the canonical directory for screenshots/downloads/session artifacts.
+- `[tools.skills]`: configures skill discovery. Leave `paths` empty to use default locations (see Agent Skills section), or set `paths` to a non-empty list to override them entirely with your own directories. Set `enabled = false` to disable skill support.
+- `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
+- `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
+
+Every section has comments + defaults in `config.example.toml` and `config.example.lua`—read the format you plan to use for hints.
+
+Lua Config Notes
+----------------
+
+If you prefer Lua config:
+
+- Start from `config.example.lua`.
+- Provider keys can be read directly from the environment using `os.getenv(...)`.
+- The Lua config file is executed locally and must `return` one top-level table matching the MiniBot settings shape.
+- Without `lupa` installed, `.lua` config files will fail to load with an install hint.
+
+For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` if you want pre-enabled tools + Playwright MCP server.
+
+Scheduler Guide
+---------------
+
+Schedule by chatting naturally. MiniBot understands reminders for one-time and recurring prompts, and keeps
+jobs persisted in SQLite so they survive restarts.
+
+Use plain prompts like:
+
+- "Remind me in 30 minutes to check my email."
+- "At 7:00 AM tomorrow, ask me for my daily priorities."
+- "Every day at 9 AM, remind me to send standup."
+- "List my active reminders."
+- "Cancel the standup reminder."
+
+Notes:
+
+- One-time and recurring reminders are supported.
+- Recurrence minimum interval is `scheduler.prompts.min_recurrence_interval_seconds` (default `60`).
+- Configure scheduler storage/polling under `[scheduler.prompts]` in `config.toml`.
+
+- Typical flow: ask for a reminder in plain language, then ask to list/cancel it later if needed.
 
 Telegram Audio Transcription (faster-whisper)
 ---------------------------------------------
@@ -205,84 +336,6 @@ For strict GPU usage:
 device = "cuda"
 compute_type = "float16"
 ```
-
-Top features
-------------
-
-- 🤖 Personal assistant, not SaaS: your chats, memory, and scheduled prompts stay in your instance.
-- 🎯 Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
-- 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment, including a full-capability `config.yolo.toml` profile.
-- 💻 Local console channel for development/testing with REPL and one-shot modes (`minibot-console`).
-- 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
-- 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
-- 🖼️ Multimodal support: media inputs (images/documents) are supported with `llm.provider = "openai_responses"`, `"openai"`, and `"openrouter"`. `openai_responses` uses Responses API content types; `openai`/`openrouter` use Chat Completions content types.
-- 🧰 Small, configurable tools: chat memory, KV notes, HTTP fetch, `calculate_expression`, `current_datetime`, optional Python execution, optional Bash execution, optional apply_patch editing, optional speech-to-text, and MCP server bridges.
-- 🗂️ Managed file workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `grep`, and `self_insert_artifact` (directive-based artifact insertion).
-- 🌐 Optional browser automation via MCP servers (for example Playwright MCP tools).
-- ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
-- 📊 Structured logfmt logs, request correlation IDs, and a focused test suite (`pytest` + `pytest-asyncio`).
-
-Demo
-----
-
-Example: generate images with the `python_execute` tool and receive them in the Telegram channel.
-
-![Generate image with python_execute (1)](demo_pics/gen_image_with_python_1.jpeg)
-![Generate image with python_execute (2)](demo_pics/gen_image_with_python_2.jpeg)
-
-Why self-host
--------------
-
-- Privacy & ownership: all transcripts, KV notes, and scheduled prompts are stored in your instance (SQLite files), not a third-party service.
-- Cost & provider control: pick where to route LLM calls and manage API usage independently.
-- Network & runtime control: deploy behind your firewall, restrict outbound access, and run the daemon as an unprivileged user.
-
-Configuration Reference
------------------------
-
-Use `config.example.toml` or `config.example.lua` as the source of truth, then update secrets before launching. Key sections:
-
-- Byte-size fields accept raw integers or quoted size strings; SI units are preferred in examples (for example `"16KB"`, `"5MB"`, `"2GB"`). IEC units are also accepted (for example `"16KiB"`, `"5MiB"`).
-
-- `[runtime]`: global flags such as log level and environment.
-- `[channels.telegram]`: enables the Telegram adapter, provides the bot token, and lets you whitelist chats/users plus set polling/webhook mode.
-- `[llm]`: configures default model/provider behavior for the main agent and specialist agents (provider, model, optional temperature/token/reasoning params, `max_tool_iterations`, base `system_prompt`, `prompts_dir`, and main-agent `structured_output_mode`). Responses API tuning includes `http2`, per-role state strategy (`main_responses_state_mode`, `agent_responses_state_mode`), and prompt-cache controls (`prompt_cache_enabled`, optional `prompt_cache_retention`). Request params are only sent when present in `config.toml`.
-  - `structured_output_mode` applies to the main/orchestrator agent only: `provider_with_fallback` (default), `prompt_only`, or `provider_strict`.
-  - For smaller/less schema-reliable models, prefer `prompt_only` (for example: `kimi-k2.5`, `glm-5`, `minimax-m2.5`).
-  - OpenRouter note: when `reasoning_effort` is set, MiniBot sends `reasoning.enabled = true` together with `reasoning.effort`.
-- `[providers.<provider>]`: stores provider credentials (`api_key`, optional `base_url`). Agent files and agent frontmatter never carry secrets.
-- `[orchestration]`: configures file-defined agents from `./agents/*.md` and delegation runtime settings. `tool_ownership_mode` controls whether tools are shared (`shared`), fully specialist-owned (`exclusive`), or only specialist-owned for MCP tools (`exclusive_mcp`). `main_tool_use_guardrail` enables an optional LLM-based tool-routing classifier per main-agent turn (`"disabled"` by default; set to `"llm_classifier"` to enable).
-- `[memory]`: conversation history backend (default SQLite). The `SQLAlchemyMemoryBackend` stores session exchanges so `LLMMessageHandler` can build context windows. `max_history_messages` optionally enables automatic trimming of old transcript messages after each user/assistant append; `max_history_tokens` triggers compaction once cumulative generation usage crosses the threshold; `context_ratio_before_compact` (default `0.95`) controls startup auto-derivation from `models.dev` limits; `notify_compaction_updates` controls whether compaction status messages are sent to end users.
-  - Startup auto-config fetches `https://models.dev/api.json` once and, when limits are resolved for the configured model/provider, overrides runtime `max_history_tokens` and main/agent `max_new_tokens` for that process. If lookup fails, configured values are kept.
-- `[scheduler.prompts]`: configures delayed prompt execution storage/polling and recurrence safety (`min_recurrence_interval_seconds` guards interval jobs).
-- `[tools.kv_memory]`: optional key/value store powering the KV tools. It has its own database URL, pool/echo tuning, and pagination defaults. Enable it only when you need tool-based memory storage.
-- `[tools.http_client]`: toggles the HTTP client tool. Configure timeout + `max_bytes` (raw byte cap), optional `max_chars` (LLM-facing char cap), and `response_processing_mode` (`auto`/`none`) for response shaping via [aiosonic].
-- `[tools.calculator]`: controls the built-in arithmetic calculator tool (enabled by default) with Decimal precision, expression length limits, and exponent guardrails.
-- `[tools.python_exec]`: configures host Python execution with interpreter selection (`python_path`/`venv_path`), timeout/output/code caps, environment policy, optional pseudo-sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`), and optional artifact export controls (`artifacts_*`) to persist generated files into managed storage for later `send_file`.
-- `[tools.bash]`: optional host Bash execution (`/bin/bash -lc`) with timeout/output caps plus environment controls (`pass_parent_env`, `env_allowlist`).
-- `[tools.apply_patch]`: optional structured patch-editing tool using opencode-style `*** Begin Patch` format (`Add File`, `Update File`, `Delete File`, optional `Move to`), with configurable workspace restriction flags.
-- `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, optional root confinement override (`allow_outside_root`), and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
-- `[tools.grep]`: optional text-search tool over files managed by `tools.file_storage`, with limits for `max_matches` and `max_file_size_bytes`.
-- `[tools.audio_transcription]`: optional speech-to-text tool powered by `faster-whisper`; configure model/runtime defaults (`model`, `device`, `compute_type`, `beam_size`, `vad_filter`) plus short-audio auto-transcription policy (`auto_transcribe_short_incoming`, `auto_transcribe_max_duration_seconds`), and enable only when the `stt` extra is installed. Runtime decoding also requires ffmpeg available on the host.
-- `[tools.lua_custom]`: optional Lua-defined custom tools loaded from a configured directory. Enable it only when the `lua` extra is installed; each `*.lua` file must return one tool manifest with `name`, `description`, `parameters`, and `handler(args)`.
-- `[tools.browser]`: configures browser artifact paths used by prompts and Playwright MCP launch defaults. `output_dir` is the canonical directory for screenshots/downloads/session artifacts.
-- `[tools.skills]`: configures skill discovery. Leave `paths` empty to use default locations (see Agent Skills section), or set `paths` to a non-empty list to override them entirely with your own directories. Set `enabled = false` to disable skill support.
-- `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
-- `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
-
-Every section has comments + defaults in `config.example.toml` and `config.example.lua`—read the format you plan to use for hints.
-
-Lua Config Notes
-----------------
-
-If you prefer Lua config:
-
-- Start from `config.example.lua`.
-- Provider keys can be read directly from the environment using `os.getenv(...)`.
-- The Lua config file is executed locally and must `return` one top-level table matching the MiniBot settings shape.
-- Without `lupa` installed, `.lua` config files will fail to load with an install hint.
-
-For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` if you want pre-enabled tools + Playwright MCP server.
 
 Lua Custom Tools
 ----------------
@@ -631,28 +684,6 @@ Suggested model presets
 - `openai_responses`: `gpt-5-mini` with `reasoning_effort = "medium"` is a solid default for a practical quality/cost balance.
 - `openrouter`: `x-ai/grok-4.1-fast` with medium reasoning effort is a comparable quality/cost balance default.
 
-Scheduler Guide
----------------
-
-Schedule by chatting naturally. MiniBot understands reminders for one-time and recurring prompts, and keeps
-jobs persisted in SQLite so they survive restarts.
-
-Use plain prompts like:
-
-- "Remind me in 30 minutes to check my email."
-- "At 7:00 AM tomorrow, ask me for my daily priorities."
-- "Every day at 9 AM, remind me to send standup."
-- "List my active reminders."
-- "Cancel the standup reminder."
-
-Notes:
-
-- One-time and recurring reminders are supported.
-- Recurrence minimum interval is `scheduler.prompts.min_recurrence_interval_seconds` (default `60`).
-- Configure scheduler storage/polling under `[scheduler.prompts]` in `config.toml`.
-
-- Typical flow: ask for a reminder in plain language, then ask to list/cancel it later if needed.
-
 Security & sandboxing
 ---------------------
 
@@ -727,29 +758,6 @@ Notes:
 
 Note: ensure the wrapper binary (for example `firejail`) is available in your runtime image or host if you enable jail mode.
 
-Stage 1 targets:
-
-1. Telegram-only channel with inbound/outbound DTO validation via `pydantic`.
-2. SQLite/SQLAlchemy-backed conversation memory for context/history.
-3. Structured `logfmter` logs with request correlation and event bus-based dispatcher.
-4. Pytest + pytest-asyncio tests for config, event bus, memory, and handler plumbing.
-
-Mini Hex Architecture
----------------------
-
-MiniBot follows a lightweight hexagonal layout described in detail in `ARCHITECTURE.md`. The repository root keeps
-`minibot/` split into:
-
-- `core/` – Domain entities and protocols (channel DTOs, memory contracts, future job models).
-- `app/` – Application services such as the daemon, dispatcher, event bus, and handler sub-services (`handlers/services/*`) that orchestrate domain + adapters.
-- `adapters/` – Infrastructure edges (config, messaging, logging, memory, scheduler persistence) wired through the
-  DI container.
-- `llm/` – Provider integration (`provider_factory.py`) plus internal request/runtime services (`llm/services/*`) and `llm/tools/` schemas/handlers that expose bot capabilities.
-- `shared/` – Cross-cutting utilities.
-
-Tests under `tests/` mirror this structure so every layer has a corresponding suite. This “mini hex” keeps the domain
-pure while letting adapters evolve independently.
-
 Prompt Packs
 ------------
 
@@ -774,32 +782,6 @@ MiniBot supports versioned, file-based system prompts plus runtime fragment comp
 2. Review changes for content, security, tone, and absence of secrets.
 3. Commit changes with a descriptive message (for example `"Update system prompt: clarify tool usage policy"`).
 4. Deploy via Docker/systemd—both setups automatically include the `prompts/` directory.
-
-Incoming Message Flow
----------------------
-
-```mermaid
-flowchart TD
-    subgraph TCHAN[Telegram channel]
-        TG[Telegram Update]
-        AD[Telegram Adapter]
-        SEND[Telegram sendMessage]
-    end
-
-    TG --> AD
-    AD --> EV[EventBus MessageEvent]
-    EV --> DP[Dispatcher]
-    DP --> HD[LLMMessageHandler]
-    HD --> MEM[(Memory Backend)]
-    HD --> LLM[LLM Client + Tools]
-    LLM --> HD
-    HD --> RESP[ChannelResponse]
-    RESP --> DEC{should_reply?}
-    DEC -- yes --> OUT[EventBus OutboundEvent]
-    OUT --> AD
-    AD --> SEND[Telegram sendMessage]
-    DEC -- no --> SKIP[No outbound message]
-```
 
 Tooling
 -------
@@ -829,11 +811,61 @@ Conversation context:
   - Main agent follows `llm.main_responses_state_mode` (default: `full_messages`).
   - Specialist agents follow `llm.agent_responses_state_mode` (default: `previous_response_id`).
 
+Mini Hex Architecture
+---------------------
+
+MiniBot follows a lightweight hexagonal layout described in detail in `ARCHITECTURE.md`. The repository root keeps
+`minibot/` split into:
+
+- `core/` – Domain entities and protocols (channel DTOs, memory contracts, future job models).
+- `app/` – Application services such as the daemon, dispatcher, event bus, and handler sub-services (`handlers/services/*`) that orchestrate domain + adapters.
+- `adapters/` – Infrastructure edges (config, messaging, logging, memory, scheduler persistence) wired through the
+  DI container.
+- `llm/` – Provider integration (`provider_factory.py`) plus internal request/runtime services (`llm/services/*`) and `llm/tools/` schemas/handlers that expose bot capabilities.
+- `shared/` – Cross-cutting utilities.
+
+Tests under `tests/` mirror this structure so every layer has a corresponding suite. This "mini hex" keeps the domain
+pure while letting adapters evolve independently.
+
+Incoming Message Flow
+---------------------
+
+```mermaid
+flowchart TD
+    subgraph TCHAN[Telegram channel]
+        TG[Telegram Update]
+        AD[Telegram Adapter]
+        SEND[Telegram sendMessage]
+    end
+
+    TG --> AD
+    AD --> EV[EventBus MessageEvent]
+    EV --> DP[Dispatcher]
+    DP --> HD[LLMMessageHandler]
+    HD --> MEM[(Memory Backend)]
+    HD --> LLM[LLM Client + Tools]
+    LLM --> HD
+    HD --> RESP[ChannelResponse]
+    RESP --> DEC{should_reply?}
+    DEC -- yes --> OUT[EventBus OutboundEvent]
+    OUT --> AD
+    AD --> SEND[Telegram sendMessage]
+    DEC -- no --> SKIP[No outbound message]
+```
+
 Roadmap / Todos
 ---------------
 
 - [ ] Add more channels: WhatsApp, Discord — implement adapters under `adapters/messaging/<channel>` reusing the event bus and dispatcher.
 - [ ] Minimal web UI for analytics & debug — a small FastAPI control plane + lightweight SPA to inspect events, scheduled prompts, and recent logs.
+
+Stage 1 targets
+---------------
+
+1. Telegram-only channel with inbound/outbound DTO validation via `pydantic`.
+2. SQLite/SQLAlchemy-backed conversation memory for context/history.
+3. Structured `logfmter` logs with request correlation and event bus-based dispatcher.
+4. Pytest + pytest-asyncio tests for config, event bus, memory, and handler plumbing.
 
 [llm-async]: https://github.com/sonic182/llm-async
 [aiosonic]: https://github.com/sonic182/aiosonic
