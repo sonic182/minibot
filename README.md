@@ -7,32 +7,56 @@ Your personal AI assistant for Telegram - self-hosted, auditable, and intentiona
 
 ## Table of Contents
 
+**Introduction**
 - [Top features](#top-features)
 - [Demo](#demo)
 - [Overview](#overview)
 - [Why self-host](#why-self-host)
+
+**Setup**
 - [Quickstart (Docker)](#quickstart-docker)
 - [Quickstart (Poetry)](#quickstart-poetry)
 - [Up & Running with Telegram](#up--running-with-telegram)
 - [Console test channel](#console-test-channel)
 - [Using Ollama via OpenAI-Compatible API](#using-ollama-via-openai-compatible-api)
 - [Optional Lua Support](#optional-lua-support)
+
+**Configuration**
 - [Configuration Reference](#configuration-reference)
 - [Lua Config Notes](#lua-config-notes)
 - [Scheduler Guide](#scheduler-guide)
+
+**Hardware & Extras**
 - [Telegram Audio Transcription (faster-whisper)](#telegram-audio-transcription-faster-whisper)
 - [GPU Runtime Dependencies](#gpu-runtime-dependencies-debianubuntu-and-archmanjaro)
+  - [Debian / Ubuntu](#debian--ubuntu)
+  - [Arch / Manjaro](#arch--manjaro)
+  - [Alternative: CUDA runtime libs in venv](#alternative-install-cuda-runtime-libs-inside-poetry-venv)
+  - [Recommended STT config for GPU](#recommended-stt-config-for-gpu)
 - [Lua Custom Tools](#lua-custom-tools)
+
+**Advanced Features**
 - [MCP Bridge Guide](#mcp-bridge-guide)
 - [Agent Tool Scoping](#agent-tool-scoping)
 - [Agent Skills](#agent-skills)
+  - [Skill file format](#skill-file-format)
+  - [Discovery paths](#discovery-paths)
+  - [Recommended setup: `./skills`](#recommended-setup-skills)
+  - [Overriding paths in `config.toml`](#overriding-paths-in-configtoml)
 - [OpenRouter Agents Custom Params](#openrouter-agents-custom-params)
 - [Suggested model presets](#suggested-model-presets)
 - [Security & sandboxing](#security--sandboxing)
 - [Prompt Packs](#prompt-packs)
+  - [Base System Prompt](#base-system-prompt)
+  - [Runtime Fragments](#runtime-fragments)
+  - [Editing the System Prompt](#editing-the-system-prompt)
+
+**Architecture & Internals**
 - [Tooling](#tooling)
 - [Mini Hex Architecture](#mini-hex-architecture)
 - [Incoming Message Flow](#incoming-message-flow)
+
+**Project**
 - [Roadmap / Todos](#roadmap--todos)
 - [Stage 1 targets](#stage-1-targets)
 
