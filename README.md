@@ -65,7 +65,7 @@ Top features
 
 - 🤖 Personal assistant, not SaaS: your chats, memory, and scheduled prompts stay in your instance.
 - 🎯 Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
-- 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment, including a full-capability `config.yolo.toml` profile.
+- 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment, including a full-capability `config.yolo.toml` / `config.yolo.lua` profile.
 - 💻 Local console channel for development/testing with REPL and one-shot modes (`minibot-console`).
 - 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
 - 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
@@ -110,7 +110,7 @@ Quickstart (Docker)
 5. `docker compose logs -f minibot`
 
 `docker-compose.yml` mounts `config.toml` by default. If you prefer Lua config, mount `config.lua` instead or set `MINIBOT_CONFIG`.
-`config.yolo.toml` is provided as a reference template for users who want an all-enabled profile (file storage, STT, HTTP/KV tools, MCP bridge, unrestricted Python runtime with `sandbox_mode = "none"`, unrestricted Bash execution, and patch-based file editing).
+`config.yolo.toml` / `config.yolo.lua` are provided as reference templates for users who want an all-enabled profile (file storage, STT, HTTP/KV tools, MCP bridge, unrestricted Python runtime with `sandbox_mode = "none"`, unrestricted Bash execution, and patch-based file editing).
 
 Docker image includes:
 
@@ -251,7 +251,7 @@ If you prefer Lua config:
 - The Lua config file is executed locally and must `return` one top-level table matching the MiniBot settings shape.
 - Without `lupa` installed, `.lua` config files will fail to load with an install hint.
 
-For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` if you want pre-enabled tools + Playwright MCP server.
+For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` (or `config.yolo.lua` into `config.lua`) if you want pre-enabled tools + Playwright MCP server.
 
 Scheduler Guide
 ---------------
