@@ -13,6 +13,7 @@ from minibot.app.handlers.services.recent_file_tracking_service import RecentFil
 from minibot.app.handlers.services.runtime_service import RuntimeOrchestrationService
 from minibot.app.handlers.services.session_state_service import SessionStateService
 from minibot.app.incoming_files_context import build_history_user_entry
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.response_parser import extract_answer, plain_render
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
@@ -21,7 +22,7 @@ from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
-from minibot.llm.services.response_schemas import main_assistant_response_schema
+from minibot.llm.services.response_schemas import main_assistant_response_model, main_assistant_response_schema
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import session_id_for, session_id_from_parts
 
@@ -150,6 +151,7 @@ class LLMTurnService:
         system_prompt = self._prompt_service.compose_system_prompt(message.channel)
         agent_trace: list[dict[str, Any]] = []
         delegation_fallback_used = False
+        runtime_result = None
         try:
             if self._runtime_service is None:
                 generation = await self._llm_client.generate(
@@ -159,6 +161,7 @@ class LLMTurnService:
                     tools=self._tools,
                     tool_context=tool_context,
                     response_schema=main_assistant_response_schema(),
+                    local_response_model=main_assistant_response_model(),
                     prompt_cache_key=prompt_cache_key,
                     previous_response_id=previous_response_id,
                     system_prompt_override=system_prompt,
@@ -175,7 +178,9 @@ class LLMTurnService:
                     session_id,
                     getattr(generation, "total_tokens", None),
                 )
-                render, should_reply = extract_answer(generation.payload, logger=self._logger)
+                parsed = extract_answer(generation.payload, logger=self._logger)
+                render = parsed.render or plain_render("")
+                should_reply = parsed.has_visible_answer
                 if use_previous_response_id and generation.response_id:
                     self._session_state.set_previous_response_id(session_id, generation.response_id)
             else:
@@ -193,7 +198,7 @@ class LLMTurnService:
                     response_schema=main_assistant_response_schema(),
                 )
                 turn_total_tokens += runtime_result.tokens_used
-                render = runtime_result.render
+                render = runtime_result.render or plain_render("")
                 should_reply = runtime_result.should_reply
                 agent_trace = runtime_result.agent_trace
                 delegation_fallback_used = runtime_result.delegation_fallback_used
@@ -212,9 +217,19 @@ class LLMTurnService:
             self._logger.exception("LLM call failed", exc_info=exc)
             render = plain_render(self._format_runtime_error_message(exc))
             should_reply = True
+        visible_messages: list[str] = []
+        response_updates_payload: list[dict[str, Any]] = []
+        if runtime_result is not None and runtime_result.response_updates:
+            for update in runtime_result.response_updates:
+                visible_messages.append(update.text)
+                response_updates_payload.append(_render_to_metadata(update))
         answer = render.text
-        await self._memory.append_history(session_id, "assistant", answer)
-        await self._enforce_history_limit(session_id)
+        if should_reply and answer.strip():
+            visible_messages.append(answer)
+        for message_text in visible_messages:
+            await self._memory.append_history(session_id, "assistant", message_text)
+        if visible_messages:
+            await self._enforce_history_limit(session_id)
         compact_prompt_cache_key = prompt_cache_key or f"{session_id}:runtime"
         compaction_result = await self._compaction_service.compact_history_if_needed(
             session_id,
@@ -233,6 +248,8 @@ class LLMTurnService:
         metadata["delegation_fallback_used"] = delegation_fallback_used
         if compaction_result.updates:
             metadata["compaction_updates"] = compaction_result.updates
+        if response_updates_payload:
+            metadata["response_updates"] = response_updates_payload
         metadata["token_trace"] = SessionStateService.build_token_trace(
             turn_total_tokens=turn_total_tokens,
             session_total_tokens_before_compaction=compaction_result.session_total_tokens_before_compaction,
@@ -283,6 +300,7 @@ class LLMTurnService:
             tools=[],
             tool_context=None,
             response_schema=main_assistant_response_schema(),
+            local_response_model=main_assistant_response_model(),
             prompt_cache_key=f"{channel}:{chat_id}:format-repair",
             previous_response_id=previous_response_id,
             system_prompt_override=system_prompt,
@@ -290,7 +308,8 @@ class LLMTurnService:
         if use_previous_response_id and generation.response_id:
             self._session_state.set_previous_response_id(session_id, generation.response_id)
         turn_total_tokens += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
-        render, _ = extract_answer(generation.payload, logger=self._logger)
+        parsed = extract_answer(generation.payload, logger=self._logger)
+        render = parsed.render or plain_render(str(generation.payload))
         await self._memory.append_history(session_id, "user", repair_prompt)
         await self._memory.append_history(session_id, "assistant", render.text)
         await self._enforce_history_limit(session_id)
@@ -367,6 +386,14 @@ def _prompt_cache_key(message: ChannelMessage) -> str | None:
     return session_key
 
 
+def _render_to_metadata(render: Any) -> dict[str, Any]:
+    return {
+        "kind": getattr(render, "kind", "text"),
+        "text": getattr(render, "text", ""),
+        "meta": dict(getattr(render, "meta", {}) or {}),
+    }
+
+
 def build_llm_turn_service(
     *,
     memory: MemoryBackend,
@@ -382,6 +409,7 @@ def build_llm_turn_service(
     managed_files_root: str | None = None,
     audio_auto_transcription_service: AudioAutoTranscriptionService | None = None,
     logger: logging.Logger | None = None,
+    agent_registry: AgentRegistry | None = None,
 ) -> LLMTurnService:
     service_logger = logger or logging.getLogger("minibot.handler")
     tool_bindings = list(tools or [])
@@ -393,6 +421,7 @@ def build_llm_turn_service(
         tools=tool_bindings,
         environment_prompt_fragment=environment_prompt_fragment,
         logger=service_logger,
+        agent_registry=agent_registry,
     )
     compaction_service = HistoryCompactionService(
         memory=memory,

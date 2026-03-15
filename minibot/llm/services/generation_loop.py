@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable, Sequence
 
+from pydantic import BaseModel
 from ratchet_sm import FailAction, ToolCallMissingAction, ValidAction
 from ratchet_sm.normalizers.extract_pseudo_tool_call import has_pseudo_tool_call_tag
 
@@ -57,6 +58,7 @@ async def generate_with_tools(
     tools: Sequence[ToolBinding] | None,
     tool_context: ToolContext | None,
     response_schema: dict[str, Any] | None,
+    local_response_model: type[BaseModel] | None,
     prompt_cache_key: str | None,
     previous_response_id: str | None,
     system_prompt: str,
@@ -103,7 +105,10 @@ async def generate_with_tools(
     usage_accumulator = UsageAccumulator()
     truncated_count = 0
     structured_validator = (
-        StructuredOutputValidator(max_attempts=max_tool_iterations, schema=response_schema)
+        StructuredOutputValidator(
+            max_attempts=max_tool_iterations,
+            schema=local_response_model or response_schema,
+        )
         if response_schema
         else None
     )
@@ -210,8 +215,21 @@ async def generate_with_tools(
                 if isinstance(action, ToolCallMissingAction):
                     logger.warning("unexpected structured validator action", extra={"action": type(action).__name__})
                 if isinstance(action, FailAction):
-                    logger.warning("structured response validation failed; returning raw fallback")
-                    fallback_payload = payload if isinstance(payload, dict) else {"raw_response": payload}
+                    logger.warning("structured response validation failed; returning structured fallback")
+                    fallback_payload = {
+                        "answer": {
+                            "kind": "text",
+                            "content": (
+                                "I could not produce a valid structured response in this attempt. "
+                                "Please try again."
+                            ),
+                        },
+                        "should_continue": False,
+                    }
+                    if isinstance(response_schema, dict):
+                        properties = response_schema.get("properties")
+                        if isinstance(properties, dict) and "attachments" in properties:
+                            fallback_payload["attachments"] = []
                     return usage_accumulator.build_generation(
                         payload=fallback_payload,
                         response_id=response_id,

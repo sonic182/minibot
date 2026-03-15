@@ -453,7 +453,7 @@ async def test_e2e_console_agent_offload_workspace_file_workflow(tmp_path: Path)
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["list_agents", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
     )
 
@@ -515,7 +515,7 @@ async def test_e2e_console_agent_offload_browser_playwright_workflow(tmp_path: P
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["list_agents", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
     )
 
@@ -602,7 +602,7 @@ async def test_e2e_console_main_agent_delegates_example_screenshot_and_reports_w
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["list_agents", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
     )
 
@@ -656,7 +656,7 @@ async def test_e2e_console_screenshot_delegation_with_attachments_reports_path(
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["list_agents", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
     )
 
@@ -717,7 +717,7 @@ async def test_e2e_console_top5_spanish_ai_youtubers_with_browser_and_llm_classi
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["list_agents", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
         enable_http_client=False,
         delegated_tool_call_policy="never",

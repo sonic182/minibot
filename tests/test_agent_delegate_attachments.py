@@ -97,13 +97,13 @@ def test_validate_attachments_strips_whitespace():
 def test_extract_outcome_with_valid_single_attachment():
     payload = {
         "answer": {"kind": "text", "content": "Screenshot taken"},
-        "should_answer_to_user": True,
+        "should_continue": False,
         "attachments": [{"path": "browser/shot.png", "type": "image/png", "caption": "Test screenshot"}],
     }
     outcome = _extract_outcome(payload)
     assert outcome.valid is True
     assert outcome.text == "Screenshot taken"
-    assert outcome.should_answer_to_user is True
+    assert outcome.should_continue is False
     assert len(outcome.attachments) == 1
     assert outcome.attachments[0]["path"] == "browser/shot.png"
 
@@ -111,7 +111,7 @@ def test_extract_outcome_with_valid_single_attachment():
 def test_extract_outcome_with_multiple_attachments():
     payload = {
         "answer": {"kind": "text", "content": "Done"},
-        "should_answer_to_user": True,
+        "should_continue": False,
         "attachments": [
             {"path": "file1.png", "type": "image/png"},
             {"path": "file2.pdf", "type": "application/pdf", "caption": "Report"},
@@ -127,7 +127,7 @@ def test_extract_outcome_with_multiple_attachments():
 def test_extract_outcome_without_attachments_field():
     payload = {
         "answer": {"kind": "text", "content": "Result"},
-        "should_answer_to_user": True,
+        "should_continue": False,
     }
     outcome = _extract_outcome(payload)
     assert outcome.valid is True
@@ -137,7 +137,7 @@ def test_extract_outcome_without_attachments_field():
 def test_extract_outcome_with_null_attachments():
     payload = {
         "answer": {"kind": "text", "content": "Result"},
-        "should_answer_to_user": True,
+        "should_continue": False,
         "attachments": None,
     }
     outcome = _extract_outcome(payload)
@@ -148,7 +148,7 @@ def test_extract_outcome_with_null_attachments():
 def test_extract_outcome_with_empty_attachments_array():
     payload = {
         "answer": {"kind": "text", "content": "Result"},
-        "should_answer_to_user": True,
+        "should_continue": False,
         "attachments": [],
     }
     outcome = _extract_outcome(payload)
@@ -159,7 +159,7 @@ def test_extract_outcome_with_empty_attachments_array():
 def test_extract_outcome_with_invalid_attachments():
     payload = {
         "answer": {"kind": "text", "content": "Result"},
-        "should_answer_to_user": True,
+        "should_continue": False,
         "attachments": [
             {"path": "valid.png", "type": "image/png"},
             {"path": "missing-type.png"},
@@ -175,7 +175,7 @@ def test_extract_outcome_with_invalid_attachments():
 def test_extract_outcome_invalid_payload_has_empty_attachments():
     payload = {
         "answer": {"kind": "text", "content": ""},
-        "should_answer_to_user": True,
+        "should_continue": False,
         "attachments": [{"path": "test.png", "type": "image/png"}],
     }
     outcome = _extract_outcome(payload)
@@ -190,7 +190,7 @@ def test_extract_outcome_string_payload_has_empty_attachments():
     assert outcome.attachments == []
 
 
-def test_extract_outcome_missing_should_answer_preserves_attachments():
+def test_extract_outcome_missing_should_continue_is_invalid_but_preserves_attachments():
     payload = {
         "answer": {"kind": "text", "content": "Result"},
         "attachments": [{"path": "test.png", "type": "image/png"}],

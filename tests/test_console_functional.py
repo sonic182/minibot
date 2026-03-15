@@ -102,7 +102,7 @@ async def test_console_functional_openai_chat_completion_flow(tmp_path: Path) ->
     default_client = ScriptedLLMClient(provider="openai")
     default_client.runtime_steps = [
         {
-            "content": '{"answer":{"kind":"text","content":"ok from fake chat"},"should_answer_to_user":true}',
+            "content": '{"answer":{"kind":"text","content":"ok from fake chat"},"should_continue":false}',
             "response_id": "console-openai-1",
             "total_tokens": 8,
         }
@@ -128,7 +128,7 @@ async def test_console_functional_openai_responses_flow(tmp_path: Path) -> None:
     default_client = ScriptedLLMClient(provider="openai_responses")
     default_client.runtime_steps = [
         {
-            "content": '{"answer":{"kind":"text","content":"ok from fake responses"},"should_answer_to_user":true}',
+            "content": '{"answer":{"kind":"text","content":"ok from fake responses"},"should_continue":false}',
             "response_id": "console-responses-1",
             "total_tokens": 8,
         }
@@ -180,7 +180,7 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
             "total_tokens": 8,
         },
         {
-            "content": '{"answer":{"kind":"text","content":"delegated response"},"should_answer_to_user":true}',
+            "content": '{"answer":{"kind":"text","content":"delegated response"},"should_continue":false}',
             "response_id": "main-agent-2",
             "total_tokens": 8,
         },
@@ -188,7 +188,7 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
     worker_client = ScriptedLLMClient(provider="openai")
     worker_client.runtime_steps = [
         {
-            "content": '{"answer":{"kind":"text","content":"delegated response"},"should_answer_to_user":true}',
+            "content": '{"answer":{"kind":"text","content":"delegated response"},"should_continue":false}',
             "response_id": "worker-1",
             "total_tokens": 8,
         }

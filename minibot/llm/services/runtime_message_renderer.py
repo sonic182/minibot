@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
+from minibot.llm.services.reasoning_replay import apply_reasoning_replay, extract_reasoning_replay
 
 
 class RuntimeMessageRenderer:
@@ -23,13 +24,16 @@ class RuntimeMessageRenderer:
 
     def from_provider_assistant_message(self, message: Any) -> AgentMessage:
         content = getattr(message, "content", "")
-        reasoning = getattr(message, "reasoning", None)
-        reasoning_details = getattr(message, "reasoning_details", None)
         metadata: dict[str, Any] = {}
-        if reasoning:
-            metadata["reasoning"] = reasoning
-        if reasoning_details:
-            metadata["reasoning_details"] = reasoning_details
+        replay = extract_reasoning_replay(message)
+        if replay.reasoning:
+            metadata["reasoning"] = replay.reasoning
+        if replay.reasoning_details:
+            metadata["reasoning_details"] = replay.reasoning_details
+        if replay.original_had_reasoning:
+            metadata["had_reasoning_context"] = True
+            if replay.source:
+                metadata["reasoning_source"] = replay.source
         if isinstance(content, str):
             return AgentMessage(
                 role="assistant",
@@ -64,9 +68,8 @@ class RuntimeMessageRenderer:
         content = getattr(message, "content", "")
         text = content if isinstance(content, str) else ""
         tool_calls = getattr(message, "tool_calls", None)
-        reasoning = getattr(message, "reasoning", None)
-        reasoning_details = getattr(message, "reasoning_details", None)
         metadata: dict[str, Any] = {}
+        replay = extract_reasoning_replay(message)
         if tool_calls:
             metadata["tool_calls"] = [
                 {
@@ -78,10 +81,14 @@ class RuntimeMessageRenderer:
                 }
                 for call in tool_calls
             ]
-        if reasoning:
-            metadata["reasoning"] = reasoning
-        if reasoning_details:
-            metadata["reasoning_details"] = reasoning_details
+        if replay.reasoning:
+            metadata["reasoning"] = replay.reasoning
+        if replay.reasoning_details:
+            metadata["reasoning_details"] = replay.reasoning_details
+        if replay.original_had_reasoning:
+            metadata["had_reasoning_context"] = True
+            if replay.source:
+                metadata["reasoning_source"] = replay.source
         return AgentMessage(role="assistant", content=[MessagePart(type="text", text=text)], metadata=metadata)
 
     def render_messages(self, state: AgentState) -> list[dict[str, Any]]:
@@ -108,10 +115,22 @@ class RuntimeMessageRenderer:
             }
             reasoning = message.metadata.get("reasoning") if message.metadata else None
             reasoning_details = message.metadata.get("reasoning_details") if message.metadata else None
-            if reasoning:
-                payload["reasoning"] = reasoning
-            if reasoning_details:
-                payload["reasoning_details"] = reasoning_details
+            replay_payload = apply_reasoning_replay(
+                {},
+                extract_reasoning_replay(
+                    _ReplayMessage(
+                        reasoning=reasoning,
+                        reasoning_details=reasoning_details,
+                        original={
+                            "reasoning": reasoning,
+                            "reasoning_details": reasoning_details,
+                        }
+                        if message.metadata and message.metadata.get("had_reasoning_context")
+                        else None,
+                    )
+                ),
+            )
+            payload.update(replay_payload)
             tool_calls = message.metadata.get("tool_calls") if message.metadata else None
             if tool_calls:
                 payload["tool_calls"] = tool_calls
@@ -212,3 +231,16 @@ class RuntimeMessageRenderer:
         if len(parts) == 1 and parts[0].type == "json":
             return json.dumps(parts[0].value, ensure_ascii=True, default=str)
         return json.dumps([part.to_dict() for part in parts], ensure_ascii=True, default=str)
+
+
+class _ReplayMessage:
+    def __init__(
+        self,
+        *,
+        reasoning: str | None,
+        reasoning_details: list[dict[str, Any] | str] | None,
+        original: dict[str, Any] | None,
+    ) -> None:
+        self.reasoning = reasoning
+        self.reasoning_details = reasoning_details
+        self.original = original

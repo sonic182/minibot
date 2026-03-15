@@ -4,6 +4,7 @@ from typing import Any, Sequence
 
 from llm_async.models.tool_call import ToolCall
 
+from minibot.llm.services.reasoning_replay import apply_reasoning_replay, extract_reasoning_replay
 from minibot.llm.services.tool_executor import decode_tool_arguments, stringify_result, tool_name_from_call
 
 
@@ -30,6 +31,7 @@ def assistant_message_for_followup(message: Any) -> dict[str, Any]:
         "role": getattr(message, "role", "assistant") or "assistant",
         "content": getattr(message, "content", "") or "",
     }
+    payload = apply_reasoning_replay(payload, extract_reasoning_replay(message))
     tool_calls = getattr(message, "tool_calls", None)
     if tool_calls:
         payload["tool_calls"] = [tool_call_to_payload(call) for call in tool_calls]
@@ -67,7 +69,7 @@ def tool_loop_fallback_payload(
                 "kind": "text",
                 "content": answer,
             },
-            "should_answer_to_user": True,
+            "should_continue": False,
             "attachments": [],
         }
     return answer

@@ -4,6 +4,7 @@ import logging
 from typing import Any, Sequence
 
 from llm_async.models.tool_call import ToolCall
+from pydantic import BaseModel
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
@@ -80,6 +81,7 @@ class LLMClient:
         tools: Sequence[ToolBinding] | None = None,
         tool_context: ToolContext | None = None,
         response_schema: dict[str, Any] | None = None,
+        local_response_model: type[BaseModel] | None = None,
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
         system_prompt_override: str | None = None,
@@ -97,6 +99,7 @@ class LLMClient:
             tools=tools,
             tool_context=tool_context,
             response_schema=response_schema,
+            local_response_model=local_response_model,
             prompt_cache_key=prompt_cache_key,
             previous_response_id=previous_response_id,
             model=self._model,
@@ -170,6 +173,8 @@ class LLMClient:
             call_kwargs = apply_structured_output_prompt(call_kwargs, response_schema)
 
         response = await self._complete_with_schema_fallback(call_kwargs)
+        # Keep raw provider response logging centralized here so every runtime completion step
+        # emits the same debug payload for response content and tool calls.
         log_provider_response(
             logger=self._logger,
             response=response,

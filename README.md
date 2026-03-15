@@ -432,7 +432,8 @@ Useful patterns and behavior:
 - If `mcp_servers` is set, all tools from those MCP servers are exposed (and tools from other MCP servers are excluded).
 - In `tools_allow` mode, exposed tools are: allowed local tools + allowed MCP-server tools.
 - In `tools_deny` mode, exposed tools are: all local tools except denied + allowed MCP-server tools.
-- Main agent delegates through tool calls (`list_agents`, `invoke_agent`) and waits for tool results before finalizing responses.
+- A generic local-only specialist can be defined with `tools_deny: ["mcp*"]` and no `mcp_servers`; this exposes normal local tools while excluding all MCP tools.
+- Main agent receives the enabled specialist roster in its system prompt, can inspect one specialist with `fetch_agent_info`, and delegates through `invoke_agent`.
 - Use `[orchestration.main_agent].tools_allow`/`tools_deny` to restrict the main-agent toolset.
 - With `[orchestration].tool_ownership_mode = "exclusive"`, tools assigned to specialist agents are removed from main-agent runtime and remain available only through delegation.
 - With `[orchestration].tool_ownership_mode = "exclusive_mcp"`, only agent-owned MCP tools are removed from main-agent runtime; local/system tools remain shared.
@@ -681,7 +682,7 @@ To enable optional speech-to-text tooling, install the `stt` extra (`poetry inst
 - 💻 `bash`: optional host shell execution via `/bin/bash -lc` for command pipelines and CLI workflows.
 - 🧩 `apply_patch`: optional structured file edits via patch envelopes (`*** Begin Patch ... *** End Patch`) with add/update/delete/move operations.
 - 🎙️ `transcribe_audio`: optional managed-file audio transcription via `faster-whisper` (install with extras: `stt`).
-- 🤝 Delegation tools: `list_agents`, `invoke_agent`.
+- 🤝 Delegation tools: `fetch_agent_info`, `invoke_agent`.
 - 🧭 `mcp_*` dynamic tools (optional): tool bindings discovered from configured MCP servers.
 - 🖼️ Telegram media inputs (`photo`/`document`/`audio`/`voice`) are supported on `openai_responses`, `openai`, and `openrouter`.
 

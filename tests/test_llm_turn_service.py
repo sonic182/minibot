@@ -187,6 +187,11 @@ class StubRuntime:
         return self._responses.pop(0)
 
 
+class FailingRuntime:
+    async def run(self, **_: Any) -> RuntimeResult:
+        raise RuntimeError("runtime exploded")
+
+
 def _service(
     llm_payload: Any,
     *,
@@ -217,7 +222,7 @@ def _service(
 @pytest.mark.asyncio
 async def test_turn_service_returns_structured_answer() -> None:
     service, stub_client, _ = _service(
-        {"answer": {"kind": "text", "content": "hello"}, "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "hello"}, "should_continue": False},
         responses_provider=True,
         response_id="resp-1",
     )
@@ -233,7 +238,7 @@ async def test_turn_service_returns_structured_answer() -> None:
 async def test_turn_service_includes_usage_trace_metadata() -> None:
     memory = StubMemory()
     stub_client = StubLLMClient(
-        {"answer": {"kind": "text", "content": "hello"}, "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "hello"}, "should_continue": False},
         is_responses=True,
         provider="openai_responses",
         total_tokens=33,
@@ -262,7 +267,7 @@ async def test_turn_service_includes_usage_trace_metadata() -> None:
 @pytest.mark.asyncio
 async def test_turn_service_compaction_endpoint_updates_previous_response_id() -> None:
     service, client, memory = _service(
-        {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "ok"}, "should_continue": False},
         response_id="resp-1",
         responses_provider=True,
         provider="openai_responses",
@@ -298,7 +303,7 @@ async def test_turn_service_fallback_compaction_updates_previous_response_id() -
     class _FallbackCompactionClient(StubLLMClient):
         def __init__(self) -> None:
             super().__init__(
-                {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
+                {"answer": {"kind": "text", "content": "ok"}, "should_continue": False},
                 response_id="resp-1",
                 is_responses=True,
                 provider="openai_responses",
@@ -343,7 +348,7 @@ async def test_turn_service_fallback_compaction_updates_previous_response_id() -
 async def test_turn_service_reuses_previous_response_id_when_mode_enabled() -> None:
     memory = StubMemory()
     stub_client = StubLLMClient(
-        {"answer": {"kind": "text", "content": "hello"}, "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "hello"}, "should_continue": False},
         response_id="resp-1",
         is_responses=True,
         provider="openai_responses",
@@ -365,7 +370,7 @@ async def test_turn_service_reuses_previous_response_id_when_mode_enabled() -> N
 @pytest.mark.asyncio
 async def test_turn_service_auto_transcribes_short_incoming_audio_before_generation() -> None:
     memory = StubMemory()
-    client = StubLLMClient({"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True})
+    client = StubLLMClient({"answer": {"kind": "text", "content": "ok"}, "should_continue": False})
     tool_calls: list[dict[str, Any]] = []
 
     async def _transcribe(payload: dict[str, Any], _context: ToolContext) -> dict[str, Any]:
@@ -457,14 +462,14 @@ async def test_turn_service_guardrail_retry_with_runtime() -> None:
     runtime = StubRuntime(
         [
             RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"Let me check."},"should_answer_to_user":true}',
+                payload='{"answer":{"kind":"text","content":"Let me check."},"should_continue":false}',
                 response_id="r1",
                 state=AgentState(
                     messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]
                 ),
             ),
             RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"Done via tool."},"should_answer_to_user":true}',
+                payload='{"answer":{"kind":"text","content":"Done via tool."},"should_continue":false}',
                 response_id="r2",
                 state=AgentState(
                     messages=[
@@ -496,7 +501,7 @@ async def test_turn_service_injects_recent_filesystem_paths_in_current_turn_only
     runtime = StubRuntime(
         [
             RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"saved"},"should_answer_to_user":true}',
+                payload='{"answer":{"kind":"text","content":"saved"},"should_continue":false}',
                 response_id="r1",
                 state=AgentState(
                     messages=[
@@ -521,7 +526,7 @@ async def test_turn_service_injects_recent_filesystem_paths_in_current_turn_only
                 ),
             ),
             RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"patched"},"should_answer_to_user":true}',
+                payload='{"answer":{"kind":"text","content":"patched"},"should_continue":false}',
                 response_id="r2",
                 state=AgentState(
                     messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="ok")])]
@@ -548,7 +553,7 @@ async def test_turn_service_repair_response_reuses_and_refreshes_previous_respon
     client = StubLLMClient(
         {
             "answer": {"kind": "markdown", "content": "*fixed*"},
-            "should_answer_to_user": True,
+            "should_continue": False,
         },
         response_id="resp-repair",
         is_responses=True,
@@ -586,7 +591,7 @@ async def test_turn_service_uses_compact_prompt_from_prompts_dir(tmp_path: Path)
     (tmp_path / "compact.md").write_text("compact with these rules", encoding="utf-8")
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": {"kind": "text", "content": "ok"}, "should_answer_to_user": True},
+        {"answer": {"kind": "text", "content": "ok"}, "should_continue": False},
         total_tokens=60,
         prompts_dir=str(tmp_path),
     )
@@ -600,3 +605,16 @@ async def test_turn_service_uses_compact_prompt_from_prompts_dir(tmp_path: Path)
     await service.handle(_message_event("one"))
 
     assert "compact with these rules" in str(client.calls[-1]["kwargs"].get("system_prompt_override", ""))
+
+
+@pytest.mark.asyncio
+async def test_turn_service_runtime_exception_returns_fallback_response() -> None:
+    service, _, _ = _service(
+        {"answer": {"kind": "text", "content": "unused"}, "should_continue": False},
+    )
+    service.set_runtime(cast(Any, FailingRuntime()))
+
+    response = await service.handle(_message_event("ping"))
+
+    assert response.metadata.get("should_reply") is True
+    assert response.text == "Sorry, I couldn't answer right now."

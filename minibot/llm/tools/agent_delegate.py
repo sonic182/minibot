@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Sequence
 
 from llm_async.models import Tool
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.agent_registry import AgentRegistry
@@ -20,7 +20,7 @@ from minibot.llm.services.response_schemas import delegated_agent_response_schem
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
-from minibot.llm.tools.schema_utils import empty_object_schema, strict_object, string_field
+from minibot.llm.tools.schema_utils import strict_object, string_field
 from minibot.shared.assistant_response import (
     validate_attachments,
 )
@@ -32,7 +32,7 @@ from minibot.shared.utils import session_identifier
 class _DelegationOutcome:
     text: str
     payload: Any
-    should_answer_to_user: bool | None
+    should_continue: bool | None
     valid: bool
     error_code: str | None
     attachments: list[dict[str, Any]]
@@ -42,7 +42,7 @@ class _DelegatedAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["text", "html", "markdown", "json"]
-    content: str
+    content: str | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("meta", mode="before")
@@ -54,17 +54,15 @@ class _DelegatedAnswer(BaseModel):
 
     @field_validator("content")
     @classmethod
-    def _validate_content(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("content must be a non-empty string")
+    def _validate_content(cls, value: str | None) -> str | None:
         return value
 
 
 class _DelegatedPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    answer: _DelegatedAnswer
-    should_answer_to_user: bool
+    answer: _DelegatedAnswer | None = None
+    should_continue: bool
     attachments: list[Any] = Field(default_factory=list)
 
     @field_validator("attachments", mode="before")
@@ -73,6 +71,17 @@ class _DelegatedPayload(BaseModel):
         if value is None:
             return []
         return value
+
+    @model_validator(mode="after")
+    def _validate_terminal_visibility(self) -> "_DelegatedPayload":
+        if self.should_continue:
+            return self
+        content = self.answer.content if self.answer is not None else None
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError(
+                "final delegated responses with should_continue=false must include a non-empty answer.content"
+            )
+        return self
 
 
 class AgentDelegateTool:
@@ -96,15 +105,20 @@ class AgentDelegateTool:
 
     def bindings(self) -> list[ToolBinding]:
         return [
-            ToolBinding(tool=self._list_agents_schema(), handler=self._list_agents),
+            ToolBinding(tool=self._fetch_agent_info_schema(), handler=self._fetch_agent_info),
             ToolBinding(tool=self._invoke_agent_schema(), handler=self._invoke_agent),
         ]
 
-    def _list_agents_schema(self) -> Tool:
+    def _fetch_agent_info_schema(self) -> Tool:
         return Tool(
-            name="list_agents",
-            description=load_tool_description("list_agents"),
-            parameters=empty_object_schema(),
+            name="fetch_agent_info",
+            description=load_tool_description("fetch_agent_info"),
+            parameters=strict_object(
+                properties={
+                    "agent_name": string_field("Exact specialist name from the available specialists list."),
+                },
+                required=["agent_name"],
+            ),
         )
 
     def _invoke_agent_schema(self) -> Tool:
@@ -113,7 +127,7 @@ class AgentDelegateTool:
             description=load_tool_description("invoke_agent"),
             parameters=strict_object(
                 properties={
-                    "agent_name": string_field("Exact name returned by list_agents."),
+                    "agent_name": string_field("Exact specialist name."),
                     "task": string_field("Concrete delegated task for the specialist."),
                     "context": string_field("Optional supporting context for the specialist."),
                 },
@@ -121,9 +135,23 @@ class AgentDelegateTool:
             ),
         )
 
-    async def _list_agents(self, _: dict[str, object], __: ToolContext) -> dict[str, object]:
-        names = sorted(spec.name for spec in self._registry.all())
-        return {"agents": names, "count": len(names)}
+    async def _fetch_agent_info(self, payload: dict[str, object], __: ToolContext) -> dict[str, object]:
+        agent_name = require_non_empty_str(payload, "agent_name")
+        spec = self._registry.get(agent_name)
+        if spec is None:
+            return {
+                "ok": False,
+                "agent": agent_name,
+                "error_code": "agent_not_found",
+                "error": f"agent '{agent_name}' is not available",
+            }
+        return {
+            "ok": True,
+            "agent": spec.name,
+            "name": spec.name,
+            "description": spec.description,
+            "system_prompt": spec.system_prompt,
+        }
 
     async def _invoke_agent(self, payload: dict[str, object], context: ToolContext) -> dict[str, object]:
         agent_name = require_non_empty_str(payload, "agent_name")
@@ -229,7 +257,7 @@ class AgentDelegateTool:
                         "agent": spec.name,
                         "result": "Delegated agent did not execute required tools.",
                         "result_status": "invalid_result",
-                        "should_answer_to_user": False,
+                        "should_continue": False,
                         "tool_count": len(scoped_tools),
                         "tool_messages_count": tool_messages_count,
                         "delegation_attempts": attempts,
@@ -267,7 +295,7 @@ class AgentDelegateTool:
                 "result": outcome.text,
                 "payload": outcome.payload,
                 "result_status": result_status,
-                "should_answer_to_user": outcome.should_answer_to_user,
+                "should_continue": outcome.should_continue,
                 "tool_count": len(scoped_tools),
                 "tool_messages_count": tool_messages_count,
                 "delegation_attempts": attempts,
@@ -293,7 +321,7 @@ class AgentDelegateTool:
 
     def _scoped_tools(self, spec: AgentSpec) -> list[ToolBinding]:
         scoped = filter_tools_for_agent(self._tools, spec)
-        return [binding for binding in scoped if binding.tool.name != "invoke_agent"]
+        return [binding for binding in scoped if binding.tool.name not in {"invoke_agent", "fetch_agent_info"}]
 
     def _build_state(
         self,
@@ -349,16 +377,19 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
             return _DelegationOutcome(
                 text=str(payload_obj),
                 payload=payload_obj,
-                should_answer_to_user=None,
+                should_continue=None,
                 valid=False,
                 error_code="invalid_payload_schema",
                 attachments=_validate_attachments(payload_obj.get("attachments")),
             )
         attachments = _validate_attachments(parsed.attachments)
+        answer_text = ""
+        if parsed.answer is not None and isinstance(parsed.answer.content, str):
+            answer_text = parsed.answer.content
         return _DelegationOutcome(
-            text=parsed.answer.content,
+            text=answer_text,
             payload=parsed.model_dump(mode="python", exclude_none=True),
-            should_answer_to_user=parsed.should_answer_to_user,
+            should_continue=parsed.should_continue,
             valid=True,
             error_code=None,
             attachments=attachments,
@@ -366,7 +397,7 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
     return _DelegationOutcome(
         text=str(payload),
         payload=payload,
-        should_answer_to_user=None,
+        should_continue=None,
         valid=False,
         error_code="unstructured_payload",
         attachments=[],
@@ -376,8 +407,8 @@ def _extract_outcome(payload: Any) -> _DelegationOutcome:
 def _delegation_result_status(outcome: _DelegationOutcome) -> str:
     if not outcome.valid:
         return "invalid_result"
-    if outcome.should_answer_to_user is False:
-        return "not_user_answerable"
+    if outcome.should_continue is True:
+        return "continue"
     return "success"
 
 

@@ -6,7 +6,7 @@ Output format:
 - Always return valid structured output JSON with:
   {
     "answer": {"kind": "text", "content": "your message"},
-    "should_answer_to_user": true
+    "should_continue": false
   }
 - Use kind="text" (console does not support rich formatting)
 

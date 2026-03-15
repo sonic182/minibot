@@ -21,3 +21,16 @@ class AgentRegistry:
 
     def is_empty(self) -> bool:
         return not self._by_name
+
+    def prompt_roster(self) -> str:
+        if not self._by_name:
+            return ""
+        lines = [
+            "Available specialist agents:",
+            "Use only these exact agent names for delegation.",
+        ]
+        for name in self.names():
+            spec = self._by_name[name]
+            description = spec.description.strip() or "No description provided."
+            lines.append(f"- {spec.name}: {description}")
+        return "\n".join(lines)

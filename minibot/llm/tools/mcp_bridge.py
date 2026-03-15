@@ -60,7 +60,7 @@ class MCPToolBridge:
 
         async def _handler(payload: dict[str, Any], _: ToolContext) -> ToolResult:
             sanitized_payload = _drop_none_values(payload)
-            self._logger.debug(
+            self._logger.info(
                 "executing mcp bridge tool",
                 extra={
                     "server": self._server_name,
@@ -72,7 +72,7 @@ class MCPToolBridge:
             content = result.content
             if isinstance(content, list):
                 content = _stringify_content_parts(content)
-            self._logger.debug(
+            self._logger.info(
                 "mcp bridge tool completed",
                 extra={
                     "server": self._server_name,
