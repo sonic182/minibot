@@ -227,6 +227,18 @@ auto_transcribe_max_duration_seconds = 45
 [tools.browser]
 output_dir = "./data/files/browser"
 
+# Optional Lua-defined custom tools (requires `poetry install --extras lua`).
+[tools.lua_custom]
+enabled = false
+directory = "./lua_tools"
+# Load all `*.lua` files from this directory at startup.
+# Each file must return one tool manifest:
+# - `name`: string
+# - `description`: string
+# - `parameters`: JSON Schema object
+# - `handler(args)`: function that returns JSON-like result data
+# Example file: `./lua_tools/example_echo.lua`
+
 # Built-in calculator tool.
 [tools.calculator]
 enabled = true

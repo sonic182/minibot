@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import tomllib
+import types
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union, get_args, get_origin
 
 from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter, ValidationError
 from pydantic import model_validator
+
+from minibot.adapters.lua.runtime import execute_lua_file, lua_to_python
 
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
@@ -24,6 +27,67 @@ def _coerce_byte_size(value: Any) -> int:
         return int(_BYTE_SIZE_ADAPTER.validate_python(value))
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid byte size value") from exc
+
+
+def _load_file_data(path: Path) -> Dict[str, Any]:
+    suffix = path.suffix.lower()
+    if suffix == ".toml":
+        with path.open("rb") as fp:
+            data = tomllib.load(fp)
+        return data
+    if suffix == ".lua":
+        return _load_lua_file_data(path)
+    raise ValueError(f"unsupported config file type: {path.suffix or '<none>'}")
+
+
+def _load_lua_file_data(path: Path) -> Dict[str, Any]:
+    try:
+        _, result = execute_lua_file(path)
+    except RuntimeError as exc:
+        raise RuntimeError("Lua config support requires `lupa`; install with `poetry install --extras lua`") from exc
+    data = lua_to_python(result)
+    if not isinstance(data, dict):
+        raise ValueError("lua config must return a top-level table")
+    return data
+
+
+def _normalize_for_annotation(value: Any, annotation: Any) -> Any:
+    if annotation is Any:
+        return value
+
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _normalize_for_annotation(value, get_args(annotation)[0])
+
+    if origin in (Union, types.UnionType):
+        non_none_args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if value is None or not non_none_args:
+            return value
+        return _normalize_for_annotation(value, non_none_args[0])
+
+    if origin in (list, List):
+        item_annotation = get_args(annotation)[0] if get_args(annotation) else Any
+        if value == {}:
+            return []
+        if isinstance(value, list):
+            return [_normalize_for_annotation(item, item_annotation) for item in value]
+        return value
+
+    if origin in (dict, Dict):
+        args = get_args(annotation)
+        value_annotation = args[1] if len(args) == 2 else Any
+        if isinstance(value, dict):
+            return {key: _normalize_for_annotation(item, value_annotation) for key, item in value.items()}
+        return value
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel) and isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            field = annotation.model_fields.get(key)
+            normalized[key] = _normalize_for_annotation(item, field.annotation) if field is not None else item
+        return normalized
+
+    return value
 
 
 ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
@@ -310,6 +374,11 @@ class MCPToolConfig(BaseModel):
     servers: List[MCPServerConfig] = Field(default_factory=list)
 
 
+class LuaCustomToolConfig(BaseModel):
+    enabled: bool = False
+    directory: str = "./lua_tools"
+
+
 class FileStorageToolConfig(BaseModel):
     enabled: bool = False
     root_dir: str = "./data/files"
@@ -360,6 +429,7 @@ class ToolsConfig(BaseModel):
     audio_transcription: AudioTranscriptionToolConfig = AudioTranscriptionToolConfig()
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
+    lua_custom: LuaCustomToolConfig = LuaCustomToolConfig()
 
 
 class ScheduledPromptsConfig(BaseModel):
@@ -403,12 +473,10 @@ class Settings(BaseModel):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Settings":
-        return cls.model_validate(data)
+        return cls.model_validate(_normalize_for_annotation(data, cls))
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> "Settings":
         if path is None:
             raise ValueError("config file path is required")
-        with path.open("rb") as fp:
-            data = tomllib.load(fp)
-        return cls.from_dict(data)
+        return cls.from_dict(_load_file_data(path))

@@ -24,11 +24,13 @@ from minibot.llm.tools.code_read import CodeReadTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
+from minibot.llm.tools.lua_custom import load_lua_custom_tools
 from minibot.llm.tools.mcp_bridge import MCPToolBridge
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.scheduler import SchedulePromptTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.llm.tools.user_memory import build_kv_tools
+from minibot.llm.services.tool_executor import canonical_tool_name
 
 if TYPE_CHECKING:  # pragma: no cover
     from minibot.app.scheduler_service import ScheduledPromptService
@@ -95,6 +97,7 @@ def build_enabled_tools(
         if not feature.enabled_in_config(settings):
             continue
         tools.extend(feature.builder(context, tools))
+    _ensure_unique_tool_names(tools)
     return tools
 
 
@@ -211,6 +214,10 @@ def _build_skill_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> 
     return SkillLoaderTool(context.skill_registry).bindings()
 
 
+def _build_lua_custom_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
+    return load_lua_custom_tools(context.settings.tools.lua_custom.directory)
+
+
 def _build_agent_delegate_feature(context: ToolAssemblyContext, tools: list[ToolBinding]) -> list[ToolBinding]:
     if context.agent_registry is None or context.llm_factory is None or context.agent_registry.is_empty():
         return []
@@ -314,6 +321,12 @@ _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (
         builder=_build_skill_feature,
     ),
     ToolFeature(
+        key="lua_custom",
+        labels=("lua_custom",),
+        enabled_in_config=lambda settings: _tool_enabled(settings, "lua_custom"),
+        builder=_build_lua_custom_feature,
+    ),
+    ToolFeature(
         key="agent_delegate",
         labels=(),
         enabled_in_config=lambda _settings: True,
@@ -364,3 +377,14 @@ def _override_playwright_output_dir(*, server_name: str, args: list[str], browse
     if not replaced:
         updated.append(f"--output-dir={normalized_dir}")
     return updated
+
+
+def _ensure_unique_tool_names(tools: list[ToolBinding]) -> None:
+    seen: dict[str, str] = {}
+    for binding in tools:
+        tool_name = binding.tool.name
+        canonical_name = canonical_tool_name(tool_name)
+        previous_name = seen.get(canonical_name)
+        if previous_name is not None:
+            raise ValueError(f"duplicate tool name detected: {tool_name} conflicts with {previous_name}")
+        seen[canonical_name] = tool_name

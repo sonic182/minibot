@@ -72,6 +72,7 @@ coverage.xml
 .DS_Store
 
 config.toml
+config.lua
 config.*.bckp
 data/
 testdata/
