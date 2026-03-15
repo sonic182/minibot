@@ -190,12 +190,12 @@ def test_extract_outcome_string_payload_has_empty_attachments():
     assert outcome.attachments == []
 
 
-def test_extract_outcome_missing_should_continue_defaults_terminal_and_preserves_attachments():
+def test_extract_outcome_missing_should_continue_is_invalid_but_preserves_attachments():
     payload = {
         "answer": {"kind": "text", "content": "Result"},
         "attachments": [{"path": "test.png", "type": "image/png"}],
     }
     outcome = _extract_outcome(payload)
-    assert outcome.valid is True
-    assert outcome.should_continue is False
+    assert outcome.valid is False
+    assert outcome.error_code == "invalid_payload_schema"
     assert len(outcome.attachments) == 1

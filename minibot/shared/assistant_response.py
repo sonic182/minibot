@@ -32,7 +32,7 @@ class AssistantRuntimePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answer: AssistantAnswer | None = None
-    should_continue: bool = False
+    should_continue: bool
     attachments: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("attachments", mode="before")

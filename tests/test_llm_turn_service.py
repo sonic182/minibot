@@ -187,6 +187,11 @@ class StubRuntime:
         return self._responses.pop(0)
 
 
+class FailingRuntime:
+    async def run(self, **_: Any) -> RuntimeResult:
+        raise RuntimeError("runtime exploded")
+
+
 def _service(
     llm_payload: Any,
     *,
@@ -600,3 +605,16 @@ async def test_turn_service_uses_compact_prompt_from_prompts_dir(tmp_path: Path)
     await service.handle(_message_event("one"))
 
     assert "compact with these rules" in str(client.calls[-1]["kwargs"].get("system_prompt_override", ""))
+
+
+@pytest.mark.asyncio
+async def test_turn_service_runtime_exception_returns_fallback_response() -> None:
+    service, _, _ = _service(
+        {"answer": {"kind": "text", "content": "unused"}, "should_continue": False},
+    )
+    service.set_runtime(cast(Any, FailingRuntime()))
+
+    response = await service.handle(_message_event("ping"))
+
+    assert response.metadata.get("should_reply") is True
+    assert response.text == "Sorry, I couldn't answer right now."

@@ -151,6 +151,7 @@ class LLMTurnService:
         system_prompt = self._prompt_service.compose_system_prompt(message.channel)
         agent_trace: list[dict[str, Any]] = []
         delegation_fallback_used = False
+        runtime_result = None
         try:
             if self._runtime_service is None:
                 generation = await self._llm_client.generate(
@@ -218,7 +219,7 @@ class LLMTurnService:
             should_reply = True
         visible_messages: list[str] = []
         response_updates_payload: list[dict[str, Any]] = []
-        if self._runtime_service is not None and runtime_result.response_updates:
+        if runtime_result is not None and runtime_result.response_updates:
             for update in runtime_result.response_updates:
                 visible_messages.append(update.text)
                 response_updates_payload.append(_render_to_metadata(update))

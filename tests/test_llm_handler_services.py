@@ -23,6 +23,7 @@ from minibot.core.memory import MemoryEntry
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient, LLMCompaction, LLMGeneration
 from minibot.llm.tools.base import ToolContext
+from minibot.shared.assistant_response import AssistantRuntimePayload
 
 
 class _StubClient:
@@ -509,3 +510,96 @@ async def test_runtime_service_calls_guardrail_when_no_tool_messages() -> None:
     )
 
     assert guardrail.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_service_continues_when_delegation_still_unresolved() -> None:
+    class _ContinuationRuntime:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run(self, **_: Any) -> RuntimeResult:
+            self.calls += 1
+            if self.calls == 1:
+                return RuntimeResult(
+                    payload='{"answer":{"kind":"text","content":"delegated progress"},"should_continue":false}',
+                    response_id="resp-1",
+                    state=AgentState(
+                        messages=[
+                            AgentMessage(role="assistant", content=[MessagePart(type="text", text="delegating")]),
+                            AgentMessage(
+                                role="tool",
+                                name="invoke_agent",
+                                content=[
+                                    MessagePart(
+                                        type="json",
+                                        value={
+                                            "ok": True,
+                                            "agent": "worker",
+                                            "result_status": "continue",
+                                            "should_continue": True,
+                                        },
+                                    )
+                                ],
+                            ),
+                        ]
+                    ),
+                    total_tokens=3,
+                )
+            return RuntimeResult(
+                payload='{"answer":{"kind":"text","content":"done"},"should_continue":false}',
+                response_id="resp-2",
+                state=AgentState(
+                    messages=[
+                        AgentMessage(role="assistant", content=[MessagePart(type="text", text="done")]),
+                        AgentMessage(
+                            role="tool",
+                            name="invoke_agent",
+                            content=[
+                                MessagePart(
+                                    type="json",
+                                    value={
+                                        "ok": True,
+                                        "agent": "worker",
+                                        "result_status": "success",
+                                        "should_continue": False,
+                                    },
+                                )
+                            ],
+                        ),
+                    ]
+                ),
+                total_tokens=4,
+            )
+
+    runtime = _ContinuationRuntime()
+    service = RuntimeOrchestrationService(
+        runtime=cast(AgentRuntime, runtime),
+        llm_client=cast(LLMClient, _StubClient()),
+        guardrail=_CountingGuardrail(),
+        session_state=SessionStateService(),
+        logger=logging.getLogger("test"),
+    )
+
+    result = await service.run_with_agent_runtime(
+        session_id="s1",
+        history=[],
+        model_text="delegate this",
+        model_user_content=None,
+        system_prompt="system",
+        tool_context=ToolContext(),
+        prompt_cache_key=None,
+        previous_response_id=None,
+        chat_id=1,
+        channel="telegram",
+        response_schema={"type": "object"},
+    )
+
+    assert runtime.calls == 2
+    assert result.render.text == "done"
+    assert result.response_updates == []
+
+
+def test_assistant_runtime_payload_requires_should_continue() -> None:
+    with pytest.raises(Exception):
+        AssistantRuntimePayload.model_validate({"answer": {"kind": "text", "content": "Result"}})

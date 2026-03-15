@@ -62,7 +62,7 @@ class _DelegatedPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answer: _DelegatedAnswer | None = None
-    should_continue: bool = False
+    should_continue: bool
     attachments: list[Any] = Field(default_factory=list)
 
     @field_validator("attachments", mode="before")

@@ -240,7 +240,9 @@ class RuntimeOrchestrationService:
         channel: str | None,
     ) -> tuple[ParsedAnswer, Any, Any, int, list[RenderableResponse]]:
         continuation_turns = 0
-        while parsed.should_continue and continuation_turns < self._MAX_CONTINUATION_TURNS:
+        while continuation_turns < self._MAX_CONTINUATION_TURNS and (
+            parsed.should_continue or trace_result.unresolved
+        ):
             if parsed.has_visible_answer and parsed.render is not None:
                 response_updates.append(_mark_as_working(parsed.render))
             continuation_turns += 1
@@ -250,6 +252,11 @@ class RuntimeOrchestrationService:
                 "to the user with a working marker. "
                 "Set should_continue=false only when the turn is complete."
             ]
+            if trace_result.unresolved:
+                continuation_prompt_parts.append(
+                    "Delegation is still unresolved. Resolve it now with another tool call or return a final "
+                    "user-facing answer with should_continue=false."
+                )
             if count_tool_messages(generation.state) == 0:
                 guardrail = await self._guardrail.apply(
                     session_id=session_id,
@@ -281,24 +288,9 @@ class RuntimeOrchestrationService:
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
             trace_result = extract_delegation_trace(generation.state)
-            if trace_result.unresolved:
-                generation.state.messages.append(
-                    AgentMessage(
-                        role="user",
-                        content=[
-                            MessagePart(
-                                type="text",
-                                text=(
-                                    "Delegation is still unresolved. Resolve it now with another tool call or return "
-                                    "a final user-facing answer with should_continue=false."
-                                ),
-                            )
-                        ],
-                    )
-                )
             parsed = extract_answer(generation.payload, logger=self._logger)
 
-        if parsed.should_continue:
+        if parsed.should_continue or trace_result.unresolved:
             self._logger.warning(
                 "continuation loop exceeded bounded retries; returning fallback",
                 extra={"chat_id": chat_id, "channel": channel},
