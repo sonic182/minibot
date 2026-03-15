@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from minibot.adapters.config.schema import AgentDefinitionConfig
 from minibot.core.agents import AgentSpec
+
+logger = logging.getLogger("minibot.agent_definitions_loader")
+_NAME_RE = re.compile(r"^[a-zA-Z_]{3,30}$")
+_DESCRIPTION_MAX_CHARS = 1000
 
 
 def load_agent_specs(directory: str) -> list[AgentSpec]:
@@ -30,6 +36,16 @@ def load_agent_specs(directory: str) -> list[AgentSpec]:
         system_prompt = body.strip()
         if not system_prompt:
             raise ValueError(f"{path}: agent body prompt cannot be empty")
+        if not _NAME_RE.fullmatch(cfg.name):
+            logger.warning(
+                "agent name does not match expected pattern",
+                extra={"agent_name": cfg.name, "pattern": _NAME_RE.pattern, "source": str(path)},
+            )
+        if len(cfg.description) > _DESCRIPTION_MAX_CHARS:
+            logger.warning(
+                "agent description exceeds recommended length",
+                extra={"agent_name": cfg.name, "length": len(cfg.description), "max": _DESCRIPTION_MAX_CHARS, "source": str(path)},
+            )
         specs.append(
             AgentSpec(
                 name=cfg.name,

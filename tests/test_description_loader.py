@@ -39,7 +39,6 @@ def test_all_builtin_descriptions_load() -> None:
         "memory",
         "bash",
         "apply_patch",
-        "list_agents",
         "invoke_agent",
         "transcribe_audio",
     ]

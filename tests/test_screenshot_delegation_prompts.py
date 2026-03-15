@@ -13,18 +13,13 @@ from minibot.shared.prompt_loader import load_channel_prompt, load_policy_prompt
 _ROOT = Path(__file__).resolve().parent.parent
 
 
+def _load_main_system_prompt() -> str:
+    return (_ROOT / "prompts" / "main_agent_system.md").read_text(encoding="utf-8")
+
+
 def test_delegation_policy_contains_anti_base64_instructions():
-    """Verify delegation policy explicitly forbids asking for base64."""
-    prompts_dir = str(_ROOT / "prompts")
-    policy_prompts = load_policy_prompts(prompts_dir)
-
-    delegation_policy = None
-    for prompt in policy_prompts:
-        if "delegation" in prompt.lower() or "invoke_agent" in prompt.lower():
-            delegation_policy = prompt
-            break
-
-    assert delegation_policy is not None, "Delegation policy not found"
+    """Verify the main system prompt explicitly forbids asking for base64."""
+    delegation_policy = _load_main_system_prompt()
 
     critical_phrases = [
         "NEVER ask for base64",
@@ -107,17 +102,10 @@ def test_browser_agent_has_attachment_example():
 
 
 def test_delegation_policy_has_simple_task_example():
-    """Verify delegation policy shows minimal task example."""
-    prompts_dir = str(_ROOT / "prompts")
-    policy_prompts = load_policy_prompts(prompts_dir)
+    """Verify the main system prompt shows the minimal screenshot task example."""
+    delegation_policy = _load_main_system_prompt()
 
-    delegation_policy = None
-    for prompt in policy_prompts:
-        if "Browser/screenshot delegation" in prompt:
-            delegation_policy = prompt
-            break
-
-    assert delegation_policy is not None, "Browser delegation section not found"
+    assert "Browser/Screenshot Delegation" in delegation_policy, "Browser delegation section not found"
     assert "Take a screenshot of https://example.com" in delegation_policy, "Missing simple delegation task example"
     assert "that's it" in delegation_policy.lower(), "Missing emphasis on simplicity"
 
@@ -135,13 +123,11 @@ def test_prompt_loader_caches_prompts():
 
 
 @pytest.mark.asyncio
-async def test_integration_prompts_loaded_in_handler(tmp_path: Path):
+async def test_integration_prompts_loaded_in_handler():
     """Integration test: verify prompts are correctly assembled in handler."""
-    from minibot.shared.prompt_loader import load_channel_prompt, load_policy_prompts
-
     prompts_dir = str(_ROOT / "prompts")
 
-    # Load prompts as handler does
+    system_prompt = _load_main_system_prompt()
     channel_prompt = load_channel_prompt(prompts_dir, "telegram")
     policy_prompts = load_policy_prompts(prompts_dir)
 
@@ -149,7 +135,7 @@ async def test_integration_prompts_loaded_in_handler(tmp_path: Path):
     assert len(policy_prompts) > 0
 
     # Verify critical content is present
-    combined = channel_prompt + "\n" + "\n".join(policy_prompts)
+    combined = system_prompt + "\n" + "\n".join(policy_prompts) + "\n" + channel_prompt
 
     critical_checks = [
         ("NEVER ask for base64", "Anti-base64 instruction missing"),
@@ -180,17 +166,13 @@ def test_browser_agent_tool_access():
 
 def test_handler_composes_system_prompt_with_all_fragments():
     """Verify handler _compose_system_prompt method includes all policy fragments."""
-    # This is an indirect test - we verify the method exists and uses load_policy_prompts
-    # The integration test above already verified the prompts combine correctly
     prompts_dir = str(_ROOT / "prompts")
 
-    # Load what the handler would load
+    system_prompt = _load_main_system_prompt()
     policy_prompts = load_policy_prompts(prompts_dir)
     telegram_prompt = load_channel_prompt(prompts_dir, "telegram")
 
-    # Simulate what _compose_system_prompt does
-    base = "You are Minibot, a helpful assistant."
-    fragments = [base]
+    fragments = [system_prompt]
     fragments.extend(policy_prompts)
     if telegram_prompt:
         fragments.append(telegram_prompt)
@@ -199,14 +181,12 @@ def test_handler_composes_system_prompt_with_all_fragments():
 
     # Verify the composed prompt has all critical elements
     assert "You are Minibot" in composed
-    assert "NEVER ask for base64" in composed, "Delegation policy missing from composed prompt"
+    assert "NEVER ask for base64" in composed, "Delegation instructions missing from composed prompt"
     assert "attachments" in composed, "Attachment handling missing from composed prompt"
     assert "Telegram" in composed or "telegram" in composed, "Channel prompt missing"
     assert len(composed) > 1000, f"Composed prompt too short ({len(composed)} chars) - fragments missing"
 
-    # Verify delegation policy comes before channel prompt (order matters for LLM context)
+    # Verify delegation instructions come before channel prompt (order matters for LLM context)
     delegation_pos = composed.find("NEVER ask for base64")
     telegram_pos = composed.find("Telegram")
-    assert delegation_pos > 0 and telegram_pos > delegation_pos, (
-        "Delegation policy should appear before channel-specific instructions"
-    )
+    assert delegation_pos > 0 and telegram_pos > delegation_pos, "Delegation should appear before channel instructions"
