@@ -122,10 +122,10 @@ def _build_machine_schema(schema: dict[str, Any] | type[BaseModel]) -> type[Base
     return schema
 
 
-def _json_schema_root_model(schema: Mapping[str, Any]) -> type[RootModel[dict[str, Any]]]:
+def _json_schema_root_model(schema: Mapping[str, Any]) -> type[RootModel[Any]]:
     schema_copy = dict(schema)
 
-    class JsonSchemaRootModel(RootModel[dict[str, Any]]):
+    class JsonSchemaRootModel(RootModel[Any]):
         @model_validator(mode="after")
         def _validate_against_schema(self) -> JsonSchemaRootModel:
             errors = validate_json_schema_instance(self.root, schema_copy)
