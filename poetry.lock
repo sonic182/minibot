@@ -1302,6 +1302,20 @@ files = [
 ]
 
 [[package]]
+name = "json-repair"
+version = "0.58.5"
+description = "A package to repair broken json strings"
+optional = false
+python-versions = ">=3.10"
+files = [
+    {file = "json_repair-0.58.5-py3-none-any.whl", hash = "sha256:16f65addc58d8e0b2b8514e3f6ea9ff568267ce94ead95f4faf90e40dd35d526"},
+    {file = "json_repair-0.58.5.tar.gz", hash = "sha256:2dfdb44573197eeea8eda23f23677412634b2fe2a93bd1dbe4f1b88e4896efa3"},
+]
+
+[package.extras]
+schema = ["jsonschema (>=4.21)", "pydantic (>=2)"]
+
+[[package]]
 name = "jsonschema"
 version = "4.26.0"
 description = "An implementation of JSON Schema validation for Python"
@@ -2477,14 +2491,17 @@ files = [
 
 [[package]]
 name = "ratchet-sm"
-version = "0.1.0"
+version = "0.2.0"
 description = "A provider-agnostic state machine for handling, normalizing, and recovering structured LLM outputs."
 optional = false
 python-versions = "<4.0,>=3.10"
 files = [
-    {file = "ratchet_sm-0.1.0-py3-none-any.whl", hash = "sha256:ae1c76980f8f0289732174388bce6c9ee834e9fc35192b7a83f381793eba1743"},
-    {file = "ratchet_sm-0.1.0.tar.gz", hash = "sha256:29f994654d1cacb4204849115c2a6d98aa17e953fb52cffd1773c1e1b82409c7"},
+    {file = "ratchet_sm-0.2.0-py3-none-any.whl", hash = "sha256:aed3595b2dc8e1890476672bb584927ca8aca6fe4b8cdf11b0f84c5c2164ed00"},
+    {file = "ratchet_sm-0.2.0.tar.gz", hash = "sha256:2bd1bd71eaf4508dae5e8cd5e7dec4c8d0cb5f8b20fc719e57f95a4b5ba86878"},
 ]
+
+[package.dependencies]
+json-repair = "*"
 
 [package.extras]
 all = ["pydantic (>=2.0)", "python-frontmatter", "pyyaml"]
@@ -3155,4 +3172,4 @@ stt = ["faster-whisper"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.12,<3.15"
-content-hash = "73765ea643596f72caf36e13710284708b2d7ee02047ac9c5850e62ccd07f7ea"
+content-hash = "77d3d3705a1a644b8395c74c4544d3f6a3e62a1695b8a212a61e985dd596edec"
