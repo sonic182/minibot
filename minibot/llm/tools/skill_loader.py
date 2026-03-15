@@ -57,6 +57,9 @@ class SkillLoaderTool:
 
 
 def _list_resources(skill_dir: Path) -> list[str]:
-    return sorted(
-        p.relative_to(skill_dir).as_posix() for p in skill_dir.rglob("*") if p.is_file() and p.name != "SKILL.md"
-    )
+    try:
+        return sorted(
+            p.relative_to(skill_dir).as_posix() for p in skill_dir.rglob("*") if p.is_file() and p.name != "SKILL.md"
+        )
+    except OSError:
+        return []

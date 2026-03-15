@@ -4,7 +4,7 @@ import logging
 import re
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from minibot.core.skills import SkillSpec
 from minibot.shared.frontmatter import parse_frontmatter, split_frontmatter
@@ -15,6 +15,8 @@ _DESCRIPTION_MAX_CHARS = 300
 
 
 class SkillDefinitionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     description: str = ""
     enabled: bool = True
