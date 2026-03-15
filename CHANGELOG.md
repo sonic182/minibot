@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-03-15
+
 ### Changed
 
 - `StructuredOutputValidator` rewritten to own the validation loop directly (no longer delegates to `ratchet_sm`'s `StateMachine`): parse-error and schema-validation failures now emit structured `RetryAction` with per-attempt prompt patches via `ValidationFeedback` / `_render_schema_retry_prompt` / `_render_pydantic_retry_prompt`, giving richer normalization feedback to the LLM on each retry.
