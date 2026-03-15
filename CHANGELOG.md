@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `StructuredOutputValidator` rewritten to own the validation loop directly (no longer delegates to `ratchet_sm`'s `StateMachine`): parse-error and schema-validation failures now emit structured `RetryAction` with per-attempt prompt patches via `ValidationFeedback` / `_render_schema_retry_prompt` / `_render_pydantic_retry_prompt`, giving richer normalization feedback to the LLM on each retry.
+- Dict-schema path now validates against `validate_json_schema_instance` and returns the raw parsed dict (preserving `null` values); Pydantic-model path validates via `model_validate` and serializes with `model_dump(exclude_none=True)`.
+
 ### Added
 
 - Agent Skills support: load skill instruction files from `.agents/skills/` or `.claude/skills/` directories (project- and user-level); skills are listed in the system prompt and loaded on demand via the new `activate_skill` tool.
