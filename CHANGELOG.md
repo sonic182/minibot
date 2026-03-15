@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Agent Skills support: load skill instruction files from `.agents/skills/` or `.claude/skills/` directories (project- and user-level); skills are listed in the system prompt and loaded on demand via the new `activate_skill` tool.
+- `[skills]` config block with optional `paths` override.
+- `minibot/shared/frontmatter.py` shared YAML frontmatter parser (reused by both agent and skill loaders).
+
+### Fixed
+
+- `SkillDefinitionConfig` now rejects unknown frontmatter keys (`extra="forbid"`), logging a warning and skipping the skill instead of silently ignoring typos.
+
 ## [0.0.9] - 2026-03-15
 
 ### Added
