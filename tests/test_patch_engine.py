@@ -33,51 +33,28 @@ def test_parse_patch_add_update_delete_and_move() -> None:
 
 
 def test_parse_patch_supports_heredoc_wrapper() -> None:
-    patch = (
-        "cat <<'EOF'\n"
-        "*** Begin Patch\n"
-        "*** Add File: test.txt\n"
-        "+ok\n"
-        "*** End Patch\n"
-        "EOF"
-    )
+    patch = "cat <<'EOF'\n*** Begin Patch\n*** Add File: test.txt\n+ok\n*** End Patch\nEOF"
     parsed = parse_patch(patch)
     assert len(parsed.hunks) == 1
     assert parsed.hunks[0].type == "add"
 
 
 def test_parse_patch_rejects_add_lines_without_plus_prefix() -> None:
-    patch = (
-        "*** Begin Patch\n"
-        "*** Add File: bad.txt\n"
-        "missing-prefix\n"
-        "*** End Patch"
-    )
+    patch = "*** Begin Patch\n*** Add File: bad.txt\nmissing-prefix\n*** End Patch"
 
     with pytest.raises(ValueError, match="Invalid add line"):
         parse_patch(patch)
 
 
 def test_parse_patch_rejects_update_hunk_without_header() -> None:
-    patch = (
-        "*** Begin Patch\n"
-        "*** Update File: a.txt\n"
-        "not-a-header\n"
-        "*** End Patch"
-    )
+    patch = "*** Begin Patch\n*** Update File: a.txt\nnot-a-header\n*** End Patch"
 
     with pytest.raises(ValueError, match="expected '@@'"):
         parse_patch(patch)
 
 
 def test_parse_patch_rejects_invalid_update_body_line() -> None:
-    patch = (
-        "*** Begin Patch\n"
-        "*** Update File: a.txt\n"
-        "@@\n"
-        "bad-body-line\n"
-        "*** End Patch"
-    )
+    patch = "*** Begin Patch\n*** Update File: a.txt\n@@\nbad-body-line\n*** End Patch"
 
     with pytest.raises(ValueError, match="Invalid update line"):
         parse_patch(patch)
@@ -159,13 +136,7 @@ def test_apply_patch_context_only_addition_respects_matched_location(tmp_path: P
     target = tmp_path / "sample.txt"
     target.write_text("a\nb\nc\n", encoding="utf-8")
 
-    parsed = parse_patch(
-        "*** Begin Patch\n"
-        "*** Update File: sample.txt\n"
-        "@@ b\n"
-        "+inserted\n"
-        "*** End Patch"
-    )
+    parsed = parse_patch("*** Begin Patch\n*** Update File: sample.txt\n@@ b\n+inserted\n*** End Patch")
 
     actions = plan_patch_actions(
         hunks=parsed.hunks,
@@ -246,13 +217,7 @@ def test_apply_patch_rejects_ambiguous_unified_hunk_location(tmp_path: Path) -> 
     target.write_text("alpha\nrepeat\nvalue = 1\nrepeat\nvalue = 1\n", encoding="utf-8")
 
     parsed = parse_patch(
-        "*** Begin Patch\n"
-        "*** Update File: sample.txt\n"
-        "@@ -3,2 +3,2 @@\n"
-        " repeat\n"
-        "-value = 1\n"
-        "+value = 2\n"
-        "*** End Patch"
+        "*** Begin Patch\n*** Update File: sample.txt\n@@ -3,2 +3,2 @@\n repeat\n-value = 1\n+value = 2\n*** End Patch"
     )
 
     with pytest.raises(ValueError, match="Unified hunk location"):
@@ -270,13 +235,7 @@ def test_apply_patch_honors_exact_unified_hunk_offset_for_repeated_blocks(tmp_pa
     target.write_text("alpha\nrepeat\nvalue = 1\nrepeat\nvalue = 1\n", encoding="utf-8")
 
     parsed = parse_patch(
-        "*** Begin Patch\n"
-        "*** Update File: sample.txt\n"
-        "@@ -4,2 +4,2 @@\n"
-        " repeat\n"
-        "-value = 1\n"
-        "+value = 2\n"
-        "*** End Patch"
+        "*** Begin Patch\n*** Update File: sample.txt\n@@ -4,2 +4,2 @@\n repeat\n-value = 1\n+value = 2\n*** End Patch"
     )
 
     actions = plan_patch_actions(

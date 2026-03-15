@@ -44,6 +44,7 @@ def extract_answer(payload: Any, *, logger: logging.Logger) -> ParsedAnswer:
         return ParsedAnswer(render=plain_render(payload), should_continue=False)
     return ParsedAnswer(render=plain_render(str(payload)), should_continue=False)
 
+
 def render_from_payload(value: Any) -> RenderableResponse | None:
     if not isinstance(value, dict):
         return None

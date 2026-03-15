@@ -32,8 +32,7 @@ class CodeReadTool:
                     "limit": nullable_integer(
                         minimum=1,
                         description=(
-                            f"Number of lines to return. Defaults to {self._DEFAULT_LIMIT}; "
-                            f"max {self._MAX_LIMIT}."
+                            f"Number of lines to return. Defaults to {self._DEFAULT_LIMIT}; max {self._MAX_LIMIT}."
                         ),
                     ),
                 },

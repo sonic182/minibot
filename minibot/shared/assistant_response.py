@@ -48,9 +48,7 @@ class AssistantRuntimePayload(BaseModel):
             return self
         content = self.answer.content if self.answer is not None else None
         if not isinstance(content, str) or not content.strip():
-            raise ValueError(
-                "final responses with should_continue=false must include a non-empty answer.content"
-            )
+            raise ValueError("final responses with should_continue=false must include a non-empty answer.content")
         return self
 
 
@@ -127,6 +125,7 @@ def assistant_response_schema(
             }
         ],
     }
+
 
 def validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
     if not isinstance(raw_attachments, list):

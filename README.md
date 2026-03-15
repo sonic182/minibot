@@ -255,6 +255,7 @@ Use `config.example.toml` as the source of truth—copy it to `config.toml` and 
 - `[tools.grep]`: optional text-search tool over files managed by `tools.file_storage`, with limits for `max_matches` and `max_file_size_bytes`.
 - `[tools.audio_transcription]`: optional speech-to-text tool powered by `faster-whisper`; configure model/runtime defaults (`model`, `device`, `compute_type`, `beam_size`, `vad_filter`) plus short-audio auto-transcription policy (`auto_transcribe_short_incoming`, `auto_transcribe_max_duration_seconds`), and enable only when the `stt` extra is installed. Runtime decoding also requires ffmpeg available on the host.
 - `[tools.browser]`: configures browser artifact paths used by prompts and Playwright MCP launch defaults. `output_dir` is the canonical directory for screenshots/downloads/session artifacts.
+- `[tools.skills]`: configures skill discovery. Leave `paths` empty to use default locations (see Agent Skills section), or set `paths` to a non-empty list to override them entirely with your own directories. Set `enabled = false` to disable skill support.
 - `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
@@ -444,6 +445,65 @@ Useful patterns and behavior:
 - Environment setup from config (for example `[tools.browser].output_dir`) is injected into both main-agent and delegated-agent system prompts.
 - Keep secrets out of agent files. Put credentials in `[providers.<provider>]`.
 - Some models reject parameters like `temperature`; if you see provider `HTTP 400` for unsupported parameters, remove that field from the agent frontmatter (or from global `[llm]` defaults).
+
+Agent Skills
+------------
+
+Skills are reusable instruction packs the model loads on demand via the `activate_skill` tool. Each skill is a
+directory containing a `SKILL.md` file (YAML frontmatter + instruction body). The model sees a short catalog in
+its system prompt and fetches full instructions only when it needs them.
+
+### Skill file format
+
+```md
+---
+name: my-skill
+description: One-line summary shown in the catalog.
+enabled: true
+---
+
+# My Skill
+
+Full instructions here...
+```
+
+Frontmatter fields: `name` (required), `description` (optional), `enabled` (default `true`).
+
+### Discovery paths
+
+When `tools.skills.paths` is **empty** (the default), MiniBot scans these locations in priority order:
+
+| Priority | Path |
+|----------|------|
+| 1 (highest) | `./.agents/skills/` |
+| 2 | `./.claude/skills/` |
+| 3 | `~/.agents/skills/` |
+| 4 (lowest) | `~/.claude/skills/` |
+
+Project-level paths (1–2) take precedence over user-level paths (3–4). On a name collision the higher-priority entry wins and a warning is logged.
+
+> **Note:** The MiniBot repository itself ships development skills under `.agents/skills/` and `.claude/skills/`. These are picked up automatically when you run from the project directory. If you want to use only your own skills, set `paths` explicitly (see below).
+
+### Overriding paths in `config.toml`
+
+Setting `paths` to a non-empty list **completely replaces** the default locations — only the listed directories are scanned:
+
+```toml
+[tools.skills]
+paths = [
+    "/home/user/my-skills",
+    "./project-skills",
+]
+```
+
+Each entry is a directory whose subdirectories each contain a `SKILL.md`. Relative paths are resolved from the working directory at startup.
+
+To disable skill discovery entirely:
+
+```toml
+[tools.skills]
+enabled = false
+```
 
 OpenRouter Agents Custom Params
 -------------------------------
@@ -683,6 +743,7 @@ To enable optional speech-to-text tooling, install the `stt` extra (`poetry inst
 - 🧩 `apply_patch`: optional structured file edits via patch envelopes (`*** Begin Patch ... *** End Patch`) with add/update/delete/move operations.
 - 🎙️ `transcribe_audio`: optional managed-file audio transcription via `faster-whisper` (install with extras: `stt`).
 - 🤝 Delegation tools: `fetch_agent_info`, `invoke_agent`.
+- 🎓 `activate_skill`: loads full instructions for a named skill discovered from the skills directories (see Agent Skills section).
 - 🧭 `mcp_*` dynamic tools (optional): tool bindings discovered from configured MCP servers.
 - 🖼️ Telegram media inputs (`photo`/`document`/`audio`/`voice`) are supported on `openai_responses`, `openai`, and `openrouter`.
 

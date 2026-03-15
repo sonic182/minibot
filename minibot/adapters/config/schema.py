@@ -341,6 +341,11 @@ class AudioTranscriptionToolConfig(BaseModel):
     auto_transcribe_max_duration_seconds: PositiveInt = 45
 
 
+class SkillsToolConfig(BaseModel):
+    enabled: bool = True
+    paths: List[str] = Field(default_factory=list)
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
@@ -354,6 +359,7 @@ class ToolsConfig(BaseModel):
     browser: BrowserToolConfig = BrowserToolConfig()
     audio_transcription: AudioTranscriptionToolConfig = AudioTranscriptionToolConfig()
     mcp: MCPToolConfig = MCPToolConfig()
+    skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
 
 
 class ScheduledPromptsConfig(BaseModel):

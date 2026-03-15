@@ -110,9 +110,7 @@ async def test_grep_tool_excludes_hidden_files_by_default(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_grep_tool_offloads_search_work_with_to_thread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_grep_tool_offloads_search_work_with_to_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     storage.create_text_file(path="a.txt", content="needle", overwrite=False)
     tool = GrepTool(storage=storage, config=GrepToolConfig(enabled=True))
