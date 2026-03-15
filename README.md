@@ -482,7 +482,7 @@ When `tools.skills.paths` is **empty** (the default), MiniBot scans these locati
 
 Project-level paths (1–2) take precedence over user-level paths (3–4). On a name collision the higher-priority entry wins and a warning is logged.
 
-> **Note:** The MiniBot repository itself ships development skills under `.agents/skills/` and `.claude/skills/`. These are picked up automatically when you run from the project directory. If you want to use only your own skills, set `paths` explicitly (see below).
+> **Note:** If you cloned the MiniBot repository and run the bot from that directory, the development skills under `.agents/skills/` and `.claude/skills/` will be picked up automatically. Set `paths` explicitly to load only your own skills (see below). This does not affect pip installs, where those directories are not present.
 
 ### Recommended setup: `./skills`
 
