@@ -213,6 +213,7 @@ def _build_skill_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> 
 
     return SkillLoaderTool(context.skill_registry).bindings()
 
+
 def _build_lua_custom_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
     return load_lua_custom_tools(context.settings.tools.lua_custom.directory)
 

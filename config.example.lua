@@ -237,7 +237,7 @@ return {
       max_file_size_bytes = "1MB",
     },
 
-    -- Optional speech-to-text tool powered by faster-whisper (install with extra: `lua` is unrelated; use `stt` here).
+    -- Optional speech-to-text tool powered by faster-whisper (install with: poetry install --extras stt).
     audio_transcription = {
       enabled = false,
       model = "small",

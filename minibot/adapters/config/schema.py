@@ -5,9 +5,10 @@ import types
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union, get_args, get_origin
 
-from minibot.adapters.lua.runtime import execute_lua_file, lua_to_python
 from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter, ValidationError
 from pydantic import model_validator
+
+from minibot.adapters.lua.runtime import execute_lua_file, lua_to_python
 
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)

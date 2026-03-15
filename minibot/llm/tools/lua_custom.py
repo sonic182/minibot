@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -55,8 +56,13 @@ def _load_lua_tool(path: Path) -> ToolBinding:
 
     async def _handler(payload: dict[str, Any], _: ToolContext) -> ToolResult:
         try:
-            raw_result = handler(python_to_lua(payload, lua_runtime))
-            return ToolResult(content=lua_to_python(raw_result))
+            loop = asyncio.get_running_loop()
+
+            def _run() -> Any:
+                return lua_to_python(handler(python_to_lua(payload, lua_runtime)))
+
+            raw_result = await loop.run_in_executor(None, _run)
+            return ToolResult(content=raw_result)
         except Exception as exc:
             raise ValueError(f"lua tool `{name}` failed from {path}: {exc}") from exc
 
