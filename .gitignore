@@ -28,11 +28,11 @@ var/
 *.egg
 pip-wheel-metadata/
 pip-log.txt
+.venv/
 venv/
 ENV/
 env/
 venv.bak/
-venv/
 
 # PyInstaller
 *.manifest

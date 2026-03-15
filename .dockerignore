@@ -28,8 +28,8 @@ var/
 *.egg
 pip-wheel-metadata/
 pip-log.txt
-venv/
 .venv/
+venv/
 ENV/
 env/
 venv.bak/
@@ -72,9 +72,11 @@ coverage.xml
 .DS_Store
 
 config.toml
-config.*
+config.lua
+config.*.bckp
 data/
 testdata/
+skills/
 
 opencode/
 aiogram/
