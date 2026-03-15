@@ -46,23 +46,23 @@ return {
 
   providers = {
     openai = {
-      api_key = os.getenv("OPENAI_API_KEY", ""),
+      api_key = os.getenv("OPENAI_API_KEY") or "",
       base_url = "",
     },
     openai_responses = {
-      api_key = os.getenv("OPENAI_API_KEY", ""),
+      api_key = os.getenv("OPENAI_API_KEY") or "",
       base_url = "",
     },
     openrouter = {
-      api_key = os.getenv("OPENROUTER_API_KEY", ""),
+      api_key = os.getenv("OPENROUTER_API_KEY") or "",
       base_url = "",
     },
     claude = {
-      api_key = os.getenv("CLAUDE_API_KEY", ""),
+      api_key = os.getenv("CLAUDE_API_KEY") or "",
       base_url = "",
     },
     google = {
-      api_key = os.getenv("GEMINI_API_KEY", ""),
+      api_key = os.getenv("GEMINI_API_KEY") or "",
       base_url = "",
     },
   },

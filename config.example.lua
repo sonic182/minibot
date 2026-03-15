@@ -115,25 +115,25 @@ return {
   providers = {
     openai = {
       -- Default to OPENAI_API_KEY from the shell environment.
-      api_key = os.getenv("OPENAI_API_KEY", ""),
+      api_key = os.getenv("OPENAI_API_KEY") or "",
       base_url = "",
     },
     openai_responses = {
       -- Reuse OPENAI_API_KEY for the Responses API provider as well.
-      api_key = os.getenv("OPENAI_API_KEY", ""),
+      api_key = os.getenv("OPENAI_API_KEY") or "",
       base_url = "",
     },
     openrouter = {
-      api_key = os.getenv("OPENROUTER_API_KEY", ""),
+      api_key = os.getenv("OPENROUTER_API_KEY") or "",
       base_url = "",
     },
     claude = {
-      api_key = os.getenv("CLAUDE_API_KEY", ""),
+      api_key = os.getenv("CLAUDE_API_KEY") or "",
       base_url = "",
     },
     google = {
       -- Gemini/OpenAI-compatible Google provider key.
-      api_key = os.getenv("GEMINI_API_KEY", ""),
+      api_key = os.getenv("GEMINI_API_KEY") or "",
       base_url = "",
     },
   },
