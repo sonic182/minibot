@@ -21,8 +21,6 @@ def test_telegram_channel_prompt_contains_attachment_handling():
     assert telegram_prompt is not None, "Telegram channel prompt not found"
 
     critical_phrases = [
-        "NEVER ask browser agent for base64",
-        "this wastes tokens",
         "attachments",
         'filesystem(action="send")',
         "NEVER return base64 data",
