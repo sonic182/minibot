@@ -15,6 +15,7 @@ from minibot.app.handlers.services.session_state_service import SessionStateServ
 from minibot.app.incoming_files_context import build_history_user_entry
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.runtime_limits import build_runtime_limits
+from minibot.app.skill_registry import SkillRegistry
 from minibot.app.response_parser import extract_answer, plain_render
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.channels import ChannelMessage, ChannelResponse
@@ -410,6 +411,7 @@ def build_llm_turn_service(
     audio_auto_transcription_service: AudioAutoTranscriptionService | None = None,
     logger: logging.Logger | None = None,
     agent_registry: AgentRegistry | None = None,
+    skill_registry: SkillRegistry | None = None,
 ) -> LLMTurnService:
     service_logger = logger or logging.getLogger("minibot.handler")
     tool_bindings = list(tools or [])
@@ -422,6 +424,7 @@ def build_llm_turn_service(
         environment_prompt_fragment=environment_prompt_fragment,
         logger=service_logger,
         agent_registry=agent_registry,
+        skill_registry=skill_registry,
     )
     compaction_service = HistoryCompactionService(
         memory=memory,

@@ -9,6 +9,7 @@ from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.environment_context import build_environment_prompt_fragment
+from minibot.app.skill_registry import SkillRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.core.memory import KeyValueMemory, MemoryBackend
@@ -45,6 +46,7 @@ class ToolAssemblyContext:
     prompt_scheduler: ScheduledPromptService | None
     event_bus: EventBus | None
     agent_registry: AgentRegistry | None
+    skill_registry: SkillRegistry | None
     llm_factory: LLMClientFactory | None
     managed_storage: LocalFileStorage | None
     environment_prompt_fragment: str
@@ -74,6 +76,7 @@ def build_enabled_tools(
     event_bus: EventBus | None = None,
     agent_registry: AgentRegistry | None = None,
     llm_factory: LLMClientFactory | None = None,
+    skill_registry: SkillRegistry | None = None,
 ) -> list[ToolBinding]:
     context = ToolAssemblyContext(
         settings=settings,
@@ -82,6 +85,7 @@ def build_enabled_tools(
         prompt_scheduler=prompt_scheduler,
         event_bus=event_bus,
         agent_registry=agent_registry,
+        skill_registry=skill_registry,
         llm_factory=llm_factory,
         managed_storage=_build_managed_storage(settings) if settings.tools.file_storage.enabled else None,
         environment_prompt_fragment=build_environment_prompt_fragment(settings),
@@ -199,6 +203,14 @@ def _build_mcp_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> li
     return bindings
 
 
+def _build_skill_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
+    if context.skill_registry is None or context.skill_registry.is_empty():
+        return []
+    from minibot.llm.tools.skill_loader import SkillLoaderTool
+
+    return SkillLoaderTool(context.skill_registry).bindings()
+
+
 def _build_agent_delegate_feature(context: ToolAssemblyContext, tools: list[ToolBinding]) -> list[ToolBinding]:
     if context.agent_registry is None or context.llm_factory is None or context.agent_registry.is_empty():
         return []
@@ -294,6 +306,12 @@ _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (
         labels=("mcp",),
         enabled_in_config=lambda settings: _tool_enabled(settings, "mcp"),
         builder=_build_mcp_feature,
+    ),
+    ToolFeature(
+        key="skills",
+        labels=("activate_skill",),
+        enabled_in_config=lambda settings: _tool_enabled(settings, "skills"),
+        builder=_build_skill_feature,
     ),
     ToolFeature(
         key="agent_delegate",

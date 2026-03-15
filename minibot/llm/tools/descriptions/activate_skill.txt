@@ -1,0 +1,8 @@
+Load the full instructions for a named skill.
+
+Use this when a user request matches one of the available skills listed in your system prompt. Call this before starting work that the skill covers.
+
+Provide:
+- name: exact skill name from the available skills list in your system prompt.
+
+The response includes the full skill instructions wrapped in <skill-instructions> tags, the skill directory path, and a list of supporting resource files. Load resource files on demand using available file tools when the skill instructions reference them.

@@ -29,8 +29,7 @@ from minibot.shared.utils import humanize_token_count
 
 
 _TRUNCATED_PATCH = (
-    "Your previous response was truncated. "
-    "Please resend your complete tool call with all required arguments."
+    "Your previous response was truncated. Please resend your complete tool call with all required arguments."
 )
 _PSEUDO_TOOL_PATCH = "Please use the tool calling interface instead of embedding tool calls in text."
 
@@ -155,13 +154,17 @@ class AgentRuntime:
                                 state=state,
                                 total_tokens=total_tokens,
                             )
-                        state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
+                        state.messages.append(
+                            self._message_renderer.from_provider_assistant_message(completion.message)
+                        )
                         state.messages.append(
                             AgentMessage(role="user", content=[MessagePart(type="text", text=_TRUNCATED_PATCH)])
                         )
                         continue
                     if not tool_calls and has_pseudo_tool_call_tag(raw_message_content):
-                        state.messages.append(self._message_renderer.from_provider_assistant_message(completion.message))
+                        state.messages.append(
+                            self._message_renderer.from_provider_assistant_message(completion.message)
+                        )
                         state.messages.append(
                             AgentMessage(role="user", content=[MessagePart(type="text", text=_PSEUDO_TOOL_PATCH)])
                         )

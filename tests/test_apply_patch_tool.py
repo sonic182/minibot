@@ -140,14 +140,7 @@ async def test_apply_patch_tool_reports_expected_update_header_forms() -> None:
     binding = _binding(ApplyPatchToolConfig())
     with pytest.raises(ValueError, match=r"Use an update chunk header in one of these forms") as exc_info:
         await binding.handler(
-            {
-                "patch_text": (
-                    "*** Begin Patch\n"
-                    "*** Update File: file.txt\n"
-                    "not-a-header\n"
-                    "*** End Patch"
-                )
-            },
+            {"patch_text": ("*** Begin Patch\n*** Update File: file.txt\nnot-a-header\n*** End Patch")},
             ToolContext(),
         )
 

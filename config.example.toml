@@ -343,3 +343,19 @@ timeout_seconds = 30
 # cwd = "."
 # enabled_tools = []
 # disabled_tools = []
+
+# Agent Skills support (agentskills.io spec).
+# Skills are instruction packs loaded on demand by the model via the activate_skill tool.
+# Each skill is a subdirectory containing a SKILL.md file.
+#
+# Default discovery paths (used when `paths` is empty), in priority order:
+#   Project-level (higher): ./.agents/skills/, ./.claude/skills/
+#   User-level   (lower):   ~/.agents/skills/, ~/.claude/skills/
+#
+# Setting `paths` to a non-empty list REPLACES the defaults entirely.
+# Use this when you want to load only your own skills and avoid picking up
+# development skills bundled with the MiniBot project directory.
+[tools.skills]
+enabled = false
+# Recommended: create a ./skills directory and set paths to load only your own skills.
+# paths = ["./skills"]

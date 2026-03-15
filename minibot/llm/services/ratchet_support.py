@@ -225,4 +225,3 @@ def _to_raw_text(payload: Any) -> str:
     if isinstance(payload, str):
         return payload
     return json.dumps(payload, ensure_ascii=True, default=str)
-

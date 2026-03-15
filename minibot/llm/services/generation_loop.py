@@ -44,8 +44,7 @@ from minibot.shared.utils import humanize_token_count
 
 
 _TRUNCATED_PATCH = (
-    "Your previous response was truncated. "
-    "Please resend your complete tool call with all required arguments."
+    "Your previous response was truncated. Please resend your complete tool call with all required arguments."
 )
 _PSEUDO_TOOL_PATCH = "Please use the tool calling interface instead of embedding tool calls in text."
 
@@ -220,8 +219,7 @@ async def generate_with_tools(
                         "answer": {
                             "kind": "text",
                             "content": (
-                                "I could not produce a valid structured response in this attempt. "
-                                "Please try again."
+                                "I could not produce a valid structured response in this attempt. Please try again."
                             ),
                         },
                         "should_continue": False,

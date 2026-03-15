@@ -108,8 +108,7 @@ def build_incoming_files_text(prompt_text: str, incoming_files: Sequence[Incomin
     if only_audio_files:
         return (
             "The user uploaded audio/voice file(s) without additional text. "
-            "Treat the transcribed content as the user intent for this turn.\n"
-            + "\n".join(lines)
+            "Treat the transcribed content as the user intent for this turn.\n" + "\n".join(lines)
         )
     return (
         "The user uploaded file(s) but did not include a clear instruction.\n"

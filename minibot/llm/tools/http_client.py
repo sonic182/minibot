@@ -150,6 +150,8 @@ def _http_tool_schema() -> Tool:
             required=["url", "method", "headers", "body", "json"],
         ),
     )
+
+
 def _decode_preview(data: bytes) -> str:
     try:
         return data.decode("utf-8")

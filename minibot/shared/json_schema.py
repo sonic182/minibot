@@ -111,8 +111,7 @@ def _relax_schema(node: Any) -> Any:
         original_required = relaxed.get("required")
         if isinstance(original_required, list) and isinstance(properties, dict):
             relaxed["required"] = [
-                name for name in original_required
-                if isinstance(name, str) and not _is_nullable(properties.get(name))
+                name for name in original_required if isinstance(name, str) and not _is_nullable(properties.get(name))
             ]
 
     return relaxed

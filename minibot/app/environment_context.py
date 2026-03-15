@@ -17,9 +17,7 @@ def build_environment_prompt_fragment(settings: Settings) -> str:
             lines.append(f"- Filesystem managed root (configured): {root_dir}")
             lines.append(f"- Filesystem managed root (resolved): {resolved_root}")
             lines.append(f"- Filesystem mode: {mode}")
-            lines.append(
-                "- Path rule: inside root use relative paths; outside root (yolo mode) use absolute paths."
-            )
+            lines.append("- Path rule: inside root use relative paths; outside root (yolo mode) use absolute paths.")
     browser = getattr(settings.tools, "browser", None)
     browser_output_dir = getattr(browser, "output_dir", "")
     if not isinstance(browser_output_dir, str):

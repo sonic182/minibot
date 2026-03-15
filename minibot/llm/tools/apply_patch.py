@@ -79,10 +79,7 @@ def _normalize_apply_patch_error(error: str) -> str:
             "`@@`, `@@ <existing source line>`, or `@@ -a,b +c,d @@`."
         )
     if "Invalid update line" in error:
-        return (
-            f"{error}. Inside an update chunk, each line must start with space, `-`, `+`, "
-            "or be `*** End of File`."
-        )
+        return f"{error}. Inside an update chunk, each line must start with space, `-`, `+`, or be `*** End of File`."
     if "Failed to find context" in error:
         return (
             f"{error}. If you are using unified diff syntax, keep the range in the `@@ -a,b +c,d @@` header "

@@ -75,3 +75,4 @@ config.toml
 config.*.bckp
 data/
 testdata/
+skills/

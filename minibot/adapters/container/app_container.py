@@ -7,6 +7,8 @@ from typing import Optional
 
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
+from minibot.app.skill_definitions_loader import load_skill_specs
+from minibot.app.skill_registry import SkillRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.scheduler_service import ScheduledPromptService
@@ -30,6 +32,7 @@ class AppContainer:
     _llm_client: Optional[LLMClient] = None
     _llm_factory: Optional[LLMClientFactory] = None
     _agent_registry: Optional[AgentRegistry] = None
+    _skill_registry: Optional[SkillRegistry] = None
     _prompt_store: Optional[SQLAlchemyScheduledPromptStore] = None
     _prompt_service: Optional[ScheduledPromptService] = None
     _token_autoconfig_applied: bool = False
@@ -49,6 +52,12 @@ class AppContainer:
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
         cls._agent_registry = AgentRegistry(agent_specs)
+        if cls._settings.tools.skills.enabled:
+            skill_paths = list(cls._settings.tools.skills.paths) or None
+            skill_specs = load_skill_specs(skill_paths)
+        else:
+            skill_specs = []
+        cls._skill_registry = SkillRegistry(skill_specs)
         cls._token_autoconfig_applied = False
         prompts_config = cls._settings.scheduler.prompts
         if prompts_config.enabled:
@@ -107,6 +116,12 @@ class AppContainer:
         if cls._agent_registry is None:
             raise RuntimeError("agent registry not configured")
         return cls._agent_registry
+
+    @classmethod
+    def get_skill_registry(cls) -> SkillRegistry:
+        if cls._skill_registry is None:
+            raise RuntimeError("container not configured")
+        return cls._skill_registry
 
     @classmethod
     def get_scheduled_prompt_service(cls) -> ScheduledPromptService | None:

@@ -5,6 +5,7 @@ from typing import Any
 from typing import Sequence
 
 from minibot.app.agent_registry import AgentRegistry
+from minibot.app.skill_registry import SkillRegistry
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding
 from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
@@ -18,6 +19,7 @@ class PromptService:
         environment_prompt_fragment: str,
         logger: logging.Logger,
         agent_registry: AgentRegistry | None = None,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         self._profile = LLMExecutionProfile.from_client(llm_client)
         self._tools = list(tools)
@@ -25,6 +27,7 @@ class PromptService:
         self._logger = logger
         self._prompts_dir = self._profile.prompts_dir
         self._agent_registry = agent_registry
+        self._skill_registry = skill_registry
 
     @property
     def prompts_dir(self) -> str:
@@ -36,6 +39,9 @@ class PromptService:
         specialist_roster = self._specialist_roster_fragment()
         if specialist_roster:
             fragments.append(specialist_roster)
+        skill_catalog = self._skill_catalog_fragment()
+        if skill_catalog:
+            fragments.append(skill_catalog)
         channel_prompt = load_channel_prompt(self._prompts_dir, channel)
         if channel_prompt:
             fragments.append(channel_prompt)
@@ -78,6 +84,14 @@ class PromptService:
                 "with that exact agent name."
             )
         return roster
+
+    def _skill_catalog_fragment(self) -> str:
+        if self._skill_registry is None or self._skill_registry.is_empty():
+            return ""
+        tool_names = {binding.tool.name for binding in self._tools}
+        if "activate_skill" not in tool_names:
+            return ""
+        return self._skill_registry.prompt_catalog()
 
     def compact_system_prompt(self, system_prompt: str) -> str:
         compact_prompt = load_compact_prompt(self._prompts_dir)

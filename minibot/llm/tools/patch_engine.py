@@ -492,12 +492,12 @@ def _normalize_unicode(value: str) -> str:
     return (
         value.replace("\u2018", "'")
         .replace("\u2019", "'")
-        .replace("\u201A", "'")
-        .replace("\u201B", "'")
-        .replace("\u201C", '"')
-        .replace("\u201D", '"')
-        .replace("\u201E", '"')
-        .replace("\u201F", '"')
+        .replace("\u201a", "'")
+        .replace("\u201b", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u201e", '"')
+        .replace("\u201f", '"')
         .replace("\u2010", "-")
         .replace("\u2011", "-")
         .replace("\u2012", "-")
@@ -505,7 +505,7 @@ def _normalize_unicode(value: str) -> str:
         .replace("\u2014", "-")
         .replace("\u2015", "-")
         .replace("\u2026", "...")
-        .replace("\u00A0", " ")
+        .replace("\u00a0", " ")
     )
 
 
@@ -573,9 +573,7 @@ def _parse_update_hunk_header(line: str, file_path: str) -> ParsedUpdateChunkHea
         if context:
             return ParsedUpdateChunkHeader(change_context=context)
 
-    raise ValueError(
-        f"Invalid update hunk for {file_path}: expected '@@', '@@ <context>', or '@@ -a,b +c,d @@'"
-    )
+    raise ValueError(f"Invalid update hunk for {file_path}: expected '@@', '@@ <context>', or '@@ -a,b +c,d @@'")
 
 
 def _preferred_chunk_index(chunk: UpdateFileChunk) -> int | None:

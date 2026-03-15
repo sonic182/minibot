@@ -211,3 +211,12 @@ env = {}
 cwd = "."
 enabled_tools = []
 disabled_tools = []
+
+# Agent Skills support (agentskills.io spec).
+# Setting `paths` to a non-empty list REPLACES the defaults entirely.
+# Use this when you want to load only your own skills and avoid picking up
+# development skills bundled with the MiniBot project directory.
+[tools.skills]
+enabled = true
+# Recommended: create a ./skills directory and set paths to load only your own skills.
+# paths = ["./skills"]
