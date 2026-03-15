@@ -28,7 +28,7 @@ Quickstart (Docker)
 
 Docker image includes:
 
-- Python deps with all MiniBot extras (`stt`, `mcp`)
+- Python deps with all MiniBot extras (`stt`, `mcp`, `lua`)
 - Node.js/npm (v24.14.0 from official Node.js tarball)
 - Playwright + Chromium
 - ffmpeg
@@ -41,6 +41,16 @@ Quickstart (Poetry)
 2. `cp config.example.toml config.toml` or `cp config.example.lua config.lua`
 3. Populate secrets in your config file (bot token, allowed chat IDs, provider credentials under `[providers.<name>]`).
 4. `poetry run minibot`
+
+Optional Lua Support
+--------------------
+
+MiniBot supports Lua as an optional extension layer for both config files and custom tools.
+
+- Install it with `poetry install --extras lua` (or `poetry install --all-extras`).
+- Lua config files are supported via `config.example.lua` and `config.lua`.
+- Lua custom tools are loaded from a configured directory via `[tools.lua_custom]` / `tools.lua_custom`.
+- If the `lua` extra is not installed, the normal Python + TOML path still works; only Lua-backed features fail.
 
 Console test channel
 --------------------
@@ -262,7 +272,51 @@ Use `config.example.toml` or `config.example.lua` as the source of truth, then u
 
 Every section has comments + defaults in `config.example.toml` and `config.example.lua`—read the format you plan to use for hints.
 
+Lua Config Notes
+----------------
+
+If you prefer Lua config:
+
+- Start from `config.example.lua`.
+- Provider keys can be read directly from the environment using `os.getenv(...)`.
+- The Lua config file is executed locally and must `return` one top-level table matching the MiniBot settings shape.
+- Without `lupa` installed, `.lua` config files will fail to load with an install hint.
+
 For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` if you want pre-enabled tools + Playwright MCP server.
+
+Lua Custom Tools
+----------------
+
+MiniBot can load custom tools written in Lua when `[tools.lua_custom]` is enabled.
+
+- Point `directory` at a folder containing `*.lua` files.
+- Each Lua file defines one tool and must return a table with:
+  - `name`
+  - `description`
+  - `parameters` as a JSON Schema object
+  - `handler(args)` as the tool implementation
+- The handler receives decoded tool arguments and returns JSON-like result data that MiniBot exposes as normal tool output.
+- Example config is documented in `config.example.toml` and `config.example.lua`.
+- A working sample tool is included at `lua_tools/example_echo.lua`.
+
+Example Lua tool config in TOML:
+
+```toml
+[tools.lua_custom]
+enabled = true
+directory = "./lua_tools"
+```
+
+Example Lua tool config in Lua:
+
+```lua
+tools = {
+  lua_custom = {
+    enabled = true,
+    directory = "./lua_tools",
+  },
+}
+```
 
 MCP Bridge Guide
 ----------------
