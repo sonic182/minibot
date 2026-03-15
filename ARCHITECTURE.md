@@ -343,7 +343,7 @@ Current notes:
 - `llm/tools/factory.py`: builds enabled tool bindings from settings.
 - `llm/tools/description_loader.py`: loads per-tool description strings from the `descriptions/` package at runtime.
 - `llm/tools/*`: concrete tool schemas + handlers:
-  - agent delegation (`list_agents`, `invoke_agent`),
+  - agent delegation (`fetch_agent_info`, `invoke_agent`),
   - chat memory management (`chat_history_info`, `chat_history_trim`),
   - calculator (`calculate_expression`),
   - HTTP client (`http_request`),

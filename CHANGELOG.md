@@ -82,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `filesystem` is now the primary file-operation surface (list/glob/info/write/move/delete/send).
   - `memory` is now the only exposed user-memory tool (sub-tools are internal-only).
   - `python_exec` and `history` unified wrappers were removed in favor of direct tools (`python_execute`, `python_environment_info`, `chat_history_info`, `chat_history_trim`).
-- Delegation tools were simplified to `list_agents` and `invoke_agent`; the `agent_delegate` wrapper tool was removed.
+- Delegation tools were simplified to `fetch_agent_info` and `invoke_agent`; the `agent_delegate` wrapper tool was removed.
 - Main system prompt was simplified, with tool descriptions treated as the authoritative source for tool-specific behavior.
 - Memory and delegation guidance was expanded so the model more proactively uses contextual memory lookup and specialist-agent discovery/delegation.
 - Direct delete fallback in `LLMMessageHandler` now routes through `filesystem(action="delete")`.
@@ -105,7 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Specialist-agent orchestration with file-defined agent specs (`./agents/*.md`), delegation tools (`list_agents`, `invoke_agent`, `agent_delegate`), and per-agent tool scoping for local tools + MCP servers.
+- Specialist-agent orchestration with file-defined agent specs (`./agents/*.md`), delegation tools (`fetch_agent_info`, `invoke_agent`, `agent_delegate`), and per-agent tool scoping for local tools + MCP servers.
 - Console channel support (`minibot-console`) for REPL and one-shot local conversations through the same dispatcher/handler pipeline used by Telegram.
 - Provider credential registry (`[providers.<name>]`) plus per-agent LLM overrides (provider/model/runtime params), including OpenRouter provider-routing and reasoning toggles.
 - Optional token-aware conversation compaction controls (`memory.max_history_tokens`) with token tracing metadata and optional user-facing compaction updates.
