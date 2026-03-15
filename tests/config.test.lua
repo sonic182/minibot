@@ -46,23 +46,23 @@ return {
 
   providers = {
     openai = {
-      api_key = "",
+      api_key = os.getenv("OPENAI_API_KEY", ""),
       base_url = "",
     },
     openai_responses = {
-      api_key = "",
+      api_key = os.getenv("OPENAI_API_KEY", ""),
       base_url = "",
     },
     openrouter = {
-      api_key = "",
+      api_key = os.getenv("OPENROUTER_API_KEY", ""),
       base_url = "",
     },
     claude = {
-      api_key = "",
+      api_key = os.getenv("CLAUDE_API_KEY", ""),
       base_url = "",
     },
     google = {
-      api_key = "",
+      api_key = os.getenv("GEMINI_API_KEY", ""),
       base_url = "",
     },
   },
@@ -138,6 +138,10 @@ return {
       vad_filter = true,
       auto_transcribe_short_incoming = true,
       auto_transcribe_max_duration_seconds = 45,
+    },
+    lua_custom = {
+      enabled = false,
+      directory = "./testdata/lua_tools",
     },
     calculator = {
       enabled = true,

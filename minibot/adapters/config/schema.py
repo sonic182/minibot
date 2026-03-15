@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import importlib
 import tomllib
 import types
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union, get_args, get_origin
 
+from minibot.adapters.lua.runtime import execute_lua_file, lua_to_python
 from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter, ValidationError
 from pydantic import model_validator
 
@@ -41,47 +41,13 @@ def _load_file_data(path: Path) -> Dict[str, Any]:
 
 def _load_lua_file_data(path: Path) -> Dict[str, Any]:
     try:
-        lupa = importlib.import_module("lupa")
-    except ModuleNotFoundError as exc:
+        _, result = execute_lua_file(path)
+    except RuntimeError as exc:
         raise RuntimeError("Lua config support requires `lupa`; install with `poetry install --extras lua`") from exc
-
-    lua = lupa.LuaRuntime(unpack_returned_tuples=True)
-    result = lua.execute(path.read_text(encoding="utf-8"))
-    if isinstance(result, tuple):
-        raise ValueError("lua config must return a single table")
-    data = _lua_to_python(result)
+    data = lua_to_python(result)
     if not isinstance(data, dict):
         raise ValueError("lua config must return a top-level table")
     return data
-
-
-def _lua_to_python(value: Any) -> Any:
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    if isinstance(value, (list, tuple)):
-        return [_lua_to_python(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _lua_to_python(item) for key, item in value.items()}
-    if not hasattr(value, "items"):
-        return value
-
-    items = [(key, item) for key, item in value.items()]
-    if not items:
-        return {}
-
-    keys = [key for key, _ in items]
-    if all(isinstance(key, str) for key in keys):
-        return {key: _lua_to_python(item) for key, item in items}
-
-    if all(isinstance(key, int) and not isinstance(key, bool) and key > 0 for key in keys):
-        ordered_keys = sorted(keys)
-        expected_keys = list(range(1, len(keys) + 1))
-        if ordered_keys != expected_keys:
-            raise ValueError("lua config arrays must use consecutive integer keys starting at 1")
-        ordered_items = sorted(items, key=lambda item: item[0])
-        return [_lua_to_python(item) for _, item in ordered_items]
-
-    raise ValueError("lua config tables must use either string keys or consecutive integer keys")
 
 
 def _normalize_for_annotation(value: Any, annotation: Any) -> Any:
@@ -407,6 +373,11 @@ class MCPToolConfig(BaseModel):
     servers: List[MCPServerConfig] = Field(default_factory=list)
 
 
+class LuaCustomToolConfig(BaseModel):
+    enabled: bool = False
+    directory: str = "./lua_tools"
+
+
 class FileStorageToolConfig(BaseModel):
     enabled: bool = False
     root_dir: str = "./data/files"
@@ -457,6 +428,7 @@ class ToolsConfig(BaseModel):
     audio_transcription: AudioTranscriptionToolConfig = AudioTranscriptionToolConfig()
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
+    lua_custom: LuaCustomToolConfig = LuaCustomToolConfig()
 
 
 class ScheduledPromptsConfig(BaseModel):

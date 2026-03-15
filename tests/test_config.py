@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from minibot.adapters.config import schema as config_schema
 from minibot.adapters.config.loader import load_settings
+from minibot.adapters.lua import runtime as lua_runtime
 
 
 def test_load_settings_from_file(tmp_path: Path) -> None:
@@ -312,14 +312,14 @@ def test_load_settings_lua_requires_lupa(tmp_path: Path, monkeypatch: pytest.Mon
     config_file = tmp_path / "bot.lua"
     config_file.write_text("return {}", encoding="utf-8")
 
-    real_import_module = config_schema.importlib.import_module
+    real_import_module = lua_runtime.importlib.import_module
 
     def _import_module(name: str):
         if name == "lupa":
             raise ModuleNotFoundError(name)
         return real_import_module(name)
 
-    monkeypatch.setattr(config_schema.importlib, "import_module", _import_module)
+    monkeypatch.setattr(lua_runtime.importlib, "import_module", _import_module)
 
     with pytest.raises(RuntimeError, match="poetry install --extras lua"):
         load_settings(config_file)

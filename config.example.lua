@@ -114,23 +114,26 @@ return {
 
   providers = {
     openai = {
-      api_key = "",
+      -- Default to OPENAI_API_KEY from the shell environment.
+      api_key = os.getenv("OPENAI_API_KEY", ""),
       base_url = "",
     },
     openai_responses = {
-      api_key = "",
+      -- Reuse OPENAI_API_KEY for the Responses API provider as well.
+      api_key = os.getenv("OPENAI_API_KEY", ""),
       base_url = "",
     },
     openrouter = {
-      api_key = "",
+      api_key = os.getenv("OPENROUTER_API_KEY", ""),
       base_url = "",
     },
     claude = {
-      api_key = "",
+      api_key = os.getenv("CLAUDE_API_KEY", ""),
       base_url = "",
     },
     google = {
-      api_key = "",
+      -- Gemini/OpenAI-compatible Google provider key.
+      api_key = os.getenv("GEMINI_API_KEY", ""),
       base_url = "",
     },
   },
@@ -253,6 +256,19 @@ return {
     -- Browser runtime paths used by browser-specialist prompts and Playwright MCP output-dir.
     browser = {
       output_dir = "./data/files/browser",
+    },
+
+    -- Optional Lua-defined custom tools (requires `poetry install --extras lua`).
+    lua_custom = {
+      enabled = false,
+      directory = "./lua_tools",
+      -- Load all `*.lua` files from this directory at startup.
+      -- Each file must return one tool manifest:
+      -- `name`: string
+      -- `description`: string
+      -- `parameters`: JSON Schema object
+      -- `handler(args)`: function that returns JSON-like result data
+      -- Example file: `./lua_tools/example_echo.lua`
     },
 
     -- Built-in current time/date tool.
