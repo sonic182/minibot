@@ -90,6 +90,11 @@ class Dispatcher:
             "main agent tool configuration loaded",
             extra={"main_agent_tools_enabled": self._main_agent_tool_names or ["none"]},
         )
+        if not skill_registry.is_empty():
+            self._logger.info(
+                "skills loaded",
+                extra={"skills": skill_registry.names()},
+            )
         if settings.tools.mcp.enabled:
             mcp_prefix = f"{settings.tools.mcp.name_prefix}_"
             mcp_tool_names = sorted(
