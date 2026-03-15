@@ -162,6 +162,10 @@ vad_filter = true
 auto_transcribe_short_incoming = true
 auto_transcribe_max_duration_seconds = 45
 
+[tools.lua_custom]
+enabled = false
+directory = "./testdata/lua_tools"
+
 # Built-in calculator tool.
 [tools.calculator]
 enabled = true

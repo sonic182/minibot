@@ -196,6 +196,64 @@ async def test_runtime_validates_structured_output_with_ratchet() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_accepts_healed_structured_output_with_trailing_comma() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[
+            LLMCompletionStep(
+                message=_FakeMessage(
+                    content='{"answer":{"kind":"text","content":"ok"},"should_continue":false,}'
+                ),
+                response_id="resp-1",
+                total_tokens=7,
+            )
+        ],
+        executions=[],
+    )
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert llm_client.complete_once_calls == 1
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["content"] == "ok"
+    assert result.payload["should_continue"] is False
+
+
+@pytest.mark.asyncio
+async def test_runtime_accepts_healed_structured_output_with_mixed_text() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[
+            LLMCompletionStep(
+                message=_FakeMessage(
+                    content='Here is the payload:\n{"answer":{"kind":"text","content":"ok"},"should_continue":false}'
+                ),
+                response_id="resp-1",
+                total_tokens=7,
+            )
+        ],
+        executions=[],
+    )
+    runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
+    state = AgentState(messages=[AgentMessage(role="user", content=[MessagePart(type="text", text="ping")])])
+
+    result = await runtime.run(
+        state=state,
+        tool_context=ToolContext(owner_id="1"),
+        response_schema={"type": "object"},
+    )
+
+    assert llm_client.complete_once_calls == 1
+    assert isinstance(result.payload, dict)
+    assert result.payload["answer"]["content"] == "ok"
+    assert result.payload["should_continue"] is False
+
+
+@pytest.mark.asyncio
 async def test_runtime_retries_invalid_structured_output_then_succeeds() -> None:
     llm_client = _StubRuntimeLLMClient(
         steps=[

@@ -1,0 +1,391 @@
+-- Runtime mode and verbosity.
+return {
+  runtime = {
+    -- Production note: use "INFO" (or "WARNING") here and set `environment = "production"`.
+    log_level = "DEBUG",
+    environment = "development",
+    -- E2E/research-heavy profile: increase agent timeout to reduce long-run failures.
+    agent_timeout_seconds = 420,
+  },
+
+  channels = {
+    -- Telegram adapter settings.
+    telegram = {
+      enabled = true,
+      bot_token = "",
+      allowed_chat_ids = {},
+      allowed_user_ids = {},
+      require_authorized = true,
+      mode = "long_polling",
+      webhook_url = "",
+      media_enabled = true,
+      -- Byte-size values accept raw integers or size strings, e.g. "5MB", "16KB", "2MiB".
+      max_photo_bytes = "5MB",
+      max_document_bytes = "10MB",
+      max_total_media_bytes = "12MB",
+      max_attachments_per_message = 3,
+      allowed_document_mime_types = {},
+      -- Example (Telegram + STT): allow common audio document MIME types.
+      -- allowed_document_mime_types = {
+      --   "audio/mpeg",
+      --   "audio/mp4",
+      --   "audio/wav",
+      --   "audio/ogg",
+      --   "audio/x-wav",
+      -- },
+    },
+  },
+
+  -- LLM provider and generation settings.
+  llm = {
+    provider = "openai_responses",
+    model = "gpt-5-mini",
+    -- reasoning_effort = "medium",
+    -- Structured-output mode for the main/orchestrator agent:
+    -- "provider_with_fallback": use provider-native schema first, then downgrade to prompt-only if unsupported.
+    -- "prompt_only": never send provider structured-output params; rely on prompt instructions + local validation.
+    -- "provider_strict": require provider-native structured outputs and fail instead of downgrading.
+    -- Recommendation: for smaller/less schema-reliable models, prefer "prompt_only".
+    -- Examples: "kimi-k2.5", "glm-5", "minimax-m2.5".
+    structured_output_mode = "provider_with_fallback",
+    -- Enable HTTP/2 for provider HTTP clients when supported (recommended for OpenAI Responses).
+    http2 = true,
+    max_tool_iterations = 60,
+    max_new_tokens = 50000,
+    request_timeout_seconds = 180,
+    sock_connect_timeout_seconds = 10,
+    sock_read_timeout_seconds = 180,
+    retry_attempts = 3,
+    retry_delay_seconds = 2.0,
+    -- Responses API state mode for the main agent.
+    -- "full_messages": resend full conversation each turn (default/safer behavior).
+    main_responses_state_mode = "full_messages",
+    -- Responses API state mode for delegated/specialist agents.
+    -- "previous_response_id": continue server-side state for lower latency/token usage.
+    agent_responses_state_mode = "previous_response_id",
+    prompt_cache_enabled = true,
+    -- Optional retention hint for OpenAI Responses prompt cache.
+    -- prompt_cache_retention = "24h",
+    -- Base system prompt (used when system_prompt_file is not configured or set to nil).
+    system_prompt = "You are Minibot, a helpful assistant.",
+    -- Load system prompt from versioned markdown file (default: "./prompts/main_agent_system.md").
+    -- Set to nil or "" to use system_prompt instead.
+    system_prompt_file = "./prompts/main_agent_system.md",
+    prompts_dir = "./prompts",
+
+    -- Optional OpenRouter-specific routing configuration.
+    -- Applied only when `llm.provider = "openrouter"`.
+    openrouter = {
+      -- reasoning_enabled = true,
+      -- Optional model pool for fallback routing.
+      models = {},
+      -- models = {
+      --   "anthropic/claude-3.5-sonnet",
+      --   "gryphe/mythomax-l2-13b",
+      -- },
+      -- Optional OpenRouter plugins (for example PDF parsing engine).
+      plugins = {},
+      -- plugins = {
+      --   {
+      --     id = "file-parser",
+      --     pdf = {
+      --       engine = "pdf-text",
+      --     },
+      --   },
+      -- },
+      provider = {
+        -- order = { "anthropic", "openai" },
+        -- allow_fallbacks = true,
+        -- require_parameters = false,
+        -- data_collection = "deny",
+        -- zdr = true,
+        -- enforce_distillable_text = false,
+        -- only = { "anthropic" },
+        -- ignore = { "parasail" },
+        -- quantizations = { "int8" },
+        -- sort = "price",
+        -- preferred_min_throughput = 20,
+        -- preferred_max_latency = 2.0,
+        -- max_price = { prompt = 3.0, completion = 15.0 },
+        provider_extra = {},
+      },
+    },
+  },
+
+  providers = {
+    openai = {
+      -- Default to OPENAI_API_KEY from the shell environment.
+      api_key = os.getenv("OPENAI_API_KEY") or "",
+      base_url = "",
+    },
+    openai_responses = {
+      -- Reuse OPENAI_API_KEY for the Responses API provider as well.
+      api_key = os.getenv("OPENAI_API_KEY") or "",
+      base_url = "",
+    },
+    openrouter = {
+      api_key = os.getenv("OPENROUTER_API_KEY") or "",
+      base_url = "",
+    },
+    claude = {
+      api_key = os.getenv("CLAUDE_API_KEY") or "",
+      base_url = "",
+    },
+    google = {
+      -- Gemini/OpenAI-compatible Google provider key.
+      api_key = os.getenv("GEMINI_API_KEY") or "",
+      base_url = "",
+    },
+  },
+
+  orchestration = {
+    directory = "./agents",
+    default_timeout_seconds = 360,
+    -- Tool ownership mode controls whether specialist-agent claimed tools are hidden from main agent.
+    -- "shared": main agent and specialists can both access the same tools.
+    -- "exclusive": any tool matched by an enabled specialist's allow/deny policy is hidden from main.
+    -- "exclusive_mcp": only specialist-claimed MCP tools are hidden from main; built-in tools stay shared.
+    tool_ownership_mode = "exclusive_mcp",
+    -- Delegated specialist tool-call policy:
+    -- "auto": require at least one tool call when delegated agent has any scoped tools.
+    -- "always": require at least one tool call for every delegated agent.
+    -- "never": do not enforce delegated tool calls.
+    delegated_tool_call_policy = "auto",
+    -- Tool-use guardrail for the main agent.
+    -- "disabled": no guardrail, trust the model output directly.
+    -- "llm_classifier": run a second LLM call to decide whether tools were required but skipped.
+    main_tool_use_guardrail = "disabled",
+    main_agent = {
+      name = "minibot",
+      -- Keep built-in tools enabled and hide direct MCP tools from main agent.
+      -- With tool_ownership_mode = "exclusive", tools claimed by specialists are also hidden from main.
+      -- With tool_ownership_mode = "exclusive_mcp", only claimed MCP tools are hidden from main.
+      tools_deny = { "mcp*" },
+    },
+  },
+
+  -- Conversation memory persistence.
+  memory = {
+    backend = "sqlite",
+    sqlite_url = "sqlite+aiosqlite:///./data/minibot.db",
+    max_history_messages = 200,
+    -- Startup auto-config: when models.dev has limits for the current model/provider,
+    -- MiniBot overrides max_history_tokens and llm/agent max_new_tokens in memory for this run.
+    -- If lookup fails, configured values are kept.
+    context_ratio_before_compact = 0.95,
+    max_history_tokens = 140000,
+    notify_compaction_updates = false,
+  },
+
+  scheduler = {
+    -- Scheduled prompt storage and polling.
+    prompts = {
+      enabled = true,
+      sqlite_url = "sqlite+aiosqlite:///./data/scheduled_prompts.db",
+      -- Poll cadence for scanning due jobs.
+      poll_interval_seconds = 60,
+      -- How long a claimed job stays leased before becoming claimable again.
+      lease_timeout_seconds = 120,
+      -- Max due jobs processed per poll cycle.
+      batch_size = 10,
+      -- Max attempts before job is marked failed.
+      max_attempts = 3,
+      -- Minimum allowed interval for recurring jobs (`recurrence_type = "interval"`).
+      min_recurrence_interval_seconds = 60,
+      pool_size = 5,
+      echo = false,
+    },
+  },
+
+  tools = {
+    -- Optional key/value memory tool.
+    kv_memory = {
+      enabled = false,
+      sqlite_url = "sqlite+aiosqlite:///./data/kv_memory.db",
+      pool_size = 5,
+      echo = false,
+      default_limit = 20,
+      max_limit = 100,
+      default_owner_id = "primary",
+    },
+
+    -- Optional HTTP fetch tool.
+    http_client = {
+      enabled = false,
+      timeout_seconds = 30,
+      max_bytes = "16KB",
+      response_processing_mode = "auto",
+      max_chars = 6000,
+      normalize_whitespace = true,
+    },
+
+    -- Managed file workspace tools.
+    file_storage = {
+      enabled = false,
+      root_dir = "./data/files",
+      max_write_bytes = "64KB",
+      allow_outside_root = false,
+      save_incoming_uploads = false,
+      uploads_subdir = "uploads",
+      incoming_temp_subdir = "uploads/temp",
+    },
+
+    -- Optional grep-style text search over managed files.
+    grep = {
+      enabled = false,
+      max_matches = 200,
+      max_file_size_bytes = "1MB",
+    },
+
+    -- Optional speech-to-text tool powered by faster-whisper (install with: poetry install --extras stt).
+    audio_transcription = {
+      enabled = false,
+      model = "small",
+      device = "auto",
+      compute_type = "int8",
+      beam_size = 5,
+      vad_filter = true,
+      auto_transcribe_short_incoming = true,
+      auto_transcribe_max_duration_seconds = 45,
+      -- Telegram STT example:
+      -- 1) set `tools.file_storage.enabled = true`
+      -- 2) optionally set `allowed_document_mime_types` to audio MIME types above
+      -- 3) set `enabled = true` here and ask in Telegram: "transcribe this audio"
+    },
+
+    -- Browser runtime paths used by browser-specialist prompts and Playwright MCP output-dir.
+    browser = {
+      output_dir = "./data/files/browser",
+    },
+
+    -- Optional Lua-defined custom tools (requires `poetry install --extras lua`).
+    lua_custom = {
+      enabled = false,
+      directory = "./lua_tools",
+      -- Load all `*.lua` files from this directory at startup.
+      -- Each file must return one tool manifest:
+      -- `name`: string
+      -- `description`: string
+      -- `parameters`: JSON Schema object
+      -- `handler(args)`: function that returns JSON-like result data
+      -- Example file: `./lua_tools/example_echo.lua`
+    },
+
+    -- Built-in current time/date tool.
+    time = {
+      enabled = true,
+      default_format = "%Y-%m-%dT%H:%M:%SZ",
+    },
+
+    -- Built-in calculator tool.
+    calculator = {
+      enabled = true,
+      default_scale = 28,
+      max_expression_length = 200,
+      max_exponent_abs = 1000,
+    },
+
+    -- Python code execution tool.
+    python_exec = {
+      enabled = true,
+      backend = "host",
+      python_path = "",
+      venv_path = "",
+      -- Valid sandbox modes: "none", "basic", "rlimit", "cgroup", "jail".
+      sandbox_mode = "basic",
+      default_timeout_seconds = 8,
+      max_timeout_seconds = 20,
+      max_output_bytes = "64KB",
+      max_code_bytes = "32KB",
+      artifacts_enabled = true,
+      artifacts_default_subdir = "generated",
+      artifacts_allowed_extensions = {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".pdf",
+        ".csv",
+        ".txt",
+        ".json",
+        ".svg",
+      },
+      artifacts_max_files = 5,
+      artifacts_max_file_bytes = "5MB",
+      artifacts_max_total_bytes = "20MB",
+      -- For safety, artifact export is blocked in sandbox_mode = "jail" unless explicitly enabled below.
+      artifacts_allow_in_jail = false,
+      -- Required when artifacts_allow_in_jail = true. Must be a host path accessible by both Firejail process and bot.
+      artifacts_jail_shared_dir = "",
+      pass_parent_env = false,
+      env_allowlist = { "PATH", "LANG", "LC_ALL", "PYTHONUTF8" },
+      -- RLIMIT sandbox parameters.
+      rlimit = {
+        enabled = false,
+        cpu_seconds = 2,
+        memory_mb = 256,
+        fsize_mb = 16,
+        nproc = 64,
+        nofile = 256,
+      },
+      -- Cgroup sandbox parameters.
+      cgroup = {
+        enabled = false,
+        driver = "systemd",
+        cpu_quota_percent = 100,
+        memory_max_mb = 256,
+      },
+      -- External jail wrapper settings.
+      jail = {
+        enabled = false,
+        command_prefix = {},
+      },
+    },
+
+    bash = {
+      enabled = false,
+      default_timeout_seconds = 15,
+      max_timeout_seconds = 120,
+      max_output_bytes = "128KB",
+      pass_parent_env = true,
+      env_allowlist = { "PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL" },
+    },
+
+    apply_patch = {
+      enabled = false,
+      restrict_to_workspace = true,
+      workspace_root = ".",
+      allow_outside_workspace = false,
+      preserve_trailing_newline = true,
+      max_patch_bytes = "256KB",
+    },
+
+    -- Optional Model Context Protocol bridge.
+    mcp = {
+      enabled = false,
+      name_prefix = "mcp",
+      timeout_seconds = 10,
+      servers = {},
+      -- Example stdio server:
+      -- servers = {
+      --   {
+      --     name = "playwright-cli",
+      --     transport = "stdio",
+      --     command = "npx",
+      --     args = { "@playwright/mcp@0.0.64", "--headless" },
+      --     env = {},
+      --     cwd = ".",
+      --   },
+      -- }
+    },
+  },
+
+  -- Structured logging output.
+  logging = {
+    structured = true,
+    logfmt_enabled = true,
+    -- Production note: set to "INFO" to reduce verbosity.
+    log_level = "DEBUG",
+    kv_separator = "=",
+    record_separator = " ",
+  },
+}

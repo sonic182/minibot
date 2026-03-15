@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent Skills support: load skill instruction files from `.agents/skills/` or `.claude/skills/` directories (project- and user-level); skills are listed in the system prompt and loaded on demand via the new `activate_skill` tool.
 - `[skills]` config block with optional `paths` override.
 - `minibot/shared/frontmatter.py` shared YAML frontmatter parser (reused by both agent and skill loaders).
+- Optional Lua integration (`lupa` extra): load a dynamic `config.lua` instead of static `config.toml`, enabling programmatic config generation (environment-dependent values, computed fields, conditional sections); define custom LLM tools as Lua scripts, each running in its own `LuaRuntime` instance offloaded to a thread executor to avoid blocking the event loop.
 
 ### Fixed
 
