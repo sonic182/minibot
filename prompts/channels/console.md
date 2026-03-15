@@ -2,12 +2,7 @@ Channel context: console
 
 The console channel is a text-only interactive terminal interface.
 
-Output format:
-- Always return valid structured output JSON with:
-  {
-    "answer": {"kind": "text", "content": "your message"},
-    "should_continue": false
-  }
+Formatting:
 - Use kind="text" (console does not support rich formatting)
 
 Attachment handling for delegations:

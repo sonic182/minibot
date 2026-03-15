@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `general_agent` specialist (`agents/general.md`) for offloading simple and intermediate tasks with MCP tools excluded by default.
+- Token-limit auto-configuration at startup (`minibot/app/token_limits_autoconfig.py`): fetches the models catalog from `models.dev` and automatically sets `max_history_tokens` and `max_new_tokens` for the main model and each agent spec based on real context/output limits.
+- `structured_output_mode` config knob supporting `"prompt"` mode: when schema-based responses are not supported by a model, the schema is injected into the system prompt instead of being sent as a native response schema.
+- New `minibot/llm/services/structured_output_policy.py` module with helpers to normalize output modes, decide whether to send a response schema natively, and augment system prompts with schema guidance.
+- New `minibot/llm/services/reasoning_replay.py` module for replaying reasoning steps during structured-output retries.
+- Agent name and description validation warnings in `agent_definitions_loader` (name pattern check, description length cap).
+- `fetch_agent_info` tool description file added (`minibot/llm/tools/descriptions/fetch_agent_info.txt`).
+
+### Changed
+
+- `complete_with_schema_fallback` now applies provider-agnostic retry logic (previously OpenRouter-only): any provider can retry without `response_schema` and fall back to prompt-injected schema guidance.
+- `generate_with_tools` now accepts `local_response_model` and `structured_output_mode` parameters; structured validator now uses the local Pydantic model when available.
+- Structured validation `FailAction` now returns a deterministic user-facing fallback payload with `should_continue: false` instead of a raw dict dump.
+- Agent runtime and delegation flow hardened: delegation trace, response parser, and runtime service were refined for cleaner structured-output handling and delegation result extraction.
+- `browser_agent.md` output contract updated: `should_answer_to_user` field replaced by `should_continue`, and screenshot instructions generalized to tool-agnostic guidance.
+- Delegation tools (`fetch_agent_info`, `invoke_agent`) descriptions updated; `list_agents` description removed.
+- Main agent system prompt and channel prompts (console, Telegram) simplified.
+- `prompts/policies/delegation.md` removed; delegation guidance consolidated into tool descriptions and the main system prompt.
+
+### Fixed
+
+- Schema fallback retry no longer leaks internal `_structured_output_prompt_schema` key to the provider call.
+- Agent registry and dispatcher startup logging improved for enabled agents and tools.
+
 ## [0.0.8] - 2026-03-08
 
 ### Added
