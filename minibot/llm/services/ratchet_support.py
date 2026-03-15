@@ -18,7 +18,6 @@ class StructuredOutputValidator:
         state_name: str = "final_response",
     ) -> None:
         self._state_name = state_name
-        self._schema = schema
         machine_schema = _build_machine_schema(schema)
         self._machine = StateMachine(
             states={
@@ -39,7 +38,7 @@ class StructuredOutputValidator:
         if isinstance(action, ValidAction | RetryAction | FailAction):
             return action
         return FailAction(
-            attempts=1,
+            attempts=action.attempts,
             state_name=self._state_name,
             raw=raw,
             history=(),
@@ -52,6 +51,8 @@ class StructuredOutputValidator:
     @staticmethod
     def valid_payload(action: ValidAction) -> Any:
         parsed = action.parsed
+        if isinstance(parsed, RootModel):
+            return parsed.root
         if isinstance(parsed, BaseModel):
             return parsed.model_dump(mode="python", exclude_none=True)
         return parsed

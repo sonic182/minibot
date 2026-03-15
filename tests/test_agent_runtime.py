@@ -200,9 +200,7 @@ async def test_runtime_accepts_healed_structured_output_with_trailing_comma() ->
     llm_client = _StubRuntimeLLMClient(
         steps=[
             LLMCompletionStep(
-                message=_FakeMessage(
-                    content='{"answer":{"kind":"text","content":"ok"},"should_continue":false,}'
-                ),
+                message=_FakeMessage(content='{"answer":{"kind":"text","content":"ok"},"should_continue":false,}'),
                 response_id="resp-1",
                 total_tokens=7,
             )
