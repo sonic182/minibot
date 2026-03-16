@@ -89,7 +89,7 @@ class HistoryCompactionService:
         try:
             if self._should_use_responses_compaction_endpoint(session_id, responses_state_mode):
                 try:
-                    previous_response_id = self._session_state.get_previous_response_id(session_id)
+                    previous_response_id = self._session_state.get_previous_response_id(session_id, system_prompt=None)
                     if previous_response_id:
                         compacted = await self._llm_client.compact_response(
                             previous_response_id=previous_response_id,
@@ -102,7 +102,11 @@ class HistoryCompactionService:
                         await self._memory.append_history(session_id, "user", self._compaction_user_request)
                         await self._memory.append_history(session_id, "assistant", compaction_text)
                         self._session_state.session_total_tokens[session_id] = 0
-                        self._session_state.set_previous_response_id(session_id, compacted.response_id)
+                        self._session_state.set_previous_response_id(
+                            session_id,
+                            compacted.response_id,
+                            system_prompt=system_prompt,
+                        )
                         if notify:
                             updates.append("done compacting")
                             updates.append(compaction_text)
@@ -144,7 +148,12 @@ class HistoryCompactionService:
             if responses_state_mode == "previous_response_id":
                 fallback_response_id = getattr(compact_generation, "response_id", None)
                 if isinstance(fallback_response_id, str) and fallback_response_id:
-                    self._session_state.set_previous_response_id(session_id, fallback_response_id)
+                    compact_system_prompt = self._prompt_service.compact_system_prompt(system_prompt)
+                    self._session_state.set_previous_response_id(
+                        session_id,
+                        fallback_response_id,
+                        system_prompt=compact_system_prompt,
+                    )
                 else:
                     self._session_state.clear_previous_response_id(session_id)
             if notify:

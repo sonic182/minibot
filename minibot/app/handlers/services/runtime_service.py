@@ -131,7 +131,7 @@ class RuntimeOrchestrationService:
                 tool_context=tool_context,
                 response_schema=response_schema,
                 prompt_cache_key=prompt_cache_key,
-                initial_previous_response_id=generation.response_id,
+                initial_previous_response_id=None,
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
             trace_result = extract_delegation_trace(generation.state)
@@ -172,7 +172,7 @@ class RuntimeOrchestrationService:
                 tool_context=tool_context,
                 response_schema=response_schema,
                 prompt_cache_key=prompt_cache_key,
-                initial_previous_response_id=generation.response_id,
+                initial_previous_response_id=None,
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
             trace_result = extract_delegation_trace(generation.state)

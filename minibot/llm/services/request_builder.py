@@ -54,7 +54,7 @@ def build_generate_extra_kwargs(
         extra_kwargs["prompt_cache_retention"] = ctx.prompt_cache_retention
     if ctx.is_responses_provider and ctx.reasoning_effort:
         extra_kwargs.setdefault("reasoning", {"effort": ctx.reasoning_effort})
-    if ctx.is_responses_provider:
+    if ctx.is_responses_provider and not previous_response_id:
         extra_kwargs["instructions"] = system_prompt
     return extra_kwargs
 
@@ -108,7 +108,7 @@ def build_complete_once_call_kwargs(
         if ctx.max_new_tokens is not None:
             call_kwargs["max_output_tokens"] = ctx.max_new_tokens
         instructions = extract_system_instructions(messages)
-        if instructions:
+        if instructions and not previous_response_id:
             call_kwargs["instructions"] = instructions
     else:
         resolved_max_tokens = resolved_max_tokens_for_request(ctx)
@@ -140,7 +140,6 @@ def build_continue_call_kwargs(
         "tools": None,
         "response_schema": response_schema,
         "previous_response_id": previous_response_id,
-        "instructions": system_prompt,
     }
     if ctx.temperature is not None:
         call_kwargs["temperature"] = ctx.temperature

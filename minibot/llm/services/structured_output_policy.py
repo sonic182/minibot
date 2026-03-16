@@ -38,6 +38,10 @@ def should_retry_without_response_schema(
         return True
     if '"code":20024' in message:
         return True
+    if "invalid schema for response_format" in message:
+        return True
+    if "'allof' is not permitted" in message:
+        return True
     if "response_schema" in message and ("unsupported" in message or "not supported" in message):
         return True
     if "response_format" in message and ("unsupported" in message or "not supported" in message):

@@ -144,12 +144,14 @@ class LLMTurnService:
             )
 
         history = list(await self._memory.get_history(session_id))
+        system_prompt = self._prompt_service.compose_system_prompt(message.channel)
         use_previous_response_id = self._use_previous_response_id()
         previous_response_id = (
-            self._session_state.get_previous_response_id(session_id) if use_previous_response_id else None
+            self._session_state.get_previous_response_id(session_id, system_prompt=system_prompt)
+            if use_previous_response_id
+            else None
         )
         prompt_cache_key = _prompt_cache_key(message) if self._profile.prompt_cache_enabled else None
-        system_prompt = self._prompt_service.compose_system_prompt(message.channel)
         agent_trace: list[dict[str, Any]] = []
         delegation_fallback_used = False
         runtime_result = None
@@ -183,7 +185,11 @@ class LLMTurnService:
                 render = parsed.render or plain_render("")
                 should_reply = parsed.has_visible_answer
                 if use_previous_response_id and generation.response_id:
-                    self._session_state.set_previous_response_id(session_id, generation.response_id)
+                    self._session_state.set_previous_response_id(
+                        session_id,
+                        generation.response_id,
+                        system_prompt=system_prompt,
+                    )
             else:
                 runtime_result = await self._runtime_service.run_with_agent_runtime(
                     session_id=session_id,
@@ -205,7 +211,11 @@ class LLMTurnService:
                 delegation_fallback_used = runtime_result.delegation_fallback_used
                 self._recent_file_tracking_service.track_from_runtime_state(session_id, runtime_result.runtime_state)
                 if use_previous_response_id and runtime_result.response_id:
-                    self._session_state.set_previous_response_id(session_id, runtime_result.response_id)
+                    self._session_state.set_previous_response_id(
+                        session_id,
+                        runtime_result.response_id,
+                        system_prompt=system_prompt,
+                    )
 
             if not use_previous_response_id:
                 self._session_state.clear_previous_response_id(session_id)
@@ -284,7 +294,9 @@ class LLMTurnService:
         system_prompt = self._prompt_service.compose_system_prompt(channel)
         use_previous_response_id = self._use_previous_response_id()
         previous_response_id = (
-            self._session_state.get_previous_response_id(session_id) if use_previous_response_id else None
+            self._session_state.get_previous_response_id(session_id, system_prompt=system_prompt)
+            if use_previous_response_id
+            else None
         )
         original_kind = response.render.kind if response.render is not None else "text"
         original_content = response.render.text if response.render is not None else response.text
@@ -307,7 +319,11 @@ class LLMTurnService:
             system_prompt_override=system_prompt,
         )
         if use_previous_response_id and generation.response_id:
-            self._session_state.set_previous_response_id(session_id, generation.response_id)
+            self._session_state.set_previous_response_id(
+                session_id,
+                generation.response_id,
+                system_prompt=system_prompt,
+            )
         turn_total_tokens += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
         parsed = extract_answer(generation.payload, logger=self._logger)
         render = parsed.render or plain_render(str(generation.payload))

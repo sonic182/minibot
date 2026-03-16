@@ -90,40 +90,6 @@ def assistant_response_schema(
         "properties": properties,
         "required": ["should_continue"],
         "additionalProperties": False,
-        "allOf": [
-            {
-                "if": {
-                    "properties": {"should_continue": {"const": False}},
-                    "required": ["should_continue"],
-                },
-                "then": {
-                    "required": ["answer"],
-                    "properties": {
-                        "answer": {
-                            "type": "object",
-                            "properties": {
-                                "kind": {"type": "string", "enum": list(kinds)},
-                                "content": {"type": "string", "minLength": 1},
-                                **(
-                                    {
-                                        "meta": {
-                                            "type": "object",
-                                            "properties": {"disable_link_preview": {"type": "boolean"}},
-                                            "required": [],
-                                            "additionalProperties": False,
-                                        }
-                                    }
-                                    if include_meta
-                                    else {}
-                                ),
-                            },
-                            "required": ["kind", "content"],
-                            "additionalProperties": False,
-                        }
-                    },
-                },
-            }
-        ],
     }
 
 

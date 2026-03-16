@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from typing import Any
 
 
@@ -16,6 +17,7 @@ class SessionStateService:
     def __init__(self) -> None:
         self.session_total_tokens: dict[str, int] = {}
         self.session_previous_response_ids: dict[str, str] = {}
+        self.session_previous_response_prompt_fingerprints: dict[str, str] = {}
         self.session_latest_input_tokens: dict[str, int] = {}
         self.session_latest_output_tokens: dict[str, int] = {}
         self.session_latest_total_tokens: dict[str, int] = {}
@@ -32,15 +34,30 @@ class SessionStateService:
     def current_tokens(self, session_id: str) -> int:
         return self.session_total_tokens.get(session_id, 0)
 
-    def set_previous_response_id(self, session_id: str, response_id: str | None) -> None:
+    def set_previous_response_id(self, session_id: str, response_id: str | None, *, system_prompt: str | None) -> None:
         if response_id:
             self.session_previous_response_ids[session_id] = response_id
+            if system_prompt is not None:
+                fingerprint = self._prompt_fingerprint(system_prompt)
+                self.session_previous_response_prompt_fingerprints[session_id] = fingerprint
+            else:
+                self.session_previous_response_prompt_fingerprints.pop(session_id, None)
 
-    def get_previous_response_id(self, session_id: str) -> str | None:
-        return self.session_previous_response_ids.get(session_id)
+    def get_previous_response_id(self, session_id: str, *, system_prompt: str | None) -> str | None:
+        response_id = self.session_previous_response_ids.get(session_id)
+        if response_id is None:
+            return None
+        expected_fingerprint = self.session_previous_response_prompt_fingerprints.get(session_id)
+        if system_prompt is None or expected_fingerprint is None:
+            return response_id
+        if expected_fingerprint == self._prompt_fingerprint(system_prompt):
+            return response_id
+        self.clear_previous_response_id(session_id)
+        return None
 
     def clear_previous_response_id(self, session_id: str) -> None:
         self.session_previous_response_ids.pop(session_id, None)
+        self.session_previous_response_prompt_fingerprints.pop(session_id, None)
 
     def has_previous_response_id(self, session_id: str) -> bool:
         return session_id in self.session_previous_response_ids
@@ -108,3 +125,7 @@ class SessionStateService:
             "compaction_performed": compaction_performed,
             "accounting_scope": "all_turn_calls",
         }
+
+    @staticmethod
+    def _prompt_fingerprint(system_prompt: str) -> str:
+        return hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
