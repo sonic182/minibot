@@ -26,7 +26,6 @@ and emit outbound responses back to the active channel adapter.
 ├── TODO.md
 ├── agents/              (specialist agent definition markdown files)
 ├── config.example.toml
-├── config.example.lua
 ├── config.yolo.toml
 ├── docker-requirements.txt
 ├── prompts/
@@ -408,7 +407,7 @@ The scheduler currently focuses on scheduled prompts (not a generic task DAG eng
 
 ## Configuration Surface
 
-`config.example.toml` and `config.example.lua` are reference configs (with production-oriented defaults).
+`config.example.toml` is the reference config (with production-oriented defaults).
 `config.yolo.toml` is a Docker-oriented full-capability profile (pre-enabled tools + Playwright MCP server).
 
 Main sections:

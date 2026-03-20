@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from minibot.adapters.config.loader import load_settings
+from minibot.adapters.config.schema import Settings
 from minibot.adapters.lua import runtime as lua_runtime
 
 
@@ -306,6 +307,65 @@ return {
     settings = load_settings()
     assert settings.llm.api_key == "lua-secret"
     assert settings.channels["telegram"].bot_token == "token"
+
+
+def test_load_settings_skips_default_directory_candidates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("lupa")
+
+    (tmp_path / "config.toml").mkdir()
+    config_file = tmp_path / "config.lua"
+    config_file.write_text(
+        """
+return {
+  llm = {
+    provider = "openai",
+    api_key = "lua-secret",
+  },
+  channels = {
+    telegram = {
+      bot_token = "token",
+    },
+  },
+}
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MINIBOT_CONFIG", raising=False)
+
+    settings = load_settings()
+    assert settings.llm.api_key == "lua-secret"
+    assert settings.channels["telegram"].bot_token == "token"
+
+
+def test_load_settings_rejects_directory_for_explicit_path(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config.toml"
+    config_dir.mkdir()
+
+    with pytest.raises(ValueError, match="config path must be a file"):
+        load_settings(config_dir)
+
+
+def test_load_settings_skips_default_lua_when_lupa_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "config.lua"
+    config_file.write_text("return {}", encoding="utf-8")
+
+    real_import_module = lua_runtime.importlib.import_module
+
+    def _import_module(name: str):
+        if name == "lupa":
+            raise ModuleNotFoundError(name)
+        return real_import_module(name)
+
+    monkeypatch.setattr(lua_runtime.importlib, "import_module", _import_module)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MINIBOT_CONFIG", raising=False)
+
+    settings = load_settings()
+    assert settings == Settings()
 
 
 def test_load_settings_lua_requires_lupa(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

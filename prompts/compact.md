@@ -26,6 +26,3 @@ Exclude:
 - Repeated explanations
 - Speculative ideas not acted upon
 - Irrelevant tangents
-
-Write in compact bullet points or short lines.
-Return only the compacted summary text. No preamble, no commentary.

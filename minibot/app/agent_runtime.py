@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -113,13 +114,39 @@ class AgentRuntime:
                 ):
                     call_messages = responses_followup_messages
 
-                completion = await self._llm_client.complete_once(
-                    messages=call_messages,
-                    tools=self._tools,
-                    response_schema=response_schema,
-                    prompt_cache_key=prompt_cache_key,
-                    previous_response_id=previous_response_id,
+                provider_name = getattr(self._llm_client, "provider_name", lambda: "unknown")()
+                started_at = time.monotonic()
+                self._logger.debug(
+                    "agent runtime provider step started",
+                    extra={
+                        "step": step,
+                        "provider": provider_name,
+                        "response_schema_present": response_schema is not None,
+                        "previous_response_id_present": previous_response_id is not None,
+                        "message_count": len(call_messages),
+                    },
                 )
+                try:
+                    completion = await self._llm_client.complete_once(
+                        messages=call_messages,
+                        tools=self._tools,
+                        response_schema=response_schema,
+                        prompt_cache_key=prompt_cache_key,
+                        previous_response_id=previous_response_id,
+                    )
+                except Exception:
+                    self._logger.warning(
+                        "agent runtime provider step failed",
+                        extra={
+                            "step": step,
+                            "provider": provider_name,
+                            "response_schema_present": response_schema is not None,
+                            "previous_response_id_present": previous_response_id is not None,
+                            "duration_ms": round((time.monotonic() - started_at) * 1000),
+                        },
+                        exc_info=True,
+                    )
+                    raise
                 if isinstance(completion.total_tokens, int) and completion.total_tokens > 0:
                     total_tokens += completion.total_tokens
                 responses_followup_messages = None
@@ -133,6 +160,8 @@ class AgentRuntime:
                         if isinstance(completion.total_tokens, int)
                         else "0",
                         "runtime_total_tokens": humanize_token_count(total_tokens),
+                        "provider": provider_name,
+                        "duration_ms": round((time.monotonic() - started_at) * 1000),
                     },
                 )
                 previous_response_id = completion.response_id
