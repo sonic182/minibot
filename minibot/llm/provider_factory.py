@@ -14,6 +14,7 @@ from minibot.llm.services.client_bootstrap import (
     load_system_prompt,
     resolve_openrouter_reasoning_enabled,
 )
+from minibot.llm.services.provider_capabilities import build_provider_capability_hints, build_provider_native_tools
 from minibot.llm.services.compaction import compact_response as compact_response_via_service
 from minibot.llm.services.debug_logging import log_provider_response
 from minibot.llm.services.generation_loop import generate_with_tools
@@ -40,6 +41,7 @@ from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
 from minibot.llm.services.usage_parser import (
     extract_response_id,
     extract_total_tokens,
+    extract_usage_from_response,
 )
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.retries import AsyncRetriesService
@@ -70,6 +72,8 @@ class LLMClient:
         self._openrouter_provider = build_openrouter_provider_payload(config)
         self._openrouter_reasoning_enabled = resolve_openrouter_reasoning_enabled(config)
         self._openrouter_plugins = tuple(getattr(getattr(config, "openrouter", None), "plugins", []) or [])
+        self._provider_native_tools = build_provider_native_tools(config)
+        self._provider_capability_hints = build_provider_capability_hints(config)
         self._is_responses_provider = is_responses_provider_instance(self._provider)
         self._logger = logging.getLogger("minibot.llm")
 
@@ -85,6 +89,7 @@ class LLMClient:
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
         system_prompt_override: str | None = None,
+        include_provider_native_tools: bool = True,
     ) -> LLMGeneration:
         system_prompt = system_prompt_override or self._system_prompt
         if not self._provider.api_key:
@@ -103,7 +108,7 @@ class LLMClient:
             prompt_cache_key=prompt_cache_key,
             previous_response_id=previous_response_id,
             model=self._model,
-            request_ctx=self._request_context(),
+            request_ctx=self._request_context(include_provider_native_tools=include_provider_native_tools),
             is_responses_provider=self._is_responses_provider,
             max_new_tokens=self._max_new_tokens,
             max_tool_iterations=self._max_tool_iterations,
@@ -151,6 +156,7 @@ class LLMClient:
         response_schema: dict[str, Any] | None = None,
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
+        include_provider_native_tools: bool = True,
     ) -> LLMCompletionStep:
         strict_response_schema = (
             normalize_response_schema(response_schema, self._model)
@@ -158,7 +164,7 @@ class LLMClient:
             else None
         )
         tool_specs = prepare_tool_specs(tools or [], self._model)
-        request_ctx = self._request_context()
+        request_ctx = self._request_context(include_provider_native_tools=include_provider_native_tools)
         call_kwargs = build_complete_once_call_kwargs(
             ctx=request_ctx,
             messages=messages,
@@ -197,6 +203,7 @@ class LLMClient:
             message=message,
             response_id=extract_response_id(response),
             total_tokens=usage_tokens,
+            provider_tool_calls=extract_usage_from_response(response).provider_tool_calls,
         )
 
     async def execute_tool_calls_for_runtime(
@@ -251,7 +258,11 @@ class LLMClient:
             supports_media_inputs=self.supports_media_inputs(),
             supports_agent_runtime=True,
             is_responses_provider=self.is_responses_provider(),
+            provider_capability_hints=self.provider_capability_hints(),
         )
+
+    def provider_capability_hints(self) -> list[str]:
+        return list(self._provider_capability_hints)
 
     async def _complete_with_schema_fallback(self, call_kwargs: dict[str, Any]) -> Any:
         return await complete_with_schema_fallback(
@@ -263,7 +274,7 @@ class LLMClient:
             structured_output_mode=self._structured_output_mode,
         )
 
-    def _request_context(self) -> RequestContext:
+    def _request_context(self, *, include_provider_native_tools: bool = True) -> RequestContext:
         return RequestContext(
             model=self._model,
             provider_name=self._provider_name,
@@ -277,4 +288,5 @@ class LLMClient:
             openrouter_provider=self._openrouter_provider,
             openrouter_reasoning_enabled=self._openrouter_reasoning_enabled,
             openrouter_plugins=self._openrouter_plugins,
+            provider_native_tools=self._provider_native_tools if include_provider_native_tools else (),
         )

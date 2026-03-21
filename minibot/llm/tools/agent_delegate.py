@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal, Sequence
@@ -177,14 +178,15 @@ class AgentDelegateTool:
 
         llm_client = self._llm_factory.create_for_agent(spec)
         scoped_tools = self._scoped_tools(spec)
+        runtime_limits = build_runtime_limits(
+            llm_client=llm_client,
+            timeout_seconds=self._default_timeout_seconds,
+            min_timeout_seconds=30,
+        )
         runtime = AgentRuntime(
             llm_client=llm_client,
             tools=scoped_tools,
-            limits=build_runtime_limits(
-                llm_client=llm_client,
-                timeout_seconds=self._default_timeout_seconds,
-                min_timeout_seconds=30,
-            ),
+            limits=runtime_limits,
             allowed_append_message_tools=["self_insert_artifact", "artifact_insert"],
             allow_system_inserts=False,
             managed_files_root=None,
@@ -197,7 +199,23 @@ class AgentDelegateTool:
         prompt_cache_key = _agent_prompt_cache_key(llm_client=llm_client, context=context, agent_name=spec.name)
         state_mode_getter = getattr(llm_client, "responses_state_mode", None)
         use_previous_response_id = callable(state_mode_getter) and state_mode_getter() == "previous_response_id"
+        provider_name = llm_client.provider_name()
+        model_name = llm_client.model_name()
         try:
+            started_at = time.monotonic()
+            self._logger.debug(
+                "delegated agent runtime attempt started",
+                extra={
+                    "agent": spec.name,
+                    "attempt": attempts,
+                    "provider": provider_name,
+                    "model": model_name,
+                    "tool_required": tool_required,
+                    "tool_count": len(scoped_tools),
+                    "timeout_seconds": runtime_limits.timeout_seconds,
+                    "prompt_cache_key_present": bool(prompt_cache_key),
+                },
+            )
             generation = await runtime.run(
                 state=state,
                 tool_context=context,
@@ -205,6 +223,18 @@ class AgentDelegateTool:
                 prompt_cache_key=prompt_cache_key,
                 initial_previous_response_id=previous_response_id,
                 structured_validator=RuntimeStructuredOutputValidator(schema_model=_DelegatedPayload, max_attempts=3),
+            )
+            self._logger.debug(
+                "delegated agent runtime attempt completed",
+                extra={
+                    "agent": spec.name,
+                    "attempt": attempts,
+                    "provider": provider_name,
+                    "model": model_name,
+                    "duration_ms": round((time.monotonic() - started_at) * 1000),
+                    "response_id": generation.response_id,
+                    "total_tokens": int(generation.total_tokens or 0),
+                },
             )
             if use_previous_response_id:
                 previous_response_id = generation.response_id
@@ -229,6 +259,21 @@ class AgentDelegateTool:
                         "your final answer. Execute the necessary tool now, then return the result."
                     ),
                 )
+                started_at = time.monotonic()
+                self._logger.debug(
+                    "delegated agent runtime attempt started",
+                    extra={
+                        "agent": spec.name,
+                        "attempt": attempts,
+                        "provider": provider_name,
+                        "model": model_name,
+                        "tool_required": tool_required,
+                        "tool_count": len(scoped_tools),
+                        "timeout_seconds": runtime_limits.timeout_seconds,
+                        "prompt_cache_key_present": bool(prompt_cache_key),
+                        "retry_reason": "missing_tool_calls",
+                    },
+                )
                 generation = await runtime.run(
                     state=retry_state,
                     tool_context=context,
@@ -239,6 +284,18 @@ class AgentDelegateTool:
                         schema_model=_DelegatedPayload,
                         max_attempts=3,
                     ),
+                )
+                self._logger.debug(
+                    "delegated agent runtime attempt completed",
+                    extra={
+                        "agent": spec.name,
+                        "attempt": attempts,
+                        "provider": provider_name,
+                        "model": model_name,
+                        "duration_ms": round((time.monotonic() - started_at) * 1000),
+                        "response_id": generation.response_id,
+                        "total_tokens": int(generation.total_tokens or 0),
+                    },
                 )
                 if use_previous_response_id:
                     previous_response_id = generation.response_id
@@ -306,6 +363,35 @@ class AgentDelegateTool:
                 response["error_code"] = outcome.error_code
                 response["error"] = f"delegated agent returned {outcome.error_code}"
             return response
+        except TimeoutError:
+            self._logger.warning(
+                "delegated agent invocation timed out",
+                extra={
+                    "agent": spec.name,
+                    "attempt": attempts,
+                    "provider": provider_name,
+                    "model": model_name,
+                    "tool_required": tool_required,
+                    "tool_count": len(scoped_tools),
+                    "timeout_seconds": runtime_limits.timeout_seconds,
+                    "total_tokens": total_tokens,
+                },
+            )
+            return {
+                "ok": False,
+                "agent": spec.name,
+                "result": "Delegated agent timed out waiting for provider response.",
+                "result_status": "timeout",
+                "should_continue": False,
+                "tool_count": len(scoped_tools),
+                "tool_messages_count": 0,
+                "delegation_attempts": attempts,
+                "total_tokens": total_tokens,
+                "error_code": "delegated_timeout",
+                "error": "delegated agent timed out waiting for provider response",
+                "provider": provider_name,
+                "model": model_name,
+            }
         except Exception as exc:
             self._logger.exception(
                 "delegated agent invocation failed",

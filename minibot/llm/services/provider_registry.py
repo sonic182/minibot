@@ -5,13 +5,15 @@ from typing import Any
 from llm_async.providers import ClaudeProvider, GoogleProvider, OpenAIProvider, OpenRouterProvider
 from llm_async.providers.openai_responses import OpenAIResponsesProvider
 
+from minibot.llm.providers import PatchedOpenAIResponsesProvider
+
 
 LLM_PROVIDERS = {
     "openai": OpenAIProvider,
     "claude": ClaudeProvider,
     "google": GoogleProvider,
     "openrouter": OpenRouterProvider,
-    "openai_responses": OpenAIResponsesProvider,
+    "openai_responses": PatchedOpenAIResponsesProvider,
 }
 
 

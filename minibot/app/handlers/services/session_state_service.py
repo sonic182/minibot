@@ -23,6 +23,7 @@ class SessionStateService:
         self.session_latest_total_tokens: dict[str, int] = {}
         self.session_latest_cached_input_tokens: dict[str, int] = {}
         self.session_latest_reasoning_output_tokens: dict[str, int] = {}
+        self.session_latest_provider_tool_calls: dict[str, int] = {}
         self.session_recent_files: dict[str, list[RecentFileRef]] = {}
 
     def track_tokens(self, session_id: str, tokens: int | None) -> int:
@@ -71,6 +72,7 @@ class SessionStateService:
         total_tokens: int | None,
         cached_input_tokens: int | None,
         reasoning_output_tokens: int | None,
+        provider_tool_calls: int | None,
     ) -> None:
         if input_tokens is not None and input_tokens >= 0:
             self.session_latest_input_tokens[session_id] = input_tokens
@@ -82,6 +84,8 @@ class SessionStateService:
             self.session_latest_cached_input_tokens[session_id] = cached_input_tokens
         if reasoning_output_tokens is not None and reasoning_output_tokens >= 0:
             self.session_latest_reasoning_output_tokens[session_id] = reasoning_output_tokens
+        if provider_tool_calls is not None and provider_tool_calls >= 0:
+            self.session_latest_provider_tool_calls[session_id] = provider_tool_calls
 
     def latest_input_tokens(self, session_id: str) -> int | None:
         return self.session_latest_input_tokens.get(session_id)
@@ -93,6 +97,7 @@ class SessionStateService:
             "total_tokens": self.session_latest_total_tokens.get(session_id),
             "cached_input_tokens": self.session_latest_cached_input_tokens.get(session_id),
             "reasoning_output_tokens": self.session_latest_reasoning_output_tokens.get(session_id),
+            "provider_tool_calls": self.session_latest_provider_tool_calls.get(session_id),
         }
 
     def track_recent_file(self, session_id: str, ref: RecentFileRef, *, max_entries: int = 10) -> None:

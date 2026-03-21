@@ -65,7 +65,7 @@ Top features
 
 - 🤖 Personal assistant, not SaaS: your chats, memory, and scheduled prompts stay in your instance.
 - 🎯 Opinionated by design: Telegram-centric flow, small tool surface, and explicit config over hidden magic.
-- 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment, including a full-capability `config.yolo.toml` / `config.yolo.lua` profile.
+- 🏠 Self-hostable: Dockerfile + docker-compose provided for easy local deployment, including a full-capability `config.yolo.toml` profile.
 - 💻 Local console channel for development/testing with REPL and one-shot modes (`minibot-console`).
 - 💬 Telegram channel with chat/user allowlists and long-polling or webhook modes; accepts text, images, and file uploads (multimodal inputs when enabled).
 - 🧠 Focused provider support (via [llm-async]): currently `openai`, `openai_responses`, and `openrouter` only.
@@ -103,14 +103,14 @@ Why self-host
 Quickstart (Docker)
 -------------------
 
-1. `cp config.example.toml config.toml` or `cp config.example.lua config.lua`
+1. `cp config.example.toml config.toml`
 2. Populate secrets in your config file (`channels.telegram.bot_token`, allowlists, provider credentials under `[providers.<name>]`).
 3. `mkdir -p logs data`
 4. `docker compose up --build -d`
 5. `docker compose logs -f minibot`
 
 `docker-compose.yml` mounts `config.toml` by default. If you prefer Lua config, mount `config.lua` instead or set `MINIBOT_CONFIG`.
-`config.yolo.toml` / `config.yolo.lua` are provided as reference templates for users who want an all-enabled profile (file storage, STT, HTTP/KV tools, MCP bridge, unrestricted Python runtime with `sandbox_mode = "none"`, unrestricted Bash execution, and patch-based file editing).
+`config.yolo.toml` is provided as a reference template for users who want an all-enabled profile (file storage, STT, HTTP/KV tools, MCP bridge, unrestricted Python runtime with `sandbox_mode = "none"`, unrestricted Bash execution, and patch-based file editing).
 
 Docker image includes:
 
@@ -124,7 +124,7 @@ Quickstart (Poetry)
 -------------------
 
 1. `poetry install --all-extras`
-2. `cp config.example.toml config.toml` or `cp config.example.lua config.lua`
+2. `cp config.example.toml config.toml`
 3. Populate secrets in your config file (bot token, allowed chat IDs, provider credentials under `[providers.<name>]`).
 4. `poetry run minibot`
 
@@ -202,14 +202,26 @@ Optional Lua Support
 MiniBot supports Lua as an optional extension layer for both config files and custom tools.
 
 - Install it with `poetry install --extras lua` (or `poetry install --all-extras`).
-- Lua config files are supported: copy `config.example.lua` → `config.lua` (gitignored, never committed), then populate your credentials.
+- Lua config files are supported via `config.lua` (gitignored, never committed). The recommended path is to convert an existing TOML config, then adjust the generated Lua if needed.
 - Lua custom tools are loaded from a configured directory via `[tools.lua_custom]` / `tools.lua_custom`.
 - If the `lua` extra is not installed, the normal Python + TOML path still works; only Lua-backed features fail.
+
+Recommended workflow:
+
+1. Start from a working TOML config such as `config.toml`.
+2. Convert it to Lua:
+
+```bash
+poetry run minibot-config toml-to-lua config.toml --output config.lua
+```
+
+3. Review `config.lua` and make any Lua-specific edits you want, such as using `os.getenv(...)` for secrets or adding conditional values.
+4. Run MiniBot with `config.lua` by setting `MINIBOT_CONFIG=config.lua` or passing the Lua path to commands that accept `--config`.
 
 Configuration Reference
 -----------------------
 
-Use `config.example.toml` or `config.example.lua` as the source of truth, then update secrets before launching. Key sections:
+Use `config.example.toml` as the source of truth, then update secrets before launching. Key sections:
 
 - Byte-size fields accept raw integers or quoted size strings; SI units are preferred in examples (for example `"16KB"`, `"5MB"`, `"2GB"`). IEC units are also accepted (for example `"16KiB"`, `"5MiB"`).
 
@@ -239,19 +251,26 @@ Use `config.example.toml` or `config.example.lua` as the source of truth, then u
 - `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
-Every section has comments + defaults in `config.example.toml` and `config.example.lua`—read the format you plan to use for hints.
+Every section has comments + defaults in `config.example.toml`; use it as the canonical reference.
 
 Lua Config Notes
 ----------------
 
 If you prefer Lua config:
 
-- Start from `config.example.lua`.
+- Start by converting an existing TOML config:
+
+```bash
+poetry run minibot-config toml-to-lua config.toml --output config.lua
+```
+
+- Review and update the generated `config.lua` as needed.
+- Mirror the structure from `config.example.toml`.
 - Provider keys can be read directly from the environment using `os.getenv(...)`.
 - The Lua config file is executed locally and must `return` one top-level table matching the MiniBot settings shape.
 - Without `lupa` installed, `.lua` config files will fail to load with an install hint.
 
-For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` (or `config.yolo.lua` into `config.lua`) if you want pre-enabled tools + Playwright MCP server.
+For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` if you want pre-enabled tools + Playwright MCP server.
 
 Scheduler Guide
 ---------------
@@ -373,7 +392,7 @@ MiniBot can load custom tools written in Lua when `[tools.lua_custom]` is enable
   - `parameters` as a JSON Schema object
   - `handler(args)` as the tool implementation
 - The handler receives decoded tool arguments and returns JSON-like result data that MiniBot exposes as normal tool output.
-- Example config is documented in `config.example.toml` and `config.example.lua`.
+- Example config is documented in `config.example.toml`.
 - A working sample tool is included at `lua_tools/example_echo.lua`.
 
 Example Lua tool config in TOML:

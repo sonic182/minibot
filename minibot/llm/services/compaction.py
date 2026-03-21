@@ -110,6 +110,7 @@ async def continue_incomplete_response(
         output_tokens=usage.output_tokens,
         cached_input_tokens=usage.cached_input_tokens,
         reasoning_output_tokens=usage.reasoning_output_tokens,
+        provider_tool_calls=usage.provider_tool_calls,
         status=usage.status,
         incomplete_reason=usage.incomplete_reason,
     )
