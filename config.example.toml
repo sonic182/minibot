@@ -152,6 +152,20 @@ tools_deny = ["mcp*"]
 # points to xAI (for example `https://api.x.ai/v1`).
 [llm.xai]
 web_search_enabled = false
+x_search_enabled = false
+
+[llm.xai.web_search]
+allowed_domains = []
+excluded_domains = []
+enable_image_understanding = false
+
+[llm.xai.x_search]
+allowed_x_handles = []
+excluded_x_handles = []
+from_date = ""
+to_date = ""
+enable_image_understanding = false
+enable_video_understanding = false
 
 # Conversation memory persistence.
 [memory]

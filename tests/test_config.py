@@ -39,6 +39,23 @@ allow_fallbacks = true
 data_collection = "deny"
 provider_extra = { custom_hint = "value" }
 
+[llm.xai]
+web_search_enabled = true
+x_search_enabled = true
+
+[llm.xai.web_search]
+allowed_domains = ["x.ai"]
+excluded_domains = ["example.com"]
+enable_image_understanding = true
+
+[llm.xai.x_search]
+allowed_x_handles = ["xai"]
+excluded_x_handles = ["spam_account"]
+from_date = "2026-03-01T00:00:00+00:00"
+to_date = "2026-03-10T00:00:00+00:00"
+enable_image_understanding = true
+enable_video_understanding = true
+
 [channels.telegram]
 bot_token = "token"
 
@@ -66,6 +83,17 @@ context_ratio_before_compact = 0.9
     assert settings.llm.openrouter.provider is not None
     assert settings.llm.openrouter.provider.order == ["anthropic", "openai"]
     assert settings.llm.openrouter.provider.provider_extra["custom_hint"] == "value"
+    assert settings.llm.xai.web_search_enabled is True
+    assert settings.llm.xai.x_search_enabled is True
+    assert settings.llm.xai.web_search.allowed_domains == ["x.ai"]
+    assert settings.llm.xai.web_search.excluded_domains == ["example.com"]
+    assert settings.llm.xai.web_search.enable_image_understanding is True
+    assert settings.llm.xai.x_search.allowed_x_handles == ["xai"]
+    assert settings.llm.xai.x_search.excluded_x_handles == ["spam_account"]
+    assert settings.llm.xai.x_search.from_date == "2026-03-01T00:00:00+00:00"
+    assert settings.llm.xai.x_search.to_date == "2026-03-10T00:00:00+00:00"
+    assert settings.llm.xai.x_search.enable_image_understanding is True
+    assert settings.llm.xai.x_search.enable_video_understanding is True
     assert settings.channels["telegram"].bot_token == "token"
     assert settings.memory.context_ratio_before_compact == 0.9
     assert settings.tools.browser.output_dir == "./data/files/browser"
@@ -194,6 +222,29 @@ auto_transcribe_max_duration_seconds = 30
     assert settings.tools.audio_transcription.vad_filter is False
     assert settings.tools.audio_transcription.auto_transcribe_short_incoming is True
     assert settings.tools.audio_transcription.auto_transcribe_max_duration_seconds == 30
+
+
+def test_load_settings_rejects_invalid_xai_limits(tmp_path: Path) -> None:
+    config_file = tmp_path / "bot.toml"
+    config_file.write_text(
+        """
+[llm]
+provider = "openai_responses"
+api_key = "secret"
+
+[llm.xai]
+web_search_enabled = true
+
+[llm.xai.web_search]
+allowed_domains = ["a.com", "b.com", "c.com", "d.com", "e.com", "f.com"]
+
+[channels.telegram]
+bot_token = "token"
+"""
+    )
+
+    with pytest.raises(ValueError):
+        load_settings(config_file)
 
 
 def test_load_settings_from_lua_file(tmp_path: Path) -> None:
