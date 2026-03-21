@@ -41,6 +41,7 @@ class RuntimeResult:
     response_id: str | None
     state: AgentState
     total_tokens: int = 0
+    provider_tool_calls: int = 0
 
 
 class AgentRuntime:
@@ -79,6 +80,7 @@ class AgentRuntime:
         previous_response_id: str | None = initial_previous_response_id
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
+        provider_tool_calls = 0
         repeated_failure_counts: dict[str, int] = {}
         repeated_iteration_count = 0
         last_iteration_signature: str | None = None
@@ -104,6 +106,7 @@ class AgentRuntime:
                         response_id=previous_response_id,
                         state=state,
                         total_tokens=total_tokens,
+                        provider_tool_calls=provider_tool_calls,
                     )
 
                 call_messages = self._message_renderer.render_messages(state)
@@ -149,6 +152,8 @@ class AgentRuntime:
                     raise
                 if isinstance(completion.total_tokens, int) and completion.total_tokens > 0:
                     total_tokens += completion.total_tokens
+                if isinstance(completion.provider_tool_calls, int) and completion.provider_tool_calls > 0:
+                    provider_tool_calls += completion.provider_tool_calls
                 responses_followup_messages = None
                 self._logger.debug(
                     "agent runtime provider step completed",
@@ -182,6 +187,7 @@ class AgentRuntime:
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,
+                                provider_tool_calls=provider_tool_calls,
                             )
                         state.messages.append(
                             self._message_renderer.from_provider_assistant_message(completion.message)
@@ -219,6 +225,7 @@ class AgentRuntime:
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,
+                                provider_tool_calls=provider_tool_calls,
                             )
                         if isinstance(action, RetryAction):
                             retry_patch = (action.prompt_patch or "").strip()
@@ -269,6 +276,7 @@ class AgentRuntime:
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,
+                                provider_tool_calls=provider_tool_calls,
                             )
                     self._logger.debug(
                         "agent runtime step returned final assistant message",
@@ -279,6 +287,7 @@ class AgentRuntime:
                         response_id=completion.response_id,
                         state=state,
                         total_tokens=total_tokens,
+                        provider_tool_calls=provider_tool_calls,
                     )
 
                 tool_calls_count += len(tool_calls)
@@ -305,6 +314,7 @@ class AgentRuntime:
                         response_id=completion.response_id,
                         state=state,
                         total_tokens=total_tokens,
+                        provider_tool_calls=provider_tool_calls,
                     )
 
                 state.messages.append(
@@ -360,6 +370,7 @@ class AgentRuntime:
                                     response_id=completion.response_id,
                                     state=state,
                                     total_tokens=total_tokens,
+                                    provider_tool_calls=provider_tool_calls,
                                 )
                 if self._llm_client.is_responses_provider():
                     responses_followup_messages = [execution.message_payload for execution in executions]
@@ -396,6 +407,7 @@ class AgentRuntime:
                         response_id=completion.response_id,
                         state=state,
                         total_tokens=total_tokens,
+                        provider_tool_calls=provider_tool_calls,
                     )
                 step += 1
 

@@ -84,6 +84,8 @@ class PromptService:
             "- Only use tools that are actually attached in this turn.",
             "- If a tool is absent, do not promise or describe using it as if it were available.",
         ]
+        for hint in self._profile.provider_capability_hints:
+            lines.append(f"- {hint}")
         if invoke_agent_available and specialist_count > 0:
             lines.append(
                 f"- Delegation is available now via `invoke_agent` with {specialist_count} listed specialist agents."

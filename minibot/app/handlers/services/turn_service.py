@@ -176,6 +176,7 @@ class LLMTurnService:
                     total_tokens=getattr(generation, "total_tokens", None),
                     cached_input_tokens=getattr(generation, "cached_input_tokens", None),
                     reasoning_output_tokens=getattr(generation, "reasoning_output_tokens", None),
+                    provider_tool_calls=getattr(generation, "provider_tool_calls", None),
                 )
                 turn_total_tokens += self._session_state.track_tokens(
                     session_id,
@@ -205,6 +206,15 @@ class LLMTurnService:
                     response_schema=main_assistant_response_schema(),
                 )
                 turn_total_tokens += runtime_result.tokens_used
+                self._session_state.track_usage(
+                    session_id,
+                    input_tokens=None,
+                    output_tokens=None,
+                    total_tokens=None,
+                    cached_input_tokens=None,
+                    reasoning_output_tokens=None,
+                    provider_tool_calls=runtime_result.provider_tool_calls,
+                )
                 render = runtime_result.render or plain_render("")
                 should_reply = runtime_result.should_reply
                 agent_trace = runtime_result.agent_trace

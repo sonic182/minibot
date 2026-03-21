@@ -141,6 +141,10 @@ class OpenRouterLLMConfig(BaseModel):
     plugins: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class XAILLMConfig(BaseModel):
+    web_search_enabled: bool = False
+
+
 class LLMMConfig(BaseModel):
     provider: str = "openai"
     api_key: str = ""
@@ -168,6 +172,7 @@ class LLMMConfig(BaseModel):
     prompt_cache_enabled: bool = True
     prompt_cache_retention: Literal["in-memory", "24h"] | None = None
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
+    xai: XAILLMConfig = XAILLMConfig()
 
 
 class ProviderConfig(BaseModel):

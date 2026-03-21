@@ -18,6 +18,7 @@ class RequestContext:
     openrouter_provider: dict[str, Any]
     openrouter_reasoning_enabled: bool | None
     openrouter_plugins: tuple[dict[str, Any], ...]
+    provider_native_tools: tuple[dict[str, Any], ...]
 
 
 def build_messages(
@@ -67,10 +68,11 @@ def build_generate_step_call_kwargs(
     strict_response_schema: dict[str, Any] | None,
     extra_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
+    resolved_tools = _merged_tools(tool_specs, ctx.provider_native_tools) if ctx.is_responses_provider else tool_specs
     call_kwargs: dict[str, Any] = {
         "model": ctx.model,
         "messages": list(conversation),
-        "tools": tool_specs,
+        "tools": resolved_tools,
         "response_schema": strict_response_schema,
     }
     if ctx.temperature is not None:
@@ -96,10 +98,11 @@ def build_complete_once_call_kwargs(
     prompt_cache_key: str | None,
     previous_response_id: str | None,
 ) -> dict[str, Any]:
+    resolved_tools = _merged_tools(tool_specs, ctx.provider_native_tools) if ctx.is_responses_provider else tool_specs
     call_kwargs: dict[str, Any] = {
         "model": ctx.model,
         "messages": list(messages),
-        "tools": tool_specs,
+        "tools": resolved_tools,
         "response_schema": strict_response_schema,
     }
     if ctx.temperature is not None:
@@ -202,3 +205,15 @@ def resolved_max_tokens_for_request(ctx: RequestContext) -> int | None:
     if ctx.max_new_tokens is not None:
         return ctx.max_new_tokens
     return None
+
+
+def _merged_tools(
+    tool_specs: Sequence[Any] | None,
+    provider_native_tools: Sequence[dict[str, Any]],
+) -> list[Any] | None:
+    items: list[Any] = []
+    if tool_specs:
+        items.extend(tool_specs)
+    if provider_native_tools:
+        items.extend(dict(tool) for tool in provider_native_tools)
+    return items or None
