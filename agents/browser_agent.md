@@ -3,10 +3,6 @@ name: playwright_mcp_agent
 description: Specialist agent for browser automation using Playwright MCP
 enabled: true
 mode: agent
-model_provider: openrouter
-model: x-ai/grok-4.1-fast
-openrouter_reasoning_enabled: true
-max_tool_iterations: 25
 mcp_servers:
   - playwright-cli
 tools_allow:
