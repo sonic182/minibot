@@ -42,6 +42,9 @@ class PromptService:
         skill_catalog = self._skill_catalog_fragment()
         if skill_catalog:
             fragments.append(skill_catalog)
+        capability_status = self._capability_status_fragment()
+        if capability_status:
+            fragments.append(capability_status)
         channel_prompt = load_channel_prompt(self._prompts_dir, channel)
         if channel_prompt:
             fragments.append(channel_prompt)
@@ -67,6 +70,38 @@ class PromptService:
                 "If the user only uploaded files and gave no clear instruction, ask a clarifying question."
             )
         return "\n\n".join(fragments)
+
+    def _capability_status_fragment(self) -> str:
+        tool_names = {binding.tool.name for binding in self._tools}
+        invoke_agent_available = "invoke_agent" in tool_names
+        fetch_agent_info_available = "fetch_agent_info" in tool_names
+        specialist_count = 0
+        if invoke_agent_available and self._agent_registry is not None and not self._agent_registry.is_empty():
+            specialist_count = len(self._agent_registry.names())
+
+        lines = [
+            "Runtime capability status:",
+            "- Only use tools that are actually attached in this turn.",
+            "- If a tool is absent, do not promise or describe using it as if it were available.",
+        ]
+        if invoke_agent_available and specialist_count > 0:
+            lines.append(
+                f"- Delegation is available now via `invoke_agent` with {specialist_count} listed specialist agents."
+            )
+            lines.append("- Prefer delegation for non-trivial specialist work; keep trivial requests local.")
+        else:
+            lines.append("- Delegation is unavailable in this turn; continue locally with available tools.")
+        if fetch_agent_info_available and specialist_count > 0:
+            lines.append(
+                "- `fetch_agent_info` is available if one listed specialist needs clarification before routing."
+            )
+        else:
+            lines.append("- `fetch_agent_info` is unavailable in this turn.")
+        lines.append(
+            "- If a needed capability is missing entirely, use the best available alternative or explain the "
+            "limitation briefly."
+        )
+        return "\n".join(lines)
 
     def _specialist_roster_fragment(self) -> str:
         if self._agent_registry is None or self._agent_registry.is_empty():
