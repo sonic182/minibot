@@ -241,3 +241,33 @@ def test_factory_applies_distinct_responses_state_modes_for_main_and_agents(monk
     assert len(created_configs) == 2
     assert created_configs[0].responses_state_mode == "full_messages"
     assert created_configs[1].responses_state_mode == "previous_response_id"
+
+
+def test_create_default_cache_key_includes_xai_config(monkeypatch) -> None:
+    settings = Settings(
+        llm=LLMMConfig(
+            provider="openai_responses",
+            api_key="key",
+            model="grok-4-1-fast-reasoning",
+            base_url="https://api.x.ai/v1",
+            xai={"web_search_enabled": True, "x_search_enabled": False},
+        )
+    )
+    factory = LLMClientFactory(settings)
+
+    created_configs: list[LLMMConfig] = []
+
+    class _FakeClient:
+        def __init__(self, config: LLMMConfig) -> None:
+            created_configs.append(config.model_copy(deep=True))
+
+    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+
+    client_a = factory.create_default()
+    settings.llm.xai.x_search_enabled = True
+    client_b = factory.create_default()
+
+    assert client_a is not client_b
+    assert len(created_configs) == 2
+    assert created_configs[0].xai.x_search_enabled is False
+    assert created_configs[1].xai.x_search_enabled is True

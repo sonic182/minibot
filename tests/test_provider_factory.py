@@ -299,6 +299,32 @@ async def test_complete_once_skips_xai_native_tools_for_non_xai_target(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_generate_can_suppress_xai_native_tools_for_internal_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import provider_registry
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openai_responses", _FakeProvider)
+    monkeypatch.setattr("minibot.llm.provider_factory.is_responses_provider_instance", lambda _: True)
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai_responses",
+            api_key="secret",
+            base_url="https://api.x.ai/v1",
+            model="grok-4-1-fast-reasoning",
+            xai={"web_search_enabled": True, "x_search_enabled": True},
+        )
+    )
+
+    await client.generate([], "classify this", tools=[], include_provider_native_tools=False)
+
+    call = client._provider.calls[-1]
+    assert call["tools"] is None
+    assert client.provider_capability_hints() == [
+        "Provider-native web search is available for web/current-info tasks.",
+        "Provider-native X search is available for X/Twitter posts and discussion.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_generate_uses_system_prompt_override(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm.services import provider_registry
 

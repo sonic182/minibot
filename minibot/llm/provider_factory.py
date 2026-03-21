@@ -89,6 +89,7 @@ class LLMClient:
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
         system_prompt_override: str | None = None,
+        include_provider_native_tools: bool = True,
     ) -> LLMGeneration:
         system_prompt = system_prompt_override or self._system_prompt
         if not self._provider.api_key:
@@ -107,7 +108,7 @@ class LLMClient:
             prompt_cache_key=prompt_cache_key,
             previous_response_id=previous_response_id,
             model=self._model,
-            request_ctx=self._request_context(),
+            request_ctx=self._request_context(include_provider_native_tools=include_provider_native_tools),
             is_responses_provider=self._is_responses_provider,
             max_new_tokens=self._max_new_tokens,
             max_tool_iterations=self._max_tool_iterations,
@@ -155,6 +156,7 @@ class LLMClient:
         response_schema: dict[str, Any] | None = None,
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
+        include_provider_native_tools: bool = True,
     ) -> LLMCompletionStep:
         strict_response_schema = (
             normalize_response_schema(response_schema, self._model)
@@ -162,7 +164,7 @@ class LLMClient:
             else None
         )
         tool_specs = prepare_tool_specs(tools or [], self._model)
-        request_ctx = self._request_context()
+        request_ctx = self._request_context(include_provider_native_tools=include_provider_native_tools)
         call_kwargs = build_complete_once_call_kwargs(
             ctx=request_ctx,
             messages=messages,
@@ -272,7 +274,7 @@ class LLMClient:
             structured_output_mode=self._structured_output_mode,
         )
 
-    def _request_context(self) -> RequestContext:
+    def _request_context(self, *, include_provider_native_tools: bool = True) -> RequestContext:
         return RequestContext(
             model=self._model,
             provider_name=self._provider_name,
@@ -286,5 +288,5 @@ class LLMClient:
             openrouter_provider=self._openrouter_provider,
             openrouter_reasoning_enabled=self._openrouter_reasoning_enabled,
             openrouter_plugins=self._openrouter_plugins,
-            provider_native_tools=self._provider_native_tools,
+            provider_native_tools=self._provider_native_tools if include_provider_native_tools else (),
         )
