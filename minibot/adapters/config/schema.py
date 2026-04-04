@@ -184,8 +184,11 @@ class XAIXSearchConfig(BaseModel):
             raise ValueError("excluded_x_handles supports at most 10 entries")
         from_dt = _parse_iso8601_datetime(self.from_date) if self.from_date else None
         to_dt = _parse_iso8601_datetime(self.to_date) if self.to_date else None
-        if from_dt and to_dt and from_dt > to_dt:
-            raise ValueError("from_date must be less than or equal to to_date")
+        if from_dt and to_dt:
+            if (from_dt.tzinfo is None) != (to_dt.tzinfo is None):
+                raise ValueError("from_date and to_date must both be timezone-aware or both timezone-naive")
+            if from_dt > to_dt:
+                raise ValueError("from_date must be less than or equal to to_date")
         return self
 
 

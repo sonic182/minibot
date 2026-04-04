@@ -87,8 +87,10 @@ def _render_dict(values: dict[Any, Any], *, level: int) -> str:
     for key in sorted(values):
         if not isinstance(key, str):
             raise ValueError("Lua serialization only supports string-keyed dictionaries")
-        rendered_key = key if _LUA_IDENTIFIER_RE.match(key) and key not in _LUA_RESERVED_WORDS else (
-            f"[{_quote_lua_string(key)}]"
+        rendered_key = (
+            key
+            if _LUA_IDENTIFIER_RE.match(key) and key not in _LUA_RESERVED_WORDS
+            else (f"[{_quote_lua_string(key)}]")
         )
         rendered_value = _render_value(values[key], level=level + 1)
         rendered_items.append(f"{indent}{rendered_key} = {rendered_value},")
@@ -97,10 +99,6 @@ def _render_dict(values: dict[Any, Any], *, level: int) -> str:
 
 def _quote_lua_string(value: str) -> str:
     escaped = (
-        value.replace("\\", "\\\\")
-        .replace("\r", "\\r")
-        .replace("\n", "\\n")
-        .replace("\t", "\\t")
-        .replace('"', '\\"')
+        value.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t").replace('"', '\\"')
     )
     return f'"{escaped}"'

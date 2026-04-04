@@ -211,6 +211,7 @@ class RuntimeOrchestrationService:
             trace_result=trace_result,
             response_updates=response_updates,
             tokens_used=tokens_used,
+            initial_provider_tool_calls=provider_tool_calls,
             model_text=model_text,
             system_prompt=system_prompt,
             tool_context=tool_context,
@@ -245,6 +246,7 @@ class RuntimeOrchestrationService:
         trace_result: Any,
         response_updates: list[RenderableResponse],
         tokens_used: int,
+        initial_provider_tool_calls: int = 0,
         model_text: str,
         system_prompt: str,
         tool_context: ToolContext,
@@ -255,6 +257,7 @@ class RuntimeOrchestrationService:
         channel: str | None,
     ) -> tuple[ParsedAnswer, Any, Any, int, list[RenderableResponse], int]:
         continuation_turns = 0
+        provider_tool_calls_acc = initial_provider_tool_calls
         while continuation_turns < self._MAX_CONTINUATION_TURNS and (
             parsed.should_continue or trace_result.unresolved
         ):
@@ -316,6 +319,7 @@ class RuntimeOrchestrationService:
                 initial_previous_response_id=generation.response_id,
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
+            provider_tool_calls_acc += int(getattr(generation, "provider_tool_calls", 0) or 0)
             trace_result = extract_delegation_trace(generation.state)
             parsed = extract_answer(generation.payload, logger=self._logger)
 
@@ -336,7 +340,7 @@ class RuntimeOrchestrationService:
             trace_result,
             tokens_used,
             response_updates,
-            int(getattr(generation, "provider_tool_calls", 0) or 0),
+            provider_tool_calls_acc,
         )
 
     @staticmethod

@@ -398,9 +398,7 @@ def test_load_settings_rejects_directory_for_explicit_path(tmp_path: Path) -> No
         load_settings(config_dir)
 
 
-def test_load_settings_skips_default_lua_when_lupa_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_settings_skips_default_lua_when_lupa_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "config.lua"
     config_file.write_text("return {}", encoding="utf-8")
 

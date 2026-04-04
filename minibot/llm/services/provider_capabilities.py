@@ -11,41 +11,37 @@ def build_provider_native_tools(config: LLMMConfig) -> tuple[dict[str, Any], ...
         return ()
     if resolve_target_provider(provider_name=config.provider, base_url=config.base_url) != "xai":
         return ()
-    xai_cfg = getattr(config, "xai", None)
-    if xai_cfg is None:
-        return ()
 
+    xai_cfg = config.xai
     tools: list[dict[str, Any]] = []
 
-    if bool(getattr(xai_cfg, "web_search_enabled", False)):
-        web_search_cfg = getattr(xai_cfg, "web_search", None)
-        web_search_tool: dict[str, Any] = {"type": "web_search"}
-        if web_search_cfg is not None:
-            if getattr(web_search_cfg, "allowed_domains", None):
-                web_search_tool["allowed_domains"] = list(web_search_cfg.allowed_domains)
-            if getattr(web_search_cfg, "excluded_domains", None):
-                web_search_tool["excluded_domains"] = list(web_search_cfg.excluded_domains)
-            if bool(getattr(web_search_cfg, "enable_image_understanding", False)):
-                web_search_tool["enable_image_understanding"] = True
-        tools.append(web_search_tool)
+    if xai_cfg.web_search_enabled:
+        web_cfg = xai_cfg.web_search
+        web_tool: dict[str, Any] = {"type": "web_search"}
+        if web_cfg.allowed_domains:
+            web_tool["allowed_domains"] = list(web_cfg.allowed_domains)
+        if web_cfg.excluded_domains:
+            web_tool["excluded_domains"] = list(web_cfg.excluded_domains)
+        if web_cfg.enable_image_understanding:
+            web_tool["enable_image_understanding"] = True
+        tools.append(web_tool)
 
-    if bool(getattr(xai_cfg, "x_search_enabled", False)):
-        x_search_cfg = getattr(xai_cfg, "x_search", None)
-        x_search_tool: dict[str, Any] = {"type": "x_search"}
-        if x_search_cfg is not None:
-            if getattr(x_search_cfg, "allowed_x_handles", None):
-                x_search_tool["allowed_x_handles"] = list(x_search_cfg.allowed_x_handles)
-            if getattr(x_search_cfg, "excluded_x_handles", None):
-                x_search_tool["excluded_x_handles"] = list(x_search_cfg.excluded_x_handles)
-            if getattr(x_search_cfg, "from_date", None):
-                x_search_tool["from_date"] = x_search_cfg.from_date
-            if getattr(x_search_cfg, "to_date", None):
-                x_search_tool["to_date"] = x_search_cfg.to_date
-            if bool(getattr(x_search_cfg, "enable_image_understanding", False)):
-                x_search_tool["enable_image_understanding"] = True
-            if bool(getattr(x_search_cfg, "enable_video_understanding", False)):
-                x_search_tool["enable_video_understanding"] = True
-        tools.append(x_search_tool)
+    if xai_cfg.x_search_enabled:
+        x_cfg = xai_cfg.x_search
+        x_tool: dict[str, Any] = {"type": "x_search"}
+        if x_cfg.allowed_x_handles:
+            x_tool["allowed_x_handles"] = list(x_cfg.allowed_x_handles)
+        if x_cfg.excluded_x_handles:
+            x_tool["excluded_x_handles"] = list(x_cfg.excluded_x_handles)
+        if x_cfg.from_date:
+            x_tool["from_date"] = x_cfg.from_date
+        if x_cfg.to_date:
+            x_tool["to_date"] = x_cfg.to_date
+        if x_cfg.enable_image_understanding:
+            x_tool["enable_image_understanding"] = True
+        if x_cfg.enable_video_understanding:
+            x_tool["enable_video_understanding"] = True
+        tools.append(x_tool)
 
     return tuple(tools)
 
