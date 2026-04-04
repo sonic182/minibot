@@ -278,8 +278,9 @@ class LLMTurnService:
             compaction_performed=compaction_result.performed,
         )
         usage_trace = self._session_state.latest_usage_trace(session_id)
-        if any(value is not None for value in usage_trace.values()):
-            metadata["usage_trace"] = usage_trace
+        filtered_usage_trace = {key: value for key, value in usage_trace.items() if value is not None}
+        if filtered_usage_trace:
+            metadata["usage_trace"] = filtered_usage_trace
         return ChannelResponse(
             channel=message.channel,
             chat_id=chat_id,

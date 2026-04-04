@@ -35,7 +35,13 @@ class SessionStateService:
     def current_tokens(self, session_id: str) -> int:
         return self.session_total_tokens.get(session_id, 0)
 
-    def set_previous_response_id(self, session_id: str, response_id: str | None, *, system_prompt: str | None) -> None:
+    def set_previous_response_id(
+        self,
+        session_id: str,
+        response_id: str | None,
+        *,
+        system_prompt: str | None = None,
+    ) -> None:
         if response_id:
             self.session_previous_response_ids[session_id] = response_id
             if system_prompt is not None:
@@ -44,7 +50,7 @@ class SessionStateService:
             else:
                 self.session_previous_response_prompt_fingerprints.pop(session_id, None)
 
-    def get_previous_response_id(self, session_id: str, *, system_prompt: str | None) -> str | None:
+    def get_previous_response_id(self, session_id: str, *, system_prompt: str | None = None) -> str | None:
         response_id = self.session_previous_response_ids.get(session_id)
         if response_id is None:
             return None
@@ -72,7 +78,7 @@ class SessionStateService:
         total_tokens: int | None,
         cached_input_tokens: int | None,
         reasoning_output_tokens: int | None,
-        provider_tool_calls: int | None,
+        provider_tool_calls: int | None = None,
     ) -> None:
         if input_tokens is not None and input_tokens >= 0:
             self.session_latest_input_tokens[session_id] = input_tokens

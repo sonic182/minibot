@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 
@@ -18,7 +18,7 @@ class RequestContext:
     openrouter_provider: dict[str, Any]
     openrouter_reasoning_enabled: bool | None
     openrouter_plugins: tuple[dict[str, Any], ...]
-    provider_native_tools: tuple[dict[str, Any], ...]
+    provider_native_tools: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
 
 def build_messages(
