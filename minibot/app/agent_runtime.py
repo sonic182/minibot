@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -40,6 +41,7 @@ class RuntimeResult:
     response_id: str | None
     state: AgentState
     total_tokens: int = 0
+    provider_tool_calls: int = 0
 
 
 class AgentRuntime:
@@ -78,6 +80,7 @@ class AgentRuntime:
         previous_response_id: str | None = initial_previous_response_id
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
+        provider_tool_calls = 0
         repeated_failure_counts: dict[str, int] = {}
         repeated_iteration_count = 0
         last_iteration_signature: str | None = None
@@ -103,6 +106,7 @@ class AgentRuntime:
                         response_id=previous_response_id,
                         state=state,
                         total_tokens=total_tokens,
+                        provider_tool_calls=provider_tool_calls,
                     )
 
                 call_messages = self._message_renderer.render_messages(state)
@@ -113,15 +117,43 @@ class AgentRuntime:
                 ):
                     call_messages = responses_followup_messages
 
-                completion = await self._llm_client.complete_once(
-                    messages=call_messages,
-                    tools=self._tools,
-                    response_schema=response_schema,
-                    prompt_cache_key=prompt_cache_key,
-                    previous_response_id=previous_response_id,
+                provider_name = getattr(self._llm_client, "provider_name", lambda: "unknown")()
+                started_at = time.monotonic()
+                self._logger.debug(
+                    "agent runtime provider step started",
+                    extra={
+                        "step": step,
+                        "provider": provider_name,
+                        "response_schema_present": response_schema is not None,
+                        "previous_response_id_present": previous_response_id is not None,
+                        "message_count": len(call_messages),
+                    },
                 )
+                try:
+                    completion = await self._llm_client.complete_once(
+                        messages=call_messages,
+                        tools=self._tools,
+                        response_schema=response_schema,
+                        prompt_cache_key=prompt_cache_key,
+                        previous_response_id=previous_response_id,
+                    )
+                except Exception:
+                    self._logger.warning(
+                        "agent runtime provider step failed",
+                        extra={
+                            "step": step,
+                            "provider": provider_name,
+                            "response_schema_present": response_schema is not None,
+                            "previous_response_id_present": previous_response_id is not None,
+                            "duration_ms": round((time.monotonic() - started_at) * 1000),
+                        },
+                        exc_info=True,
+                    )
+                    raise
                 if isinstance(completion.total_tokens, int) and completion.total_tokens > 0:
                     total_tokens += completion.total_tokens
+                if isinstance(completion.provider_tool_calls, int) and completion.provider_tool_calls > 0:
+                    provider_tool_calls += completion.provider_tool_calls
                 responses_followup_messages = None
                 self._logger.debug(
                     "agent runtime provider step completed",
@@ -133,6 +165,8 @@ class AgentRuntime:
                         if isinstance(completion.total_tokens, int)
                         else "0",
                         "runtime_total_tokens": humanize_token_count(total_tokens),
+                        "provider": provider_name,
+                        "duration_ms": round((time.monotonic() - started_at) * 1000),
                     },
                 )
                 previous_response_id = completion.response_id
@@ -153,6 +187,7 @@ class AgentRuntime:
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,
+                                provider_tool_calls=provider_tool_calls,
                             )
                         state.messages.append(
                             self._message_renderer.from_provider_assistant_message(completion.message)
@@ -190,6 +225,7 @@ class AgentRuntime:
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,
+                                provider_tool_calls=provider_tool_calls,
                             )
                         if isinstance(action, RetryAction):
                             retry_patch = (action.prompt_patch or "").strip()
@@ -240,6 +276,7 @@ class AgentRuntime:
                                 response_id=completion.response_id,
                                 state=state,
                                 total_tokens=total_tokens,
+                                provider_tool_calls=provider_tool_calls,
                             )
                     self._logger.debug(
                         "agent runtime step returned final assistant message",
@@ -250,6 +287,7 @@ class AgentRuntime:
                         response_id=completion.response_id,
                         state=state,
                         total_tokens=total_tokens,
+                        provider_tool_calls=provider_tool_calls,
                     )
 
                 tool_calls_count += len(tool_calls)
@@ -276,6 +314,7 @@ class AgentRuntime:
                         response_id=completion.response_id,
                         state=state,
                         total_tokens=total_tokens,
+                        provider_tool_calls=provider_tool_calls,
                     )
 
                 state.messages.append(
@@ -331,6 +370,7 @@ class AgentRuntime:
                                     response_id=completion.response_id,
                                     state=state,
                                     total_tokens=total_tokens,
+                                    provider_tool_calls=provider_tool_calls,
                                 )
                 if self._llm_client.is_responses_provider():
                     responses_followup_messages = [execution.message_payload for execution in executions]
@@ -367,6 +407,7 @@ class AgentRuntime:
                         response_id=completion.response_id,
                         state=state,
                         total_tokens=total_tokens,
+                        provider_tool_calls=provider_tool_calls,
                     )
                 step += 1
 

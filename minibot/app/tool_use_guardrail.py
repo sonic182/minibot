@@ -93,6 +93,7 @@ class LLMClassifierToolUseGuardrail:
                     prompt_cache_key=f"{prompt_cache_key}:tool-requirement" if prompt_cache_key else None,
                     previous_response_id=None,
                     system_prompt_override="You are a strict tool-routing classifier. Output JSON only.",
+                    include_provider_native_tools=False,
                 )
                 raw_tokens = getattr(generation, "total_tokens", None)
                 if isinstance(raw_tokens, int) and raw_tokens > 0:

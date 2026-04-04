@@ -26,6 +26,7 @@ class AgentRuntimeResult:
     agent_trace: list[dict[str, Any]]
     delegation_fallback_used: bool
     tokens_used: int
+    provider_tool_calls: int
 
 
 class RuntimeOrchestrationService:
@@ -80,11 +81,12 @@ class RuntimeOrchestrationService:
         )
         tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
         tool_messages_count = count_tool_messages(generation.state)
+        provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
         trace_result = extract_delegation_trace(generation.state)
         delegation_unresolved = trace_result.unresolved
 
         guardrail = None
-        if tool_messages_count == 0:
+        if tool_messages_count == 0 and provider_tool_calls == 0:
             guardrail = await self._guardrail.apply(
                 session_id=session_id,
                 user_text=model_text,
@@ -101,6 +103,7 @@ class RuntimeOrchestrationService:
                     "session_id": session_id,
                     "chat_id": chat_id,
                     "tool_messages_count": tool_messages_count,
+                    "provider_tool_calls": provider_tool_calls,
                 },
             )
 
@@ -114,6 +117,7 @@ class RuntimeOrchestrationService:
                 agent_trace=trace_result.trace,
                 delegation_fallback_used=trace_result.fallback_used,
                 tokens_used=tokens_used,
+                provider_tool_calls=provider_tool_calls,
             )
 
         if guardrail is not None and guardrail.requires_retry and tool_messages_count == 0:
@@ -136,8 +140,9 @@ class RuntimeOrchestrationService:
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
             trace_result = extract_delegation_trace(generation.state)
             delegation_unresolved = trace_result.unresolved
+            provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
             parsed = extract_answer(generation.payload, logger=self._logger)
-            if count_tool_messages(generation.state) == 0:
+            if count_tool_messages(generation.state) == 0 and provider_tool_calls == 0:
                 return AgentRuntimeResult(
                     render=plain_render(
                         "I could not verify or execute that action with tools in this attempt. "
@@ -150,6 +155,7 @@ class RuntimeOrchestrationService:
                     agent_trace=trace_result.trace,
                     delegation_fallback_used=trace_result.fallback_used,
                     tokens_used=tokens_used,
+                    provider_tool_calls=provider_tool_calls,
                 )
         else:
             parsed = extract_answer(generation.payload, logger=self._logger)
@@ -175,6 +181,7 @@ class RuntimeOrchestrationService:
                 initial_previous_response_id=None,
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
+            provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
             trace_result = extract_delegation_trace(generation.state)
             delegation_unresolved = trace_result.unresolved
             parsed = extract_answer(generation.payload, logger=self._logger)
@@ -191,12 +198,20 @@ class RuntimeOrchestrationService:
                     should_continue=False,
                 )
 
-        parsed, generation, trace_result, tokens_used, response_updates = await self._resolve_continuations(
+        (
+            parsed,
+            generation,
+            trace_result,
+            tokens_used,
+            response_updates,
+            provider_tool_calls,
+        ) = await self._resolve_continuations(
             parsed=parsed,
             generation=generation,
             trace_result=trace_result,
             response_updates=response_updates,
             tokens_used=tokens_used,
+            initial_provider_tool_calls=provider_tool_calls,
             model_text=model_text,
             system_prompt=system_prompt,
             tool_context=tool_context,
@@ -220,6 +235,7 @@ class RuntimeOrchestrationService:
             agent_trace=trace_result.trace,
             delegation_fallback_used=trace_result.fallback_used,
             tokens_used=tokens_used,
+            provider_tool_calls=provider_tool_calls,
         )
 
     async def _resolve_continuations(
@@ -230,6 +246,7 @@ class RuntimeOrchestrationService:
         trace_result: Any,
         response_updates: list[RenderableResponse],
         tokens_used: int,
+        initial_provider_tool_calls: int = 0,
         model_text: str,
         system_prompt: str,
         tool_context: ToolContext,
@@ -238,11 +255,26 @@ class RuntimeOrchestrationService:
         session_id: str,
         chat_id: int | None,
         channel: str | None,
-    ) -> tuple[ParsedAnswer, Any, Any, int, list[RenderableResponse]]:
+    ) -> tuple[ParsedAnswer, Any, Any, int, list[RenderableResponse], int]:
         continuation_turns = 0
+        provider_tool_calls_acc = initial_provider_tool_calls
         while continuation_turns < self._MAX_CONTINUATION_TURNS and (
             parsed.should_continue or trace_result.unresolved
         ):
+            current_provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
+            if (
+                parsed.should_continue
+                and parsed.has_visible_answer
+                and not trace_result.unresolved
+                and count_tool_messages(generation.state) == 0
+                and current_provider_tool_calls == 0
+            ):
+                self._logger.warning(
+                    "coercing visible continuation response to final answer because no remaining work is detectable",
+                    extra={"chat_id": chat_id, "channel": channel},
+                )
+                parsed = ParsedAnswer(render=parsed.render, should_continue=False)
+                break
             if parsed.has_visible_answer and parsed.render is not None:
                 response_updates.append(_mark_as_working(parsed.render))
             continuation_turns += 1
@@ -257,7 +289,7 @@ class RuntimeOrchestrationService:
                     "Delegation is still unresolved. Resolve it now with another tool call or return a final "
                     "user-facing answer with should_continue=false."
                 )
-            if count_tool_messages(generation.state) == 0:
+            if count_tool_messages(generation.state) == 0 and current_provider_tool_calls == 0:
                 guardrail = await self._guardrail.apply(
                     session_id=session_id,
                     user_text=model_text,
@@ -287,6 +319,7 @@ class RuntimeOrchestrationService:
                 initial_previous_response_id=generation.response_id,
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
+            provider_tool_calls_acc += int(getattr(generation, "provider_tool_calls", 0) or 0)
             trace_result = extract_delegation_trace(generation.state)
             parsed = extract_answer(generation.payload, logger=self._logger)
 
@@ -301,7 +334,14 @@ class RuntimeOrchestrationService:
                 ),
                 should_continue=False,
             )
-        return parsed, generation, trace_result, tokens_used, response_updates
+        return (
+            parsed,
+            generation,
+            trace_result,
+            tokens_used,
+            response_updates,
+            provider_tool_calls_acc,
+        )
 
     @staticmethod
     def _build_agent_state(

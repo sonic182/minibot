@@ -53,6 +53,7 @@ async def test_guardrail_requires_retry_when_tools_needed() -> None:
     assert decision.reason == "needs file io"
     assert decision.attempts == 1
     assert decision.tokens_used == 11
+    assert client.calls[0]["kwargs"]["include_provider_native_tools"] is False
 
 
 @pytest.mark.asyncio

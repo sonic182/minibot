@@ -82,6 +82,11 @@ class LLMClientFactory:
                 sort_keys=True,
                 separators=(",", ":"),
             )
+        xai_payload = json.dumps(
+            config.xai.model_dump(mode="python", exclude_none=True),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         return (
             config.provider.lower().strip(),
             config.model,
@@ -102,4 +107,5 @@ class LLMClientFactory:
             config.api_key,
             config.base_url,
             openrouter_provider_payload,
+            xai_payload,
         )

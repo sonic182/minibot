@@ -70,12 +70,22 @@ def extract_usage_from_payload(original: dict[str, Any]) -> UsageSnapshot:
     if isinstance(output_details, dict):
         reasoning_output_tokens = opt_int(output_details.get("reasoning_tokens"))
 
+    provider_tool_calls = None
+    server_side_tool_usage = usage.get("server_side_tool_usage_details")
+    if isinstance(server_side_tool_usage, dict):
+        counts = [value for value in server_side_tool_usage.values() if isinstance(value, int) and value > 0]
+        if counts:
+            provider_tool_calls = sum(counts)
+    if provider_tool_calls is None:
+        provider_tool_calls = opt_int(usage.get("num_server_side_tools_used"))
+
     return UsageSnapshot(
         total_tokens=total_tokens,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cached_input_tokens=cached_input_tokens,
         reasoning_output_tokens=reasoning_output_tokens,
+        provider_tool_calls=provider_tool_calls,
         status=opt_str(original.get("status")),
         incomplete_reason=incomplete_reason(original),
     )
@@ -97,10 +107,12 @@ class UsageAccumulator:
     output_tokens_used: int = 0
     cached_input_tokens_used: int = 0
     reasoning_output_tokens_used: int = 0
+    provider_tool_calls_used: int = 0
     saw_input_tokens: bool = False
     saw_output_tokens: bool = False
     saw_cached_input_tokens: bool = False
     saw_reasoning_output_tokens: bool = False
+    saw_provider_tool_calls: bool = False
 
     def add_step(self, usage: UsageSnapshot, usage_tokens: int | None) -> None:
         if usage_tokens is not None:
@@ -117,6 +129,9 @@ class UsageAccumulator:
         if usage.reasoning_output_tokens is not None:
             self.reasoning_output_tokens_used += usage.reasoning_output_tokens
             self.saw_reasoning_output_tokens = True
+        if usage.provider_tool_calls is not None:
+            self.provider_tool_calls_used += usage.provider_tool_calls
+            self.saw_provider_tool_calls = True
 
     def add_generation(self, generation: LLMGeneration) -> None:
         if generation.total_tokens is not None:
@@ -133,6 +148,9 @@ class UsageAccumulator:
         if generation.reasoning_output_tokens is not None:
             self.reasoning_output_tokens_used += generation.reasoning_output_tokens
             self.saw_reasoning_output_tokens = True
+        if generation.provider_tool_calls is not None:
+            self.provider_tool_calls_used += generation.provider_tool_calls
+            self.saw_provider_tool_calls = True
 
     def build_generation(
         self,
@@ -150,6 +168,7 @@ class UsageAccumulator:
             output_tokens=self.output_tokens_used if self.saw_output_tokens else None,
             cached_input_tokens=self.cached_input_tokens_used if self.saw_cached_input_tokens else None,
             reasoning_output_tokens=self.reasoning_output_tokens_used if self.saw_reasoning_output_tokens else None,
+            provider_tool_calls=self.provider_tool_calls_used if self.saw_provider_tool_calls else None,
             status=status,
             incomplete_reason=incomplete_reason,
         )

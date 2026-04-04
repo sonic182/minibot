@@ -600,6 +600,80 @@ async def test_runtime_service_continues_when_delegation_still_unresolved() -> N
     assert result.response_updates == []
 
 
+@pytest.mark.asyncio
+async def test_runtime_service_does_not_retry_when_delegation_times_out() -> None:
+    class _TimeoutDelegationRuntime:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run(self, **_: Any) -> RuntimeResult:
+            self.calls += 1
+            return RuntimeResult(
+                payload='{"answer":{"kind":"text","content":"delegate timeout surfaced"},"should_continue":false}',
+                response_id="resp-1",
+                state=AgentState(
+                    messages=[
+                        AgentMessage(role="assistant", content=[MessagePart(type="text", text="delegating")]),
+                        AgentMessage(
+                            role="tool",
+                            name="invoke_agent",
+                            content=[
+                                MessagePart(
+                                    type="json",
+                                    value={
+                                        "ok": False,
+                                        "agent": "playwright_mcp_agent",
+                                        "result_status": "timeout",
+                                        "should_continue": False,
+                                        "error_code": "delegated_timeout",
+                                        "error": "delegated agent timed out waiting for provider response",
+                                    },
+                                )
+                            ],
+                        ),
+                    ]
+                ),
+                total_tokens=3,
+            )
+
+    runtime = _TimeoutDelegationRuntime()
+    service = RuntimeOrchestrationService(
+        runtime=cast(AgentRuntime, runtime),
+        llm_client=cast(LLMClient, _StubClient()),
+        guardrail=_CountingGuardrail(),
+        session_state=SessionStateService(),
+        logger=logging.getLogger("test"),
+    )
+
+    result = await service.run_with_agent_runtime(
+        session_id="s1",
+        history=[],
+        model_text="delegate this",
+        model_user_content=None,
+        system_prompt="system",
+        tool_context=ToolContext(),
+        prompt_cache_key=None,
+        previous_response_id=None,
+        chat_id=1,
+        channel="telegram",
+        response_schema={"type": "object"},
+    )
+
+    assert runtime.calls == 1
+    assert result.render.text == "delegate timeout surfaced"
+    assert result.agent_trace == [
+        {
+            "agent": "minibot",
+            "decision": "invoke_agent",
+            "target": "playwright_mcp_agent",
+            "ok": False,
+            "result_status": "timeout",
+            "should_continue": False,
+            "error": "delegated agent timed out waiting for provider response",
+        }
+    ]
+
+
 def test_assistant_runtime_payload_requires_should_continue() -> None:
     with pytest.raises(Exception):
         AssistantRuntimePayload.model_validate({"answer": {"kind": "text", "content": "Result"}})

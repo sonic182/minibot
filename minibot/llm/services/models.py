@@ -15,6 +15,7 @@ class LLMGeneration:
     output_tokens: int | None = None
     cached_input_tokens: int | None = None
     reasoning_output_tokens: int | None = None
+    provider_tool_calls: int | None = None
     status: str | None = None
     incomplete_reason: str | None = None
 
@@ -24,6 +25,7 @@ class LLMCompletionStep:
     message: Any
     response_id: str | None
     total_tokens: int | None = None
+    provider_tool_calls: int | None = None
 
 
 @dataclass
@@ -48,6 +50,7 @@ class UsageSnapshot:
     output_tokens: int | None = None
     cached_input_tokens: int | None = None
     reasoning_output_tokens: int | None = None
+    provider_tool_calls: int | None = None
     status: str | None = None
     incomplete_reason: str | None = None
 
@@ -64,6 +67,7 @@ class LLMExecutionProfile:
     supports_media_inputs: bool = False
     supports_agent_runtime: bool = False
     is_responses_provider: bool = False
+    provider_capability_hints: tuple[str, ...] = ()
 
     @classmethod
     def from_client(cls, client: Any) -> "LLMExecutionProfile":
@@ -90,6 +94,7 @@ class LLMExecutionProfile:
             default=media_input_mode in {"responses", "chat_completions"},
         )
         is_responses_provider = cls._call_bool(client, "is_responses_provider", default=False)
+        provider_capability_hints = cls._call_strs(client, "provider_capability_hints")
         supports_agent_runtime = callable(getattr(client, "complete_once", None)) and callable(
             getattr(client, "execute_tool_calls_for_runtime", None)
         )
@@ -104,6 +109,7 @@ class LLMExecutionProfile:
             supports_media_inputs=supports_media_inputs,
             supports_agent_runtime=supports_agent_runtime,
             is_responses_provider=is_responses_provider,
+            provider_capability_hints=provider_capability_hints,
         )
 
     @staticmethod
@@ -121,3 +127,13 @@ class LLMExecutionProfile:
         if callable(getter):
             return bool(getter())
         return default
+
+    @staticmethod
+    def _call_strs(client: Any, name: str) -> tuple[str, ...]:
+        getter = getattr(client, name, None)
+        if not callable(getter):
+            return ()
+        value = getter()
+        if not isinstance(value, (list, tuple)):
+            return ()
+        return tuple(item for item in value if isinstance(item, str) and item.strip())

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tomllib
 import types
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union, get_args, get_origin
 
@@ -141,6 +142,63 @@ class OpenRouterLLMConfig(BaseModel):
     plugins: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+def _parse_iso8601_datetime(value: str) -> datetime:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("datetime value must not be empty")
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError("datetime value must be a valid ISO8601 string") from exc
+
+
+class XAIWebSearchConfig(BaseModel):
+    allowed_domains: List[str] = Field(default_factory=list)
+    excluded_domains: List[str] = Field(default_factory=list)
+    enable_image_understanding: bool = False
+
+    @model_validator(mode="after")
+    def _validate_limits(self) -> "XAIWebSearchConfig":
+        if len(self.allowed_domains) > 5:
+            raise ValueError("allowed_domains supports at most 5 entries")
+        if len(self.excluded_domains) > 5:
+            raise ValueError("excluded_domains supports at most 5 entries")
+        return self
+
+
+class XAIXSearchConfig(BaseModel):
+    allowed_x_handles: List[str] = Field(default_factory=list)
+    excluded_x_handles: List[str] = Field(default_factory=list)
+    from_date: str | None = None
+    to_date: str | None = None
+    enable_image_understanding: bool = False
+    enable_video_understanding: bool = False
+
+    @model_validator(mode="after")
+    def _validate_limits(self) -> "XAIXSearchConfig":
+        if len(self.allowed_x_handles) > 10:
+            raise ValueError("allowed_x_handles supports at most 10 entries")
+        if len(self.excluded_x_handles) > 10:
+            raise ValueError("excluded_x_handles supports at most 10 entries")
+        from_dt = _parse_iso8601_datetime(self.from_date) if self.from_date else None
+        to_dt = _parse_iso8601_datetime(self.to_date) if self.to_date else None
+        if from_dt and to_dt:
+            if (from_dt.tzinfo is None) != (to_dt.tzinfo is None):
+                raise ValueError("from_date and to_date must both be timezone-aware or both timezone-naive")
+            if from_dt > to_dt:
+                raise ValueError("from_date must be less than or equal to to_date")
+        return self
+
+
+class XAILLMConfig(BaseModel):
+    web_search_enabled: bool = False
+    x_search_enabled: bool = False
+    web_search: XAIWebSearchConfig = XAIWebSearchConfig()
+    x_search: XAIXSearchConfig = XAIXSearchConfig()
+
+
 class LLMMConfig(BaseModel):
     provider: str = "openai"
     api_key: str = ""
@@ -168,6 +226,7 @@ class LLMMConfig(BaseModel):
     prompt_cache_enabled: bool = True
     prompt_cache_retention: Literal["in-memory", "24h"] | None = None
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
+    xai: XAILLMConfig = XAILLMConfig()
 
 
 class ProviderConfig(BaseModel):
