@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import mimetypes
+import os
 from pathlib import Path
+import re
 import shutil
+import tempfile
 from typing import Literal
 
 from minibot.shared.path_utils import to_posix_relative
@@ -93,6 +96,34 @@ class LocalFileStorage:
         return {
             "path": self._relative_to_root(target),
             "bytes_written": len(content_bytes),
+        }
+
+    def create_managed_temp_text_file(
+        self,
+        *,
+        subdir: str,
+        stem: str,
+        content: str,
+        suffix: str = ".txt",
+    ) -> dict[str, str | int]:
+        if not isinstance(content, str):
+            raise ValueError("content must be a string")
+        target_dir = self.resolve_dir(subdir, create=True)
+        normalized_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("._-") or "http-response"
+        normalized_suffix = suffix if suffix.startswith(".") else f".{suffix}"
+        fd, raw_path = tempfile.mkstemp(prefix=f"{normalized_stem}-", suffix=normalized_suffix, dir=str(target_dir))
+        path = Path(raw_path)
+        try:
+            os.close(fd)
+            path.write_text(content, encoding="utf-8")
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        content_bytes = len(content.encode("utf-8"))
+        return {
+            "path": self._relative_to_root(path),
+            "absolute_path": str(path),
+            "bytes_written": content_bytes,
         }
 
     def ensure_upload_dir(self, uploads_subdir: str) -> Path:

@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+from pathlib import PurePosixPath
 import re
 from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import urlparse
 
 import aiosonic
 from aiosonic.timeout import Timeouts
 from llm_async.models import Tool
 
 from minibot.adapters.config.schema import HTTPClientToolConfig
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.schema_utils import nullable_string, strict_object
 
@@ -18,8 +22,9 @@ _SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"
 
 
 class HTTPClientTool:
-    def __init__(self, config: HTTPClientToolConfig) -> None:
+    def __init__(self, config: HTTPClientToolConfig, storage: LocalFileStorage | None = None) -> None:
         self._config = config
+        self._storage = storage
         self._logger = logging.getLogger("minibot.http_tool")
         self._client = aiosonic.HTTPClient()
 
@@ -53,21 +58,51 @@ class HTTPClientTool:
             response = await self._client.request(url, method=method, **request_kwargs)
             content = await response.content()
             truncated = len(content) > self._config.max_bytes
-            preview = content[: self._config.max_bytes]
-            text_preview = _decode_preview(preview)
             content_type = _extract_content_type(response.headers)
-            processed_body, processor_used = _process_response_text(
-                text=text_preview,
-                content_type=content_type,
-                mode=self._config.response_processing_mode,
-                normalize_whitespace=self._config.normalize_whitespace,
-            )
-            final_body, truncated_chars = _apply_char_cap(processed_body, self._config.max_chars)
+            raw_decoded_body = _decode_preview(content)
+            body_storage = "inline"
+            body_file_path: str | None = None
+            body_file_absolute_path: str | None = None
+
+            if self._should_spill(raw_decoded_body):
+                processed_body, processor_used = _process_response_text(
+                    text=raw_decoded_body,
+                    content_type=content_type,
+                    mode=self._config.response_processing_mode,
+                    normalize_whitespace=self._config.normalize_whitespace,
+                )
+                saved = self._save_spilled_body(url=url, content_type=content_type, content=raw_decoded_body)
+                if saved is not None:
+                    body_storage = "managed_file"
+                    body_file_path = str(saved["path"])
+                    body_file_absolute_path = str(saved["absolute_path"])
+                    final_body, truncated_chars = _apply_char_cap(processed_body, self._config.spill_preview_chars)
+                else:
+                    text_preview = _decode_preview(content[: self._config.max_bytes])
+                    processed_preview, processor_used = _process_response_text(
+                        text=text_preview,
+                        content_type=content_type,
+                        mode=self._config.response_processing_mode,
+                        normalize_whitespace=self._config.normalize_whitespace,
+                    )
+                    final_body, truncated_chars = _apply_char_cap(processed_preview, self._config.max_chars)
+            else:
+                text_preview = _decode_preview(content[: self._config.max_bytes])
+                processed_body, processor_used = _process_response_text(
+                    text=text_preview,
+                    content_type=content_type,
+                    mode=self._config.response_processing_mode,
+                    normalize_whitespace=self._config.normalize_whitespace,
+                )
+                final_body, truncated_chars = _apply_char_cap(processed_body, self._config.max_chars)
             headers_subset = dict(list(response.headers.items())[:10])
             return {
                 "status": response.status_code,
                 "headers": headers_subset,
                 "body": final_body,
+                "body_storage": body_storage,
+                "body_file_path": body_file_path,
+                "body_file_absolute_path": body_file_absolute_path,
                 "truncated": truncated,
                 "truncated_chars": truncated_chars,
                 "processor_used": processor_used,
@@ -121,6 +156,28 @@ class HTTPClientTool:
         if isinstance(body, bytes):
             return body, None
         raise ValueError("body must be string or bytes")
+
+    def _should_spill(self, body: str) -> bool:
+        return self._config.spill_to_managed_file and len(body) > self._config.spill_after_chars
+
+    def _save_spilled_body(self, *, url: str, content_type: str, content: str) -> dict[str, str | int] | None:
+        if self._storage is None:
+            self._logger.info("http tool spill skipped because managed storage is unavailable", extra={"url": url})
+            return None
+        try:
+            return self._storage.create_managed_temp_text_file(
+                subdir=self._config.spill_subdir,
+                stem=_build_spill_stem(url),
+                suffix=_suggest_spill_suffix(url=url, content_type=content_type),
+                content=content,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning(
+                "http tool spill write failed; falling back to inline response",
+                exc_info=exc,
+                extra={"url": url, "subdir": self._config.spill_subdir},
+            )
+            return None
 
 
 def _http_tool_schema() -> Tool:
@@ -190,6 +247,26 @@ def _apply_char_cap(text: str, max_chars: int | None) -> tuple[str, bool]:
     if max_chars is None or len(text) <= max_chars:
         return text, False
     return text[:max_chars], True
+
+
+def _build_spill_stem(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc or "http"
+    name = PurePosixPath(parsed.path or "/").name or "response"
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+    return f"{host}-{name}-{digest}"
+
+
+def _suggest_spill_suffix(*, url: str, content_type: str) -> str:
+    if content_type == "application/json" or content_type.endswith("+json"):
+        return ".json"
+    if content_type in {"text/html", "application/xhtml+xml"}:
+        return ".html"
+    path_name = PurePosixPath(urlparse(url).path or "/").name
+    suffix = PurePosixPath(path_name).suffix
+    if suffix:
+        return suffix
+    return ".txt"
 
 
 def _is_json_content_type(content_type: str) -> bool:

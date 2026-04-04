@@ -108,7 +108,7 @@ def _build_kv_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> lis
 
 
 def _build_http_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
-    return HTTPClientTool(context.settings.tools.http_client).bindings()
+    return HTTPClientTool(context.settings.tools.http_client, storage=context.managed_storage).bindings()
 
 
 def _build_time_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
