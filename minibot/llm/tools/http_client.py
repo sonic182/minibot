@@ -59,19 +59,23 @@ class HTTPClientTool:
             content = await response.content()
             truncated = len(content) > self._config.max_bytes
             content_type = _extract_content_type(response.headers)
-            raw_decoded_body = _decode_preview(content)
             body_storage = "inline"
             body_file_path: str | None = None
             body_file_absolute_path: str | None = None
 
-            if self._should_spill(raw_decoded_body):
+            if self._can_spill():
+                raw_decoded_body = _decode_preview(content)
+            else:
+                raw_decoded_body = None
+
+            if raw_decoded_body is not None and self._should_spill(raw_decoded_body):
                 processed_body, processor_used = _process_response_text(
                     text=raw_decoded_body,
                     content_type=content_type,
                     mode=self._config.response_processing_mode,
                     normalize_whitespace=self._config.normalize_whitespace,
                 )
-                saved = self._save_spilled_body(url=url, content_type=content_type, content=raw_decoded_body)
+                saved = self._save_spilled_body(url=url, content_type=content_type, content=content)
                 if saved is not None:
                     body_storage = "managed_file"
                     body_file_path = str(saved["path"])
@@ -160,12 +164,14 @@ class HTTPClientTool:
     def _should_spill(self, body: str) -> bool:
         return self._config.spill_to_managed_file and len(body) > self._config.spill_after_chars
 
-    def _save_spilled_body(self, *, url: str, content_type: str, content: str) -> dict[str, str | int] | None:
-        if self._storage is None:
-            self._logger.info("http tool spill skipped because managed storage is unavailable", extra={"url": url})
-            return None
+    def _can_spill(self) -> bool:
+        return self._config.spill_to_managed_file and self._storage is not None
+
+    def _save_spilled_body(self, *, url: str, content_type: str, content: bytes) -> dict[str, str | int] | None:
         try:
-            return self._storage.create_managed_temp_text_file(
+            if self._storage is None:
+                return None
+            return self._storage.create_managed_temp_bytes_file(
                 subdir=self._config.spill_subdir,
                 stem=_build_spill_stem(url),
                 suffix=_suggest_spill_suffix(url=url, content_type=content_type),
