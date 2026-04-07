@@ -62,6 +62,8 @@ class HTTPClientTool:
             body_storage = "inline"
             body_file_path: str | None = None
             body_file_absolute_path: str | None = None
+            body_file_bytes_written: int | None = None
+            body_notice: str | None = None
 
             if self._can_spill():
                 raw_decoded_body = _decode_preview(content)
@@ -80,7 +82,14 @@ class HTTPClientTool:
                     body_storage = "managed_file"
                     body_file_path = str(saved["path"])
                     body_file_absolute_path = str(saved["absolute_path"])
+                    body_file_bytes_written = int(saved["bytes_written"])
                     final_body, truncated_chars = _apply_char_cap(processed_body, self._config.spill_preview_chars)
+                    body_notice = (
+                        "HTTP response body exceeded "
+                        f"{self._config.spill_after_chars} characters and was saved to managed temp file "
+                        f"{body_file_path}. The body field contains a {self._config.spill_preview_chars}-character "
+                        "processed preview; use body_file_path with file or grep tools to inspect the full response."
+                    )
                 else:
                     text_preview = _decode_preview(content[: self._config.max_bytes])
                     processed_preview, processor_used = _process_response_text(
@@ -107,6 +116,8 @@ class HTTPClientTool:
                 "body_storage": body_storage,
                 "body_file_path": body_file_path,
                 "body_file_absolute_path": body_file_absolute_path,
+                "body_file_bytes_written": body_file_bytes_written,
+                "body_notice": body_notice,
                 "truncated": truncated,
                 "truncated_chars": truncated_chars,
                 "processor_used": processor_used,
@@ -191,7 +202,9 @@ def _http_tool_schema() -> Tool:
         name="http_request",
         description=(
             "Fetch an HTTP or HTTPS resource. "
-            "Returns status, headers, body, truncated, truncated_chars, processor_used, and content_type."
+            "Returns status, headers, body, truncated, truncated_chars, processor_used, and content_type. "
+            "When a large response is spilled to managed storage, body is a preview and body_notice, "
+            "body_file_path, body_file_absolute_path, and body_file_bytes_written identify the created temp file."
         ),
         parameters=strict_object(
             properties={
