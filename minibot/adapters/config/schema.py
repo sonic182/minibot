@@ -469,6 +469,15 @@ class ToolsConfig(BaseModel):
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "lua_custom" in data:
+            raise ValueError(
+                "[tools.lua_custom] is no longer supported; remove it from your config"
+            )
+        return data
+
 
 class ScheduledPromptsConfig(BaseModel):
     enabled: bool = True
