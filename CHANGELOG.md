@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - xAI native tool support for the `openai_responses` provider: `web_search` and `x_search` tools are injected at the provider level when `llm.xai.web_search_enabled` / `llm.xai.x_search_enabled` are set and the `base_url` resolves to `api.x.ai`. Domain/handle allow- and block-lists, image/video understanding flags, and date-range filters are all configurable under `[llm.xai.web_search]` and `[llm.xai.x_search]`.
-- `minibot-config toml-to-lua` CLI command: converts a TOML config to a Lua equivalent, making it the recommended starting point for Lua configs (replaces the now-removed `config.example.lua` / `config.yolo.lua` reference files).
 - Runtime capability hints injected into the system prompt each turn: the model is told which provider-native tools (e.g. web search, X search) are active, and whether agent delegation is available.
 - `provider_tool_calls` metric tracked end-to-end: usage parsing → `LLMGeneration` → `AgentRuntime` → `AgentRuntimeResult` → `SessionStateService`. Provider-native tool calls are now counted alongside local tool calls for guardrail bypass and session-state reporting.
 - Structured logging for each agent runtime provider step (start, completion, failure) including `duration_ms`, provider name, and step index; same for delegated agent invocations.
@@ -22,15 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Config loader now distinguishes files from directories: explicit paths that point to a directory raise `ValueError` instead of falling back to defaults; default-path candidates that are directories are skipped.
-- `config.example.lua` and `config.yolo.lua` removed; `config.example.toml` is the sole reference config. Lua users should convert from TOML via `minibot-config toml-to-lua`.
 - Guardrail is skipped when `provider_tool_calls > 0` (not just when local tool messages exist), preventing redundant guardrail evaluation after provider-side tool use.
 - Continuation loop in `RuntimeOrchestrationService` coerces a visible `should_continue=true` response to final when no remaining work is detectable (no local tool messages and no provider tool calls), avoiding infinite loops on provider-native-tool-only turns.
 - `browser_agent.md` no longer hard-codes a model/provider; agent model selection falls back to the orchestration default.
 
+### Removed
+
+- Lua/lupa integration removed: `config.lua` support, `[tools.lua_custom]`, the `lua` extras group, and the `minibot-config toml-to-lua` CLI command. The added complexity was not justified at this stage of the project. Dynamic config via Python may be revisited in a future release.
+
 ### Fixed
 
 - `delegated_timeout` error payload now includes `provider` and `model` fields for easier debugging.
-- Config default-path scan skips Lua candidates that are not regular files (e.g. directories named `config.lua`) instead of raising.
 
 ## [0.1.1] - 2026-03-15
 
@@ -50,7 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent Skills support: load skill instruction files from `.agents/skills/` or `.claude/skills/` directories (project- and user-level); skills are listed in the system prompt and loaded on demand via the new `activate_skill` tool.
 - `[skills]` config block with optional `paths` override.
 - `minibot/shared/frontmatter.py` shared YAML frontmatter parser (reused by both agent and skill loaders).
-- Optional Lua integration (`lupa` extra): load a dynamic `config.lua` instead of static `config.toml`, enabling programmatic config generation (environment-dependent values, computed fields, conditional sections); define custom LLM tools as Lua scripts, each running in its own `LuaRuntime` instance offloaded to a thread executor to avoid blocking the event loop.
 
 ### Fixed
 

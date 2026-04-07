@@ -9,8 +9,6 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Union, get_arg
 from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter, ValidationError
 from pydantic import model_validator
 
-from minibot.adapters.lua.runtime import execute_lua_file, lua_to_python
-
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
 
@@ -36,20 +34,7 @@ def _load_file_data(path: Path) -> Dict[str, Any]:
         with path.open("rb") as fp:
             data = tomllib.load(fp)
         return data
-    if suffix == ".lua":
-        return _load_lua_file_data(path)
     raise ValueError(f"unsupported config file type: {path.suffix or '<none>'}")
-
-
-def _load_lua_file_data(path: Path) -> Dict[str, Any]:
-    try:
-        _, result = execute_lua_file(path)
-    except RuntimeError as exc:
-        raise RuntimeError("Lua config support requires `lupa`; install with `poetry install --extras lua`") from exc
-    data = lua_to_python(result)
-    if not isinstance(data, dict):
-        raise ValueError("lua config must return a top-level table")
-    return data
 
 
 def _normalize_for_annotation(value: Any, annotation: Any) -> Any:
@@ -438,11 +423,6 @@ class MCPToolConfig(BaseModel):
     servers: List[MCPServerConfig] = Field(default_factory=list)
 
 
-class LuaCustomToolConfig(BaseModel):
-    enabled: bool = False
-    directory: str = "./lua_tools"
-
-
 class FileStorageToolConfig(BaseModel):
     enabled: bool = False
     root_dir: str = "./data/files"
@@ -493,7 +473,15 @@ class ToolsConfig(BaseModel):
     audio_transcription: AudioTranscriptionToolConfig = AudioTranscriptionToolConfig()
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
-    lua_custom: LuaCustomToolConfig = LuaCustomToolConfig()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "lua_custom" in data:
+            raise ValueError(
+                "[tools.lua_custom] is no longer supported; remove it from your config"
+            )
+        return data
 
 
 class ScheduledPromptsConfig(BaseModel):

@@ -19,11 +19,9 @@ Your personal AI assistant for Telegram - self-hosted, auditable, and intentiona
 - [Up & Running with Telegram](#up--running-with-telegram)
 - [Console test channel](#console-test-channel)
 - [Using Ollama via OpenAI-Compatible API](#using-ollama-via-openai-compatible-api)
-- [Optional Lua Support](#optional-lua-support)
 
 **Configuration**
 - [Configuration Reference](#configuration-reference)
-- [Lua Config Notes](#lua-config-notes)
 - [Scheduler Guide](#scheduler-guide)
 
 **Hardware & Extras**
@@ -33,7 +31,6 @@ Your personal AI assistant for Telegram - self-hosted, auditable, and intentiona
   - [Arch / Manjaro](#arch--manjaro)
   - [Alternative: CUDA runtime libs in venv](#alternative-install-cuda-runtime-libs-inside-poetry-venv)
   - [Recommended STT config for GPU](#recommended-stt-config-for-gpu)
-- [Lua Custom Tools](#lua-custom-tools)
 
 **Advanced Features**
 - [MCP Bridge Guide](#mcp-bridge-guide)
@@ -109,12 +106,12 @@ Quickstart (Docker)
 4. `docker compose up --build -d`
 5. `docker compose logs -f minibot`
 
-`docker-compose.yml` mounts `config.toml` by default. If you prefer Lua config, mount `config.lua` instead or set `MINIBOT_CONFIG`.
+`docker-compose.yml` mounts `config.toml` by default.
 `config.yolo.toml` is provided as a reference template for users who want an all-enabled profile (file storage, STT, HTTP/KV tools, MCP bridge, unrestricted Python runtime with `sandbox_mode = "none"`, unrestricted Bash execution, and patch-based file editing).
 
 Docker image includes:
 
-- Python deps with all MiniBot extras (`stt`, `mcp`, `lua`)
+- Python deps with all MiniBot extras (`stt`, `mcp`)
 - Node.js/npm (v24.14.0 from official Node.js tarball)
 - Playwright + Chromium
 - ffmpeg
@@ -196,28 +193,6 @@ Notes:
 - When `base_url` uses `http://`, MiniBot automatically disables HTTP/2 for compatibility.
 - If a model/provider combination fails under `openai_responses`, switch to `openai` first.
 
-Optional Lua Support
---------------------
-
-MiniBot supports Lua as an optional extension layer for both config files and custom tools.
-
-- Install it with `poetry install --extras lua` (or `poetry install --all-extras`).
-- Lua config files are supported via `config.lua` (gitignored, never committed). The recommended path is to convert an existing TOML config, then adjust the generated Lua if needed.
-- Lua custom tools are loaded from a configured directory via `[tools.lua_custom]` / `tools.lua_custom`.
-- If the `lua` extra is not installed, the normal Python + TOML path still works; only Lua-backed features fail.
-
-Recommended workflow:
-
-1. Start from a working TOML config such as `config.toml`.
-2. Convert it to Lua:
-
-```bash
-poetry run minibot-config toml-to-lua config.toml --output config.lua
-```
-
-3. Review `config.lua` and make any Lua-specific edits you want, such as using `os.getenv(...)` for secrets or adding conditional values.
-4. Run MiniBot with `config.lua` by setting `MINIBOT_CONFIG=config.lua` or passing the Lua path to commands that accept `--config`.
-
 Configuration Reference
 -----------------------
 
@@ -245,32 +220,12 @@ Use `config.example.toml` as the source of truth, then update secrets before lau
 - `[tools.file_storage]`: configures managed file operations and in-loop file injection: `root_dir`, `max_write_bytes`, optional root confinement override (`allow_outside_root`), and Telegram upload persistence controls (`save_incoming_uploads`, `uploads_subdir`).
 - `[tools.grep]`: optional text-search tool over files managed by `tools.file_storage`, with limits for `max_matches` and `max_file_size_bytes`.
 - `[tools.audio_transcription]`: optional speech-to-text tool powered by `faster-whisper`; configure model/runtime defaults (`model`, `device`, `compute_type`, `beam_size`, `vad_filter`) plus short-audio auto-transcription policy (`auto_transcribe_short_incoming`, `auto_transcribe_max_duration_seconds`), and enable only when the `stt` extra is installed. Runtime decoding also requires ffmpeg available on the host.
-- `[tools.lua_custom]`: optional Lua-defined custom tools loaded from a configured directory. Enable it only when the `lua` extra is installed; each `*.lua` file must return one tool manifest with `name`, `description`, `parameters`, and `handler(args)`.
 - `[tools.browser]`: configures browser artifact paths used by prompts and Playwright MCP launch defaults. `output_dir` is the canonical directory for screenshots/downloads/session artifacts.
 - `[tools.skills]`: configures skill discovery. Leave `paths` empty to use default locations (see Agent Skills section), or set `paths` to a non-empty list to override them entirely with your own directories. Set `enabled = false` to disable skill support.
 - `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
 Every section has comments + defaults in `config.example.toml`; use it as the canonical reference.
-
-Lua Config Notes
-----------------
-
-If you prefer Lua config:
-
-- Start by converting an existing TOML config:
-
-```bash
-poetry run minibot-config toml-to-lua config.toml --output config.lua
-```
-
-- Review and update the generated `config.lua` as needed.
-- Mirror the structure from `config.example.toml`.
-- Provider keys can be read directly from the environment using `os.getenv(...)`.
-- The Lua config file is executed locally and must `return` one top-level table matching the MiniBot settings shape.
-- Without `lupa` installed, `.lua` config files will fail to load with an install hint.
-
-For Docker full-stack startup, copy from `config.yolo.toml` into `config.toml` if you want pre-enabled tools + Playwright MCP server.
 
 Scheduler Guide
 ---------------
@@ -378,40 +333,6 @@ For strict GPU usage:
 [tools.audio_transcription]
 device = "cuda"
 compute_type = "float16"
-```
-
-Lua Custom Tools
-----------------
-
-MiniBot can load custom tools written in Lua when `[tools.lua_custom]` is enabled.
-
-- Point `directory` at a folder containing `*.lua` files.
-- Each Lua file defines one tool and must return a table with:
-  - `name`
-  - `description`
-  - `parameters` as a JSON Schema object
-  - `handler(args)` as the tool implementation
-- The handler receives decoded tool arguments and returns JSON-like result data that MiniBot exposes as normal tool output.
-- Example config is documented in `config.example.toml`.
-- A working sample tool is included at `lua_tools/example_echo.lua`.
-
-Example Lua tool config in TOML:
-
-```toml
-[tools.lua_custom]
-enabled = true
-directory = "./lua_tools"
-```
-
-Example Lua tool config in Lua:
-
-```lua
-tools = {
-  lua_custom = {
-    enabled = true,
-    directory = "./lua_tools",
-  },
-}
 ```
 
 MCP Bridge Guide

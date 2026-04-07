@@ -24,7 +24,6 @@ from minibot.llm.tools.code_read import CodeReadTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
-from minibot.llm.tools.lua_custom import load_lua_custom_tools
 from minibot.llm.tools.mcp_bridge import MCPToolBridge
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.scheduler import SchedulePromptTool
@@ -214,10 +213,6 @@ def _build_skill_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> 
     return SkillLoaderTool(context.skill_registry).bindings()
 
 
-def _build_lua_custom_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
-    return load_lua_custom_tools(context.settings.tools.lua_custom.directory)
-
-
 def _build_agent_delegate_feature(context: ToolAssemblyContext, tools: list[ToolBinding]) -> list[ToolBinding]:
     if context.agent_registry is None or context.llm_factory is None or context.agent_registry.is_empty():
         return []
@@ -319,12 +314,6 @@ _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (
         labels=("activate_skill",),
         enabled_in_config=lambda settings: _tool_enabled(settings, "skills"),
         builder=_build_skill_feature,
-    ),
-    ToolFeature(
-        key="lua_custom",
-        labels=("lua_custom",),
-        enabled_in_config=lambda settings: _tool_enabled(settings, "lua_custom"),
-        builder=_build_lua_custom_feature,
     ),
     ToolFeature(
         key="agent_delegate",
