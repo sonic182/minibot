@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `provider_target.py`: URL-based provider resolution (`resolve_target_provider`, `infer_provider_from_base_url`) to detect xAI, OpenRouter, or OpenAI from `base_url`.
 - `provider_capabilities.py`: builds provider-native tool payloads and capability hint strings from config.
 - HTTP client large-response spill support: `[tools.http_client]` can now save oversized responses to managed temp files via `spill_to_managed_file`, `spill_after_chars`, `spill_preview_chars`, `max_spill_bytes`, and `spill_subdir`; spilled responses return a preview plus `body_notice`, `body_file_path`, `body_file_absolute_path`, and `body_file_bytes_written` so file/grep tools can inspect the full response.
+- Public tool documentation under `tools/`, including a tool index plus purpose, configuration, interface, and safety notes for each canonical MiniBot tool.
 
 ### Changed
 
@@ -24,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guardrail is skipped when `provider_tool_calls > 0` (not just when local tool messages exist), preventing redundant guardrail evaluation after provider-side tool use.
 - Continuation loop in `RuntimeOrchestrationService` coerces a visible `should_continue=true` response to final when no remaining work is detectable (no local tool messages and no provider tool calls), avoiding infinite loops on provider-native-tool-only turns.
 - `browser_agent.md` no longer hard-codes a model/provider; agent model selection falls back to the orchestration default.
+- Main-agent prompt policy is leaner, with tool-use and delegation guidance moved into focused prompt fragments instead of being duplicated in the base system prompt.
 
 ### Removed
 
@@ -32,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `delegated_timeout` error payload now includes `provider` and `model` fields for easier debugging.
+- Responses API previous-response reuse is now tied to the system-prompt fingerprint, preventing stale `previous_response_id` state from being reused after prompt/capability changes.
+- Structured-output schema fallback now catches additional provider rejection shapes such as invalid `response_format` schemas and unsupported `allOf` usage.
 
 ## [0.1.1] - 2026-03-15
 
