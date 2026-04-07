@@ -8,7 +8,7 @@ from minibot.adapters.config.schema import Settings
 
 _logger = logging.getLogger("minibot.config")
 
-DEFAULT_CONFIG_PATHS = (Path("config.toml"), Path("config.lua"))
+DEFAULT_CONFIG_PATHS = (Path("config.toml"),)
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -24,14 +24,5 @@ def load_settings(path: Path | None = None) -> Settings:
     for candidate in DEFAULT_CONFIG_PATHS:
         if not candidate.is_file():
             continue
-        try:
-            return Settings.from_file(candidate)
-        except RuntimeError:
-            if candidate.suffix.lower() == ".lua":
-                _logger.warning(
-                    "skipping %s: lupa not installed — run `pip install minibot[lua]` to enable Lua config support",
-                    candidate,
-                )
-                continue
-            raise
+        return Settings.from_file(candidate)
     return Settings()

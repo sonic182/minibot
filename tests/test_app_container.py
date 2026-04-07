@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import pytest
 
@@ -107,87 +106,3 @@ async def test_app_container_configures_and_initializes_backends(monkeypatch: py
     sync_backend = _SyncBackend()
     await app_container.AppContainer._initialize_backend(sync_backend)
     assert sync_backend.initialized is True
-
-
-@pytest.mark.asyncio
-async def test_app_container_accepts_lua_config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    pytest.importorskip("lupa")
-
-    from minibot.adapters.container import app_container
-
-    _reset_container(app_container)
-
-    class _AsyncBackend:
-        def __init__(self, *_args, **_kwargs) -> None:
-            self.initialized = False
-
-        async def initialize(self) -> None:
-            self.initialized = True
-
-    class _LLMFactory:
-        def __init__(self, _settings) -> None:
-            self._client = object()
-
-        def create_default(self):
-            return self._client
-
-    class _PromptService:
-        def __init__(self, repository, event_bus, config) -> None:
-            self.repository = repository
-            self.event_bus = event_bus
-            self.config = config
-
-    config_path = tmp_path / "config.lua"
-    config_path.write_text(
-        """
-return {
-  runtime = {
-    log_level = "INFO",
-  },
-  channels = {
-    telegram = {
-      enabled = false,
-      bot_token = "token",
-    },
-  },
-  llm = {
-    provider = "openai",
-    api_key = "lua-secret",
-  },
-  providers = {
-    openai = {
-      api_key = "lua-secret",
-      base_url = "http://mock.local/v1",
-    },
-  },
-  scheduler = {
-    prompts = {
-      enabled = false,
-    },
-  },
-}
-""",
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(app_container, "configure_logging", lambda *_: logging.getLogger("test.container.lua"))
-    monkeypatch.setattr(app_container, "EventBus", lambda: object())
-    monkeypatch.setattr(app_container, "SQLAlchemyMemoryBackend", _AsyncBackend)
-    monkeypatch.setattr(app_container, "SQLAlchemyKeyValueMemory", _AsyncBackend)
-    monkeypatch.setattr(app_container, "SQLAlchemyScheduledPromptStore", _AsyncBackend)
-    monkeypatch.setattr(app_container, "ScheduledPromptService", _PromptService)
-    monkeypatch.setattr(app_container, "LLMClientFactory", _LLMFactory)
-    monkeypatch.setattr(app_container, "load_agent_specs", lambda *_: [])
-
-    async def _noop_autoconfig(*, settings, agent_specs, logger):
-        return agent_specs
-
-    monkeypatch.setattr(app_container, "apply_runtime_token_autoconfig_async", _noop_autoconfig)
-
-    app_container.AppContainer.configure(config_path)
-    await app_container.AppContainer.initialize_storage()
-
-    settings = app_container.AppContainer.get_settings()
-    assert settings.llm.api_key == "lua-secret"
-    assert settings.channels["telegram"].enabled is False
-    assert app_container.AppContainer.get_memory_backend().initialized is True

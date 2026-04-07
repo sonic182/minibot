@@ -19,7 +19,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chat-id", type=int, default=1)
     parser.add_argument("--user-id", type=int, default=1)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
-    parser.add_argument("--config", type=str, default=None, help="Optional config.toml or config.lua path.")
+    parser.add_argument("--config", type=str, default=None, help="Optional config.toml path.")
     parser.add_argument("--verbose", action="store_true", default=False, help="Also log to stdout.")
     return parser
 
