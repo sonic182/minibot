@@ -318,6 +318,11 @@ class HTTPClientToolConfig(BaseModel):
     response_processing_mode: Literal["none", "auto"] = "auto"
     max_chars: PositiveInt | None = None
     normalize_whitespace: bool = True
+    spill_to_managed_file: bool = False
+    spill_after_chars: PositiveInt = 16000
+    spill_preview_chars: PositiveInt = 2000
+    max_spill_bytes: ByteSizeValue = 5000000
+    spill_subdir: str = "http_responses/tmp"
 
 
 class TimeToolConfig(BaseModel):
