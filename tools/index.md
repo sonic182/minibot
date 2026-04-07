@@ -54,7 +54,6 @@ This directory documents the current public MiniBot tool surface. Tool names her
 ## Dynamic Tool Surfaces
 
 - [mcp_dynamic_tools](mcp_dynamic_tools.md): dynamically discovered Model Context Protocol tools, exposed as `mcp_<server>__<remote_tool>`.
-- [lua_custom](lua_custom.md): custom tool manifests loaded from Lua files.
 
 ## Configuration Sources
 
