@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import Any, Dict
 
 import pytest
 import pytest_asyncio
 
 from minibot.adapters.config.schema import HTTPClientToolConfig
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.http_client import HTTPClientTool
 
@@ -127,3 +129,119 @@ async def test_http_tool_auto_skips_json_processing(http_server: Dict[str, Any])
     assert result["processor_used"] == "none"
     assert result["content_type"] == "application/json"
     assert result["body"] == '{"message":"hello","count":2}'
+
+
+@pytest.mark.asyncio
+async def test_http_tool_spills_large_response_to_managed_file(tmp_path: Path, http_server: Dict[str, Any]) -> None:
+    spill_after_chars = 16000
+    response_body = (
+        b"<html><body><article><h1>MiniBot</h1><p>"
+        + (b"x" * 20050)
+        + b"</p></article></body></html>"
+    )
+    http_server["state"]["content_type"] = "text/html"
+    http_server["state"]["body"] = response_body
+    assert len(response_body.decode("utf-8")) > spill_after_chars
+    config = HTTPClientToolConfig(
+        enabled=True,
+        timeout_seconds=5,
+        max_bytes=100,
+        response_processing_mode="auto",
+        max_chars=40,
+        spill_to_managed_file=True,
+        spill_after_chars=spill_after_chars,
+        spill_preview_chars=120,
+        max_spill_bytes=100_000,
+        spill_subdir="http_responses/tmp",
+    )
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10)
+    binding = HTTPClientTool(config, storage=storage).bindings()[0]
+
+    result = await binding.handler(
+        {"method": "GET", "url": http_server["url"]},
+        ToolContext(owner_id="tester"),
+    )
+
+    assert result["status"] == 200
+    assert result["body_storage"] == "managed_file"
+    assert result["body_file_path"].startswith("http_responses/tmp/")
+    assert result["body_file_absolute_path"] is not None
+    assert result["body_file_bytes_written"] == len(response_body)
+    assert result["body_notice"] is not None
+    assert "saved to managed temp file" in result["body_notice"]
+    assert str(result["body_file_path"]) in result["body_notice"]
+    assert "up to 120 characters" in result["body_notice"]
+    assert "use body_file_path with file or grep tools" in result["body_notice"]
+    assert result["processor_used"] == "html_text"
+    assert len(result["body"]) == 120
+    saved = Path(str(result["body_file_absolute_path"]))
+    assert saved.read_bytes() == response_body
+    assert "MiniBot" in result["body"]
+
+
+@pytest.mark.asyncio
+async def test_http_tool_skips_spill_when_response_exceeds_max_spill_bytes(
+    tmp_path: Path,
+    http_server: Dict[str, Any],
+) -> None:
+    response_body = b"a" * 500
+    http_server["state"]["body"] = response_body
+    config = HTTPClientToolConfig(
+        enabled=True,
+        timeout_seconds=5,
+        max_bytes=80,
+        response_processing_mode="auto",
+        max_chars=40,
+        spill_to_managed_file=True,
+        spill_after_chars=100,
+        spill_preview_chars=120,
+        max_spill_bytes=300,
+        spill_subdir="http_responses/tmp",
+    )
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10)
+    binding = HTTPClientTool(config, storage=storage).bindings()[0]
+
+    result = await binding.handler(
+        {"method": "GET", "url": http_server["url"]},
+        ToolContext(owner_id="tester"),
+    )
+
+    assert result["status"] == 200
+    assert result["body_storage"] == "inline"
+    assert result["body_file_path"] is None
+    assert result["body_file_absolute_path"] is None
+    assert result["body_file_bytes_written"] is None
+    assert result["body_notice"] is not None
+    assert "was not saved because it exceeds max_spill_bytes" in result["body_notice"]
+    assert result["body"] == "a" * 40
+    assert not any(tmp_path.rglob("*"))
+
+
+@pytest.mark.asyncio
+async def test_http_tool_falls_back_to_inline_when_spill_storage_unavailable(http_server: Dict[str, Any]) -> None:
+    http_server["state"]["body"] = b"a" * 20050
+    config = HTTPClientToolConfig(
+        enabled=True,
+        timeout_seconds=5,
+        max_bytes=80,
+        response_processing_mode="auto",
+        max_chars=40,
+        spill_to_managed_file=True,
+        spill_after_chars=16000,
+        spill_preview_chars=120,
+    )
+    binding = HTTPClientTool(config, storage=None).bindings()[0]
+
+    result = await binding.handler(
+        {"method": "GET", "url": http_server["url"]},
+        ToolContext(owner_id="tester"),
+    )
+
+    assert result["status"] == 200
+    assert result["body_storage"] == "inline"
+    assert result["body_file_path"] is None
+    assert result["body_file_absolute_path"] is None
+    assert result["body_file_bytes_written"] is None
+    assert result["body_notice"] is None
+    assert len(result["body"]) == 40
+    assert result["truncated"] is True

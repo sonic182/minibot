@@ -114,6 +114,11 @@ return {
       response_processing_mode = "auto",
       max_chars = 6000,
       normalize_whitespace = true,
+      spill_to_managed_file = false,
+      spill_after_chars = 16000,
+      spill_preview_chars = 2000,
+      max_spill_bytes = "5MB",
+      spill_subdir = "http_responses/tmp",
     },
     file_storage = {
       enabled = true,

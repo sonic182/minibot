@@ -297,6 +297,21 @@ async def test_read_file_tool_rejects_missing_file(tmp_path: Path) -> None:
         )
 
 
+def test_local_storage_creates_managed_temp_text_file(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10)
+
+    result = storage.create_managed_temp_text_file(
+        subdir="http_responses/tmp",
+        stem="example.com-index",
+        content="large response body",
+        suffix=".html",
+    )
+
+    assert result["path"].startswith("http_responses/tmp/example.com-index-")
+    assert str(result["absolute_path"]).endswith(".html")
+    assert Path(str(result["absolute_path"])).read_text(encoding="utf-8") == "large response body"
+
+
 @pytest.mark.asyncio
 async def test_glob_files_tool_lists_matching_files(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
