@@ -147,9 +147,11 @@ async def test_http_tool_spills_large_response_to_managed_file(tmp_path: Path, h
         timeout_seconds=5,
         max_bytes=100,
         response_processing_mode="auto",
+        max_chars=40,
         spill_to_managed_file=True,
         spill_after_chars=spill_after_chars,
         spill_preview_chars=120,
+        max_spill_bytes=100_000,
         spill_subdir="http_responses/tmp",
     )
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10)
@@ -168,12 +170,51 @@ async def test_http_tool_spills_large_response_to_managed_file(tmp_path: Path, h
     assert result["body_notice"] is not None
     assert "saved to managed temp file" in result["body_notice"]
     assert str(result["body_file_path"]) in result["body_notice"]
+    assert "up to 120 characters" in result["body_notice"]
     assert "use body_file_path with file or grep tools" in result["body_notice"]
     assert result["processor_used"] == "html_text"
     assert len(result["body"]) == 120
     saved = Path(str(result["body_file_absolute_path"]))
     assert saved.read_bytes() == response_body
     assert "MiniBot" in result["body"]
+
+
+@pytest.mark.asyncio
+async def test_http_tool_skips_spill_when_response_exceeds_max_spill_bytes(
+    tmp_path: Path,
+    http_server: Dict[str, Any],
+) -> None:
+    response_body = b"a" * 500
+    http_server["state"]["body"] = response_body
+    config = HTTPClientToolConfig(
+        enabled=True,
+        timeout_seconds=5,
+        max_bytes=80,
+        response_processing_mode="auto",
+        max_chars=40,
+        spill_to_managed_file=True,
+        spill_after_chars=100,
+        spill_preview_chars=120,
+        max_spill_bytes=300,
+        spill_subdir="http_responses/tmp",
+    )
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10)
+    binding = HTTPClientTool(config, storage=storage).bindings()[0]
+
+    result = await binding.handler(
+        {"method": "GET", "url": http_server["url"]},
+        ToolContext(owner_id="tester"),
+    )
+
+    assert result["status"] == 200
+    assert result["body_storage"] == "inline"
+    assert result["body_file_path"] is None
+    assert result["body_file_absolute_path"] is None
+    assert result["body_file_bytes_written"] is None
+    assert result["body_notice"] is not None
+    assert "was not saved because it exceeds max_spill_bytes" in result["body_notice"]
+    assert result["body"] == "a" * 40
+    assert not any(tmp_path.rglob("*"))
 
 
 @pytest.mark.asyncio

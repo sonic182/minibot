@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PatchedOpenAIResponsesProvider` subclass that extends `OpenAIResponsesProvider` to support mixed tool lists (standard `Tool` objects alongside raw native-tool dicts).
 - `provider_target.py`: URL-based provider resolution (`resolve_target_provider`, `infer_provider_from_base_url`) to detect xAI, OpenRouter, or OpenAI from `base_url`.
 - `provider_capabilities.py`: builds provider-native tool payloads and capability hint strings from config.
-- HTTP client large-response spill support: `[tools.http_client]` can now save oversized responses to managed temp files via `spill_to_managed_file`, `spill_after_chars`, `spill_preview_chars`, and `spill_subdir`; spilled responses return a preview plus `body_notice`, `body_file_path`, `body_file_absolute_path`, and `body_file_bytes_written` so file/grep tools can inspect the full response.
+- HTTP client large-response spill support: `[tools.http_client]` can now save oversized responses to managed temp files via `spill_to_managed_file`, `spill_after_chars`, `spill_preview_chars`, `max_spill_bytes`, and `spill_subdir`; spilled responses return a preview plus `body_notice`, `body_file_path`, `body_file_absolute_path`, and `body_file_bytes_written` so file/grep tools can inspect the full response.
 
 ### Changed
 

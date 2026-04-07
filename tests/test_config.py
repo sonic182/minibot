@@ -119,6 +119,7 @@ max_bytes = "16KB"
 spill_to_managed_file = true
 spill_after_chars = 17000
 spill_preview_chars = 500
+max_spill_bytes = "5MB"
 spill_subdir = "http/spills"
 
 [tools.python_exec]
@@ -159,6 +160,7 @@ max_file_size_bytes = "2MB"
     assert settings.tools.http_client.spill_to_managed_file is True
     assert settings.tools.http_client.spill_after_chars == 17_000
     assert settings.tools.http_client.spill_preview_chars == 500
+    assert settings.tools.http_client.max_spill_bytes == 5_000_000
     assert settings.tools.http_client.spill_subdir == "http/spills"
     assert settings.tools.python_exec.max_output_bytes == 64_000
     assert settings.tools.python_exec.max_code_bytes == 32_000

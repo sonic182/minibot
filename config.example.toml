@@ -214,9 +214,12 @@ max_bytes = "16KB"
 response_processing_mode = "auto"
 max_chars = 6000
 normalize_whitespace = true
+# When a response spills, max_bytes/max_chars apply only to inline fallbacks; max_spill_bytes and
+# spill_preview_chars control the saved response cap and LLM-facing preview.
 spill_to_managed_file = true
 spill_after_chars = 16000
 spill_preview_chars = 2000
+max_spill_bytes = "5MB"
 spill_subdir = "http_responses/tmp"
 
 # Managed file workspace tools.

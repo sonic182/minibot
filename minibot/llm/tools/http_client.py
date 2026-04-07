@@ -66,13 +66,13 @@ class HTTPClientTool:
             body_notice: str | None = None
 
             if self._can_spill():
-                raw_decoded_body = _decode_preview(content)
+                raw_decoded_body = self._decode_spill_probe(content)
             else:
                 raw_decoded_body = None
 
             if raw_decoded_body is not None and self._should_spill(raw_decoded_body):
-                processed_body, processor_used = _process_response_text(
-                    text=raw_decoded_body,
+                processed_preview, processor_used = _process_response_text(
+                    text=self._decode_spill_preview(content),
                     content_type=content_type,
                     mode=self._config.response_processing_mode,
                     normalize_whitespace=self._config.normalize_whitespace,
@@ -83,12 +83,13 @@ class HTTPClientTool:
                     body_file_path = str(saved["path"])
                     body_file_absolute_path = str(saved["absolute_path"])
                     body_file_bytes_written = int(saved["bytes_written"])
-                    final_body, truncated_chars = _apply_char_cap(processed_body, self._config.spill_preview_chars)
+                    final_body, truncated_chars = _apply_char_cap(processed_preview, self._config.spill_preview_chars)
                     body_notice = (
                         "HTTP response body exceeded "
                         f"{self._config.spill_after_chars} characters and was saved to managed temp file "
-                        f"{body_file_path}. The body field contains a {self._config.spill_preview_chars}-character "
-                        "processed preview; use body_file_path with file or grep tools to inspect the full response."
+                        f"{body_file_path}. The body field contains up to "
+                        f"{self._config.spill_preview_chars} characters of processed preview; use body_file_path "
+                        "with file or grep tools to inspect the full response."
                     )
                 else:
                     text_preview = _decode_preview(content[: self._config.max_bytes])
@@ -99,6 +100,13 @@ class HTTPClientTool:
                         normalize_whitespace=self._config.normalize_whitespace,
                     )
                     final_body, truncated_chars = _apply_char_cap(processed_preview, self._config.max_chars)
+                    if len(content) > self._config.max_spill_bytes:
+                        body_notice = (
+                            "HTTP response body exceeded "
+                            f"{self._config.spill_after_chars} characters but was not saved because it exceeds "
+                            f"max_spill_bytes ({self._config.max_spill_bytes} bytes). The body field contains "
+                            "the bounded inline preview."
+                        )
             else:
                 text_preview = _decode_preview(content[: self._config.max_bytes])
                 processed_body, processor_used = _process_response_text(
@@ -182,6 +190,8 @@ class HTTPClientTool:
         try:
             if self._storage is None:
                 return None
+            if len(content) > self._config.max_spill_bytes:
+                return None
             return self._storage.create_managed_temp_bytes_file(
                 subdir=self._config.spill_subdir,
                 stem=_build_spill_stem(url),
@@ -195,6 +205,14 @@ class HTTPClientTool:
                 extra={"url": url, "subdir": self._config.spill_subdir},
             )
             return None
+
+    def _decode_spill_probe(self, content: bytes) -> str:
+        probe_bytes = (self._config.spill_after_chars + 1) * 4
+        return _decode_preview(content[:probe_bytes])
+
+    def _decode_spill_preview(self, content: bytes) -> str:
+        preview_bytes = max(self._config.max_bytes, self._config.spill_preview_chars * 4)
+        return _decode_preview(content[:preview_bytes])
 
 
 def _http_tool_schema() -> Tool:

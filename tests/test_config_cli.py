@@ -25,6 +25,7 @@ def test_settings_to_lua_text_serializes_supported_values() -> None:
     settings.tools.http_client.spill_to_managed_file = True
     settings.tools.http_client.spill_after_chars = 456
     settings.tools.http_client.spill_preview_chars = 78
+    settings.tools.http_client.max_spill_bytes = 1234
     settings.tools.http_client.spill_subdir = "http/tmp"
 
     lua_text = settings_to_lua_text(Settings.model_validate(settings.model_dump(mode="python")))
@@ -38,6 +39,7 @@ def test_settings_to_lua_text_serializes_supported_values() -> None:
     assert "max_chars = 123," in lua_text
     assert "spill_to_managed_file = true," in lua_text
     assert "spill_after_chars = 456," in lua_text
+    assert "max_spill_bytes = 1234," in lua_text
     assert 'spill_subdir = "http/tmp"' in lua_text
 
 
@@ -58,6 +60,7 @@ allowed_chat_ids = [123]
 enabled = true
 max_chars = 321
 spill_to_managed_file = true
+max_spill_bytes = "5MB"
 """,
         encoding="utf-8",
     )
@@ -72,6 +75,7 @@ spill_to_managed_file = true
     assert "allowed_chat_ids = {\n" in generated
     assert "123," in generated
     assert "spill_to_managed_file = true," in generated
+    assert "max_spill_bytes = 5000000," in generated
 
 
 def test_config_cli_requires_output_argument() -> None:

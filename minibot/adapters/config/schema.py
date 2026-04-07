@@ -336,6 +336,7 @@ class HTTPClientToolConfig(BaseModel):
     spill_to_managed_file: bool = False
     spill_after_chars: PositiveInt = 16000
     spill_preview_chars: PositiveInt = 2000
+    max_spill_bytes: ByteSizeValue = 5000000
     spill_subdir: str = "http_responses/tmp"
 
 
