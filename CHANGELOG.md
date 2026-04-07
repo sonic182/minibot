@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-07
+
 ### Added
 
 - xAI native tool support for the `openai_responses` provider: `web_search` and `x_search` tools are injected at the provider level when `llm.xai.web_search_enabled` / `llm.xai.x_search_enabled` are set and the `base_url` resolves to `api.x.ai`. Domain/handle allow- and block-lists, image/video understanding flags, and date-range filters are all configurable under `[llm.xai.web_search]` and `[llm.xai.x_search]`.
@@ -262,7 +264,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.1.1..HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.2.0..HEAD
+[0.2.0]: https://github.com/sonic182/minibot/compare/0.1.1..0.2.0
 [0.1.1]: https://github.com/sonic182/minibot/compare/0.1.0..0.1.1
 [0.1.0]: https://github.com/sonic182/minibot/compare/0.0.9..0.1.0
 [0.0.9]: https://github.com/sonic182/minibot/compare/0.0.8..0.0.9
