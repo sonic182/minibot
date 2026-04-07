@@ -751,6 +751,7 @@ Tooling
 -------
 
 Tools live under `minibot/llm/tools/` and are exposed to [llm-async] with server-side execution controls.
+Detailed purpose, configuration, interface, and safety notes are documented in [`tools/index.md`](tools/index.md).
 To enable optional speech-to-text tooling, install the `stt` extra (`poetry install --extras stt` or `poetry install --all-extras`).
 
 - 🧠 Chat memory tools: `chat_history_info`, `chat_history_trim`.
