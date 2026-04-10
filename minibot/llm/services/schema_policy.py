@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import re
-from typing import Sequence
+from collections.abc import Sequence
 
 from llm_async.models import Tool
 
 from minibot.llm.tools.base import ToolBinding
 from minibot.shared.json_schema import to_openai_strict_schema, to_relaxed_schema
-
 
 _OPENAI_STRICT_MODEL_PATTERNS = (
     re.compile(r"^openai(?:/.*)?"),

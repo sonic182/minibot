@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.environment_context import build_environment_prompt_fragment
-from minibot.app.skill_registry import SkillRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.skill_registry import SkillRegistry
 from minibot.core.memory import KeyValueMemory, MemoryBackend
+from minibot.llm.services.tool_executor import canonical_tool_name
 from minibot.llm.tools.agent_delegate import AgentDelegateTool
 from minibot.llm.tools.apply_patch import ApplyPatchTool
 from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
-from minibot.llm.tools.bash import BashTool
 from minibot.llm.tools.base import ToolBinding
+from minibot.llm.tools.bash import BashTool
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.code_read import CodeReadTool
@@ -29,7 +31,6 @@ from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.scheduler import SchedulePromptTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.llm.tools.user_memory import build_kv_tools
-from minibot.llm.services.tool_executor import canonical_tool_name
 
 if TYPE_CHECKING:  # pragma: no cover
     from minibot.app.scheduler_service import ScheduledPromptService

@@ -3,9 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from pathlib import Path
 import sys
-from typing import Optional
+from pathlib import Path
 
 from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.console.service import ConsoleService
@@ -99,7 +98,7 @@ async def run(
         await dispatcher.stop()
 
 
-def main(argv: Optional[list[str]] = None) -> None:
+def main(argv: list[str] | None = None) -> None:
     args = build_arg_parser().parse_args(argv)
     try:
         asyncio.run(
@@ -126,7 +125,7 @@ async def _wait_for_response_or_warn(
     try:
         await console_service.wait_for_response(timeout_seconds)
         return True
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("timed out waiting for console response", extra={"timeout_seconds": timeout_seconds})
         console.print(
             f"[yellow]Timeout getting response after {int(timeout_seconds)}s. "

@@ -3,9 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from minibot.core.agent_runtime import AgentState
-
 from minibot.app.handlers.services.session_state_service import RecentFileRef, SessionStateService
+from minibot.core.agent_runtime import AgentState
 
 
 class RecentFileTrackingService:

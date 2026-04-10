@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
 
-from minibot.app.agent_runtime import RuntimeResult
-from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.agent_runtime import AgentRuntime, RuntimeResult
 from minibot.app.handlers.services import (
     HistoryCompactionService,
     PromptService,
@@ -19,8 +18,7 @@ from minibot.app.handlers.services import (
 from minibot.app.tool_use_guardrail import GuardrailDecision
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.channels import ChannelMessage
-from minibot.core.memory import MemoryEntry
-from minibot.core.memory import MemoryBackend
+from minibot.core.memory import MemoryBackend, MemoryEntry
 from minibot.llm.provider_factory import LLMClient, LLMCompaction, LLMGeneration
 from minibot.llm.tools.base import ToolContext
 
@@ -78,7 +76,7 @@ class _StubMemory:
 
     async def append_history(self, session_id: str, role: str, content: str) -> None:
         self._store.setdefault(session_id, []).append(
-            MemoryEntry(role=role, content=content, created_at=datetime.now(timezone.utc))
+            MemoryEntry(role=role, content=content, created_at=datetime.now(UTC))
         )
 
     async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:

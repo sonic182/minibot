@@ -4,8 +4,8 @@ import logging
 
 import pytest
 
-from minibot.adapters.config.schema import ProviderConfig, Settings
 import minibot.app.token_limits_autoconfig as token_limits_autoconfig
+from minibot.adapters.config.schema import ProviderConfig, Settings
 
 
 class _FakeResponse:

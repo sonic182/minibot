@@ -67,13 +67,19 @@ build-backend = "poetry.core.masonry.api"
 line-length = 119
 target-version = "py312"
 
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
 [tool.ruff.lint]
-# Enable the flake8-print plugin rule T201 to ban print() statements
+# Core lint rules plus import sorting, pyupgrade, bugbear, and no-print enforcement.
 select = [
-    "E",    # pycodestyle errors
-    "W",    # pycodestyle warnings
-    "F",    # pyflakes
-    "T201", # Ban print statements
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "T201",
 ]
 # Exclude certain directories from linting
 exclude = [

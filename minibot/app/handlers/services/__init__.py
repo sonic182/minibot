@@ -14,8 +14,7 @@ from minibot.app.handlers.services.tool_audio_executor import (
     AudioTranscriptionExecutor,
     ToolBindingAudioTranscriptionExecutor,
 )
-from minibot.app.handlers.services.turn_service import LLMTurnService
-from minibot.app.handlers.services.turn_service import build_llm_turn_service
+from minibot.app.handlers.services.turn_service import LLMTurnService, build_llm_turn_service
 
 __all__ = [
     "AgentRuntimeResult",

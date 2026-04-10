@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 from fnmatch import fnmatch
-from typing import Callable, Iterable, Sequence, TypeVar
-
+from typing import TypeVar
 
 _T = TypeVar("_T")
 

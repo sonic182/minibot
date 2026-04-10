@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import cast
 
 import pytest
 
-from minibot.core.jobs import PromptRecurrence, PromptRole, ScheduledPrompt, ScheduledPromptStatus
 from minibot.app.scheduler_service import ScheduledPromptService
+from minibot.core.jobs import PromptRecurrence, PromptRole, ScheduledPrompt, ScheduledPromptStatus
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.scheduler import SchedulePromptTool
 
@@ -45,7 +45,7 @@ class StubPromptService:
             owner_id=str(kwargs.get("owner_id")),
             channel=str(kwargs.get("channel")),
             text="scheduled",
-            run_at=datetime.now(timezone.utc),
+            run_at=datetime.now(UTC),
             status=ScheduledPromptStatus.CANCELLED,
             chat_id=kwargs.get("chat_id"),
             user_id=kwargs.get("user_id"),
@@ -59,7 +59,7 @@ class StubPromptService:
                 owner_id=str(kwargs.get("owner_id")),
                 channel=str(kwargs.get("channel")),
                 text="hello",
-                run_at=datetime.now(timezone.utc),
+                run_at=datetime.now(UTC),
                 status=ScheduledPromptStatus.PENDING,
                 chat_id=kwargs.get("chat_id"),
                 user_id=kwargs.get("user_id"),
@@ -79,7 +79,7 @@ class StubPromptService:
                 owner_id=str(kwargs.get("owner_id")),
                 channel=str(kwargs.get("channel")),
                 text="scheduled",
-                run_at=datetime.now(timezone.utc),
+                run_at=datetime.now(UTC),
                 status=status,
                 chat_id=kwargs.get("chat_id"),
                 user_id=kwargs.get("user_id"),
@@ -103,7 +103,7 @@ async def test_schedule_prompt_tool_accepts_delay_seconds() -> None:
     assert service.calls
     scheduled_run = service.calls[0]["run_at"]
     assert isinstance(scheduled_run, datetime)
-    assert scheduled_run >= datetime.now(timezone.utc)
+    assert scheduled_run >= datetime.now(UTC)
 
 
 @pytest.mark.asyncio

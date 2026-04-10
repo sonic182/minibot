@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from llm_async.models import Tool
 
@@ -27,5 +27,5 @@ class CurrentTimeTool:
 
     async def _handle(self, payload: dict[str, str], _: ToolContext) -> dict[str, str]:
         fmt = payload.get("format") or self._default_format
-        timestamp = datetime.now(timezone.utc).strftime(fmt)
+        timestamp = datetime.now(UTC).strftime(fmt)
         return {"timestamp": timestamp}

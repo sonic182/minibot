@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-
 PartType = Literal["text", "image", "file", "json"]
 MessageRole = Literal["system", "user", "assistant", "tool"]
 

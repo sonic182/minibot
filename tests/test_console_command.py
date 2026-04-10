@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import io
 import logging
 from pathlib import Path
@@ -308,7 +307,7 @@ async def test_console_run_once_timeout_shows_warning_without_crash(monkeypatch:
 
         async def wait_for_response(self, timeout_seconds: float):
             del timeout_seconds
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
     monkeypatch.setattr(console_module, "AppContainer", _FakeContainer)
     monkeypatch.setattr(console_module, "Dispatcher", _FakeDispatcher)

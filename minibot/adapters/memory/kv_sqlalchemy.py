@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import JSON, DateTime, Index, String, Text, delete, func, or_, select, text
+from sqlalchemy.engine import URL, Connection, make_url
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.engine import Connection, URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 

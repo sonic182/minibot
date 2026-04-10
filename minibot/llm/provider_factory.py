@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from llm_async.models.tool_call import ToolCall
 
@@ -13,7 +14,6 @@ from minibot.llm.services.client_bootstrap import (
     load_system_prompt,
     resolve_openrouter_reasoning_enabled,
 )
-from minibot.llm.services.provider_capabilities import build_provider_capability_hints, build_provider_native_tools
 from minibot.llm.services.compaction import compact_response as compact_response_via_service
 from minibot.llm.services.debug_logging import log_provider_response
 from minibot.llm.services.generation_loop import generate_with_tools
@@ -24,6 +24,7 @@ from minibot.llm.services.models import (
     LLMGeneration,
     ToolExecutionRecord,
 )
+from minibot.llm.services.provider_capabilities import build_provider_capability_hints, build_provider_native_tools
 from minibot.llm.services.provider_registry import is_responses_provider_instance
 from minibot.llm.services.request_builder import (
     RequestContext,

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from llm_async.models import Tool
 import pytest
+from llm_async.models import Tool
 
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.core.agents import AgentSpec

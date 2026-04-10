@@ -2,17 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass
-from html import unescape
 import logging
 import re
-from typing import Optional
+from dataclasses import dataclass
+from html import unescape
 
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent
 from minibot.shared.console_compat import CompatConsole, format_assistant_output
-
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -39,7 +37,7 @@ class ConsoleService:
         self._logger = logging.getLogger("minibot.console")
         self._message_id = 0
         self._subscription = event_bus.subscribe()
-        self._outgoing_task: Optional[asyncio.Task[None]] = None
+        self._outgoing_task: asyncio.Task[None] | None = None
         self._responses: asyncio.Queue[ConsoleResponse] = asyncio.Queue()
 
     async def start(self) -> None:

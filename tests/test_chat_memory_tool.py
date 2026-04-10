@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -15,7 +15,7 @@ class StubMemory:
         self._store: dict[str, list[MemoryEntry]] = {}
 
     async def append_history(self, session_id: str, role: str, content: str) -> None:
-        entry = MemoryEntry(role=role, content=content, created_at=datetime.now(timezone.utc))
+        entry = MemoryEntry(role=role, content=content, created_at=datetime.now(UTC))
         self._store.setdefault(session_id, []).append(entry)
 
     async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:

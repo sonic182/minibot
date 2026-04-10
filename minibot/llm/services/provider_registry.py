@@ -7,7 +7,6 @@ from llm_async.providers.openai_responses import OpenAIResponsesProvider
 
 from minibot.llm.providers import PatchedOpenAIResponsesProvider
 
-
 LLM_PROVIDERS = {
     "openai": OpenAIProvider,
     "claude": ClaudeProvider,

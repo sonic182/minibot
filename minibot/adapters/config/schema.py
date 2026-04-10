@@ -4,11 +4,19 @@ import tomllib
 import types
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
-from pydantic import BaseModel, BeforeValidator, ByteSize, ConfigDict, Field, PositiveInt, TypeAdapter, ValidationError
-from pydantic import model_validator
-
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ByteSize,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
 
@@ -28,7 +36,7 @@ def _coerce_byte_size(value: Any) -> int:
         raise ValueError("invalid byte size value") from exc
 
 
-def _load_file_data(path: Path) -> Dict[str, Any]:
+def _load_file_data(path: Path) -> dict[str, Any]:
     suffix = path.suffix.lower()
     if suffix == ".toml":
         with path.open("rb") as fp:
@@ -51,7 +59,7 @@ def _normalize_for_annotation(value: Any, annotation: Any) -> Any:
             return value
         return _normalize_for_annotation(value, non_none_args[0])
 
-    if origin in (list, List):
+    if origin in (list, list):
         item_annotation = get_args(annotation)[0] if get_args(annotation) else Any
         if value == {}:
             return []
@@ -59,7 +67,7 @@ def _normalize_for_annotation(value: Any, annotation: Any) -> Any:
             return [_normalize_for_annotation(item, item_annotation) for item in value]
         return value
 
-    if origin in (dict, Dict):
+    if origin in (dict, dict):
         args = get_args(annotation)
         value_annotation = args[1] if len(args) == 2 else Any
         if isinstance(value, dict):
@@ -88,43 +96,43 @@ class RuntimeConfig(BaseModel):
 class TelegramChannelConfig(BaseModel):
     enabled: bool = True
     bot_token: str = ""
-    allowed_chat_ids: List[int] = Field(default_factory=list)
-    allowed_user_ids: List[int] = Field(default_factory=list)
+    allowed_chat_ids: list[int] = Field(default_factory=list)
+    allowed_user_ids: list[int] = Field(default_factory=list)
     mode: str = Field(default="long_polling")
-    webhook_url: Optional[str] = None
+    webhook_url: str | None = None
     require_authorized: bool = True
     media_enabled: bool = True
     max_photo_bytes: ByteSizeValue = 5242880
     max_document_bytes: ByteSizeValue = 10485760
     max_total_media_bytes: ByteSizeValue = 12582912
     max_attachments_per_message: PositiveInt = 3
-    allowed_document_mime_types: List[str] = Field(default_factory=list)
+    allowed_document_mime_types: list[str] = Field(default_factory=list)
     format_repair_enabled: bool = True
     format_repair_max_attempts: PositiveInt = 1
 
 
 class OpenRouterProviderRoutingConfig(BaseModel):
-    order: List[str] | None = None
+    order: list[str] | None = None
     allow_fallbacks: bool | None = None
     require_parameters: bool | None = None
     data_collection: Literal["allow", "deny"] | None = None
     zdr: bool | None = None
     enforce_distillable_text: bool | None = None
-    only: List[str] | None = None
-    ignore: List[str] | None = None
-    quantizations: List[str] | None = None
-    sort: str | Dict[str, Any] | None = None
-    preferred_min_throughput: float | Dict[str, float] | None = None
-    preferred_max_latency: float | Dict[str, float] | None = None
-    max_price: Dict[str, Any] | None = None
-    provider_extra: Dict[str, Any] = Field(default_factory=dict)
+    only: list[str] | None = None
+    ignore: list[str] | None = None
+    quantizations: list[str] | None = None
+    sort: str | dict[str, Any] | None = None
+    preferred_min_throughput: float | dict[str, float] | None = None
+    preferred_max_latency: float | dict[str, float] | None = None
+    max_price: dict[str, Any] | None = None
+    provider_extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class OpenRouterLLMConfig(BaseModel):
-    models: List[str] = Field(default_factory=list)
+    models: list[str] = Field(default_factory=list)
     provider: OpenRouterProviderRoutingConfig | None = None
     reasoning_enabled: bool | None = None
-    plugins: List[Dict[str, Any]] = Field(default_factory=list)
+    plugins: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _parse_iso8601_datetime(value: str) -> datetime:
@@ -140,12 +148,12 @@ def _parse_iso8601_datetime(value: str) -> datetime:
 
 
 class XAIWebSearchConfig(BaseModel):
-    allowed_domains: List[str] = Field(default_factory=list)
-    excluded_domains: List[str] = Field(default_factory=list)
+    allowed_domains: list[str] = Field(default_factory=list)
+    excluded_domains: list[str] = Field(default_factory=list)
     enable_image_understanding: bool = False
 
     @model_validator(mode="after")
-    def _validate_limits(self) -> "XAIWebSearchConfig":
+    def _validate_limits(self) -> XAIWebSearchConfig:
         if len(self.allowed_domains) > 5:
             raise ValueError("allowed_domains supports at most 5 entries")
         if len(self.excluded_domains) > 5:
@@ -154,15 +162,15 @@ class XAIWebSearchConfig(BaseModel):
 
 
 class XAIXSearchConfig(BaseModel):
-    allowed_x_handles: List[str] = Field(default_factory=list)
-    excluded_x_handles: List[str] = Field(default_factory=list)
+    allowed_x_handles: list[str] = Field(default_factory=list)
+    excluded_x_handles: list[str] = Field(default_factory=list)
     from_date: str | None = None
     to_date: str | None = None
     enable_image_understanding: bool = False
     enable_video_understanding: bool = False
 
     @model_validator(mode="after")
-    def _validate_limits(self) -> "XAIXSearchConfig":
+    def _validate_limits(self) -> XAIXSearchConfig:
         if len(self.allowed_x_handles) > 10:
             raise ValueError("allowed_x_handles supports at most 10 entries")
         if len(self.excluded_x_handles) > 10:
@@ -227,16 +235,16 @@ class AgentDefinitionConfig(BaseModel):
     max_new_tokens: PositiveInt | None = None
     reasoning_effort: str | None = None
     max_tool_iterations: PositiveInt | None = None
-    tools_allow: List[str] = Field(default_factory=list)
-    tools_deny: List[str] = Field(default_factory=list)
-    mcp_servers: List[str] = Field(default_factory=list)
-    openrouter_provider_overrides: Dict[str, Any] = Field(default_factory=dict)
+    tools_allow: list[str] = Field(default_factory=list)
+    tools_deny: list[str] = Field(default_factory=list)
+    mcp_servers: list[str] = Field(default_factory=list)
+    openrouter_provider_overrides: dict[str, Any] = Field(default_factory=dict)
     openrouter_reasoning_enabled: bool | None = None
 
     model_config = ConfigDict(extra="allow")
 
     @model_validator(mode="after")
-    def _validate_tool_policy(self) -> "AgentDefinitionConfig":
+    def _validate_tool_policy(self) -> AgentDefinitionConfig:
         if self.tools_allow and self.tools_deny:
             raise ValueError("only one of tools_allow or tools_deny can be set")
         extras = dict(self.model_extra or {})
@@ -270,11 +278,11 @@ class AgentDefinitionConfig(BaseModel):
 
 class MainAgentConfig(BaseModel):
     name: str = "minibot"
-    tools_allow: List[str] = Field(default_factory=list)
-    tools_deny: List[str] = Field(default_factory=list)
+    tools_allow: list[str] = Field(default_factory=list)
+    tools_deny: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_tool_policy(self) -> "MainAgentConfig":
+    def _validate_tool_policy(self) -> MainAgentConfig:
         if self.tools_allow and self.tools_deny:
             raise ValueError("only one of tools_allow or tools_deny can be set")
         return self
@@ -352,7 +360,7 @@ class PythonExecCgroupConfig(BaseModel):
 
 class PythonExecJailConfig(BaseModel):
     enabled: bool = False
-    command_prefix: List[str] = Field(default_factory=list)
+    command_prefix: list[str] = Field(default_factory=list)
 
 
 class PythonExecToolConfig(BaseModel):
@@ -367,7 +375,7 @@ class PythonExecToolConfig(BaseModel):
     max_code_bytes: ByteSizeValue = 32000
     artifacts_enabled: bool = True
     artifacts_default_subdir: str = "generated"
-    artifacts_allowed_extensions: List[str] = Field(
+    artifacts_allowed_extensions: list[str] = Field(
         default_factory=lambda: [".png", ".jpg", ".jpeg", ".pdf", ".csv", ".txt", ".json", ".svg"]
     )
     artifacts_max_files: PositiveInt = 5
@@ -376,7 +384,7 @@ class PythonExecToolConfig(BaseModel):
     artifacts_allow_in_jail: bool = False
     artifacts_jail_shared_dir: str | None = None
     pass_parent_env: bool = False
-    env_allowlist: List[str] = Field(default_factory=lambda: ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"])
+    env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"])
     rlimit: PythonExecRLimitConfig = PythonExecRLimitConfig()
     cgroup: PythonExecCgroupConfig = PythonExecCgroupConfig()
     jail: PythonExecJailConfig = PythonExecJailConfig()
@@ -388,7 +396,7 @@ class BashToolConfig(BaseModel):
     max_timeout_seconds: PositiveInt = 120
     max_output_bytes: ByteSizeValue = 128000
     pass_parent_env: bool = True
-    env_allowlist: List[str] = Field(default_factory=lambda: ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"])
+    env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"])
 
 
 class ApplyPatchToolConfig(BaseModel):
@@ -404,20 +412,20 @@ class MCPServerConfig(BaseModel):
     name: str
     transport: Literal["stdio", "http"] = "stdio"
     command: str | None = None
-    args: List[str] = Field(default_factory=list)
-    env: Dict[str, str] = Field(default_factory=dict)
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
     cwd: str | None = None
     url: str | None = None
-    headers: Dict[str, str] = Field(default_factory=dict)
-    enabled_tools: List[str] = Field(default_factory=list)
-    disabled_tools: List[str] = Field(default_factory=list)
+    headers: dict[str, str] = Field(default_factory=dict)
+    enabled_tools: list[str] = Field(default_factory=list)
+    disabled_tools: list[str] = Field(default_factory=list)
 
 
 class MCPToolConfig(BaseModel):
     enabled: bool = False
     name_prefix: str = "mcp"
     timeout_seconds: PositiveInt = 10
-    servers: List[MCPServerConfig] = Field(default_factory=list)
+    servers: list[MCPServerConfig] = Field(default_factory=list)
 
 
 class FileStorageToolConfig(BaseModel):
@@ -453,7 +461,7 @@ class AudioTranscriptionToolConfig(BaseModel):
 
 class SkillsToolConfig(BaseModel):
     enabled: bool = True
-    paths: List[str] = Field(default_factory=list)
+    paths: list[str] = Field(default_factory=list)
 
 
 class ToolsConfig(BaseModel):
@@ -515,10 +523,10 @@ class LoggingConfig(BaseModel):
 
 class Settings(BaseModel):
     runtime: RuntimeConfig = RuntimeConfig()
-    channels: Dict[str, TelegramChannelConfig] = Field(
+    channels: dict[str, TelegramChannelConfig] = Field(
         default_factory=lambda: {"telegram": TelegramChannelConfig(bot_token="")}
     )
-    providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
+    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     llm: LLMMConfig = LLMMConfig()
     orchestration: OrchestrationConfig = OrchestrationConfig()
     memory: MemoryConfig = MemoryConfig()
@@ -530,11 +538,11 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Settings":
+    def from_dict(cls, data: dict[str, Any]) -> Settings:
         return cls.model_validate(_normalize_for_annotation(data, cls))
 
     @classmethod
-    def from_file(cls, path: Path | None = None) -> "Settings":
+    def from_file(cls, path: Path | None = None) -> Settings:
         if path is None:
             raise ValueError("config file path is required")
         return cls.from_dict(_load_file_data(path))

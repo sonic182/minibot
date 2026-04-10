@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from minibot.app.mcp_tool_name import extract_mcp_server, is_mcp_tool_name
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns, validate_allow_deny

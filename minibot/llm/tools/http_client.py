@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from pathlib import PurePosixPath
 import re
 from html.parser import HTMLParser
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 

@@ -1,6 +1,6 @@
-import pytest
-
 from pathlib import Path
+
+import pytest
 
 from minibot.adapters.config.schema import MemoryConfig
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend

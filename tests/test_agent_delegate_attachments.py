@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from minibot.llm.tools.agent_delegate import _extract_outcome, _validate_attachments
 
 

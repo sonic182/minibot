@@ -3,8 +3,9 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.llm.services.reasoning_replay import apply_reasoning_replay, extract_reasoning_replay

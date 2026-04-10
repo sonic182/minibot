@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
 
 from minibot.core.memory import MemoryEntry
 from minibot.llm.services.compaction import continue_incomplete_response

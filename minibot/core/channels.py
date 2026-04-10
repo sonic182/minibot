@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ChannelMessage(BaseModel):
     channel: str
-    user_id: Optional[int]
-    chat_id: Optional[int]
-    message_id: Optional[int]
+    user_id: int | None
+    chat_id: int | None
+    message_id: int | None
     text: str
-    attachments: list[Dict[str, Any]] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class IncomingFileRef(BaseModel):
@@ -31,7 +31,7 @@ class RenderableResponse(BaseModel):
 
     kind: Literal["text", "html", "markdown"] = "text"
     text: str = Field(validation_alias=AliasChoices("content", "text"), serialization_alias="content")
-    meta: Dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChannelResponse(BaseModel):
@@ -39,12 +39,12 @@ class ChannelResponse(BaseModel):
     chat_id: int
     text: str
     render: RenderableResponse | None = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChannelFileResponse(BaseModel):
     channel: str
     chat_id: int
     file_path: str
-    caption: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    caption: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

@@ -4,10 +4,11 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from multiprocessing import Process
-from typing import Any, Callable, Optional
+from typing import Any
 
 from aiopipe import aioduplex
 
@@ -20,14 +21,14 @@ from minibot.core.events import MessageEvent
 @dataclass
 class Task:
     task_id: str
-    chat_id: Optional[int]
-    user_id: Optional[int]
+    chat_id: int | None
+    user_id: int | None
     proc: Process
     reader_task: asyncio.Task
     ack_cb: Callable[[], Any]
     nack_cb: Callable[[], Any]
     semaphore: asyncio.Semaphore
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class TaskManager:
@@ -42,8 +43,8 @@ class TaskManager:
         task_id: str,
         prompt: str,
         context: dict[str, Any],
-        chat_id: Optional[int],
-        user_id: Optional[int],
+        chat_id: int | None,
+        user_id: int | None,
         ack_cb: Callable[[], Any],
         nack_cb: Callable[[], Any],
         semaphore: asyncio.Semaphore,
@@ -125,7 +126,7 @@ class TaskManager:
             await self._event_bus.publish(MessageEvent(message=channel_message))
             self._logger.info("task completed", extra={"task_id": task_id})
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._logger.warning("task timed out", extra={"task_id": task_id})
             proc.terminate()
             await loop.run_in_executor(None, proc.join)

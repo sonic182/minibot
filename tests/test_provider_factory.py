@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
-
 from llm_async.models import Tool
 
 from minibot.adapters.config.schema import LLMMConfig
@@ -556,7 +555,7 @@ async def test_generate_stops_after_tool_loop_limit(monkeypatch: pytest.MonkeyPa
     client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
 
     result = await client.generate(
-        [MemoryEntry(role="user", content="first", created_at=datetime.now(timezone.utc))],
+        [MemoryEntry(role="user", content="first", created_at=datetime.now(UTC))],
         "hello",
         tools=[binding],
     )

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.handlers.services.audio_transcription_service import AudioAutoTranscriptionService
 from minibot.app.handlers.services.compaction_service import HistoryCompactionService
@@ -13,10 +15,9 @@ from minibot.app.handlers.services.recent_file_tracking_service import RecentFil
 from minibot.app.handlers.services.runtime_service import RuntimeOrchestrationService
 from minibot.app.handlers.services.session_state_service import SessionStateService
 from minibot.app.incoming_files_context import build_history_user_entry
-from minibot.app.agent_registry import AgentRegistry
+from minibot.app.response_parser import extract_answer, plain_render
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.skill_registry import SkillRegistry
-from minibot.app.response_parser import extract_answer, plain_render
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent

@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from minibot.app.response_parser import extract_pre_response_meta
 from minibot.core.agent_runtime import (

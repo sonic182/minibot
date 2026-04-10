@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Any
-from typing import Sequence
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.skill_registry import SkillRegistry

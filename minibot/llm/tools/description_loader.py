@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from importlib.resources import files
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_tool_description(name: str) -> str:
     package = files("minibot.llm.tools.descriptions")
     resource = package.joinpath(f"{name}.txt")

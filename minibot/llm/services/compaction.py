@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from minibot.llm.services.models import LLMCompaction, LLMGeneration
 from minibot.llm.services.request_builder import RequestContext, build_continue_call_kwargs

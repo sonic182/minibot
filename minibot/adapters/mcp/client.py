@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from contextlib import suppress
+from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
+from contextlib import suppress
 from dataclasses import dataclass
 from threading import Event, Lock, Thread
-from typing import Any, Callable, Coroutine, Literal
+from typing import Any, Literal
 
 import aiosonic
 

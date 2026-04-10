@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -94,7 +94,7 @@ async def test_kv_memory_delete_by_title_and_missing(kv_memory: SQLAlchemyKeyVal
 
 @pytest.mark.asyncio
 async def test_kv_memory_delete_by_title_removes_single_matching_entry(kv_memory: SQLAlchemyKeyValueMemory) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     older = KVEntry(
         id=uuid4().hex,
         owner_id="tenant",

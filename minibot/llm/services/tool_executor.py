@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from llm_async.models.tool_call import ToolCall
 
@@ -12,7 +13,6 @@ from minibot.core.agent_runtime import ToolResult
 from minibot.llm.services.models import ToolExecutionRecord
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.parse_utils import parse_json_maybe_python_object
-
 
 _MAX_LOG_ARGUMENT_STRING_CHARS = 300
 _MAX_LOG_ARGUMENT_COLLECTION_ITEMS = 20

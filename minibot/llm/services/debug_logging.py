@@ -4,7 +4,6 @@ import json
 import logging
 from typing import Any
 
-
 _MAX_PREVIEW_CHARS = 4000
 
 

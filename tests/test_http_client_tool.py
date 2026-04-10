@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -15,9 +15,9 @@ from minibot.llm.tools.http_client import HTTPClientTool
 
 
 @pytest_asyncio.fixture()
-async def http_server(unused_tcp_port: int) -> AsyncGenerator[Dict[str, Any], None]:
+async def http_server(unused_tcp_port: int) -> AsyncGenerator[dict[str, Any], None]:
     port = unused_tcp_port
-    state: Dict[str, Any] = {"body": b"hello from server", "content_type": "text/plain"}
+    state: dict[str, Any] = {"body": b"hello from server", "content_type": "text/plain"}
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await reader.read(65536)
@@ -43,7 +43,7 @@ async def http_server(unused_tcp_port: int) -> AsyncGenerator[Dict[str, Any], No
 
 
 @pytest.mark.asyncio
-async def test_http_tool_fetches_data(http_server: Dict[str, Any]) -> None:
+async def test_http_tool_fetches_data(http_server: dict[str, Any]) -> None:
     config = HTTPClientToolConfig(enabled=True, timeout_seconds=5, max_bytes=1024)
     bindings = HTTPClientTool(config).bindings()
     assert [binding.tool.name for binding in bindings] == ["http_request"]
@@ -58,7 +58,7 @@ async def test_http_tool_fetches_data(http_server: Dict[str, Any]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_http_tool_truncates_large_response(http_server: Dict[str, Any]) -> None:
+async def test_http_tool_truncates_large_response(http_server: dict[str, Any]) -> None:
     http_server["state"]["body"] = b"a" * 5000
     config = HTTPClientToolConfig(enabled=True, timeout_seconds=5, max_bytes=100)
     binding = HTTPClientTool(config).bindings()[0]
@@ -72,7 +72,7 @@ async def test_http_tool_truncates_large_response(http_server: Dict[str, Any]) -
 
 
 @pytest.mark.asyncio
-async def test_http_tool_rejects_invalid_method(http_server: Dict[str, Any]) -> None:
+async def test_http_tool_rejects_invalid_method(http_server: dict[str, Any]) -> None:
     config = HTTPClientToolConfig(enabled=True, timeout_seconds=5, max_bytes=100)
     binding = HTTPClientTool(config).bindings()[0]
     with pytest.raises(ValueError):
@@ -83,7 +83,7 @@ async def test_http_tool_rejects_invalid_method(http_server: Dict[str, Any]) -> 
 
 
 @pytest.mark.asyncio
-async def test_http_tool_auto_processes_html_and_caps_chars(http_server: Dict[str, Any]) -> None:
+async def test_http_tool_auto_processes_html_and_caps_chars(http_server: dict[str, Any]) -> None:
     http_server["state"]["content_type"] = "text/html"
     http_server["state"]["body"] = (
         b"<html><head><title>MiniBot</title><style>.x{display:none;}</style></head>"
@@ -110,7 +110,7 @@ async def test_http_tool_auto_processes_html_and_caps_chars(http_server: Dict[st
 
 
 @pytest.mark.asyncio
-async def test_http_tool_auto_skips_json_processing(http_server: Dict[str, Any]) -> None:
+async def test_http_tool_auto_skips_json_processing(http_server: dict[str, Any]) -> None:
     http_server["state"]["content_type"] = "application/json"
     http_server["state"]["body"] = b'{"message":"hello","count":2}'
     config = HTTPClientToolConfig(
@@ -132,7 +132,7 @@ async def test_http_tool_auto_skips_json_processing(http_server: Dict[str, Any])
 
 
 @pytest.mark.asyncio
-async def test_http_tool_spills_large_response_to_managed_file(tmp_path: Path, http_server: Dict[str, Any]) -> None:
+async def test_http_tool_spills_large_response_to_managed_file(tmp_path: Path, http_server: dict[str, Any]) -> None:
     spill_after_chars = 16000
     response_body = b"<html><body><article><h1>MiniBot</h1><p>" + (b"x" * 20050) + b"</p></article></body></html>"
     http_server["state"]["content_type"] = "text/html"
@@ -178,7 +178,7 @@ async def test_http_tool_spills_large_response_to_managed_file(tmp_path: Path, h
 @pytest.mark.asyncio
 async def test_http_tool_skips_spill_when_response_exceeds_max_spill_bytes(
     tmp_path: Path,
-    http_server: Dict[str, Any],
+    http_server: dict[str, Any],
 ) -> None:
     response_body = b"a" * 500
     http_server["state"]["body"] = response_body
@@ -214,7 +214,7 @@ async def test_http_tool_skips_spill_when_response_exceeds_max_spill_bytes(
 
 
 @pytest.mark.asyncio
-async def test_http_tool_falls_back_to_inline_when_spill_storage_unavailable(http_server: Dict[str, Any]) -> None:
+async def test_http_tool_falls_back_to_inline_when_spill_storage_unavailable(http_server: dict[str, Any]) -> None:
     http_server["state"]["body"] = b"a" * 20050
     config = HTTPClientToolConfig(
         enabled=True,

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
 
+from minibot.app.handlers.services.tool_audio_executor import AudioTranscriptionExecutor
 from minibot.app.incoming_files_context import incoming_files_from_metadata
 from minibot.core.channels import ChannelMessage, IncomingFileRef
 from minibot.llm.tools.base import ToolContext
-
-from minibot.app.handlers.services.tool_audio_executor import AudioTranscriptionExecutor
 
 
 @dataclass(frozen=True)

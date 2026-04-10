@@ -5,12 +5,12 @@ import json
 import logging
 import mimetypes
 import os
-from pathlib import Path
 import shutil
 import signal
 import sys
 import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 from llm_async.models import Tool
@@ -512,7 +512,7 @@ class HostPythonExecTool:
                     process.communicate(input=input_bytes),
                     timeout=timeout_seconds,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 timed_out = True
                 self._logger.warning(
                     "python exec timed out",

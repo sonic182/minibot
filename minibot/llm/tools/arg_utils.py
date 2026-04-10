@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from minibot.llm.tools.base import ToolContext
 

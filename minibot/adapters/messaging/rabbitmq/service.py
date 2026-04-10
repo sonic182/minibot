@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import aio_pika
 import aio_pika.abc
@@ -19,14 +19,14 @@ class RabbitMQConsumerService:
         self,
         config: RabbitMQConsumerConfig,
         event_bus: EventBus,
-        task_manager: Optional[TaskManager] = None,
+        task_manager: TaskManager | None = None,
     ) -> None:
         self._config = config
         self._event_bus = event_bus
         self._task_manager = task_manager
         self._logger = logging.getLogger("minibot.rabbitmq")
-        self._consume_task: Optional[asyncio.Task[None]] = None
-        self._exchange: Optional[aio_pika.abc.AbstractExchange] = None
+        self._consume_task: asyncio.Task[None] | None = None
+        self._exchange: aio_pika.abc.AbstractExchange | None = None
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(config.max_concurrent_workers)
 
     async def start(self) -> None:
@@ -78,8 +78,8 @@ class RabbitMQConsumerService:
             await message.nack(requeue=False)
             return
 
-        chat_id: Optional[int] = body.get("chat_id")
-        user_id: Optional[int] = body.get("user_id")
+        chat_id: int | None = body.get("chat_id")
+        user_id: int | None = body.get("user_id")
         context: dict[str, Any] = body.get("context", {})
 
         await self._semaphore.acquire()
