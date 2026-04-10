@@ -484,6 +484,14 @@ class ToolsConfig(BaseModel):
         return data
 
 
+class RabbitMQConsumerConfig(BaseModel):
+    enabled: bool = False
+    broker_url: str = "amqp://guest:guest@localhost:5672/"
+    queue_name: str = "minibot"
+    prefetch_count: PositiveInt = 1
+    worker_timeout_seconds: PositiveInt = 60
+
+
 class ScheduledPromptsConfig(BaseModel):
     enabled: bool = True
     sqlite_url: str = "sqlite+aiosqlite:///./data/scheduled_prompts.db"
@@ -520,6 +528,7 @@ class Settings(BaseModel):
     tools: ToolsConfig = ToolsConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
     logging: LoggingConfig = LoggingConfig()
+    rabbitmq: RabbitMQConsumerConfig = RabbitMQConsumerConfig()
 
     model_config = ConfigDict(extra="forbid")
 

@@ -1,4 +1,12 @@
 services:
+  rabbitmq:
+    image: rabbitmq:4.2-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
   minibot:
     build: .
     container_name: minibot
