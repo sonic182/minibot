@@ -87,7 +87,6 @@ async def test_invoke_agent_returns_timeout_payload_when_runtime_times_out(monke
     assert runtime_calls == 1
     assert result["ok"] is False
     assert result["result_status"] == "timeout"
-    assert result["should_continue"] is False
     assert result["error_code"] == "delegated_timeout"
     assert result["provider"] == "openrouter"
     assert result["model"] == "z-ai/glm-4.7"

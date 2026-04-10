@@ -134,11 +134,7 @@ async def test_http_tool_auto_skips_json_processing(http_server: Dict[str, Any])
 @pytest.mark.asyncio
 async def test_http_tool_spills_large_response_to_managed_file(tmp_path: Path, http_server: Dict[str, Any]) -> None:
     spill_after_chars = 16000
-    response_body = (
-        b"<html><body><article><h1>MiniBot</h1><p>"
-        + (b"x" * 20050)
-        + b"</p></article></body></html>"
-    )
+    response_body = b"<html><body><article><h1>MiniBot</h1><p>" + (b"x" * 20050) + b"</p></article></body></html>"
     http_server["state"]["content_type"] = "text/html"
     http_server["state"]["body"] = response_body
     assert len(response_body.decode("utf-8")) > spill_after_chars

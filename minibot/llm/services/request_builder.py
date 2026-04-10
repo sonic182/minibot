@@ -65,7 +65,6 @@ def build_generate_step_call_kwargs(
     ctx: RequestContext,
     conversation: Sequence[dict[str, Any]],
     tool_specs: Sequence[Any] | None,
-    strict_response_schema: dict[str, Any] | None,
     extra_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
     resolved_tools = _merged_tools(tool_specs, ctx.provider_native_tools) if ctx.is_responses_provider else tool_specs
@@ -73,7 +72,6 @@ def build_generate_step_call_kwargs(
         "model": ctx.model,
         "messages": list(conversation),
         "tools": resolved_tools,
-        "response_schema": strict_response_schema,
     }
     if ctx.temperature is not None:
         call_kwargs["temperature"] = ctx.temperature
@@ -94,7 +92,6 @@ def build_complete_once_call_kwargs(
     ctx: RequestContext,
     messages: Sequence[dict[str, Any]],
     tool_specs: Sequence[Any] | None,
-    strict_response_schema: dict[str, Any] | None,
     prompt_cache_key: str | None,
     previous_response_id: str | None,
 ) -> dict[str, Any]:
@@ -103,7 +100,6 @@ def build_complete_once_call_kwargs(
         "model": ctx.model,
         "messages": list(messages),
         "tools": resolved_tools,
-        "response_schema": strict_response_schema,
     }
     if ctx.temperature is not None:
         call_kwargs["temperature"] = ctx.temperature
@@ -135,13 +131,11 @@ def build_continue_call_kwargs(
     previous_response_id: str,
     prompt_cache_key: str | None,
     system_prompt: str,
-    response_schema: dict[str, Any] | None,
 ) -> dict[str, Any]:
     call_kwargs: dict[str, Any] = {
         "model": ctx.model,
         "messages": [{"role": "user", "content": "Continue exactly where you left off. Do not repeat."}],
         "tools": None,
-        "response_schema": response_schema,
         "previous_response_id": previous_response_id,
     }
     if ctx.temperature is not None:

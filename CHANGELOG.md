@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `pre_response` tool: agents call this before their final plain-text answer to declare `kind`, `meta`, and `attachments` metadata. Replaces the structured `AssistantRuntimePayload` JSON schema as the mechanism for conveying render hints and file attachments.
+- `shell_agent` specialist (`agents/shell_agent.md`) using `gpt-5.4-nano` with high reasoning for bash and filesystem tasks.
+
+### Changed
+
+- Agent runtime continuation is now driven purely by the tool-call loop: any step with tool calls continues; a step with no tool calls is the final answer. The outer `should_continue` / `_resolve_continuations` loop is removed entirely.
+- `browser_agent.md` system prompt rewritten to remove the old structured JSON output contract (`answer`, `should_continue`, `attachments`); screenshot attachments are now declared via `pre_response` before the final answer. `pre_response` added to `tools_allow`.
+- `count_tool_messages` (used by `RuntimeOrchestrationService` guardrail checks and delegated tool-use enforcement) now excludes `pre_response` calls from the count, so a turn that only calls `pre_response` is not treated as having executed a real tool.
+
+### Removed
+
+- Structured output infrastructure: `AssistantRuntimePayload` response schema, `main_assistant_response_model` / `main_assistant_response_schema`, `RuntimeStructuredOutputValidator`, `_DelegatedPayload`, and all `response_schema` / `local_response_model` parameters from `generate()` call sites.
+- `ratchet-sm` runtime dependency: `ToolGuardrailValidator` rewritten with plain JSON parsing and Pydantic validation; `has_pseudo_tool_call_tag` inlined.
+- `structured_output_mode` config field and its `provider_with_fallback` / `prompt_only` / `provider_strict` variants removed from `[llm]` config, `config.example.toml`, and README.
+
+### Fixed
+
+- `provider_factory._complete` was calling `self._provider.complete(...)` instead of `acomplete`; fixed to use the correct async method, resolving an `AttributeError` at runtime.
+
 ## [0.2.0] - 2026-04-07
 
 ### Added

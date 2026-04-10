@@ -201,9 +201,6 @@ class LLMMConfig(BaseModel):
     system_prompt: str = "You are Minibot, a helpful assistant."
     system_prompt_file: str | None = "./prompts/main_agent_system.md"
     prompts_dir: str = "./prompts"
-    structured_output_mode: Literal["provider_with_fallback", "prompt_only", "provider_strict"] = (
-        "provider_with_fallback"
-    )
     reasoning_effort: str | None = None
     main_responses_state_mode: Literal["full_messages", "previous_response_id"] = "full_messages"
     agent_responses_state_mode: Literal["full_messages", "previous_response_id"] = "previous_response_id"
@@ -478,9 +475,7 @@ class ToolsConfig(BaseModel):
     @classmethod
     def _reject_removed_keys(cls, data: Any) -> Any:
         if isinstance(data, dict) and "lua_custom" in data:
-            raise ValueError(
-                "[tools.lua_custom] is no longer supported; remove it from your config"
-            )
+            raise ValueError("[tools.lua_custom] is no longer supported; remove it from your config")
         return data
 
 

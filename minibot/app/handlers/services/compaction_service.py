@@ -129,7 +129,6 @@ class HistoryCompactionService:
                 user_content=None,
                 tools=[],
                 tool_context=None,
-                response_schema=None,
                 prompt_cache_key=f"{prompt_cache_key}:compact",
                 previous_response_id=None,
                 system_prompt_override=self._prompt_service.compact_system_prompt(system_prompt),
@@ -139,7 +138,7 @@ class HistoryCompactionService:
                 session_id,
                 getattr(compact_generation, "total_tokens", None),
             )
-            compact_parsed = extract_answer(compact_generation.payload, logger=self._logger)
+            compact_parsed = extract_answer(compact_generation.payload)
             compact_render = compact_parsed.render or plain_render(str(compact_generation.payload))
             await self._memory.trim_history(session_id, 0)
             await self._memory.append_history(session_id, "user", self._compaction_user_request)
