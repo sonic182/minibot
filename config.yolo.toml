@@ -103,6 +103,10 @@ default_limit = 20
 max_limit = 100
 default_owner_id = "primary"
 
+# Optional async task tools.
+[tools.tasks]
+enabled = true
+
 [tools.http_client]
 enabled = true
 timeout_seconds = 30
@@ -225,3 +229,12 @@ disabled_tools = []
 enabled = true
 # Recommended: create a ./skills directory and set paths to load only your own skills.
 # paths = ["./skills"]
+
+[rabbitmq]
+enabled = true
+broker_url = "amqp://guest:guest@rabbitmq:5672/"
+queue_name = "minibot.tasks.worker"
+exchange_name = "minibot.tasks"
+prefetch_count = 1
+worker_timeout_seconds = 60
+max_concurrent_workers = 4
