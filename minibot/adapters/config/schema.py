@@ -464,6 +464,10 @@ class SkillsToolConfig(BaseModel):
     paths: list[str] = Field(default_factory=list)
 
 
+class TaskToolConfig(BaseModel):
+    enabled: bool = False
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
@@ -478,6 +482,7 @@ class ToolsConfig(BaseModel):
     audio_transcription: AudioTranscriptionToolConfig = AudioTranscriptionToolConfig()
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
+    tasks: TaskToolConfig = Field(default_factory=TaskToolConfig)
 
     @model_validator(mode="before")
     @classmethod

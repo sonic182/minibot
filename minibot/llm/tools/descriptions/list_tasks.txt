@@ -1,0 +1,3 @@
+List currently active background worker tasks.
+
+Use this to inspect outstanding task_ids and elapsed time before deciding whether to wait, synthesize partial results, or cancel remaining work.

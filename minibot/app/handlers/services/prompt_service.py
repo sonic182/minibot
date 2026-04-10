@@ -73,6 +73,7 @@ class PromptService:
 
     def _capability_status_fragment(self) -> str:
         tool_names = {binding.tool.name for binding in self._tools}
+        task_tools_available = {"spawn_task", "cancel_task", "list_tasks"}.issubset(tool_names)
         invoke_agent_available = "invoke_agent" in tool_names
         fetch_agent_info_available = "fetch_agent_info" in tool_names
         specialist_count = 0
@@ -86,7 +87,14 @@ class PromptService:
         ]
         for hint in self._profile.provider_capability_hints:
             lines.append(f"- {hint}")
-        if invoke_agent_available and specialist_count > 0:
+        if task_tools_available:
+            lines.append(
+                "- Asynchronous delegation is available now via `spawn_task`, with `list_tasks` and `cancel_task` "
+                "for tracking and cancellation."
+            )
+            if invoke_agent_available and specialist_count > 0:
+                lines.append("- `invoke_agent` is also available as a local fallback when task tools are unsuitable.")
+        elif invoke_agent_available and specialist_count > 0:
             lines.append(
                 f"- Delegation is available now via `invoke_agent` with {specialist_count} listed specialist agents."
             )
@@ -103,6 +111,9 @@ class PromptService:
             "- If a needed capability is missing entirely, use the best available alternative or explain the "
             "limitation briefly."
         )
+        task_guidance = self._task_worker_guidance_fragment(task_tools_available=task_tools_available)
+        if task_guidance:
+            lines.append(task_guidance)
         return "\n".join(lines)
 
     def _specialist_roster_fragment(self) -> str:
@@ -129,6 +140,26 @@ class PromptService:
         if "activate_skill" not in tool_names:
             return ""
         return self._skill_registry.prompt_catalog()
+
+    def _task_worker_guidance_fragment(self, *, task_tools_available: bool) -> str:
+        tool_names = {binding.tool.name for binding in self._tools}
+        if not task_tools_available or "list_tasks" not in tool_names:
+            return ""
+        return "\n".join(
+            [
+                "Task-worker result handling:",
+                '- Messages with `metadata.source == "task_worker"` are asynchronous worker results '
+                "from earlier `spawn_task` calls.",
+                "- Track pending task ids explicitly. Use `list_tasks` to verify which tasks are "
+                "still active.",
+                "- When only some task results have arrived, acknowledge the partial completion "
+                "briefly and wait for the remaining tasks.",
+                "- When all required task results have arrived, synthesize them and continue the "
+                "tool loop or answer the user.",
+                "- Use `cancel_task` only when the user asks to stop or the remaining work is no "
+                "longer useful.",
+            ]
+        )
 
     def compact_system_prompt(self, system_prompt: str) -> str:
         compact_prompt = load_compact_prompt(self._prompts_dir)

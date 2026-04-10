@@ -18,9 +18,11 @@ from minibot.adapters.config.schema import (
     MCPServerConfig,
     MCPToolConfig,
     PythonExecToolConfig,
+    RabbitMQConsumerConfig,
     ScheduledPromptsConfig,
     SchedulerConfig,
     Settings,
+    TaskToolConfig,
     TimeToolConfig,
     ToolsConfig,
 )
@@ -105,6 +107,8 @@ def _settings(
     file_storage_enabled: bool,
     audio_transcription_enabled: bool,
     grep_enabled: bool,
+    tasks_enabled: bool = False,
+    rabbitmq_enabled: bool = False,
 ) -> Settings:
     return Settings(
         llm=LLMMConfig(api_key="secret"),
@@ -120,8 +124,10 @@ def _settings(
             grep=GrepToolConfig(enabled=grep_enabled),
             browser=BrowserToolConfig(output_dir="./data/files/browser"),
             audio_transcription=AudioTranscriptionToolConfig(enabled=audio_transcription_enabled),
+            tasks=TaskToolConfig(enabled=tasks_enabled),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
+        rabbitmq=RabbitMQConsumerConfig(enabled=rabbitmq_enabled),
     )
 
 
@@ -392,3 +398,81 @@ def test_build_enabled_tools_rejects_grep_without_file_storage() -> None:
 
     with pytest.raises(ValueError, match="tools.grep.enabled requires tools.file_storage.enabled"):
         _ = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
+
+
+def test_build_enabled_tools_includes_task_tools_when_rabbitmq_enabled() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=False,
+        audio_transcription_enabled=False,
+        grep_enabled=False,
+        tasks_enabled=True,
+        rabbitmq_enabled=True,
+    )
+
+    class _TaskManagerStub:
+        async def cancel(self, task_id: str) -> bool:
+            del task_id
+            return False
+
+        def active(self) -> list[object]:
+            return []
+
+    tools = build_enabled_tools(
+        settings,
+        memory=_MemoryStub(),
+        kv_memory=None,
+        prompt_scheduler=None,
+        event_bus=None,
+        task_manager=cast(Any, _TaskManagerStub()),
+    )
+    names = {binding.tool.name for binding in tools}
+
+    assert {"spawn_task", "cancel_task", "list_tasks"}.issubset(names)
+
+
+def test_build_enabled_tools_skips_task_tools_when_rabbitmq_disabled() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=False,
+        audio_transcription_enabled=False,
+        grep_enabled=False,
+        tasks_enabled=True,
+        rabbitmq_enabled=False,
+    )
+
+    class _TaskManagerStub:
+        async def cancel(self, task_id: str) -> bool:
+            del task_id
+            return False
+
+        def active(self) -> list[object]:
+            return []
+
+    tools = build_enabled_tools(
+        settings,
+        memory=_MemoryStub(),
+        kv_memory=None,
+        prompt_scheduler=None,
+        event_bus=None,
+        task_manager=cast(Any, _TaskManagerStub()),
+    )
+    names = {binding.tool.name for binding in tools}
+
+    assert "spawn_task" not in names
+    assert "cancel_task" not in names
+    assert "list_tasks" not in names

@@ -200,6 +200,10 @@ default_limit = 20
 max_limit = 100
 default_owner_id = "primary"
 
+# Optional async task tools.
+[tools.tasks]
+enabled = false
+
 # Optional HTTP fetch tool.
 [tools.http_client]
 enabled = false
