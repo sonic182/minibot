@@ -9,10 +9,10 @@ from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
-import aiosonic
 from aiosonic.timeout import Timeouts
 from llm_async.models import Tool
 
+import aiosonic
 from minibot.adapters.config.schema import HTTPClientToolConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.llm.tools.base import ToolBinding, ToolContext

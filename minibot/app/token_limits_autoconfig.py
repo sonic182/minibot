@@ -7,7 +7,6 @@ from logging import Logger
 from typing import Any
 
 import aiosonic
-
 from minibot.adapters.config.schema import Settings
 from minibot.core.agents import AgentSpec
 from minibot.llm.services.provider_target import infer_provider_from_base_url, resolve_target_provider

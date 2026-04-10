@@ -66,8 +66,15 @@ class _SchedulerSettings:
 
 
 class _Settings:
+    class _RabbitMQ:
+        def __init__(self, enabled: bool) -> None:
+            self.enabled = enabled
+
     tools = _ToolSettings()
     scheduler = _SchedulerSettings()
+
+    def __init__(self, *, rabbitmq_enabled: bool = False) -> None:
+        self.rabbitmq = self._RabbitMQ(enabled=rabbitmq_enabled)
 
 
 class _TelegramConfig:
@@ -83,6 +90,7 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
     dispatcher_probe = _Probe()
     scheduler_probe = _Probe()
     telegram_probe = _Probe()
+    rabbitmq_probe = _Probe()
 
     class _FakeContainer:
         @classmethod
@@ -95,7 +103,7 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
 
         @classmethod
         def get_settings(cls) -> _Settings:
-            return _Settings()
+            return _Settings(rabbitmq_enabled=True)
 
         @classmethod
         def get_event_bus(cls):
@@ -108,6 +116,10 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
         @classmethod
         def get_telegram_config(cls) -> _TelegramConfig:
             return _TelegramConfig(enabled=True, bot_token="token")
+
+        @classmethod
+        def get_task_manager(cls):
+            return object()
 
         @classmethod
         async def initialize_storage(cls) -> None:
@@ -133,6 +145,16 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
         async def stop(self) -> None:
             await telegram_probe.stop()
 
+    class _FakeRabbitMQ:
+        def __init__(self, config, event_bus, task_manager) -> None:
+            del config, event_bus, task_manager
+
+        async def start(self) -> None:
+            await rabbitmq_probe.start()
+
+        async def stop(self) -> None:
+            await rabbitmq_probe.stop()
+
     @asynccontextmanager
     async def _fake_shutdown(services, logger):
         del logger
@@ -147,6 +169,7 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
     monkeypatch.setattr(daemon_module, "Dispatcher", _FakeDispatcher)
     monkeypatch.setattr(daemon_module, "TelegramService", _FakeTelegram)
+    monkeypatch.setattr(daemon_module, "RabbitMQConsumerService", _FakeRabbitMQ)
     monkeypatch.setattr(daemon_module, "_graceful_shutdown", _fake_shutdown)
 
     await daemon_module.run()
@@ -157,6 +180,8 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
     assert scheduler_probe.stopped == 1
     assert telegram_probe.started == 1
     assert telegram_probe.stopped == 1
+    assert rabbitmq_probe.started == 1
+    assert rabbitmq_probe.stopped == 1
 
 
 @pytest.mark.asyncio
@@ -176,7 +201,7 @@ async def test_run_skips_telegram_when_disabled(monkeypatch: pytest.MonkeyPatch)
 
         @classmethod
         def get_settings(cls) -> _Settings:
-            return _Settings()
+            return _Settings(rabbitmq_enabled=False)
 
         @classmethod
         def get_event_bus(cls):

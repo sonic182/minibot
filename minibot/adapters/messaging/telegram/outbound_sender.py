@@ -6,11 +6,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile
 
+from aiogram import Bot
 from minibot.adapters.config.schema import TelegramChannelConfig
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelResponse, RenderableResponse

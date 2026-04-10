@@ -37,6 +37,8 @@ class RabbitMQConsumerService:
             self._consume_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._consume_task
+        if self._task_manager is not None:
+            await self._task_manager.stop()
 
     async def _consume(self) -> None:
         connection: aio_pika.abc.AbstractRobustConnection = await aio_pika.connect_robust(
@@ -81,6 +83,7 @@ class RabbitMQConsumerService:
 
         chat_id: int | None = body.get("chat_id")
         user_id: int | None = body.get("user_id")
+        agent_name = body.get("agent_name")
         context: dict[str, Any] = body.get("context", {})
 
         await self._semaphore.acquire()
@@ -95,6 +98,7 @@ class RabbitMQConsumerService:
                 task_id=task_id,
                 channel=channel,
                 prompt=prompt,
+                agent_name=agent_name if isinstance(agent_name, str) and agent_name.strip() else None,
                 context=context,
                 chat_id=chat_id,
                 user_id=user_id,

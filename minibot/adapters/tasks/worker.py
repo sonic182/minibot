@@ -10,7 +10,10 @@ from typing import Any
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.files.local_storage import LocalFileStorage
-from minibot.app.agent_policies import filter_tools_for_agent
+from minibot.adapters.mcp.client import MCPClient
+from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_policies import filter_tools_for_agent, strip_reserved_delegation_tools
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.llm_client_factory import LLMClientFactory
@@ -27,6 +30,7 @@ from minibot.llm.tools.code_read import CodeReadTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
+from minibot.llm.tools.mcp_bridge import MCPToolBridge
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.shared.utils import session_identifier
@@ -85,9 +89,11 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
         settings = load_settings()
         llm_factory = LLMClientFactory(settings)
         environment_prompt_fragment = build_environment_prompt_fragment(settings)
-        spec = _build_worker_spec(
-            system_prompt=llm_factory.create_default().system_prompt(),
+        spec = _resolve_task_spec(
+            settings=settings,
+            llm_factory=llm_factory,
             environment_prompt_fragment=environment_prompt_fragment,
+            task=task,
         )
         llm_client = llm_factory.create_for_agent(spec)
         tools = _build_worker_tools(settings=settings, spec=spec)
@@ -128,8 +134,11 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             "tool_count": sum(1 for message in generation.state.messages if message.role == "tool"),
             "model": llm_client.model_name(),
             "provider": llm_client.provider_name(),
+            "agent_name": spec.name,
+            "managed_files_root": settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
         }
-        return {"task_id": task_id, "text": text, "metadata": metadata}
+        attachments = _validate_attachments((generation.pre_response_meta or {}).get("attachments"))
+        return {"task_id": task_id, "text": text, "attachments": attachments, "metadata": metadata}
     except Exception as exc:  # noqa: BLE001
         _LOGGER.exception("task worker failed", exc_info=exc, extra={"task_id": task_id or "unknown"})
         return {
@@ -173,8 +182,31 @@ def _build_worker_tools(*, settings: Settings, spec: AgentSpec) -> list[ToolBind
                     storage=managed_storage,
                 ).bindings()
             )
+    if settings.tools.mcp.enabled and spec.mcp_servers:
+        for server in settings.tools.mcp.servers:
+            if server.name not in spec.mcp_servers:
+                continue
+            client = MCPClient(
+                server_name=server.name,
+                transport=server.transport,
+                timeout_seconds=settings.tools.mcp.timeout_seconds,
+                command=server.command,
+                args=server.args,
+                env=server.env or None,
+                cwd=server.cwd,
+                url=server.url,
+                headers=server.headers,
+            )
+            bridge = MCPToolBridge(
+                server_name=server.name,
+                client=client,
+                name_prefix=settings.tools.mcp.name_prefix,
+                enabled_tools=server.enabled_tools,
+                disabled_tools=server.disabled_tools,
+            )
+            bindings.extend(bridge.build_bindings())
 
-    return filter_tools_for_agent(bindings, spec)
+    return strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))
 
 
 def _build_worker_spec(*, system_prompt: str, environment_prompt_fragment: str) -> AgentSpec:
@@ -188,6 +220,44 @@ def _build_worker_spec(*, system_prompt: str, environment_prompt_fragment: str) 
         source_path=_WORKER_SPEC_PATH,
         max_tool_iterations=_WORKER_MAX_TOOL_ITERATIONS,
         tools_allow=list(_WORKER_TOOL_ALLOWLIST),
+    )
+
+
+def _resolve_task_spec(
+    *,
+    settings: Settings,
+    llm_factory: LLMClientFactory,
+    environment_prompt_fragment: str,
+    task: dict[str, Any],
+) -> AgentSpec:
+    agent_name = task.get("agent_name")
+    if isinstance(agent_name, str) and agent_name.strip():
+        registry = AgentRegistry(load_agent_specs(settings.orchestration.directory))
+        spec = registry.get(agent_name.strip())
+        if spec is None:
+            raise ValueError(f"agent '{agent_name.strip()}' is not available for async task execution")
+        if not environment_prompt_fragment.strip():
+            return spec
+        return AgentSpec(
+            name=spec.name,
+            description=spec.description,
+            system_prompt=f"{spec.system_prompt}\n\n{environment_prompt_fragment.strip()}",
+            source_path=spec.source_path,
+            model_provider=spec.model_provider,
+            model=spec.model,
+            temperature=spec.temperature,
+            max_new_tokens=spec.max_new_tokens,
+            reasoning_effort=spec.reasoning_effort,
+            max_tool_iterations=spec.max_tool_iterations,
+            tools_allow=list(spec.tools_allow),
+            tools_deny=list(spec.tools_deny),
+            mcp_servers=list(spec.mcp_servers),
+            openrouter_provider_overrides=dict(spec.openrouter_provider_overrides),
+            openrouter_reasoning_enabled=spec.openrouter_reasoning_enabled,
+        )
+    return _build_worker_spec(
+        system_prompt=llm_factory.create_default().system_prompt(),
+        environment_prompt_fragment=environment_prompt_fragment,
     )
 
 
@@ -273,3 +343,24 @@ def _extract_retry_after_seconds(error_text: str) -> int:
     if match is None:
         return 30
     return max(1, int(float(match.group("seconds")) + 0.999))
+
+
+def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_attachments, list):
+        return []
+    validated: list[dict[str, Any]] = []
+    for item in raw_attachments:
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path")
+        file_type = item.get("type")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if not isinstance(file_type, str) or not file_type.strip():
+            continue
+        attachment: dict[str, Any] = {"path": path.strip(), "type": file_type.strip()}
+        caption = item.get("caption")
+        if isinstance(caption, str) and caption.strip():
+            attachment["caption"] = caption.strip()
+        validated.append(attachment)
+    return validated

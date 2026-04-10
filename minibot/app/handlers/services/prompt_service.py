@@ -92,6 +92,9 @@ class PromptService:
                 "- Asynchronous delegation is available now via `spawn_task`, with `list_tasks` and `cancel_task` "
                 "for tracking and cancellation."
             )
+            lines.append(
+                "- `spawn_task` can also target a listed specialist via exact `agent_name` for long-running async work."
+            )
             if invoke_agent_available and specialist_count > 0:
                 lines.append("- `invoke_agent` is also available as a local fallback when task tools are unsuitable.")
         elif invoke_agent_available and specialist_count > 0:

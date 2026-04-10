@@ -8,14 +8,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from multiprocessing import Process
+from pathlib import Path
 from typing import Any
 
 from aiopipe import aioduplex
 
 from minibot.adapters.tasks.worker import worker_entry
 from minibot.app.event_bus import EventBus
-from minibot.core.channels import ChannelMessage, ChannelResponse
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.channels import ChannelFileResponse, ChannelMessage, ChannelResponse
+from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
 
 _MAX_RETRYABLE_ATTEMPTS = 2
 
@@ -46,6 +47,7 @@ class TaskManager:
         task_id: str,
         channel: str,
         prompt: str,
+        agent_name: str | None,
         context: dict[str, Any],
         chat_id: int | None,
         user_id: int | None,
@@ -57,6 +59,7 @@ class TaskManager:
             "task_id": task_id,
             "channel": channel,
             "prompt": prompt,
+            "agent_name": agent_name,
             "context": context,
             "chat_id": chat_id,
             "user_id": user_id,
@@ -99,6 +102,14 @@ class TaskManager:
 
     def active(self) -> list[Task]:
         return list(self._tasks.values())
+
+    async def stop(self) -> None:
+        tasks = list(self._tasks.values())
+        for task in tasks:
+            task.reader_task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task.reader_task
 
     async def _reader(
         self,
@@ -181,13 +192,31 @@ class TaskManager:
                     return
 
                 await ack_cb()
+                attachments = _validated_attachments(result.get("attachments"))
+                metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+                managed_files_root = metadata.get("managed_files_root")
+                await self._publish_attachments(
+                    payload=payload,
+                    attachments=attachments,
+                    managed_files_root=managed_files_root if isinstance(managed_files_root, str) else None,
+                )
                 channel_message = ChannelMessage(
                     channel=str(payload.get("channel") or "rabbitmq"),
                     user_id=payload.get("user_id"),
                     chat_id=payload.get("chat_id"),
                     message_id=None,
-                    text=result.get("text", ""),
-                    metadata={"task_id": task_id, "source": "task_worker", "context": payload.get("context", {})},
+                    text=_append_attachment_paths(
+                        text=str(result.get("text", "")),
+                        channel=str(payload.get("channel") or "rabbitmq"),
+                        attachments=attachments,
+                    ),
+                    metadata={
+                        "task_id": task_id,
+                        "source": "task_worker",
+                        "context": payload.get("context", {}),
+                        "agent_name": payload.get("agent_name"),
+                        "attachments": attachments,
+                    },
                 )
                 await self._event_bus.publish(MessageEvent(message=channel_message))
                 self._logger.info("task completed", extra={"task_id": task_id, "attempts": attempt})
@@ -239,6 +268,33 @@ class TaskManager:
             )
         )
 
+    async def _publish_attachments(
+        self,
+        *,
+        payload: dict[str, Any],
+        attachments: list[dict[str, Any]],
+        managed_files_root: str | None,
+    ) -> None:
+        if not attachments:
+            return
+        channel = str(payload.get("channel") or "rabbitmq")
+        chat_id = payload.get("chat_id")
+        if channel != "telegram" or not isinstance(chat_id, int):
+            return
+        base_dir = Path(managed_files_root or "data/files")
+        for attachment in attachments:
+            await self._event_bus.publish(
+                OutboundFileEvent(
+                    response=ChannelFileResponse(
+                        channel=channel,
+                        chat_id=chat_id,
+                        file_path=str(base_dir / attachment["path"]),
+                        caption=attachment.get("caption"),
+                        metadata={"task_id": payload.get("task_id"), "source": "task_worker"},
+                    )
+                )
+            )
+
 
 def _coerce_retry_after_seconds(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
@@ -251,3 +307,34 @@ def _failure_text_from_result(result: dict[str, Any]) -> str:
     if metadata.get("error_code") == "rate_limit_exceeded":
         return "La tarea asíncrona falló tras reintentar por rate limit del proveedor."
     return "La tarea asíncrona falló y fue cancelada."
+
+
+def _validated_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_attachments, list):
+        return []
+    validated: list[dict[str, Any]] = []
+    for item in raw_attachments:
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path")
+        file_type = item.get("type")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if not isinstance(file_type, str) or not file_type.strip():
+            continue
+        attachment: dict[str, Any] = {"path": path.strip(), "type": file_type.strip()}
+        caption = item.get("caption")
+        if isinstance(caption, str) and caption.strip():
+            attachment["caption"] = caption.strip()
+        validated.append(attachment)
+    return validated
+
+
+def _append_attachment_paths(*, text: str, channel: str, attachments: list[dict[str, Any]]) -> str:
+    if channel == "telegram" or not attachments:
+        return text
+    lines = [text.strip()] if text.strip() else []
+    lines.append("Artifacts:")
+    for attachment in attachments:
+        lines.append(f"- {attachment['path']}")
+    return "\n".join(lines)

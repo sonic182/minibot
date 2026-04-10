@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import aiosonic
 from llm_async.utils.retry import RetryConfig
 
+import aiosonic
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.llm.services.provider_registry import resolve_provider_class
 

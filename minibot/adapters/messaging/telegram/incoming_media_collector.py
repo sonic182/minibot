@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from aiogram import Bot
 from aiogram.types import Message as TelegramMessage
 
+from aiogram import Bot
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.messaging.telegram.incoming_media_mapper import TelegramIncomingMediaMapper

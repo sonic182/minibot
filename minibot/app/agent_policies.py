@@ -7,6 +7,14 @@ from minibot.app.tool_policy_utils import matches_any, normalize_patterns, valid
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
 
+RESERVED_DELEGATION_TOOL_NAMES = {
+    "invoke_agent",
+    "fetch_agent_info",
+    "spawn_task",
+    "list_tasks",
+    "cancel_task",
+}
+
 
 def filter_tools_for_agent(tools: Sequence[ToolBinding], spec: AgentSpec) -> list[ToolBinding]:
     validate_allow_deny(spec.tools_allow, spec.tools_deny)
@@ -39,3 +47,7 @@ def filter_tools_for_agent(tools: Sequence[ToolBinding], spec: AgentSpec) -> lis
             continue
         # Neither allow nor deny: no non-MCP tools are exposed.
     return filtered
+
+
+def strip_reserved_delegation_tools(tools: Sequence[ToolBinding]) -> list[ToolBinding]:
+    return [binding for binding in tools if binding.tool.name not in RESERVED_DELEGATION_TOOL_NAMES]

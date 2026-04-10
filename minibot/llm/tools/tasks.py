@@ -35,6 +35,10 @@ class TaskTools:
             parameters=strict_object(
                 properties={
                     "prompt": {"type": "string", "description": "Task prompt for the worker agent."},
+                    "agent_name": {
+                        "type": ["string", "null"],
+                        "description": "Optional exact specialist agent name to run asynchronously.",
+                    },
                     "context_json": {
                         "type": ["string", "null"],
                         "description": "Optional JSON object string with structured context for the worker task.",
@@ -65,6 +69,7 @@ class TaskTools:
         task_id = str(uuid4())
         channel = require_channel(context, message="channel context is required for task spawning")
         prompt = require_non_empty_str(payload, "prompt")
+        agent_name = optional_str(payload.get("agent_name"), error_message="agent_name must be a string or null")
         task_context = _coerce_task_context(payload)
 
         connection = await aio_pika.connect_robust(self._rabbitmq_config.broker_url)
@@ -81,6 +86,7 @@ class TaskTools:
                 "chat_id": context.chat_id,
                 "user_id": context.user_id,
                 "prompt": prompt,
+                "agent_name": agent_name,
                 "context": task_context,
             }
             await exchange.publish(
@@ -98,6 +104,7 @@ class TaskTools:
             "channel": channel,
             "chat_id": context.chat_id,
             "user_id": context.user_id,
+            "agent_name": agent_name,
         }
 
     async def _cancel_task(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:

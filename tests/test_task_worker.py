@@ -9,6 +9,7 @@ import pytest
 
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.tasks import worker
+from minibot.core.agents import AgentSpec
 
 
 class _PipeCapture:
@@ -97,6 +98,39 @@ async def test_run_agent_loop_returns_structured_success() -> None:
     assert result["metadata"]["provider"] == "fake-provider"
 
 
+@pytest.mark.asyncio
+async def test_run_agent_loop_resolves_specialist_agent() -> None:
+    settings = Settings()
+    specialist = AgentSpec(
+        name="playwright_mcp_agent",
+        description="browser specialist",
+        system_prompt="You are browser specialist.",
+        source_path=worker.Path("/tmp/agent.md"),
+        mcp_servers=["playwright-cli"],
+        tools_allow=["mcp_playwright-cli__*", "filesystem"],
+    )
+
+    with (
+        patch("minibot.adapters.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.adapters.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.adapters.tasks.worker.load_agent_specs", return_value=[specialist]),
+        patch("minibot.adapters.tasks.worker._build_worker_tools", return_value=[]),
+        patch("minibot.adapters.tasks.worker.AgentRuntime", _FakeRuntime),
+    ):
+        result = await worker.run_agent_loop(
+            {
+                "task_id": "t1",
+                "channel": "console",
+                "prompt": "browse",
+                "agent_name": "playwright_mcp_agent",
+                "chat_id": 1,
+                "user_id": 2,
+            }
+        )
+
+    assert result["metadata"]["agent_name"] == "playwright_mcp_agent"
+
+
 def test_build_worker_tools_excludes_orchestration_tools() -> None:
     settings = Settings()
     settings.tools.http_client.enabled = True
@@ -121,3 +155,25 @@ def test_build_worker_tools_excludes_orchestration_tools() -> None:
     assert "chat_history_info" not in tool_names
     assert "schedule" not in tool_names
     assert "self_insert_artifact" not in tool_names
+
+
+def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
+    settings = Settings()
+    settings.tools.http_client.enabled = True
+    spec = AgentSpec(
+        name="specialist",
+        description="desc",
+        system_prompt="prompt",
+        source_path=worker.Path("/tmp/specialist.md"),
+        tools_allow=["http_request", "spawn_task", "invoke_agent", "cancel_task", "list_tasks", "fetch_agent_info"],
+    )
+
+    bindings = worker._build_worker_tools(settings=settings, spec=spec)
+    tool_names = {binding.tool.name for binding in bindings}
+
+    assert "http_request" in tool_names
+    assert "spawn_task" not in tool_names
+    assert "invoke_agent" not in tool_names
+    assert "cancel_task" not in tool_names
+    assert "list_tasks" not in tool_names
+    assert "fetch_agent_info" not in tool_names

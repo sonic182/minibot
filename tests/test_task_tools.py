@@ -91,7 +91,7 @@ async def test_spawn_task_publishes_rabbitmq_message(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("minibot.llm.tools.tasks.aio_pika.Message", _FakeMessage)
 
     result = await bindings["spawn_task"].handler(
-        {"prompt": "Summarize logs", "context_json": '{"trace_id":"abc"}'},
+        {"prompt": "Summarize logs", "agent_name": "playwright_mcp_agent", "context_json": '{"trace_id":"abc"}'},
         ToolContext(channel="console", chat_id=42, user_id=7),
     )
 
@@ -108,6 +108,7 @@ async def test_spawn_task_publishes_rabbitmq_message(monkeypatch: pytest.MonkeyP
     assert '"chat_id": 42' in payload
     assert '"user_id": 7' in payload
     assert '"prompt": "Summarize logs"' in payload
+    assert '"agent_name": "playwright_mcp_agent"' in payload
     assert '"trace_id": "abc"' in payload
 
 

@@ -79,6 +79,7 @@ async def test_task_result_preserves_console_channel_for_outbound_routing() -> N
             task_id="t1",
             channel="console",
             prompt="do work",
+            agent_name=None,
             context={},
             chat_id=1,
             user_id=2,

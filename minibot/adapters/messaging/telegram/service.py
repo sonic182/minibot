@@ -5,9 +5,9 @@ import contextlib
 import logging
 from pathlib import Path
 
-from aiogram import Bot, Dispatcher
 from aiogram.types import Message as TelegramMessage
 
+from aiogram import Bot, Dispatcher
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.messaging.telegram.authorization import is_authorized

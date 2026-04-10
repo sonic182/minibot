@@ -117,6 +117,7 @@ async def test_dispatch_valid_message_delegates_to_task_manager() -> None:
         "task_id": "t1",
         "channel": "telegram",
         "prompt": "summarise this",
+        "agent_name": "playwright_mcp_agent",
         "chat_id": 10,
         "user_id": 20,
         "context": {"k": "v"},
@@ -130,6 +131,7 @@ async def test_dispatch_valid_message_delegates_to_task_manager() -> None:
     assert kw["task_id"] == "t1"
     assert kw["channel"] == "telegram"
     assert kw["prompt"] == "summarise this"
+    assert kw["agent_name"] == "playwright_mcp_agent"
     assert kw["chat_id"] == 10
     assert kw["user_id"] == 20
     assert kw["context"] == {"k": "v"}
@@ -148,6 +150,7 @@ async def test_dispatch_optional_fields_default_to_none() -> None:
 
     kw = task_manager.spawn.call_args.kwargs
     assert kw["channel"] == "console"
+    assert kw["agent_name"] is None
     assert kw["chat_id"] is None
     assert kw["user_id"] is None
     assert kw["context"] == {}
