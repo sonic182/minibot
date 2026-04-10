@@ -33,6 +33,17 @@ class _PipeSuccess:
         yield _RX(), _TX()
 
 
+class _FakeProc:
+    def start(self) -> None:
+        return None
+
+    def join(self) -> None:
+        return None
+
+    def terminate(self) -> None:
+        return None
+
+
 @pytest.mark.asyncio
 async def test_task_result_preserves_console_channel_for_outbound_routing() -> None:
     bus = EventBus()
@@ -60,10 +71,9 @@ async def test_task_result_preserves_console_channel_for_outbound_routing() -> N
             break
 
     relay_task = asyncio.create_task(relay())
-
     with (
         patch("minibot.adapters.tasks.manager.aioduplex", return_value=(_PipeSuccess({"text": "done"}), MagicMock())),
-        patch("minibot.adapters.tasks.manager.Process", return_value=MagicMock()),
+        patch("minibot.adapters.tasks.manager.Process", return_value=_FakeProc()),
     ):
         await manager.spawn(
             task_id="t1",

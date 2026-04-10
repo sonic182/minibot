@@ -89,6 +89,22 @@ class _PipeWorkerError:
         yield _RX(), _TX()
 
 
+class _FakeProc:
+    def __init__(self) -> None:
+        self.start_calls = 0
+        self.join_calls = 0
+        self.terminate_calls = 0
+
+    def start(self) -> None:
+        self.start_calls += 1
+
+    def join(self) -> None:
+        self.join_calls += 1
+
+    def terminate(self) -> None:
+        self.terminate_calls += 1
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -111,7 +127,7 @@ async def _spawn(
     sem = asyncio.Semaphore(1)
     await sem.acquire()  # simulate consumer pre-acquiring before delegating to manager
 
-    fake_proc = MagicMock()
+    fake_proc = _FakeProc()
 
     with (
         patch("minibot.adapters.tasks.manager.aioduplex", return_value=(pipe, MagicMock())),
@@ -209,7 +225,7 @@ async def test_reader_timeout_nacks_and_terminates_process() -> None:
 
     nack_cb.assert_called_once()
     ack_cb.assert_not_called()
-    fake_proc.terminate.assert_called_once()
+    assert fake_proc.terminate_calls == 1
 
 
 @pytest.mark.asyncio
@@ -277,7 +293,7 @@ async def test_cancel_nacks_and_terminates_process() -> None:
     assert result is True
     nack_cb.assert_called_once()
     ack_cb.assert_not_called()
-    fake_proc.terminate.assert_called_once()
+    assert fake_proc.terminate_calls == 1
 
 
 @pytest.mark.asyncio
