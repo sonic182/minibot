@@ -4,6 +4,6 @@ Use this when work can run asynchronously and the main agent should not block on
 
 Provide:
 - prompt: clear worker instruction.
-- context: optional structured context the worker should receive.
+- context_json: optional JSON object string the worker should receive as structured context.
 
 Each spawned task keeps the current channel/chat routing so its result returns to the same conversation as a later task_worker message.

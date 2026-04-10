@@ -91,7 +91,7 @@ async def test_spawn_task_publishes_rabbitmq_message(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("minibot.llm.tools.tasks.aio_pika.Message", _FakeMessage)
 
     result = await bindings["spawn_task"].handler(
-        {"prompt": "Summarize logs", "context": {"trace_id": "abc"}},
+        {"prompt": "Summarize logs", "context_json": '{"trace_id":"abc"}'},
         ToolContext(channel="console", chat_id=42, user_id=7),
     )
 
@@ -108,6 +108,31 @@ async def test_spawn_task_publishes_rabbitmq_message(monkeypatch: pytest.MonkeyP
     assert '"chat_id": 42' in payload
     assert '"user_id": 7' in payload
     assert '"prompt": "Summarize logs"' in payload
+    assert '"trace_id": "abc"' in payload
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_accepts_legacy_context_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    task_manager = _TaskManagerStub()
+    tools = TaskTools(RabbitMQConsumerConfig(enabled=True, broker_url="amqp://broker/"), cast(Any, task_manager))
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+    exchange = _FakeExchange()
+    channel_obj = _FakeChannel(exchange)
+    connection = _FakeConnection(channel_obj)
+
+    async def _connect(url: str) -> _FakeConnection:
+        assert url == "amqp://broker/"
+        return connection
+
+    monkeypatch.setattr("minibot.llm.tools.tasks.aio_pika.connect_robust", _connect)
+    monkeypatch.setattr("minibot.llm.tools.tasks.aio_pika.Message", _FakeMessage)
+
+    await bindings["spawn_task"].handler(
+        {"prompt": "Summarize logs", "context": {"trace_id": "abc"}},
+        ToolContext(channel="console", chat_id=42, user_id=7),
+    )
+
+    payload = exchange.published[0]["message"].body.decode()
     assert '"trace_id": "abc"' in payload
 
 

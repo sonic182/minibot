@@ -10,7 +10,7 @@ from llm_async.models import Tool
 
 from minibot.adapters.config.schema import RabbitMQConsumerConfig
 from minibot.adapters.tasks.manager import TaskManager
-from minibot.llm.tools.arg_utils import require_channel, require_non_empty_str
+from minibot.llm.tools.arg_utils import optional_str, require_channel, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import empty_object_schema, strict_object
@@ -35,13 +35,12 @@ class TaskTools:
             parameters=strict_object(
                 properties={
                     "prompt": {"type": "string", "description": "Task prompt for the worker agent."},
-                    "context": {
-                        "type": ["object", "null"],
-                        "description": "Optional structured context for the worker task.",
-                        "additionalProperties": True,
+                    "context_json": {
+                        "type": ["string", "null"],
+                        "description": "Optional JSON object string with structured context for the worker task.",
                     },
                 },
-                required=["prompt", "context"],
+                required=["prompt"],
             ),
         )
 
@@ -66,7 +65,7 @@ class TaskTools:
         task_id = str(uuid4())
         channel = require_channel(context, message="channel context is required for task spawning")
         prompt = require_non_empty_str(payload, "prompt")
-        task_context = _coerce_task_context(payload.get("context"))
+        task_context = _coerce_task_context(payload)
 
         connection = await aio_pika.connect_robust(self._rabbitmq_config.broker_url)
         async with connection:
@@ -122,11 +121,21 @@ class TaskTools:
         return {"tasks": tasks, "count": len(tasks)}
 
 
-def _coerce_task_context(value: Any) -> dict[str, Any]:
+def _coerce_task_context(payload: dict[str, Any]) -> dict[str, Any]:
+    if "context_json" in payload:
+        raw_context = optional_str(payload.get("context_json"), error_message="context_json must be a string or null")
+        if raw_context is None or not raw_context.strip():
+            return {}
+        try:
+            value = json.loads(raw_context)
+        except json.JSONDecodeError as exc:
+            raise ValueError("context_json must be valid JSON") from exc
+    else:
+        value = payload.get("context")
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise ValueError("context must be an object or null")
+        raise ValueError("task context must decode to an object")
     return value
 
 
