@@ -145,7 +145,13 @@ async def _spawn(
             semaphore=sem,
         )
 
-    return ack_cb, nack_cb, sem, fake_proc
+    task = manager._tasks.get(task_id)
+    if task is None:
+        reader_task = asyncio.get_running_loop().create_future()
+        reader_task.set_result(None)
+    else:
+        reader_task = task.reader_task
+    return ack_cb, nack_cb, sem, fake_proc, reader_task
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +166,8 @@ async def test_reader_success_publishes_message_event() -> None:
     manager = _make_manager(bus)
     pipe = _PipeSuccess({"task_id": "t1", "text": "the answer"})
 
-    await _spawn(manager, pipe, task_id="t1", prompt="hello")
+    _, _, _, _, reader_task = await _spawn(manager, pipe, task_id="t1", prompt="hello")
+    await asyncio.wait_for(reader_task, timeout=1.0)
 
     event = await asyncio.wait_for(sub._queue.get(), timeout=2.0)
     assert isinstance(event, MessageEvent)
@@ -179,8 +186,8 @@ async def test_reader_success_acks_and_does_not_nack() -> None:
     manager = _make_manager(bus)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
 
-    ack_cb, nack_cb, sem, _ = await _spawn(manager, pipe)
-    await asyncio.sleep(0.2)
+    ack_cb, nack_cb, sem, _, reader_task = await _spawn(manager, pipe)
+    await asyncio.wait_for(reader_task, timeout=1.0)
 
     ack_cb.assert_called_once()
     nack_cb.assert_not_called()
@@ -192,8 +199,8 @@ async def test_reader_success_releases_semaphore() -> None:
     manager = _make_manager(bus)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
 
-    _, _, sem, _ = await _spawn(manager, pipe)
-    await asyncio.sleep(0.2)
+    _, _, sem, _, reader_task = await _spawn(manager, pipe)
+    await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert sem._value == 1
 
@@ -204,8 +211,8 @@ async def test_reader_success_removes_task_from_registry() -> None:
     manager = _make_manager(bus)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
 
-    await _spawn(manager, pipe)
-    await asyncio.sleep(0.2)
+    _, _, _, _, reader_task = await _spawn(manager, pipe)
+    await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert manager.active() == []
 
@@ -220,8 +227,8 @@ async def test_reader_timeout_nacks_and_terminates_process() -> None:
     bus = EventBus()
     manager = _make_manager(bus, timeout=0.05)
 
-    ack_cb, nack_cb, sem, fake_proc = await _spawn(manager, _PipeHang(), task_id="t2")
-    await asyncio.sleep(0.5)
+    ack_cb, nack_cb, sem, fake_proc, reader_task = await _spawn(manager, _PipeHang(), task_id="t2")
+    await asyncio.wait_for(reader_task, timeout=1.0)
 
     nack_cb.assert_called_once()
     ack_cb.assert_not_called()
@@ -233,8 +240,8 @@ async def test_reader_timeout_releases_semaphore_and_clears_registry() -> None:
     bus = EventBus()
     manager = _make_manager(bus, timeout=0.05)
 
-    _, _, sem, _ = await _spawn(manager, _PipeHang(), task_id="t2")
-    await asyncio.sleep(0.5)
+    _, _, sem, _, reader_task = await _spawn(manager, _PipeHang(), task_id="t2")
+    await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert sem._value == 1
     assert manager.active() == []
@@ -250,8 +257,8 @@ async def test_reader_invalid_json_nacks() -> None:
     bus = EventBus()
     manager = _make_manager(bus)
 
-    ack_cb, nack_cb, sem, _ = await _spawn(manager, _PipeInvalidJSON(), task_id="t3")
-    await asyncio.sleep(0.2)
+    ack_cb, nack_cb, sem, _, reader_task = await _spawn(manager, _PipeInvalidJSON(), task_id="t3")
+    await asyncio.wait_for(reader_task, timeout=1.0)
 
     nack_cb.assert_called_once()
     ack_cb.assert_not_called()
@@ -265,8 +272,8 @@ async def test_reader_worker_error_nacks_without_publishing_event() -> None:
     sub = bus.subscribe()
     manager = _make_manager(bus)
 
-    ack_cb, nack_cb, sem, _ = await _spawn(manager, _PipeWorkerError("boom"), task_id="t-error")
-    await asyncio.sleep(0.2)
+    ack_cb, nack_cb, sem, _, reader_task = await _spawn(manager, _PipeWorkerError("boom"), task_id="t-error")
+    await asyncio.wait_for(reader_task, timeout=1.0)
 
     nack_cb.assert_called_once()
     ack_cb.assert_not_called()
@@ -286,7 +293,7 @@ async def test_cancel_nacks_and_terminates_process() -> None:
     bus = EventBus()
     manager = _make_manager(bus, timeout=10.0)
 
-    ack_cb, nack_cb, _, fake_proc = await _spawn(manager, _PipeHang(), task_id="t4")
+    ack_cb, nack_cb, _, fake_proc, _ = await _spawn(manager, _PipeHang(), task_id="t4")
     result = await manager.cancel("t4")
     await asyncio.sleep(0.2)
 
@@ -301,7 +308,7 @@ async def test_cancel_releases_semaphore_and_clears_registry() -> None:
     bus = EventBus()
     manager = _make_manager(bus, timeout=10.0)
 
-    _, _, sem, _ = await _spawn(manager, _PipeHang(), task_id="t4")
+    _, _, sem, _, _ = await _spawn(manager, _PipeHang(), task_id="t4")
     await manager.cancel("t4")
     await asyncio.sleep(0.2)
 
