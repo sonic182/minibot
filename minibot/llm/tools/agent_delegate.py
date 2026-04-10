@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import logging
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from llm_async.models import Tool
 
@@ -432,5 +432,3 @@ def _agent_prompt_cache_key(*, llm_client: Any, context: ToolContext, agent_name
     channel = context.channel or "agent"
     session_id = session_identifier(channel, context.chat_id, context.user_id)
     return f"{session_id}:agent:{agent_name}"
-
-

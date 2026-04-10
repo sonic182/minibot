@@ -204,6 +204,7 @@ class LLMClassifierToolUseGuardrail:
             "Do not answer with intent statements like 'I will check'."
         )
 
+
 @dataclass(frozen=True)
 class _ClassifierHistoryEntry:
     role: str

@@ -551,10 +551,7 @@ async def test_turn_service_injects_recent_filesystem_paths_in_current_turn_only
 async def test_turn_service_repair_response_reuses_and_refreshes_previous_response_id_when_mode_enabled() -> None:
     memory = StubMemory()
     client = StubLLMClient(
-        {
-            "answer": {"kind": "markdown", "content": "*fixed*"},
-            "should_continue": False,
-        },
+        "*fixed*",
         response_id="resp-repair",
         is_responses=True,
         provider="openai_responses",
@@ -591,7 +588,7 @@ async def test_turn_service_uses_compact_prompt_from_prompts_dir(tmp_path: Path)
     (tmp_path / "compact.md").write_text("compact with these rules", encoding="utf-8")
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": {"kind": "text", "content": "ok"}, "should_continue": False},
+        "ok",
         total_tokens=60,
         prompts_dir=str(tmp_path),
     )
@@ -610,7 +607,7 @@ async def test_turn_service_uses_compact_prompt_from_prompts_dir(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_turn_service_runtime_exception_returns_fallback_response() -> None:
     service, _, _ = _service(
-        {"answer": {"kind": "text", "content": "unused"}, "should_continue": False},
+        "unused",
     )
     service.set_runtime(cast(Any, FailingRuntime()))
 

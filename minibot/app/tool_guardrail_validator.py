@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
@@ -63,7 +63,7 @@ class ToolGuardrailValidator:
                 return _RetryResult(
                     attempts=self._attempts,
                     reason=reason,
-                    prompt_patch=f"Your previous response was not valid JSON. Error: {exc}. Return only a JSON object.",
+                    prompt_patch=f"Your previous response was not valid JSON. Error: {exc}. Return only a JSON object.",  # noqa: E501
                 )
             return _FailResult(attempts=self._attempts, reason=reason)
         try:

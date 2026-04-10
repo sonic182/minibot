@@ -6,7 +6,7 @@ from typing import Any, Sequence, cast
 
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.delegation_trace import count_tool_messages, extract_delegation_trace
-from minibot.app.response_parser import ParsedAnswer, extract_answer, plain_render
+from minibot.app.response_parser import extract_answer, plain_render
 from minibot.core.channels import RenderableResponse
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole

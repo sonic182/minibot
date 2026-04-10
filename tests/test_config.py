@@ -4,6 +4,7 @@ import pytest
 
 from minibot.adapters.config.loader import load_settings
 
+
 def test_load_settings_from_file(tmp_path: Path) -> None:
     config_file = tmp_path / "bot.toml"
     config_file.write_text(
@@ -252,7 +253,6 @@ bot_token = "token"
 
     with pytest.raises(ValueError):
         load_settings(config_file)
-
 
 
 def test_load_settings_rejects_directory_for_explicit_path(tmp_path: Path) -> None:

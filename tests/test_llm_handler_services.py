@@ -577,5 +577,3 @@ async def test_runtime_service_does_not_retry_when_delegation_times_out() -> Non
             "error": "delegated agent timed out waiting for provider response",
         }
     ]
-
-

@@ -17,8 +17,7 @@ def load_settings(path: Path | None = None) -> Settings:
     if resolved is not None:
         if resolved.suffix.lower() == ".lua":
             raise ValueError(
-                f"Lua config is no longer supported: {resolved}. "
-                "Migrate to config.toml (see config.example.toml)."
+                f"Lua config is no longer supported: {resolved}. Migrate to config.toml (see config.example.toml)."
             )
         if resolved.is_file():
             return Settings.from_file(resolved)
