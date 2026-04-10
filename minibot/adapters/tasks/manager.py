@@ -32,7 +32,7 @@ class Task:
 
 
 class TaskManager:
-    def __init__(self, event_bus: EventBus, worker_timeout_seconds: int) -> None:
+    def __init__(self, event_bus: EventBus, worker_timeout_seconds: float) -> None:
         self._event_bus = event_bus
         self._worker_timeout_seconds = worker_timeout_seconds
         self._tasks: dict[str, Task] = {}
@@ -84,6 +84,8 @@ class TaskManager:
         task.reader_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task.reader_task
+        if self._tasks.get(task_id) is task:
+            await self._cancel_task(task_id, task)
         return True
 
     def active(self) -> list[Task]:
@@ -142,3 +144,12 @@ class TaskManager:
         finally:
             self._tasks.pop(task_id, None)
             semaphore.release()
+
+    async def _cancel_task(self, task_id: str, task: Task) -> None:
+        loop = asyncio.get_running_loop()
+        self._logger.info("task cancelled before reader cleanup", extra={"task_id": task_id})
+        task.proc.terminate()
+        await loop.run_in_executor(None, task.proc.join)
+        await task.nack_cb()
+        self._tasks.pop(task_id, None)
+        task.semaphore.release()
