@@ -94,108 +94,51 @@ def test_validate_attachments_strips_whitespace():
     assert result[0]["caption"] == "Test"
 
 
-def test_extract_outcome_with_valid_single_attachment():
-    payload = {
-        "answer": {"kind": "text", "content": "Screenshot taken"},
-        "should_continue": False,
+def test_extract_outcome_with_plain_text_and_attachments():
+    pre_response_meta = {
+        "kind": "text",
         "attachments": [{"path": "browser/shot.png", "type": "image/png", "caption": "Test screenshot"}],
     }
-    outcome = _extract_outcome(payload)
+    outcome = _extract_outcome("Screenshot taken", pre_response_meta)
     assert outcome.valid is True
     assert outcome.text == "Screenshot taken"
-    assert outcome.should_continue is False
     assert len(outcome.attachments) == 1
     assert outcome.attachments[0]["path"] == "browser/shot.png"
 
 
 def test_extract_outcome_with_multiple_attachments():
-    payload = {
-        "answer": {"kind": "text", "content": "Done"},
-        "should_continue": False,
+    pre_response_meta = {
         "attachments": [
             {"path": "file1.png", "type": "image/png"},
             {"path": "file2.pdf", "type": "application/pdf", "caption": "Report"},
         ],
     }
-    outcome = _extract_outcome(payload)
+    outcome = _extract_outcome("Done", pre_response_meta)
     assert outcome.valid is True
     assert len(outcome.attachments) == 2
     assert outcome.attachments[0]["path"] == "file1.png"
     assert outcome.attachments[1]["caption"] == "Report"
 
 
-def test_extract_outcome_without_attachments_field():
-    payload = {
-        "answer": {"kind": "text", "content": "Result"},
-        "should_continue": False,
-    }
-    outcome = _extract_outcome(payload)
+def test_extract_outcome_without_attachments():
+    outcome = _extract_outcome("Result", None)
     assert outcome.valid is True
     assert outcome.attachments == []
 
 
-def test_extract_outcome_with_null_attachments():
-    payload = {
-        "answer": {"kind": "text", "content": "Result"},
-        "should_continue": False,
-        "attachments": None,
-    }
-    outcome = _extract_outcome(payload)
-    assert outcome.valid is True
-    assert outcome.attachments == []
-
-
-def test_extract_outcome_with_empty_attachments_array():
-    payload = {
-        "answer": {"kind": "text", "content": "Result"},
-        "should_continue": False,
-        "attachments": [],
-    }
-    outcome = _extract_outcome(payload)
-    assert outcome.valid is True
-    assert outcome.attachments == []
-
-
-def test_extract_outcome_with_invalid_attachments():
-    payload = {
-        "answer": {"kind": "text", "content": "Result"},
-        "should_continue": False,
-        "attachments": [
-            {"path": "valid.png", "type": "image/png"},
-            {"path": "missing-type.png"},
-            "not a dict",
-        ],
-    }
-    outcome = _extract_outcome(payload)
-    assert outcome.valid is True
-    assert len(outcome.attachments) == 1
-    assert outcome.attachments[0]["path"] == "valid.png"
-
-
-def test_extract_outcome_invalid_payload_has_empty_attachments():
-    payload = {
-        "answer": {"kind": "text", "content": ""},
-        "should_continue": False,
-        "attachments": [{"path": "test.png", "type": "image/png"}],
-    }
-    outcome = _extract_outcome(payload)
-    assert outcome.valid is False
-    assert len(outcome.attachments) == 1
-
-
-def test_extract_outcome_string_payload_has_empty_attachments():
-    payload = "just a string"
-    outcome = _extract_outcome(payload)
+def test_extract_outcome_with_empty_text_is_invalid():
+    outcome = _extract_outcome("", None)
     assert outcome.valid is False
     assert outcome.attachments == []
 
 
-def test_extract_outcome_missing_should_continue_is_invalid_but_preserves_attachments():
-    payload = {
-        "answer": {"kind": "text", "content": "Result"},
-        "attachments": [{"path": "test.png", "type": "image/png"}],
-    }
-    outcome = _extract_outcome(payload)
+def test_extract_outcome_with_whitespace_only_is_invalid():
+    outcome = _extract_outcome("   ", None)
     assert outcome.valid is False
-    assert outcome.error_code == "invalid_payload_schema"
-    assert len(outcome.attachments) == 1
+
+
+def test_extract_outcome_string_payload():
+    outcome = _extract_outcome("just a string", None)
+    assert outcome.valid is True
+    assert outcome.text == "just a string"
+    assert outcome.attachments == []

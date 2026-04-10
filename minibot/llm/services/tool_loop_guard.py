@@ -55,24 +55,13 @@ def tool_call_to_payload(call: ToolCall) -> dict[str, Any]:
 def tool_loop_fallback_payload(
     tool_messages: Sequence[dict[str, Any]],
     tool_names: Sequence[str],
-    response_schema: dict[str, Any] | None,
-) -> Any:
+) -> str:
     summary = summarize_tool_outputs(tool_messages)
     tools_used = ", ".join(tool_names[-4:]) if tool_names else "tools"
-    answer = (
+    return (
         "I executed tool calls but hit an internal tool-loop safeguard before finalizing. "
         f"Recent tools: {tools_used}. Last tool output: {summary}"
     )
-    if response_schema:
-        return {
-            "answer": {
-                "kind": "text",
-                "content": answer,
-            },
-            "should_continue": False,
-            "attachments": [],
-        }
-    return answer
 
 
 def summarize_tool_outputs(tool_messages: Sequence[dict[str, Any]]) -> str:

@@ -4,10 +4,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
 
-from ratchet_sm import FailAction, RetryAction, ValidAction
-
 from minibot.core.agent_runtime import AgentMessage, AgentState
-from minibot.app.tool_guardrail_validator import ToolGuardrailValidator
+from minibot.app.tool_guardrail_validator import ToolGuardrailValidator, _FailResult, _RetryResult, _ValidResult
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
@@ -89,7 +87,6 @@ class LLMClassifierToolUseGuardrail:
                     user_content=None,
                     tools=[],
                     tool_context=None,
-                    response_schema=self._schema(),
                     prompt_cache_key=f"{prompt_cache_key}:tool-requirement" if prompt_cache_key else None,
                     previous_response_id=None,
                     system_prompt_override="You are a strict tool-routing classifier. Output JSON only.",
@@ -98,64 +95,48 @@ class LLMClassifierToolUseGuardrail:
                 raw_tokens = getattr(generation, "total_tokens", None)
                 if isinstance(raw_tokens, int) and raw_tokens > 0:
                     tokens += raw_tokens
-                action = validator.receive(generation.payload)
-                attempts += 1
-                if isinstance(action, ValidAction):
-                    payload = validator.valid_payload(action)
+                result = validator.receive(generation.payload)
+                attempts = result.attempts
+                if isinstance(result, _ValidResult):
+                    payload = validator.valid_payload(result)
                     break
-                if isinstance(action, RetryAction):
-                    prompt_patch = (action.prompt_patch or "").strip()
+                if isinstance(result, _RetryResult):
+                    prompt_patch = result.prompt_patch.strip()
                     self._logger.warning(
                         "tool requirement classifier output invalid; retrying",
                         extra={
                             "session_id": session_id,
-                            "attempts": action.attempts,
-                            "reason": action.reason,
-                            "errors": list(action.errors),
+                            "attempts": result.attempts,
+                            "reason": result.reason,
                             "retry_patch_present": bool(prompt_patch),
                         },
                     )
                     continue
-                if isinstance(action, FailAction):
+                if isinstance(result, _FailResult):
                     self._logger.warning(
                         "tool requirement classifier validation failed",
                         extra={
                             "session_id": session_id,
-                            "attempts": action.attempts,
-                            "reason": action.reason,
+                            "attempts": result.attempts,
+                            "reason": result.reason,
                             "fail_open": self._fail_open,
                         },
                     )
-                    reason = f"guardrail_validation_failed: {action.reason}"
+                    reason = f"guardrail_validation_failed: {result.reason}"
                     if self._fail_open:
                         return GuardrailDecision(
                             requires_retry=False,
                             reason=reason,
-                            attempts=action.attempts,
+                            attempts=result.attempts,
                             tokens_used=tokens,
                         )
                     return GuardrailDecision(
                         requires_retry=True,
                         retry_system_prompt_suffix=self._tool_retry_suffix(),
                         reason=reason,
-                        attempts=action.attempts,
+                        attempts=result.attempts,
                         tokens_used=tokens,
                     )
-                reason = f"guardrail_validation_failed: unsupported_action:{type(action).__name__}"
-                if self._fail_open:
-                    return GuardrailDecision(
-                        requires_retry=False,
-                        reason=reason,
-                        attempts=attempts,
-                        tokens_used=tokens,
-                    )
-                return GuardrailDecision(
-                    requires_retry=True,
-                    retry_system_prompt_suffix=self._tool_retry_suffix(),
-                    reason=reason,
-                    attempts=attempts,
-                    tokens_used=tokens,
-                )
 
             if not payload.requires_tools:
                 self._logger.debug(
@@ -222,21 +203,6 @@ class LLMClassifierToolUseGuardrail:
             "Call the relevant tool now, then provide the final answer from tool output. "
             "Do not answer with intent statements like 'I will check'."
         )
-
-    @staticmethod
-    def _schema() -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "requires_tools": {"type": "boolean"},
-                "suggested_tool": {"type": ["string", "null"]},
-                "path": {"type": ["string", "null"]},
-                "reason": {"type": ["string", "null"]},
-            },
-            "required": ["requires_tools", "suggested_tool", "path", "reason"],
-            "additionalProperties": False,
-        }
-
 
 @dataclass(frozen=True)
 class _ClassifierHistoryEntry:

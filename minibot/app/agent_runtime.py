@@ -3,13 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Sequence
 
-from ratchet_sm import FailAction, RetryAction, ValidAction
-from ratchet_sm.normalizers.extract_pseudo_tool_call import has_pseudo_tool_call_tag
-
-from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
+from minibot.app.response_parser import extract_pre_response_meta
 from minibot.core.agent_runtime import (
     AgentMessage,
     AgentState,
@@ -26,7 +23,12 @@ from minibot.llm.services.tool_loop_guard import (
     tool_loop_fallback_payload,
 )
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.pre_response import pre_response_binding
 from minibot.shared.utils import humanize_token_count
+
+
+def _has_pseudo_tool_call_tag(text: str) -> bool:
+    return "<tool_call>" in text
 
 
 _TRUNCATED_PATCH = (
@@ -42,6 +44,7 @@ class RuntimeResult:
     state: AgentState
     total_tokens: int = 0
     provider_tool_calls: int = 0
+    pre_response_meta: dict[str, Any] | None = field(default=None)
 
 
 class AgentRuntime:
@@ -55,7 +58,7 @@ class AgentRuntime:
         managed_files_root: str | None = None,
     ) -> None:
         self._llm_client = llm_client
-        self._tools = list(tools or [])
+        self._tools = [pre_response_binding(), *list(tools or [])]
         self._limits = limits or RuntimeLimits()
         self._allow_system_inserts = allow_system_inserts
         self._allowed_append_message_tools = set(allowed_append_message_tools or [])
@@ -70,10 +73,8 @@ class AgentRuntime:
         self,
         state: AgentState,
         tool_context: ToolContext,
-        response_schema: dict[str, Any] | None = None,
         prompt_cache_key: str | None = None,
         initial_previous_response_id: str | None = None,
-        structured_validator: RuntimeStructuredOutputValidator | None = None,
     ) -> RuntimeResult:
         tool_calls_count = 0
         step = 0
@@ -84,25 +85,13 @@ class AgentRuntime:
         repeated_failure_counts: dict[str, int] = {}
         repeated_iteration_count = 0
         last_iteration_signature: str | None = None
-        _validator = structured_validator if response_schema is not None else None
-        if _validator is None and response_schema is not None:
-            _validator = RuntimeStructuredOutputValidator(max_attempts=3)
         truncated_tool_call_count = 0
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
                 if step >= self._limits.max_steps:
                     return RuntimeResult(
-                        payload={
-                            "answer": {
-                                "kind": "text",
-                                "content": "I reached the maximum execution steps before finishing.",
-                            },
-                            "should_continue": False,
-                            "attachments": [],
-                        }
-                        if response_schema
-                        else "I reached the maximum execution steps before finishing.",
+                        payload="I reached the maximum execution steps before finishing.",
                         response_id=previous_response_id,
                         state=state,
                         total_tokens=total_tokens,
@@ -124,7 +113,6 @@ class AgentRuntime:
                     extra={
                         "step": step,
                         "provider": provider_name,
-                        "response_schema_present": response_schema is not None,
                         "previous_response_id_present": previous_response_id is not None,
                         "message_count": len(call_messages),
                     },
@@ -133,7 +121,6 @@ class AgentRuntime:
                     completion = await self._llm_client.complete_once(
                         messages=call_messages,
                         tools=self._tools,
-                        response_schema=response_schema,
                         prompt_cache_key=prompt_cache_key,
                         previous_response_id=previous_response_id,
                     )
@@ -143,7 +130,6 @@ class AgentRuntime:
                         extra={
                             "step": step,
                             "provider": provider_name,
-                            "response_schema_present": response_schema is not None,
                             "previous_response_id_present": previous_response_id is not None,
                             "duration_ms": round((time.monotonic() - started_at) * 1000),
                         },
@@ -180,9 +166,9 @@ class AgentRuntime:
                         truncated_tool_call_count += 1
                         if truncated_tool_call_count >= 3:
                             return RuntimeResult(
-                                payload=self._repeated_failure_payload(
-                                    response_schema=response_schema,
-                                    tool_name="truncated_tool_call",
+                                payload=(
+                                    "I hit a truncated tool call error repeatedly before finishing. "
+                                    "Please try again or rephrase your request."
                                 ),
                                 response_id=completion.response_id,
                                 state=state,
@@ -196,7 +182,7 @@ class AgentRuntime:
                             AgentMessage(role="user", content=[MessagePart(type="text", text=_TRUNCATED_PATCH)])
                         )
                         continue
-                    if not tool_calls and has_pseudo_tool_call_tag(raw_message_content):
+                    if not tool_calls and _has_pseudo_tool_call_tag(raw_message_content):
                         state.messages.append(
                             self._message_renderer.from_provider_assistant_message(completion.message)
                         )
@@ -207,77 +193,6 @@ class AgentRuntime:
                 if not tool_calls:
                     assistant_message = self._message_renderer.from_provider_assistant_message(completion.message)
                     state.messages.append(assistant_message)
-                    if _validator is not None:
-                        action = _validator.receive(getattr(completion.message, "content", ""))
-                        if isinstance(action, ValidAction):
-                            payload = _validator.valid_payload(action)
-                            self._logger.debug(
-                                "agent runtime structured output validated",
-                                extra={
-                                    "step": step,
-                                    "response_id": completion.response_id,
-                                    "attempts": action.attempts,
-                                    "format_detected": action.format_detected,
-                                },
-                            )
-                            return RuntimeResult(
-                                payload=payload,
-                                response_id=completion.response_id,
-                                state=state,
-                                total_tokens=total_tokens,
-                                provider_tool_calls=provider_tool_calls,
-                            )
-                        if isinstance(action, RetryAction):
-                            retry_patch = (action.prompt_patch or "").strip()
-                            raw_preview = action.raw.strip().replace("\n", " ")
-                            if len(raw_preview) > 300:
-                                raw_preview = f"{raw_preview[:300]}..."
-                            self._logger.warning(
-                                "agent runtime structured output invalid; retrying",
-                                extra={
-                                    "step": step,
-                                    "response_id": completion.response_id,
-                                    "attempts": action.attempts,
-                                    "reason": action.reason,
-                                    "errors": list(action.errors),
-                                    "raw_preview": raw_preview,
-                                    "retry_patch_present": bool(retry_patch),
-                                },
-                            )
-                            if retry_patch:
-                                state.messages.append(
-                                    AgentMessage(
-                                        role="user",
-                                        content=[MessagePart(type="text", text=retry_patch)],
-                                    )
-                                )
-                            continue
-                        if isinstance(action, FailAction):
-                            validation_errors: list[str] = []
-                            for item in action.history:
-                                if isinstance(item, RetryAction):
-                                    validation_errors.extend(item.errors)
-                            raw_preview = action.raw.strip().replace("\n", " ")
-                            if len(raw_preview) > 300:
-                                raw_preview = f"{raw_preview[:300]}..."
-                            self._logger.warning(
-                                "agent runtime structured output failed; returning fallback",
-                                extra={
-                                    "step": step,
-                                    "response_id": completion.response_id,
-                                    "attempts": action.attempts,
-                                    "reason": action.reason,
-                                    "errors": validation_errors,
-                                    "raw_preview": raw_preview,
-                                },
-                            )
-                            return RuntimeResult(
-                                payload=_validator.fallback_payload(),
-                                response_id=completion.response_id,
-                                state=state,
-                                total_tokens=total_tokens,
-                                provider_tool_calls=provider_tool_calls,
-                            )
                     self._logger.debug(
                         "agent runtime step returned final assistant message",
                         extra={"step": step, "response_id": completion.response_id},
@@ -288,6 +203,7 @@ class AgentRuntime:
                         state=state,
                         total_tokens=total_tokens,
                         provider_tool_calls=provider_tool_calls,
+                        pre_response_meta=extract_pre_response_meta(state),
                     )
 
                 tool_calls_count += len(tool_calls)
@@ -301,16 +217,7 @@ class AgentRuntime:
                 )
                 if tool_calls_count > self._limits.max_tool_calls:
                     return RuntimeResult(
-                        payload={
-                            "answer": {
-                                "kind": "text",
-                                "content": "I reached the maximum number of tool calls before finishing.",
-                            },
-                            "should_continue": False,
-                            "attachments": [],
-                        }
-                        if response_schema
-                        else "I reached the maximum number of tool calls before finishing.",
+                        payload="I reached the maximum number of tool calls before finishing.",
                         response_id=completion.response_id,
                         state=state,
                         total_tokens=total_tokens,
@@ -363,9 +270,10 @@ class AgentRuntime:
                                     },
                                 )
                                 return RuntimeResult(
-                                    payload=self._repeated_failure_payload(
-                                        response_schema=response_schema,
-                                        tool_name=execution.tool_name,
+                                    payload=(
+                                        "I hit the same tool error repeatedly with the same parameters before "
+                                        f"finishing. Tool: {execution.tool_name}. "
+                                        "Please adjust parameters or ask for a different approach."
                                     ),
                                     response_id=completion.response_id,
                                     state=state,
@@ -378,8 +286,6 @@ class AgentRuntime:
                         responses_followup_messages.extend(
                             self._message_renderer.render_messages(AgentState(messages=applied_directive_messages))
                         )
-                if _validator is not None:
-                    _validator.reset()
                 iteration_signature = tool_iteration_signature(
                     tool_calls,
                     [execution.message_payload for execution in executions],
@@ -402,7 +308,6 @@ class AgentRuntime:
                         payload=tool_loop_fallback_payload(
                             [execution.message_payload for execution in executions],
                             [execution.tool_name for execution in executions],
-                            response_schema,
                         ),
                         response_id=completion.response_id,
                         state=state,
@@ -418,23 +323,6 @@ class AgentRuntime:
         if content.get("ok") is not False:
             return False
         return bool(content.get("is_repeated_failure_candidate"))
-
-    @staticmethod
-    def _repeated_failure_payload(*, response_schema: dict[str, Any] | None, tool_name: str) -> Any:
-        answer = (
-            "I hit the same tool error repeatedly with the same parameters before finishing. "
-            f"Tool: {tool_name}. Please adjust parameters or ask for a different approach."
-        )
-        if response_schema is None:
-            return answer
-        return {
-            "answer": {
-                "kind": "text",
-                "content": answer,
-            },
-            "should_continue": False,
-            "attachments": [],
-        }
 
     def _apply_directives(self, state: AgentState, tool_name: str, directives: Sequence[Any]) -> list[AgentMessage]:
         appended: list[AgentMessage] = []

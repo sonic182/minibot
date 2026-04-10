@@ -158,7 +158,7 @@ async def test_main_agent_invokes_specialist_via_tool(tmp_path: Path, provider: 
             "total_tokens": 5,
         },
         {
-            "content": '{"answer":{"kind":"text","content":"delegated result is 5"},"should_continue":false}',
+            "content": "delegated result is 5",
             "response_id": "main-final",
             "total_tokens": 6,
         },
@@ -175,7 +175,7 @@ async def test_main_agent_invokes_specialist_via_tool(tmp_path: Path, provider: 
             "total_tokens": 4,
         },
         {
-            "content": '{"answer":{"kind":"text","content":"5"},"should_continue":false}',
+            "content": "5",
             "response_id": "worker-final",
             "total_tokens": 4,
         },
@@ -235,13 +235,8 @@ async def test_disabled_agent_is_not_invokable(tmp_path: Path, provider: str) ->
             "total_tokens": 5,
         },
         {
-            "content": '{"answer":{"kind":"text","content":"fallback answer"},"should_continue":false}',
+            "content": "fallback answer",
             "response_id": "main-final",
-            "total_tokens": 5,
-        },
-        {
-            "content": '{"answer":{"kind":"text","content":"fallback answer"},"should_continue":false}',
-            "response_id": "main-final-retry",
             "total_tokens": 5,
         },
     ]
@@ -289,7 +284,7 @@ async def test_exclusive_ownership_hides_specialist_tool_from_main_agent(tmp_pat
             "total_tokens": 5,
         },
         {
-            "content": '{"answer":{"kind":"text","content":"result is 5"},"should_continue":false}',
+            "content": "result is 5",
             "response_id": "main-final",
             "total_tokens": 6,
         },
@@ -306,7 +301,7 @@ async def test_exclusive_ownership_hides_specialist_tool_from_main_agent(tmp_pat
             "total_tokens": 4,
         },
         {
-            "content": '{"answer":{"kind":"text","content":"5"},"should_continue":false}',
+            "content": "5",
             "response_id": "worker-final",
             "total_tokens": 4,
         },
@@ -360,13 +355,8 @@ async def test_delegated_agent_without_tool_calls_triggers_fallback(tmp_path: Pa
             "total_tokens": 5,
         },
         {
-            "content": '{"answer":{"kind":"text","content":"fallback answer"},"should_continue":false}',
+            "content": "fallback answer",
             "response_id": "main-final",
-            "total_tokens": 5,
-        },
-        {
-            "content": '{"answer":{"kind":"text","content":"fallback answer"},"should_continue":false}',
-            "response_id": "main-final-retry",
             "total_tokens": 5,
         },
     ]
@@ -374,12 +364,12 @@ async def test_delegated_agent_without_tool_calls_triggers_fallback(tmp_path: Pa
     worker_client = ScriptedLLMClient(provider=provider)
     worker_client.runtime_steps = [
         {
-            "content": '{"answer":{"kind":"text","content":"5"},"should_continue":false}',
+            "content": "5",
             "response_id": "worker-final-1",
             "total_tokens": 4,
         },
         {
-            "content": '{"answer":{"kind":"text","content":"5"},"should_continue":false}',
+            "content": "5",
             "response_id": "worker-final-2",
             "total_tokens": 4,
         },

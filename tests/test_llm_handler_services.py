@@ -23,7 +23,6 @@ from minibot.core.memory import MemoryEntry
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient, LLMCompaction, LLMGeneration
 from minibot.llm.tools.base import ToolContext
-from minibot.shared.assistant_response import AssistantRuntimePayload
 
 
 class _StubClient:
@@ -104,7 +103,7 @@ class _StubMemory:
 class _StubRuntime:
     async def run(self, **_: Any) -> RuntimeResult:
         return RuntimeResult(
-            payload='{"answer":{"kind":"text","content":"ignored"},"should_continue":false}',
+            payload="ignored",
             response_id="resp-1",
             state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
             total_tokens=4,
@@ -315,7 +314,7 @@ async def test_compaction_service_fallback_summary_updates_previous_response_id(
         async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
             _ = args, kwargs
             return LLMGeneration(
-                {"answer": {"kind": "text", "content": "summary via fallback"}, "should_continue": False},
+                "summary via fallback",
                 response_id="cmp-fallback",
                 total_tokens=7,
             )
@@ -365,7 +364,7 @@ async def test_compaction_service_fallback_summary_clears_previous_response_id_w
         async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
             _ = args, kwargs
             return LLMGeneration(
-                {"answer": {"kind": "text", "content": "summary via fallback"}, "should_continue": False},
+                "summary via fallback",
                 response_id=None,
                 total_tokens=7,
             )
@@ -427,7 +426,6 @@ async def test_runtime_service_returns_guardrail_resolved_text() -> None:
         previous_response_id=None,
         chat_id=1,
         channel="telegram",
-        response_schema={"type": "object"},
     )
 
     assert result.should_reply is True
@@ -441,7 +439,7 @@ async def test_runtime_service_skips_guardrail_when_tool_messages_exist() -> Non
     class _ToolRuntime:
         async def run(self, **_: Any) -> RuntimeResult:
             return RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"done"},"should_continue":false}',
+                payload="done",
                 response_id="resp-1",
                 state=AgentState(
                     messages=[
@@ -476,7 +474,6 @@ async def test_runtime_service_skips_guardrail_when_tool_messages_exist() -> Non
         previous_response_id=None,
         chat_id=1,
         channel="telegram",
-        response_schema={"type": "object"},
     )
 
     assert guardrail.calls == 0
@@ -506,98 +503,9 @@ async def test_runtime_service_calls_guardrail_when_no_tool_messages() -> None:
         previous_response_id=None,
         chat_id=1,
         channel="telegram",
-        response_schema={"type": "object"},
     )
 
     assert guardrail.calls == 1
-
-
-@pytest.mark.asyncio
-async def test_runtime_service_continues_when_delegation_still_unresolved() -> None:
-    class _ContinuationRuntime:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        async def run(self, **_: Any) -> RuntimeResult:
-            self.calls += 1
-            if self.calls == 1:
-                return RuntimeResult(
-                    payload='{"answer":{"kind":"text","content":"delegated progress"},"should_continue":false}',
-                    response_id="resp-1",
-                    state=AgentState(
-                        messages=[
-                            AgentMessage(role="assistant", content=[MessagePart(type="text", text="delegating")]),
-                            AgentMessage(
-                                role="tool",
-                                name="invoke_agent",
-                                content=[
-                                    MessagePart(
-                                        type="json",
-                                        value={
-                                            "ok": True,
-                                            "agent": "worker",
-                                            "result_status": "continue",
-                                            "should_continue": True,
-                                        },
-                                    )
-                                ],
-                            ),
-                        ]
-                    ),
-                    total_tokens=3,
-                )
-            return RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"done"},"should_continue":false}',
-                response_id="resp-2",
-                state=AgentState(
-                    messages=[
-                        AgentMessage(role="assistant", content=[MessagePart(type="text", text="done")]),
-                        AgentMessage(
-                            role="tool",
-                            name="invoke_agent",
-                            content=[
-                                MessagePart(
-                                    type="json",
-                                    value={
-                                        "ok": True,
-                                        "agent": "worker",
-                                        "result_status": "success",
-                                        "should_continue": False,
-                                    },
-                                )
-                            ],
-                        ),
-                    ]
-                ),
-                total_tokens=4,
-            )
-
-    runtime = _ContinuationRuntime()
-    service = RuntimeOrchestrationService(
-        runtime=cast(AgentRuntime, runtime),
-        llm_client=cast(LLMClient, _StubClient()),
-        guardrail=_CountingGuardrail(),
-        session_state=SessionStateService(),
-        logger=logging.getLogger("test"),
-    )
-
-    result = await service.run_with_agent_runtime(
-        session_id="s1",
-        history=[],
-        model_text="delegate this",
-        model_user_content=None,
-        system_prompt="system",
-        tool_context=ToolContext(),
-        prompt_cache_key=None,
-        previous_response_id=None,
-        chat_id=1,
-        channel="telegram",
-        response_schema={"type": "object"},
-    )
-
-    assert runtime.calls == 2
-    assert result.render.text == "done"
-    assert result.response_updates == []
 
 
 @pytest.mark.asyncio
@@ -609,7 +517,7 @@ async def test_runtime_service_does_not_retry_when_delegation_times_out() -> Non
         async def run(self, **_: Any) -> RuntimeResult:
             self.calls += 1
             return RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"delegate timeout surfaced"},"should_continue":false}',
+                payload="delegate timeout surfaced",
                 response_id="resp-1",
                 state=AgentState(
                     messages=[
@@ -624,7 +532,6 @@ async def test_runtime_service_does_not_retry_when_delegation_times_out() -> Non
                                         "ok": False,
                                         "agent": "playwright_mcp_agent",
                                         "result_status": "timeout",
-                                        "should_continue": False,
                                         "error_code": "delegated_timeout",
                                         "error": "delegated agent timed out waiting for provider response",
                                     },
@@ -656,7 +563,6 @@ async def test_runtime_service_does_not_retry_when_delegation_times_out() -> Non
         previous_response_id=None,
         chat_id=1,
         channel="telegram",
-        response_schema={"type": "object"},
     )
 
     assert runtime.calls == 1
@@ -668,12 +574,8 @@ async def test_runtime_service_does_not_retry_when_delegation_times_out() -> Non
             "target": "playwright_mcp_agent",
             "ok": False,
             "result_status": "timeout",
-            "should_continue": False,
             "error": "delegated agent timed out waiting for provider response",
         }
     ]
 
 
-def test_assistant_runtime_payload_requires_should_continue() -> None:
-    with pytest.raises(Exception):
-        AssistantRuntimePayload.model_validate({"answer": {"kind": "text", "content": "Result"}})

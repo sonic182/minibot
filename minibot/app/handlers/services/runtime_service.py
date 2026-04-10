@@ -30,8 +30,6 @@ class AgentRuntimeResult:
 
 
 class RuntimeOrchestrationService:
-    _MAX_CONTINUATION_TURNS = 3
-
     def __init__(
         self,
         *,
@@ -60,7 +58,6 @@ class RuntimeOrchestrationService:
         previous_response_id: str | None,
         chat_id: int | None,
         channel: str | None,
-        response_schema: dict[str, Any],
     ) -> AgentRuntimeResult:
         tokens_used = 0
         trace_result = None
@@ -75,7 +72,6 @@ class RuntimeOrchestrationService:
         generation = await self._runtime.run(
             state=state,
             tool_context=tool_context,
-            response_schema=response_schema,
             prompt_cache_key=prompt_cache_key,
             initial_previous_response_id=previous_response_id,
         )
@@ -83,7 +79,6 @@ class RuntimeOrchestrationService:
         tool_messages_count = count_tool_messages(generation.state)
         provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
         trace_result = extract_delegation_trace(generation.state)
-        delegation_unresolved = trace_result.unresolved
 
         guardrail = None
         if tool_messages_count == 0 and provider_tool_calls == 0:
@@ -133,15 +128,12 @@ class RuntimeOrchestrationService:
             generation = await self._runtime.run(
                 state=retry_state,
                 tool_context=tool_context,
-                response_schema=response_schema,
                 prompt_cache_key=prompt_cache_key,
                 initial_previous_response_id=None,
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
             trace_result = extract_delegation_trace(generation.state)
-            delegation_unresolved = trace_result.unresolved
             provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
-            parsed = extract_answer(generation.payload, logger=self._logger)
             if count_tool_messages(generation.state) == 0 and provider_tool_calls == 0:
                 return AgentRuntimeResult(
                     render=plain_render(
@@ -157,71 +149,8 @@ class RuntimeOrchestrationService:
                     tokens_used=tokens_used,
                     provider_tool_calls=provider_tool_calls,
                 )
-        else:
-            parsed = extract_answer(generation.payload, logger=self._logger)
 
-        if delegation_unresolved:
-            retry_state = self._build_agent_state(
-                history=history,
-                user_text=model_text,
-                user_content=model_user_content,
-                system_prompt=(
-                    f"{system_prompt}\n\n"
-                    "Delegation policy reminder: If invoke_agent result has should_continue=true "
-                    "or result_status other than success, you must resolve it in this turn. "
-                    "Do one additional concrete tool call or return an explicit failure message to user "
-                    "with should_continue=false."
-                ),
-            )
-            generation = await self._runtime.run(
-                state=retry_state,
-                tool_context=tool_context,
-                response_schema=response_schema,
-                prompt_cache_key=prompt_cache_key,
-                initial_previous_response_id=None,
-            )
-            tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
-            provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
-            trace_result = extract_delegation_trace(generation.state)
-            delegation_unresolved = trace_result.unresolved
-            parsed = extract_answer(generation.payload, logger=self._logger)
-            if delegation_unresolved:
-                self._logger.warning(
-                    "delegation unresolved after bounded retry; returning explicit failure",
-                    extra={"chat_id": chat_id, "channel": channel},
-                )
-                parsed = ParsedAnswer(
-                    render=plain_render(
-                        "I could not complete that delegated action reliably in this attempt. "
-                        "Please retry, or ask me to run a specific tool step-by-step."
-                    ),
-                    should_continue=False,
-                )
-
-        (
-            parsed,
-            generation,
-            trace_result,
-            tokens_used,
-            response_updates,
-            provider_tool_calls,
-        ) = await self._resolve_continuations(
-            parsed=parsed,
-            generation=generation,
-            trace_result=trace_result,
-            response_updates=response_updates,
-            tokens_used=tokens_used,
-            initial_provider_tool_calls=provider_tool_calls,
-            model_text=model_text,
-            system_prompt=system_prompt,
-            tool_context=tool_context,
-            prompt_cache_key=prompt_cache_key,
-            response_schema=response_schema,
-            session_id=session_id,
-            chat_id=chat_id,
-            channel=channel,
-        )
-
+        parsed = extract_answer(generation.payload, pre_response_meta=generation.pre_response_meta)
         render = parsed.render
         should_reply = parsed.has_visible_answer
 
@@ -236,111 +165,6 @@ class RuntimeOrchestrationService:
             delegation_fallback_used=trace_result.fallback_used,
             tokens_used=tokens_used,
             provider_tool_calls=provider_tool_calls,
-        )
-
-    async def _resolve_continuations(
-        self,
-        *,
-        parsed: ParsedAnswer,
-        generation: Any,
-        trace_result: Any,
-        response_updates: list[RenderableResponse],
-        tokens_used: int,
-        initial_provider_tool_calls: int = 0,
-        model_text: str,
-        system_prompt: str,
-        tool_context: ToolContext,
-        prompt_cache_key: str | None,
-        response_schema: dict[str, Any],
-        session_id: str,
-        chat_id: int | None,
-        channel: str | None,
-    ) -> tuple[ParsedAnswer, Any, Any, int, list[RenderableResponse], int]:
-        continuation_turns = 0
-        provider_tool_calls_acc = initial_provider_tool_calls
-        while continuation_turns < self._MAX_CONTINUATION_TURNS and (
-            parsed.should_continue or trace_result.unresolved
-        ):
-            current_provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
-            if (
-                parsed.should_continue
-                and parsed.has_visible_answer
-                and not trace_result.unresolved
-                and count_tool_messages(generation.state) == 0
-                and current_provider_tool_calls == 0
-            ):
-                self._logger.warning(
-                    "coercing visible continuation response to final answer because no remaining work is detectable",
-                    extra={"chat_id": chat_id, "channel": channel},
-                )
-                parsed = ParsedAnswer(render=parsed.render, should_continue=False)
-                break
-            if parsed.has_visible_answer and parsed.render is not None:
-                response_updates.append(_mark_as_working(parsed.render))
-            continuation_turns += 1
-            continuation_prompt_parts = [
-                "Continue the same turn. "
-                "If you include user-visible progress text before finishing, keep it concise because it will be sent "
-                "to the user with a working marker. "
-                "Set should_continue=false only when the turn is complete."
-            ]
-            if trace_result.unresolved:
-                continuation_prompt_parts.append(
-                    "Delegation is still unresolved. Resolve it now with another tool call or return a final "
-                    "user-facing answer with should_continue=false."
-                )
-            if count_tool_messages(generation.state) == 0 and current_provider_tool_calls == 0:
-                guardrail = await self._guardrail.apply(
-                    session_id=session_id,
-                    user_text=model_text,
-                    tool_context=tool_context,
-                    state=generation.state,
-                    system_prompt=system_prompt,
-                    prompt_cache_key=prompt_cache_key,
-                )
-                tokens_used += self._session_state.track_tokens(session_id, guardrail.tokens_used)
-                if guardrail.requires_retry and guardrail.retry_system_prompt_suffix:
-                    continuation_prompt_parts.append(guardrail.retry_system_prompt_suffix)
-                elif guardrail.resolved_render_text is not None:
-                    parsed = ParsedAnswer(
-                        render=plain_render(guardrail.resolved_render_text),
-                        should_continue=False,
-                    )
-                    break
-            continuation_prompt = "\n\n".join(continuation_prompt_parts)
-            generation.state.messages.append(
-                AgentMessage(role="user", content=[MessagePart(type="text", text=continuation_prompt)])
-            )
-            generation = await self._runtime.run(
-                state=generation.state,
-                tool_context=tool_context,
-                response_schema=response_schema,
-                prompt_cache_key=prompt_cache_key,
-                initial_previous_response_id=generation.response_id,
-            )
-            tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
-            provider_tool_calls_acc += int(getattr(generation, "provider_tool_calls", 0) or 0)
-            trace_result = extract_delegation_trace(generation.state)
-            parsed = extract_answer(generation.payload, logger=self._logger)
-
-        if parsed.should_continue or trace_result.unresolved:
-            self._logger.warning(
-                "continuation loop exceeded bounded retries; returning fallback",
-                extra={"chat_id": chat_id, "channel": channel},
-            )
-            parsed = ParsedAnswer(
-                render=plain_render(
-                    "I am still working on that, but I could not complete the turn reliably in this attempt."
-                ),
-                should_continue=False,
-            )
-        return (
-            parsed,
-            generation,
-            trace_result,
-            tokens_used,
-            response_updates,
-            provider_tool_calls_acc,
         )
 
     @staticmethod
@@ -378,15 +202,3 @@ class RuntimeOrchestrationService:
                 )
             )
         return AgentState(messages=messages)
-
-
-def _mark_as_working(render: RenderableResponse) -> RenderableResponse:
-    text = render.text.rstrip()
-    suffix = "[working...]"
-    if text.endswith(suffix):
-        marked_text = text
-    elif text:
-        marked_text = f"{text}\n\n{suffix}"
-    else:
-        marked_text = suffix
-    return RenderableResponse(kind=render.kind, text=marked_text, meta=dict(render.meta))

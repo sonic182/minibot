@@ -75,13 +75,11 @@ async def compact_response(
 
 async def continue_incomplete_response(
     *,
-    complete_with_schema_fallback: Callable[[dict[str, Any]], Awaitable[Any]],
+    complete_fn: Callable[[dict[str, Any]], Awaitable[Any]],
     ctx: RequestContext,
     previous_response_id: str,
     prompt_cache_key: str | None,
     system_prompt: str,
-    response_schema: dict[str, Any] | None,
-    prompt_response_schema: dict[str, Any] | None,
     logger: Any,
 ) -> LLMGeneration:
     call_kwargs = build_continue_call_kwargs(
@@ -89,15 +87,12 @@ async def continue_incomplete_response(
         previous_response_id=previous_response_id,
         prompt_cache_key=prompt_cache_key,
         system_prompt=system_prompt,
-        response_schema=response_schema,
     )
-    if prompt_response_schema:
-        call_kwargs["_structured_output_prompt_schema"] = prompt_response_schema
     logger.warning(
         "responses output incomplete; attempting one continuation",
         extra={"model": ctx.model, "response_id": previous_response_id},
     )
-    response = await complete_with_schema_fallback(call_kwargs)
+    response = await complete_fn(call_kwargs)
     message = response.main_response
     if not message:
         raise RuntimeError("LLM did not return a continuation completion")
