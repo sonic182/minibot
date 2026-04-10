@@ -181,7 +181,7 @@ def test_prompt_service_builds_format_repair_prompt() -> None:
 
     assert "Telegram" in prompt
     assert "can't parse entities" in prompt
-    assert "structured output" in prompt
+    assert "placeholder" in prompt
 
 
 def test_session_state_service_tracks_tokens_and_previous_response_id() -> None:

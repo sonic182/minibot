@@ -159,8 +159,7 @@ class PromptService:
                 "- Return the same meaning and content, only fix formatting.\n"
                 "- Keep kind as markdown or html only if valid for Telegram, otherwise use text.\n"
                 "- For markdown, write normal Markdown (do not pre-escape Telegram MarkdownV2).\n"
-                "- Do not use placeholder statements.\n"
-                "- Return structured output only.\n\n"
+                "- Do not use placeholder statements.\n\n"
                 f"Original content:\n{original_content}"
             )
         return (
@@ -172,7 +171,6 @@ class PromptService:
             "Requirements:\n"
             "- Return the same meaning and content, only fix formatting.\n"
             "- Keep kind aligned with valid formatting for this channel, otherwise use text.\n"
-            "- Do not use placeholder statements.\n"
-            "- Return structured output only.\n\n"
+            "- Do not use placeholder statements.\n\n"
             f"Original content:\n{original_content}"
         )

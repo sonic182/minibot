@@ -319,7 +319,6 @@ class AgentDelegateTool:
                 "agent": spec.name,
                 "result": "Delegated agent timed out waiting for provider response.",
                 "result_status": "timeout",
-                "should_continue": False,
                 "tool_count": len(scoped_tools),
                 "tool_messages_count": 0,
                 "delegation_attempts": attempts,

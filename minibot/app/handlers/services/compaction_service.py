@@ -129,7 +129,6 @@ class HistoryCompactionService:
                 user_content=None,
                 tools=[],
                 tool_context=None,
-                response_schema=None,
                 prompt_cache_key=f"{prompt_cache_key}:compact",
                 previous_response_id=None,
                 system_prompt_override=self._prompt_service.compact_system_prompt(system_prompt),

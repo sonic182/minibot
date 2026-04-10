@@ -26,7 +26,6 @@ class LLMClientFactory:
     def create_for_agent(self, spec: AgentSpec) -> LLMClient:
         config = self._settings.llm.model_copy(deep=True)
         config.responses_state_mode = config.agent_responses_state_mode
-        config.structured_output_mode = "provider_with_fallback"
         if spec.model_provider:
             config.provider = spec.model_provider
         if spec.model:
@@ -95,7 +94,6 @@ class LLMClientFactory:
             config.max_new_tokens,
             config.reasoning_effort,
             config.max_tool_iterations,
-            config.structured_output_mode,
             config.responses_state_mode,
             config.prompt_cache_enabled,
             config.prompt_cache_retention,
