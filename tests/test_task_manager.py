@@ -9,7 +9,7 @@ import pytest
 
 from minibot.adapters.tasks.manager import TaskManager
 from minibot.app.event_bus import EventBus
-from minibot.core.events import MessageEvent
+from minibot.core.events import MessageEvent, OutboundEvent
 
 # ---------------------------------------------------------------------------
 # Fake pipe helpers
@@ -71,16 +71,18 @@ class _PipeInvalidJSON:
 
 
 class _PipeWorkerError:
-    def __init__(self, error: str) -> None:
+    def __init__(self, error: str, metadata: dict | None = None) -> None:
         self._error = error
+        self._metadata = metadata or {}
 
     @asynccontextmanager
     async def open(self):
         error = self._error
+        metadata = self._metadata
 
         class _RX:
             async def readline(self) -> bytes:
-                return json.dumps({"task_id": "t-error", "error": error}).encode() + b"\n"
+                return json.dumps({"task_id": "t-error", "error": error, "metadata": metadata}).encode() + b"\n"
 
         class _TX:
             def write(self, _data: bytes) -> None:
@@ -230,8 +232,8 @@ async def test_reader_timeout_nacks_and_terminates_process() -> None:
     ack_cb, nack_cb, sem, fake_proc, reader_task = await _spawn(manager, _PipeHang(), task_id="t2")
     await asyncio.wait_for(reader_task, timeout=1.0)
 
-    nack_cb.assert_called_once()
-    ack_cb.assert_not_called()
+    ack_cb.assert_called_once()
+    nack_cb.assert_not_called()
     assert fake_proc.terminate_calls == 1
 
 
@@ -260,8 +262,8 @@ async def test_reader_invalid_json_nacks() -> None:
     ack_cb, nack_cb, sem, _, reader_task = await _spawn(manager, _PipeInvalidJSON(), task_id="t3")
     await asyncio.wait_for(reader_task, timeout=1.0)
 
-    nack_cb.assert_called_once()
-    ack_cb.assert_not_called()
+    ack_cb.assert_called_once()
+    nack_cb.assert_not_called()
     assert sem._value == 1
     assert manager.active() == []
 
@@ -275,9 +277,10 @@ async def test_reader_worker_error_nacks_without_publishing_event() -> None:
     ack_cb, nack_cb, sem, _, reader_task = await _spawn(manager, _PipeWorkerError("boom"), task_id="t-error")
     await asyncio.wait_for(reader_task, timeout=1.0)
 
-    nack_cb.assert_called_once()
-    ack_cb.assert_not_called()
-    assert sub._queue.empty()
+    ack_cb.assert_called_once()
+    nack_cb.assert_not_called()
+    event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    assert isinstance(event, OutboundEvent)
     assert sem._value == 1
     assert manager.active() == []
     await sub.close()
@@ -298,8 +301,8 @@ async def test_cancel_nacks_and_terminates_process() -> None:
     await asyncio.sleep(0.2)
 
     assert result is True
-    nack_cb.assert_called_once()
-    ack_cb.assert_not_called()
+    ack_cb.assert_called_once()
+    nack_cb.assert_not_called()
     assert fake_proc.terminate_calls == 1
 
 
@@ -345,3 +348,55 @@ async def test_active_lists_spawned_task() -> None:
     await manager.cancel("t5")
     await asyncio.sleep(0.2)
     assert manager.active() == []
+
+
+@pytest.mark.asyncio
+async def test_reader_retryable_worker_error_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    bus = EventBus()
+    sub = bus.subscribe()
+    manager = _make_manager(bus)
+    ack_cb = AsyncMock()
+    nack_cb = AsyncMock()
+    sem = asyncio.Semaphore(1)
+    await sem.acquire()
+    fake_proc_1 = _FakeProc()
+    fake_proc_2 = _FakeProc()
+    pipe_1 = _PipeWorkerError(
+        "HTTP 429: rate_limit_exceeded",
+        metadata={"retryable": True, "retry_after_seconds": 1, "error_code": "rate_limit_exceeded"},
+    )
+    pipe_2 = _PipeSuccess({"task_id": "t-retry", "text": "done"})
+
+    async def _fake_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+
+    with (
+        patch("minibot.adapters.tasks.manager.aioduplex", side_effect=[(pipe_1, MagicMock()), (pipe_2, MagicMock())]),
+        patch("minibot.adapters.tasks.manager.Process", side_effect=[fake_proc_1, fake_proc_2]),
+    ):
+        await manager.spawn(
+            task_id="t-retry",
+            channel="console",
+            prompt="hello",
+            context={},
+            chat_id=1,
+            user_id=2,
+            ack_cb=ack_cb,
+            nack_cb=nack_cb,
+            semaphore=sem,
+        )
+
+    reader_task = manager._tasks["t-retry"].reader_task
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    first_event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    second_event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    assert isinstance(first_event, OutboundEvent)
+    assert "Reintentando en 1s" in first_event.response.text
+    assert isinstance(second_event, MessageEvent)
+    assert second_event.message.text == "done"
+    ack_cb.assert_called_once()
+    nack_cb.assert_not_called()
+    await sub.close()

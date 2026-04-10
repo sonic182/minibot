@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -51,8 +52,13 @@ _WORKER_SYSTEM_PROMPT_SUFFIX = (
     "You are an isolated task worker.\n"
     "Complete the assigned task using the available tools when useful.\n"
     "Do not delegate to other agents or attempt to spawn additional tasks.\n"
+    "Do not keep probing large HTML or JavaScript assets unless the answer cannot be obtained otherwise.\n"
+    "Prefer targeted reads, focused grep searches, and small excerpts over broad page or script inspection.\n"
+    "Avoid fetching linked JavaScript assets unless the page itself clearly points to required data living there.\n"
     "Return only the task result needed by the main agent."
 )
+_WORKER_MAX_TOOL_ITERATIONS = 8
+_RATE_LIMIT_RETRY_AFTER_RE = re.compile(r"Please try again in (?P<seconds>\d+(?:\.\d+)?)s", re.IGNORECASE)
 
 
 def worker_entry(pipe: Any) -> None:
@@ -129,7 +135,7 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
         return {
             "task_id": task_id,
             "error": str(exc),
-            "metadata": {"error_type": type(exc).__name__},
+            "metadata": _build_error_metadata(exc),
         }
 
 
@@ -180,6 +186,7 @@ def _build_worker_spec(*, system_prompt: str, environment_prompt_fragment: str) 
         description="Isolated subprocess worker for async task execution.",
         system_prompt=prompt,
         source_path=_WORKER_SPEC_PATH,
+        max_tool_iterations=_WORKER_MAX_TOOL_ITERATIONS,
         tools_allow=list(_WORKER_TOOL_ALLOWLIST),
     )
 
@@ -242,3 +249,27 @@ def _require_string(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} is required")
     return value.strip()
+
+
+def _build_error_metadata(exc: Exception) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"error_type": type(exc).__name__}
+    error_text = str(exc)
+    lowered = error_text.lower()
+    if "http 429" not in lowered or "rate_limit_exceeded" not in lowered:
+        return metadata
+    retry_after_seconds = _extract_retry_after_seconds(error_text)
+    metadata.update(
+        {
+            "error_code": "rate_limit_exceeded",
+            "retryable": True,
+            "retry_after_seconds": retry_after_seconds,
+        }
+    )
+    return metadata
+
+
+def _extract_retry_after_seconds(error_text: str) -> int:
+    match = _RATE_LIMIT_RETRY_AFTER_RE.search(error_text)
+    if match is None:
+        return 30
+    return max(1, int(float(match.group("seconds")) + 0.999))
