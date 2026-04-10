@@ -33,7 +33,8 @@ async def run() -> None:
     rabbitmq_config = settings.rabbitmq
     rabbitmq_service = None
     if rabbitmq_config.enabled:
-        rabbitmq_service = RabbitMQConsumerService(rabbitmq_config, event_bus)
+        task_manager = AppContainer.get_task_manager()
+        rabbitmq_service = RabbitMQConsumerService(rabbitmq_config, event_bus, task_manager)
 
     services: list[Any] = [dispatcher]
     if telegram_service is not None:

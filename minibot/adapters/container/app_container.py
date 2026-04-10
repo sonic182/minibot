@@ -21,6 +21,7 @@ from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
+from minibot.adapters.tasks.manager import TaskManager
 
 
 class AppContainer:
@@ -35,6 +36,7 @@ class AppContainer:
     _skill_registry: Optional[SkillRegistry] = None
     _prompt_store: Optional[SQLAlchemyScheduledPromptStore] = None
     _prompt_service: Optional[ScheduledPromptService] = None
+    _task_manager: Optional[TaskManager] = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -44,6 +46,10 @@ class AppContainer:
         cls._logger = configure_logging(cls._settings.logging)
         agent_specs = load_agent_specs(cls._settings.orchestration.directory)
         cls._event_bus = EventBus()
+        cls._task_manager = TaskManager(
+            event_bus=cls._event_bus,
+            worker_timeout_seconds=cls._settings.rabbitmq.worker_timeout_seconds,
+        )
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
         if cls._settings.tools.kv_memory.enabled:
             cls._kv_memory_backend = SQLAlchemyKeyValueMemory(cls._settings.tools.kv_memory)
@@ -126,6 +132,10 @@ class AppContainer:
     @classmethod
     def get_scheduled_prompt_service(cls) -> ScheduledPromptService | None:
         return cls._prompt_service
+
+    @classmethod
+    def get_task_manager(cls) -> TaskManager | None:
+        return cls._task_manager
 
     @classmethod
     def get_telegram_config(cls) -> TelegramChannelConfig:

@@ -483,8 +483,10 @@ class RabbitMQConsumerConfig(BaseModel):
     enabled: bool = False
     broker_url: str = "amqp://guest:guest@localhost:5672/"
     queue_name: str = "minibot"
+    exchange_name: str = "minibot.tasks"
     prefetch_count: PositiveInt = 1
     worker_timeout_seconds: PositiveInt = 60
+    max_concurrent_workers: PositiveInt = 4
 
 
 class ScheduledPromptsConfig(BaseModel):
