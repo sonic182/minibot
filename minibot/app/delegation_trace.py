@@ -14,7 +14,7 @@ class DelegationTraceResult:
 
 
 def count_tool_messages(state: AgentState) -> int:
-    return sum(1 for message in state.messages if message.role == "tool")
+    return sum(1 for message in state.messages if message.role == "tool" and message.name != "pre_response")
 
 
 def extract_delegation_trace(state: AgentState) -> DelegationTraceResult:

@@ -379,7 +379,7 @@ class AgentDelegateTool:
 
     @staticmethod
     def _count_tool_messages(state: AgentState) -> int:
-        return sum(1 for message in state.messages if message.role == "tool")
+        return sum(1 for message in state.messages if message.role == "tool" and message.name != "pre_response")
 
 
 def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
