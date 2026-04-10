@@ -236,5 +236,5 @@ broker_url = "amqp://guest:guest@rabbitmq:5672/"
 queue_name = "minibot.tasks.worker"
 exchange_name = "minibot.tasks"
 prefetch_count = 1
-worker_timeout_seconds = 60
+worker_timeout_seconds = 300
 max_concurrent_workers = 4
