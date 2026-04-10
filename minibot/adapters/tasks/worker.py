@@ -135,7 +135,9 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             "model": llm_client.model_name(),
             "provider": llm_client.provider_name(),
             "agent_name": spec.name,
-            "managed_files_root": settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
+            "managed_files_root": settings.tools.file_storage.root_dir
+            if settings.tools.file_storage.enabled
+            else None,
         }
         attachments = _validate_attachments((generation.pre_response_meta or {}).get("attachments"))
         return {"task_id": task_id, "text": text, "attachments": attachments, "metadata": metadata}

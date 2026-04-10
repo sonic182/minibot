@@ -93,7 +93,8 @@ class PromptService:
                 "for tracking and cancellation."
             )
             lines.append(
-                "- `spawn_task` can also target a listed specialist via exact `agent_name` for long-running async work."
+                "- `spawn_task` can also target a listed specialist via exact `agent_name`"
+                " for long-running async work."
             )
             if invoke_agent_available and specialist_count > 0:
                 lines.append("- `invoke_agent` is also available as a local fallback when task tools are unsuitable.")

@@ -134,7 +134,7 @@ def int_with_default(
     return parsed
 
 
-def enum_by_value(
+def enum_by_value(  # noqa: UP047
     value: Any,
     *,
     enum_type: type[_EnumT],
