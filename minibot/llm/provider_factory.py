@@ -4,7 +4,6 @@ import logging
 from typing import Any, Sequence
 
 from llm_async.models.tool_call import ToolCall
-from pydantic import BaseModel
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
@@ -30,13 +29,7 @@ from minibot.llm.services.request_builder import (
     RequestContext,
     build_complete_once_call_kwargs,
 )
-from minibot.llm.services.schema_fallback import complete_with_schema_fallback
-from minibot.llm.services.schema_policy import normalize_response_schema, prepare_tool_specs
-from minibot.llm.services.structured_output_policy import (
-    apply_structured_output_prompt,
-    normalize_structured_output_mode,
-    should_send_response_schema,
-)
+from minibot.llm.services.schema_policy import prepare_tool_specs
 from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
 from minibot.llm.services.usage_parser import (
     extract_response_id,
@@ -57,9 +50,6 @@ class LLMClient:
         self._max_tool_iterations = config.max_tool_iterations
         self._system_prompt = load_system_prompt(config)
         self._prompts_dir = getattr(config, "prompts_dir", "./prompts")
-        self._structured_output_mode = normalize_structured_output_mode(
-            getattr(config, "structured_output_mode", "provider_with_fallback")
-        )
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
         self._responses_state_mode = getattr(config, "responses_state_mode", "full_messages")
         self._prompt_cache_enabled = bool(getattr(config, "prompt_cache_enabled", True))
@@ -84,8 +74,6 @@ class LLMClient:
         user_content: str | list[dict[str, Any]] | None = None,
         tools: Sequence[ToolBinding] | None = None,
         tool_context: ToolContext | None = None,
-        response_schema: dict[str, Any] | None = None,
-        local_response_model: type[BaseModel] | None = None,
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
         system_prompt_override: str | None = None,
@@ -103,8 +91,6 @@ class LLMClient:
             system_prompt=system_prompt,
             tools=tools,
             tool_context=tool_context,
-            response_schema=response_schema,
-            local_response_model=local_response_model,
             prompt_cache_key=prompt_cache_key,
             previous_response_id=previous_response_id,
             model=self._model,
@@ -113,9 +99,8 @@ class LLMClient:
             max_new_tokens=self._max_new_tokens,
             max_tool_iterations=self._max_tool_iterations,
             provider_name=self.provider_name(),
-            structured_output_mode=self._structured_output_mode,
             logger=self._logger,
-            complete_with_schema_fallback=self._complete_with_schema_fallback,
+            complete_fn=self._complete,
         )
 
     def is_responses_provider(self) -> bool:
@@ -153,34 +138,21 @@ class LLMClient:
         self,
         messages: Sequence[dict[str, Any]],
         tools: Sequence[ToolBinding] | None = None,
-        response_schema: dict[str, Any] | None = None,
         prompt_cache_key: str | None = None,
         previous_response_id: str | None = None,
         include_provider_native_tools: bool = True,
     ) -> LLMCompletionStep:
-        strict_response_schema = (
-            normalize_response_schema(response_schema, self._model)
-            if response_schema and should_send_response_schema(self._structured_output_mode)
-            else None
-        )
         tool_specs = prepare_tool_specs(tools or [], self._model)
         request_ctx = self._request_context(include_provider_native_tools=include_provider_native_tools)
         call_kwargs = build_complete_once_call_kwargs(
             ctx=request_ctx,
             messages=messages,
             tool_specs=tool_specs,
-            strict_response_schema=strict_response_schema,
             prompt_cache_key=prompt_cache_key,
             previous_response_id=previous_response_id,
         )
-        if response_schema:
-            call_kwargs["_structured_output_prompt_schema"] = response_schema
-        if response_schema and not should_send_response_schema(self._structured_output_mode):
-            call_kwargs = apply_structured_output_prompt(call_kwargs, response_schema)
 
-        response = await self._complete_with_schema_fallback(call_kwargs)
-        # Keep raw provider response logging centralized here so every runtime completion step
-        # emits the same debug payload for response content and tool calls.
+        response = await self._complete(call_kwargs)
         log_provider_response(
             logger=self._logger,
             response=response,
@@ -264,15 +236,8 @@ class LLMClient:
     def provider_capability_hints(self) -> list[str]:
         return list(self._provider_capability_hints)
 
-    async def _complete_with_schema_fallback(self, call_kwargs: dict[str, Any]) -> Any:
-        return await complete_with_schema_fallback(
-            provider=self._provider,
-            call_kwargs=call_kwargs,
-            model=self._model,
-            provider_display_name=self.provider_name(),
-            logger=self._logger,
-            structured_output_mode=self._structured_output_mode,
-        )
+    async def _complete(self, call_kwargs: dict[str, Any]) -> Any:
+        return await self._provider.acomplete(**call_kwargs)
 
     def _request_context(self, *, include_provider_native_tools: bool = True) -> RequestContext:
         return RequestContext(

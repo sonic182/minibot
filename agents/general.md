@@ -3,14 +3,9 @@ name: general_agent
 description: General-purpose agent for fresh requests without context overload. Use it for simple and intermediate tasks, and provide as much detail as possible so it can fulfill the job.
 enabled: true
 mode: agent
-model_provider: openrouter
-model: minimax/minimax-m2.5
-openrouter_provider_only:
-  - deepinfra
-  - atlas-cloud
-  - chutes
-  - parasail
-  - novita
+model_provider: openai_responses
+model: gpt-5.4-nano
+reasoning_effort: high
 tools_deny:
   - mcp*
 ---

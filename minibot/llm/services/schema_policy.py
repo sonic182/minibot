@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Sequence
+from typing import Sequence
 
 from llm_async.models import Tool
 
@@ -20,56 +20,35 @@ _DEEPSEEK_MODEL_PATTERNS = (
 )
 
 
-def should_apply_openai_strict_schema(model_name: str | None) -> bool:
+def _should_apply_openai_strict_schema(model_name: str | None) -> bool:
     if not isinstance(model_name, str) or not model_name:
         return False
     return any(pattern.match(model_name) for pattern in _OPENAI_STRICT_MODEL_PATTERNS)
 
 
-def should_apply_relaxed_schema(model_name: str | None) -> bool:
+def _should_apply_relaxed_schema(model_name: str | None) -> bool:
     if not isinstance(model_name, str) or not model_name:
         return False
     return any(pattern.match(model_name) for pattern in _DEEPSEEK_MODEL_PATTERNS)
 
 
-def normalize_response_schema(
-    response_schema: dict[str, Any] | None,
-    model_name: str | None,
-) -> dict[str, Any] | None:
-    if isinstance(response_schema, dict) and should_apply_openai_strict_schema(model_name):
-        return to_openai_strict_schema(response_schema)
-    return response_schema
-
-
 def prepare_tool_specs(tool_bindings: Sequence[ToolBinding], model_name: str | None) -> list[Tool] | None:
     if not tool_bindings:
         return None
-    if should_apply_openai_strict_schema(model_name):
+    if _should_apply_openai_strict_schema(model_name):
         result: list[Tool] = []
         for binding in tool_bindings:
             parameters = binding.tool.parameters
             if isinstance(parameters, dict):
                 parameters = to_openai_strict_schema(parameters)
-            result.append(
-                Tool(
-                    name=binding.tool.name,
-                    description=binding.tool.description,
-                    parameters=parameters,
-                )
-            )
+            result.append(Tool(name=binding.tool.name, description=binding.tool.description, parameters=parameters))
         return result
-    elif should_apply_relaxed_schema(model_name):
+    if _should_apply_relaxed_schema(model_name):
         result = []
         for binding in tool_bindings:
             parameters = binding.tool.parameters
             if isinstance(parameters, dict):
                 parameters = to_relaxed_schema(parameters)
-            result.append(
-                Tool(
-                    name=binding.tool.name,
-                    description=binding.tool.description,
-                    parameters=parameters,
-                )
-            )
+            result.append(Tool(name=binding.tool.name, description=binding.tool.description, parameters=parameters))
         return result
     return [binding.tool for binding in tool_bindings]

@@ -23,7 +23,6 @@ from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
-from minibot.llm.services.response_schemas import main_assistant_response_model, main_assistant_response_schema
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import session_id_for, session_id_from_parts
 
@@ -163,8 +162,6 @@ class LLMTurnService:
                     user_content=model_user_content,
                     tools=self._tools,
                     tool_context=tool_context,
-                    response_schema=main_assistant_response_schema(),
-                    local_response_model=main_assistant_response_model(),
                     prompt_cache_key=prompt_cache_key,
                     previous_response_id=previous_response_id,
                     system_prompt_override=system_prompt,
@@ -182,7 +179,7 @@ class LLMTurnService:
                     session_id,
                     getattr(generation, "total_tokens", None),
                 )
-                parsed = extract_answer(generation.payload, logger=self._logger)
+                parsed = extract_answer(generation.payload)
                 render = parsed.render or plain_render("")
                 should_reply = parsed.has_visible_answer
                 if use_previous_response_id and generation.response_id:
@@ -203,7 +200,6 @@ class LLMTurnService:
                     previous_response_id=previous_response_id,
                     chat_id=message.chat_id,
                     channel=message.channel,
-                    response_schema=main_assistant_response_schema(),
                 )
                 turn_total_tokens += runtime_result.tokens_used
                 self._session_state.track_usage(
@@ -231,7 +227,7 @@ class LLMTurnService:
                 self._session_state.clear_previous_response_id(session_id)
 
             self._logger.debug(
-                "structured output parsed",
+                "response parsed",
                 extra={"kind": render.kind, "content_length": len(render.text), "should_reply": should_reply},
             )
         except Exception as exc:
@@ -323,8 +319,6 @@ class LLMTurnService:
             user_content=None,
             tools=[],
             tool_context=None,
-            response_schema=main_assistant_response_schema(),
-            local_response_model=main_assistant_response_model(),
             prompt_cache_key=f"{channel}:{chat_id}:format-repair",
             previous_response_id=previous_response_id,
             system_prompt_override=system_prompt,
@@ -336,8 +330,7 @@ class LLMTurnService:
                 system_prompt=system_prompt,
             )
         turn_total_tokens += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
-        parsed = extract_answer(generation.payload, logger=self._logger)
-        render = parsed.render or plain_render(str(generation.payload))
+        render = plain_render(generation.payload if isinstance(generation.payload, str) else str(generation.payload))
         await self._memory.append_history(session_id, "user", repair_prompt)
         await self._memory.append_history(session_id, "assistant", render.text)
         await self._enforce_history_limit(session_id)

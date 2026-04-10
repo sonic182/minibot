@@ -3,27 +3,17 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable, Sequence
 
-from pydantic import BaseModel
-from ratchet_sm import FailAction, ToolCallMissingAction, ValidAction
-from ratchet_sm.normalizers.extract_pseudo_tool_call import has_pseudo_tool_call_tag
-
 from minibot.core.memory import MemoryEntry
 from minibot.llm.services.compaction import continue_incomplete_response
 from minibot.llm.services.debug_logging import log_provider_response
 from minibot.llm.services.models import LLMGeneration
-from minibot.llm.services.ratchet_support import StructuredOutputValidator
 from minibot.llm.services.request_builder import (
     RequestContext,
     build_generate_extra_kwargs,
     build_generate_step_call_kwargs,
     build_messages,
 )
-from minibot.llm.services.schema_policy import normalize_response_schema, prepare_tool_specs
-from minibot.llm.services.structured_output_policy import (
-    augment_system_prompt_with_structured_output,
-    normalize_structured_output_mode,
-    should_send_response_schema,
-)
+from minibot.llm.services.schema_policy import prepare_tool_specs
 from minibot.llm.services.tool_executor import execute_tool_calls, tool_name_from_call
 from minibot.llm.services.tool_loop_guard import (
     MAX_REPEATED_TOOL_ITERATIONS,
@@ -43,6 +33,10 @@ from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import humanize_token_count
 
 
+def _has_pseudo_tool_call_tag(text: str) -> bool:
+    return "<tool_call>" in text
+
+
 _TRUNCATED_PATCH = (
     "Your previous response was truncated. Please resend your complete tool call with all required arguments."
 )
@@ -56,8 +50,6 @@ async def generate_with_tools(
     user_content: str | list[dict[str, Any]] | None,
     tools: Sequence[ToolBinding] | None,
     tool_context: ToolContext | None,
-    response_schema: dict[str, Any] | None,
-    local_response_model: type[BaseModel] | None,
     prompt_cache_key: str | None,
     previous_response_id: str | None,
     system_prompt: str,
@@ -67,19 +59,14 @@ async def generate_with_tools(
     max_new_tokens: int,
     max_tool_iterations: int,
     provider_name: str,
-    structured_output_mode: str | None,
     logger: logging.Logger,
-    complete_with_schema_fallback: Callable[[dict[str, Any]], Awaitable[Any]],
+    complete_fn: Callable[[dict[str, Any]], Awaitable[Any]],
 ) -> LLMGeneration:
-    mode = normalize_structured_output_mode(structured_output_mode)
-    effective_system_prompt = system_prompt
-    if response_schema and not should_send_response_schema(mode):
-        effective_system_prompt = augment_system_prompt_with_structured_output(system_prompt, response_schema)
     messages = build_messages(
         history=history,
         user_message=user_message,
         user_content=user_content,
-        system_prompt=effective_system_prompt,
+        system_prompt=system_prompt,
     )
     conversation = list(messages)
     tool_bindings = list(tools or [])
@@ -90,39 +77,23 @@ async def generate_with_tools(
     recent_tool_names: list[str] = []
     last_iteration_signature: str | None = None
     repeated_iteration_count = 0
-    strict_response_schema = (
-        normalize_response_schema(response_schema, model)
-        if response_schema and should_send_response_schema(mode)
-        else None
-    )
     extra_kwargs = build_generate_extra_kwargs(
         ctx=request_ctx,
         prompt_cache_key=prompt_cache_key,
         previous_response_id=previous_response_id,
-        system_prompt=effective_system_prompt,
+        system_prompt=system_prompt,
     )
     usage_accumulator = UsageAccumulator()
     truncated_count = 0
-    structured_validator = (
-        StructuredOutputValidator(
-            max_attempts=max_tool_iterations,
-            schema=local_response_model or response_schema,
-        )
-        if response_schema
-        else None
-    )
 
     while True:
         call_kwargs = build_generate_step_call_kwargs(
             ctx=request_ctx,
             conversation=conversation,
             tool_specs=tool_specs,
-            strict_response_schema=strict_response_schema,
             extra_kwargs=extra_kwargs,
         )
-        if response_schema:
-            call_kwargs["_structured_output_prompt_schema"] = response_schema
-        response = await complete_with_schema_fallback(call_kwargs)
+        response = await complete_fn(call_kwargs)
         log_provider_response(
             logger=logger,
             response=response,
@@ -164,7 +135,7 @@ async def generate_with_tools(
                         *recent_tool_names,
                         *(tool_name_from_call(call) for call in message_tool_calls),
                     ]
-                    payload = tool_loop_fallback_payload(last_tool_messages, attempted_tool_names, response_schema)
+                    payload = tool_loop_fallback_payload(last_tool_messages, attempted_tool_names)
                     return LLMGeneration(
                         payload,
                         response_id,
@@ -173,7 +144,7 @@ async def generate_with_tools(
                 conversation.append(assistant_message_for_followup(message))
                 conversation.append({"role": "user", "content": _TRUNCATED_PATCH})
                 continue
-            if not message_tool_calls and has_pseudo_tool_call_tag(raw_content):
+            if not message_tool_calls and _has_pseudo_tool_call_tag(raw_content):
                 conversation.append(assistant_message_for_followup(message))
                 conversation.append({"role": "user", "content": _PSEUDO_TOOL_PATCH})
                 continue
@@ -184,13 +155,11 @@ async def generate_with_tools(
             incomplete_reason = usage.incomplete_reason
             if is_responses_provider and response_id and should_auto_continue_incomplete(usage):
                 continuation = await continue_incomplete_response(
-                    complete_with_schema_fallback=complete_with_schema_fallback,
+                    complete_fn=complete_fn,
                     ctx=request_ctx,
                     previous_response_id=response_id,
                     prompt_cache_key=prompt_cache_key,
-                    system_prompt=effective_system_prompt,
-                    response_schema=strict_response_schema,
-                    prompt_response_schema=response_schema,
+                    system_prompt=system_prompt,
                     logger=logger,
                 )
                 continuation_payload = (
@@ -201,43 +170,6 @@ async def generate_with_tools(
                 response_id = continuation.response_id or response_id
                 status = continuation.status
                 incomplete_reason = continuation.incomplete_reason
-            if response_schema and structured_validator is not None:
-                action = structured_validator.receive(payload)
-                if isinstance(action, ValidAction):
-                    parsed_payload = structured_validator.valid_payload(action)
-                    return usage_accumulator.build_generation(
-                        payload=parsed_payload,
-                        response_id=response_id,
-                        status=status,
-                        incomplete_reason=incomplete_reason,
-                    )
-                if isinstance(action, ToolCallMissingAction):
-                    logger.warning("unexpected structured validator action", extra={"action": type(action).__name__})
-                if isinstance(action, FailAction):
-                    logger.warning("structured response validation failed; returning structured fallback")
-                    fallback_payload = {
-                        "answer": {
-                            "kind": "text",
-                            "content": (
-                                "I could not produce a valid structured response in this attempt. Please try again."
-                            ),
-                        },
-                        "should_continue": False,
-                    }
-                    if isinstance(response_schema, dict):
-                        properties = response_schema.get("properties")
-                        if isinstance(properties, dict) and "attachments" in properties:
-                            fallback_payload["attachments"] = []
-                    return usage_accumulator.build_generation(
-                        payload=fallback_payload,
-                        response_id=response_id,
-                        status=status,
-                        incomplete_reason=incomplete_reason,
-                    )
-                conversation.append(assistant_message_for_followup(message))
-                if action.prompt_patch:
-                    conversation.append({"role": "user", "content": action.prompt_patch})
-                continue
             return usage_accumulator.build_generation(
                 payload=payload,
                 response_id=response_id,
@@ -269,7 +201,7 @@ async def generate_with_tools(
                 },
             )
             response_id = extract_response_id(response)
-            payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
+            payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names)
             return LLMGeneration(
                 payload,
                 response_id,
@@ -290,7 +222,7 @@ async def generate_with_tools(
                 extra={"tool_names": recent_tool_names[-10:]},
             )
             response_id = extract_response_id(response)
-            payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names, response_schema)
+            payload = tool_loop_fallback_payload(last_tool_messages, recent_tool_names)
             return LLMGeneration(
                 payload,
                 response_id,

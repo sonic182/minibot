@@ -6,26 +6,19 @@ from dataclasses import dataclass
 from typing import Any, Literal, Sequence
 
 from llm_async.models import Tool
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.llm_client_factory import LLMClientFactory
-from minibot.app.runtime_structured_output import RuntimeStructuredOutputValidator
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
 from minibot.llm.services import LLMExecutionProfile
-from minibot.llm.services.response_schemas import delegated_agent_response_schema
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import strict_object, string_field
-from minibot.shared.assistant_response import (
-    validate_attachments,
-)
-from minibot.shared.parse_utils import parse_json_with_fenced_fallback
 from minibot.shared.utils import session_identifier
 
 
@@ -33,56 +26,9 @@ from minibot.shared.utils import session_identifier
 class _DelegationOutcome:
     text: str
     payload: Any
-    should_continue: bool | None
     valid: bool
     error_code: str | None
     attachments: list[dict[str, Any]]
-
-
-class _DelegatedAnswer(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    kind: Literal["text", "html", "markdown", "json"]
-    content: str | None = None
-    meta: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("meta", mode="before")
-    @classmethod
-    def _normalize_meta(cls, value: Any) -> Any:
-        if value is None:
-            return {}
-        return value
-
-    @field_validator("content")
-    @classmethod
-    def _validate_content(cls, value: str | None) -> str | None:
-        return value
-
-
-class _DelegatedPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    answer: _DelegatedAnswer | None = None
-    should_continue: bool
-    attachments: list[Any] = Field(default_factory=list)
-
-    @field_validator("attachments", mode="before")
-    @classmethod
-    def _normalize_attachments(cls, value: Any) -> Any:
-        if value is None:
-            return []
-        return value
-
-    @model_validator(mode="after")
-    def _validate_terminal_visibility(self) -> "_DelegatedPayload":
-        if self.should_continue:
-            return self
-        content = self.answer.content if self.answer is not None else None
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError(
-                "final delegated responses with should_continue=false must include a non-empty answer.content"
-            )
-        return self
 
 
 class AgentDelegateTool:
@@ -219,10 +165,8 @@ class AgentDelegateTool:
             generation = await runtime.run(
                 state=state,
                 tool_context=context,
-                response_schema=_agent_response_schema(),
                 prompt_cache_key=prompt_cache_key,
                 initial_previous_response_id=previous_response_id,
-                structured_validator=RuntimeStructuredOutputValidator(schema_model=_DelegatedPayload, max_attempts=3),
             )
             self._logger.debug(
                 "delegated agent runtime attempt completed",
@@ -277,13 +221,8 @@ class AgentDelegateTool:
                 generation = await runtime.run(
                     state=retry_state,
                     tool_context=context,
-                    response_schema=_agent_response_schema(),
                     prompt_cache_key=prompt_cache_key,
                     initial_previous_response_id=previous_response_id,
-                    structured_validator=RuntimeStructuredOutputValidator(
-                        schema_model=_DelegatedPayload,
-                        max_attempts=3,
-                    ),
                 )
                 self._logger.debug(
                     "delegated agent runtime attempt completed",
@@ -314,7 +253,6 @@ class AgentDelegateTool:
                         "agent": spec.name,
                         "result": "Delegated agent did not execute required tools.",
                         "result_status": "invalid_result",
-                        "should_continue": False,
                         "tool_count": len(scoped_tools),
                         "tool_messages_count": tool_messages_count,
                         "delegation_attempts": attempts,
@@ -322,7 +260,7 @@ class AgentDelegateTool:
                         "error_code": "delegated_no_tool_calls",
                         "error": "delegated agent returned without required tool calls",
                     }
-            outcome = _extract_outcome(generation.payload)
+            outcome = _extract_outcome(generation.payload, generation.pre_response_meta)
             result_status = _delegation_result_status(outcome)
             ok = result_status == "success"
             if outcome.attachments:
@@ -352,7 +290,6 @@ class AgentDelegateTool:
                 "result": outcome.text,
                 "payload": outcome.payload,
                 "result_status": result_status,
-                "should_continue": outcome.should_continue,
                 "tool_count": len(scoped_tools),
                 "tool_messages_count": tool_messages_count,
                 "delegation_attempts": attempts,
@@ -382,7 +319,6 @@ class AgentDelegateTool:
                 "agent": spec.name,
                 "result": "Delegated agent timed out waiting for provider response.",
                 "result_status": "timeout",
-                "should_continue": False,
                 "tool_count": len(scoped_tools),
                 "tool_messages_count": 0,
                 "delegation_attempts": attempts,
@@ -443,58 +379,48 @@ class AgentDelegateTool:
 
     @staticmethod
     def _count_tool_messages(state: AgentState) -> int:
-        return sum(1 for message in state.messages if message.role == "tool")
-
-
-def _agent_response_schema() -> dict[str, Any]:
-    return delegated_agent_response_schema()
+        return sum(1 for message in state.messages if message.role == "tool" and message.name != "pre_response")
 
 
 def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
-    return validate_attachments(raw_attachments)
+    if not isinstance(raw_attachments, list):
+        return []
+    validated: list[dict[str, Any]] = []
+    for item in raw_attachments:
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path")
+        file_type = item.get("type")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if not isinstance(file_type, str) or not file_type.strip():
+            continue
+        attachment: dict[str, Any] = {"path": path.strip(), "type": file_type.strip()}
+        caption = item.get("caption")
+        if isinstance(caption, str) and caption.strip():
+            attachment["caption"] = caption.strip()
+        validated.append(attachment)
+    return validated
 
 
-def _extract_outcome(payload: Any) -> _DelegationOutcome:
-    payload_obj = _payload_to_object(payload)
-    if payload_obj is not None:
-        try:
-            parsed = _DelegatedPayload.model_validate(payload_obj)
-        except ValidationError:
-            return _DelegationOutcome(
-                text=str(payload_obj),
-                payload=payload_obj,
-                should_continue=None,
-                valid=False,
-                error_code="invalid_payload_schema",
-                attachments=_validate_attachments(payload_obj.get("attachments")),
-            )
-        attachments = _validate_attachments(parsed.attachments)
-        answer_text = ""
-        if parsed.answer is not None and isinstance(parsed.answer.content, str):
-            answer_text = parsed.answer.content
-        return _DelegationOutcome(
-            text=answer_text,
-            payload=parsed.model_dump(mode="python", exclude_none=True),
-            should_continue=parsed.should_continue,
-            valid=True,
-            error_code=None,
-            attachments=attachments,
-        )
+def _extract_outcome(payload: Any, pre_response_meta: dict[str, Any] | None) -> _DelegationOutcome:
+    text = payload if isinstance(payload, str) else str(payload) if payload is not None else ""
+    attachments = _validate_attachments((pre_response_meta or {}).get("attachments"))
+    valid = bool(text.strip()) if isinstance(payload, str) else payload is not None
     return _DelegationOutcome(
-        text=str(payload),
+        text=text,
         payload=payload,
-        should_continue=None,
-        valid=False,
-        error_code="unstructured_payload",
-        attachments=[],
+        valid=valid,
+        error_code=None,
+        attachments=attachments,
     )
 
 
 def _delegation_result_status(outcome: _DelegationOutcome) -> str:
+    if outcome.error_code is not None:
+        return "error"
     if not outcome.valid:
         return "invalid_result"
-    if outcome.should_continue is True:
-        return "continue"
     return "success"
 
 
@@ -505,17 +431,3 @@ def _agent_prompt_cache_key(*, llm_client: Any, context: ToolContext, agent_name
     channel = context.channel or "agent"
     session_id = session_identifier(channel, context.chat_id, context.user_id)
     return f"{session_id}:agent:{agent_name}"
-
-
-def _payload_to_object(payload: Any) -> dict[str, Any] | None:
-    if isinstance(payload, dict):
-        return payload
-    if not isinstance(payload, str):
-        return None
-    try:
-        parsed = parse_json_with_fenced_fallback(payload)
-    except Exception:
-        return None
-    if isinstance(parsed, dict):
-        return parsed
-    return None

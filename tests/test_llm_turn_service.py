@@ -222,7 +222,7 @@ def _service(
 @pytest.mark.asyncio
 async def test_turn_service_returns_structured_answer() -> None:
     service, stub_client, _ = _service(
-        {"answer": {"kind": "text", "content": "hello"}, "should_continue": False},
+        "hello",
         responses_provider=True,
         response_id="resp-1",
     )
@@ -238,7 +238,7 @@ async def test_turn_service_returns_structured_answer() -> None:
 async def test_turn_service_includes_usage_trace_metadata() -> None:
     memory = StubMemory()
     stub_client = StubLLMClient(
-        {"answer": {"kind": "text", "content": "hello"}, "should_continue": False},
+        "hello",
         is_responses=True,
         provider="openai_responses",
         total_tokens=33,
@@ -267,7 +267,7 @@ async def test_turn_service_includes_usage_trace_metadata() -> None:
 @pytest.mark.asyncio
 async def test_turn_service_compaction_endpoint_updates_previous_response_id() -> None:
     service, client, memory = _service(
-        {"answer": {"kind": "text", "content": "ok"}, "should_continue": False},
+        "ok",
         response_id="resp-1",
         responses_provider=True,
         provider="openai_responses",
@@ -303,7 +303,7 @@ async def test_turn_service_fallback_compaction_updates_previous_response_id() -
     class _FallbackCompactionClient(StubLLMClient):
         def __init__(self) -> None:
             super().__init__(
-                {"answer": {"kind": "text", "content": "ok"}, "should_continue": False},
+                "ok",
                 response_id="resp-1",
                 is_responses=True,
                 provider="openai_responses",
@@ -348,7 +348,7 @@ async def test_turn_service_fallback_compaction_updates_previous_response_id() -
 async def test_turn_service_reuses_previous_response_id_when_mode_enabled() -> None:
     memory = StubMemory()
     stub_client = StubLLMClient(
-        {"answer": {"kind": "text", "content": "hello"}, "should_continue": False},
+        "hello",
         response_id="resp-1",
         is_responses=True,
         provider="openai_responses",
@@ -370,7 +370,7 @@ async def test_turn_service_reuses_previous_response_id_when_mode_enabled() -> N
 @pytest.mark.asyncio
 async def test_turn_service_auto_transcribes_short_incoming_audio_before_generation() -> None:
     memory = StubMemory()
-    client = StubLLMClient({"answer": {"kind": "text", "content": "ok"}, "should_continue": False})
+    client = StubLLMClient("ok")
     tool_calls: list[dict[str, Any]] = []
 
     async def _transcribe(payload: dict[str, Any], _context: ToolContext) -> dict[str, Any]:
@@ -462,14 +462,14 @@ async def test_turn_service_guardrail_retry_with_runtime() -> None:
     runtime = StubRuntime(
         [
             RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"Let me check."},"should_continue":false}',
+                payload="Let me check.",
                 response_id="r1",
                 state=AgentState(
                     messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]
                 ),
             ),
             RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"Done via tool."},"should_continue":false}',
+                payload="Done via tool.",
                 response_id="r2",
                 state=AgentState(
                     messages=[
@@ -501,7 +501,7 @@ async def test_turn_service_injects_recent_filesystem_paths_in_current_turn_only
     runtime = StubRuntime(
         [
             RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"saved"},"should_continue":false}',
+                payload="saved",
                 response_id="r1",
                 state=AgentState(
                     messages=[
@@ -526,7 +526,7 @@ async def test_turn_service_injects_recent_filesystem_paths_in_current_turn_only
                 ),
             ),
             RuntimeResult(
-                payload='{"answer":{"kind":"text","content":"patched"},"should_continue":false}',
+                payload="patched",
                 response_id="r2",
                 state=AgentState(
                     messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="ok")])]
@@ -551,10 +551,7 @@ async def test_turn_service_injects_recent_filesystem_paths_in_current_turn_only
 async def test_turn_service_repair_response_reuses_and_refreshes_previous_response_id_when_mode_enabled() -> None:
     memory = StubMemory()
     client = StubLLMClient(
-        {
-            "answer": {"kind": "markdown", "content": "*fixed*"},
-            "should_continue": False,
-        },
+        "*fixed*",
         response_id="resp-repair",
         is_responses=True,
         provider="openai_responses",
@@ -591,7 +588,7 @@ async def test_turn_service_uses_compact_prompt_from_prompts_dir(tmp_path: Path)
     (tmp_path / "compact.md").write_text("compact with these rules", encoding="utf-8")
     memory = StubMemory()
     client = StubLLMClient(
-        {"answer": {"kind": "text", "content": "ok"}, "should_continue": False},
+        "ok",
         total_tokens=60,
         prompts_dir=str(tmp_path),
     )
@@ -610,7 +607,7 @@ async def test_turn_service_uses_compact_prompt_from_prompts_dir(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_turn_service_runtime_exception_returns_fallback_response() -> None:
     service, _, _ = _service(
-        {"answer": {"kind": "text", "content": "unused"}, "should_continue": False},
+        "unused",
     )
     service.set_runtime(cast(Any, FailingRuntime()))
 
