@@ -232,7 +232,7 @@ enabled = true
 
 [rabbitmq]
 enabled = true
-broker_url = "amqp://guest:guest@rabbitmq:5672/"
+broker_url = "amqp://guest:guest@minibot-rabbitmq:5672/"
 queue_name = "minibot.tasks.worker"
 exchange_name = "minibot.tasks"
 prefetch_count = 1

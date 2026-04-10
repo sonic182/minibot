@@ -406,7 +406,7 @@ enabled = false
 # Example body: {"text": "summarise this report", "user_id": 1, "chat_id": 1}
 [rabbitmq]
 enabled = false
-broker_url = "amqp://guest:guest@localhost:5672/"
+broker_url = "amqp://guest:guest@minibot-rabbitmq:5672/"
 queue_name = "minibot.tasks.worker"
 exchange_name = "minibot.tasks"
 # Max messages delivered to the consumer before acknowledgement.
