@@ -2,15 +2,243 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+from pathlib import Path
+from typing import Any
+
+from minibot.adapters.config.loader import load_settings
+from minibot.adapters.config.schema import Settings
+from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.app.agent_policies import filter_tools_for_agent
+from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.environment_context import build_environment_prompt_fragment
+from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.response_parser import extract_answer
+from minibot.app.runtime_limits import build_runtime_limits
+from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
+from minibot.core.agents import AgentSpec
+from minibot.llm.tools.apply_patch import ApplyPatchTool
+from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
+from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.bash import BashTool
+from minibot.llm.tools.calculator import CalculatorTool
+from minibot.llm.tools.code_read import CodeReadTool
+from minibot.llm.tools.file_storage import FileStorageTool
+from minibot.llm.tools.grep import GrepTool
+from minibot.llm.tools.http_client import HTTPClientTool
+from minibot.llm.tools.python_exec import HostPythonExecTool
+from minibot.llm.tools.time import CurrentTimeTool
+from minibot.shared.utils import session_identifier
+
+_LOGGER = logging.getLogger("minibot.task_worker")
+_WORKER_SPEC_PATH = Path("<task_worker>")
+_WORKER_TOOL_ALLOWLIST = [
+    "current_datetime",
+    "calculate_expression",
+    "http_request",
+    "filesystem",
+    "glob_files",
+    "read_file",
+    "code_read",
+    "grep",
+    "bash",
+    "python_execute",
+    "python_environment_info",
+    "apply_patch",
+    "transcribe_audio",
+]
+_WORKER_SYSTEM_PROMPT_SUFFIX = (
+    "You are an isolated task worker.\n"
+    "Complete the assigned task using the available tools when useful.\n"
+    "Do not delegate to other agents or attempt to spawn additional tasks.\n"
+    "Return only the task result needed by the main agent."
+)
 
 
-def worker_entry(pipe) -> None:
-    asyncio.run(_worker_task(pipe))
+def worker_entry(pipe: Any) -> None:
+    asyncio.run(_worker_async(pipe))
 
 
-async def _worker_task(pipe) -> None:
+async def _worker_async(pipe: Any) -> None:
     async with pipe.open() as (rx, tx):
         raw = await rx.readline()
-        payload = json.loads(raw)
-        result = {"task_id": payload.get("task_id", ""), "text": payload.get("prompt", "")}
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            result = {"task_id": "", "error": "invalid task payload", "metadata": {"error_type": "invalid_payload"}}
+        else:
+            result = await run_agent_loop(payload)
         tx.write(json.dumps(result).encode() + b"\n")
+
+
+async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
+    task_id = str(task.get("task_id") or "")
+    try:
+        channel = _require_string(task.get("channel"), "channel")
+        prompt = _require_string(task.get("prompt"), "prompt")
+        settings = load_settings()
+        llm_factory = LLMClientFactory(settings)
+        environment_prompt_fragment = build_environment_prompt_fragment(settings)
+        spec = _build_worker_spec(
+            system_prompt=llm_factory.create_default().system_prompt(),
+            environment_prompt_fragment=environment_prompt_fragment,
+        )
+        llm_client = llm_factory.create_for_agent(spec)
+        tools = _build_worker_tools(settings=settings, spec=spec)
+        runtime = AgentRuntime(
+            llm_client=llm_client,
+            tools=tools,
+            limits=build_runtime_limits(
+                llm_client=llm_client,
+                timeout_seconds=settings.rabbitmq.worker_timeout_seconds,
+                min_timeout_seconds=30,
+            ),
+            allowed_append_message_tools=[],
+            allow_system_inserts=False,
+            managed_files_root=settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
+        )
+        state = _build_worker_state(
+            spec=spec,
+            prompt=prompt,
+            context=_coerce_context(task.get("context")),
+        )
+        tool_context = ToolContext(
+            owner_id=_resolve_owner_id(task),
+            channel=channel,
+            chat_id=_coerce_int(task.get("chat_id")),
+            user_id=_coerce_int(task.get("user_id")),
+        )
+        prompt_cache_key = _worker_prompt_cache_key(tool_context=tool_context, task_id=task_id)
+        generation = await runtime.run(
+            state=state,
+            tool_context=tool_context,
+            prompt_cache_key=prompt_cache_key,
+            initial_previous_response_id=None,
+        )
+        parsed = extract_answer(generation.payload, pre_response_meta=generation.pre_response_meta)
+        render = parsed.render
+        text = render.text if render is not None else ""
+        metadata = {
+            "tool_count": sum(1 for message in generation.state.messages if message.role == "tool"),
+            "model": llm_client.model_name(),
+            "provider": llm_client.provider_name(),
+        }
+        return {"task_id": task_id, "text": text, "metadata": metadata}
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.exception("task worker failed", exc_info=exc, extra={"task_id": task_id or "unknown"})
+        return {
+            "task_id": task_id,
+            "error": str(exc),
+            "metadata": {"error_type": type(exc).__name__},
+        }
+
+
+def _build_worker_tools(*, settings: Settings, spec: AgentSpec) -> list[ToolBinding]:
+    bindings: list[ToolBinding] = []
+    managed_storage = _build_managed_storage(settings)
+
+    if settings.tools.time.enabled:
+        bindings.extend(CurrentTimeTool(settings.tools.time.default_format).bindings())
+    if settings.tools.calculator.enabled:
+        bindings.extend(
+            CalculatorTool(
+                default_scale=settings.tools.calculator.default_scale,
+                max_expression_length=settings.tools.calculator.max_expression_length,
+                max_exponent_abs=settings.tools.calculator.max_exponent_abs,
+            ).bindings()
+        )
+    if settings.tools.http_client.enabled:
+        bindings.extend(HTTPClientTool(settings.tools.http_client, storage=managed_storage).bindings())
+    if settings.tools.python_exec.enabled:
+        bindings.extend(HostPythonExecTool(settings.tools.python_exec, storage=managed_storage).bindings())
+    if settings.tools.bash.enabled:
+        bindings.extend(BashTool(settings.tools.bash).bindings())
+    if settings.tools.apply_patch.enabled:
+        bindings.extend(ApplyPatchTool(settings.tools.apply_patch).bindings())
+    if managed_storage is not None:
+        bindings.extend(FileStorageTool(storage=managed_storage, event_bus=None).bindings())
+        bindings.extend(CodeReadTool(storage=managed_storage).bindings())
+        if settings.tools.grep.enabled:
+            bindings.extend(GrepTool(storage=managed_storage, config=settings.tools.grep).bindings())
+        if settings.tools.audio_transcription.enabled:
+            bindings.extend(
+                AudioTranscriptionTool(
+                    config=settings.tools.audio_transcription,
+                    storage=managed_storage,
+                ).bindings()
+            )
+
+    return filter_tools_for_agent(bindings, spec)
+
+
+def _build_worker_spec(*, system_prompt: str, environment_prompt_fragment: str) -> AgentSpec:
+    prompt = f"{system_prompt.strip()}\n\n{_WORKER_SYSTEM_PROMPT_SUFFIX}"
+    if environment_prompt_fragment.strip():
+        prompt = f"{prompt}\n\n{environment_prompt_fragment.strip()}"
+    return AgentSpec(
+        name="task_worker",
+        description="Isolated subprocess worker for async task execution.",
+        system_prompt=prompt,
+        source_path=_WORKER_SPEC_PATH,
+        tools_allow=list(_WORKER_TOOL_ALLOWLIST),
+    )
+
+
+def _build_worker_state(*, spec: AgentSpec, prompt: str, context: dict[str, Any]) -> AgentState:
+    user_text = prompt.strip()
+    if context:
+        user_text = f"{user_text}\n\nContext:\n{json.dumps(context, ensure_ascii=True, indent=2, sort_keys=True)}"
+    return AgentState(
+        messages=[
+            AgentMessage(role="system", content=[MessagePart(type="text", text=spec.system_prompt)]),
+            AgentMessage(role="user", content=[MessagePart(type="text", text=user_text)]),
+        ]
+    )
+
+
+def _build_managed_storage(settings: Settings) -> LocalFileStorage | None:
+    if not settings.tools.file_storage.enabled:
+        return None
+    return LocalFileStorage(
+        root_dir=settings.tools.file_storage.root_dir,
+        max_write_bytes=settings.tools.file_storage.max_write_bytes,
+        allow_outside_root=settings.tools.file_storage.allow_outside_root,
+    )
+
+
+def _resolve_owner_id(task: dict[str, Any]) -> str:
+    user_id = _coerce_int(task.get("user_id"))
+    if user_id is not None:
+        return str(user_id)
+    chat_id = _coerce_int(task.get("chat_id"))
+    if chat_id is not None:
+        return str(chat_id)
+    channel = str(task.get("channel") or "task")
+    return session_identifier(channel, chat_id, user_id)
+
+
+def _worker_prompt_cache_key(*, tool_context: ToolContext, task_id: str) -> str:
+    session_id = session_identifier(tool_context.channel or "task", tool_context.chat_id, tool_context.user_id)
+    return f"{session_id}:task:{task_id or 'worker'}"
+
+
+def _coerce_context(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("context must be an object")
+    return value
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("chat_id and user_id must be integers when provided")
+    return value
+
+
+def _require_string(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} is required")
+    return value.strip()

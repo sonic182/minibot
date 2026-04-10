@@ -69,11 +69,12 @@ class RabbitMQConsumerService:
             return
 
         task_id = body.get("task_id")
+        channel = body.get("channel")
         prompt = body.get("prompt")
-        if not task_id or not prompt:
+        if not task_id or not channel or not prompt:
             self._logger.warning(
                 "malformed rabbitmq message: missing required fields",
-                extra={"missing": [f for f in ("task_id", "prompt") if not body.get(f)]},
+                extra={"missing": [f for f in ("task_id", "channel", "prompt") if not body.get(f)]},
             )
             await message.nack(requeue=False)
             return
@@ -92,6 +93,7 @@ class RabbitMQConsumerService:
         if self._task_manager is not None:
             await self._task_manager.spawn(
                 task_id=task_id,
+                channel=channel,
                 prompt=prompt,
                 context=context,
                 chat_id=chat_id,

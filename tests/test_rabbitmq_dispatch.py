@@ -56,7 +56,7 @@ async def test_dispatch_invalid_json_nacks_and_discards() -> None:
 @pytest.mark.asyncio
 async def test_dispatch_missing_task_id_nacks_and_discards() -> None:
     service = _make_service()
-    msg = _make_message(json.dumps({"prompt": "hello"}).encode())
+    msg = _make_message(json.dumps({"channel": "console", "prompt": "hello"}).encode())
 
     await service._dispatch(msg)
 
@@ -67,7 +67,7 @@ async def test_dispatch_missing_task_id_nacks_and_discards() -> None:
 @pytest.mark.asyncio
 async def test_dispatch_missing_prompt_nacks_and_discards() -> None:
     service = _make_service()
-    msg = _make_message(json.dumps({"task_id": "t1"}).encode())
+    msg = _make_message(json.dumps({"task_id": "t1", "channel": "console"}).encode())
 
     await service._dispatch(msg)
 
@@ -76,9 +76,9 @@ async def test_dispatch_missing_prompt_nacks_and_discards() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_empty_task_id_nacks_and_discards() -> None:
+async def test_dispatch_missing_channel_nacks_and_discards() -> None:
     service = _make_service()
-    msg = _make_message(json.dumps({"task_id": "", "prompt": "hello"}).encode())
+    msg = _make_message(json.dumps({"task_id": "t1", "prompt": "hello"}).encode())
 
     await service._dispatch(msg)
 
@@ -94,7 +94,7 @@ async def test_dispatch_empty_task_id_nacks_and_discards() -> None:
 @pytest.mark.asyncio
 async def test_dispatch_no_task_manager_nacks_and_discards() -> None:
     service = _make_service(task_manager=None)
-    msg = _make_message(json.dumps({"task_id": "t1", "prompt": "hello"}).encode())
+    msg = _make_message(json.dumps({"task_id": "t1", "channel": "console", "prompt": "hello"}).encode())
 
     await service._dispatch(msg)
 
@@ -113,7 +113,14 @@ async def test_dispatch_valid_message_delegates_to_task_manager() -> None:
     task_manager.spawn = AsyncMock()
     service = _make_service(task_manager=task_manager)
 
-    body = {"task_id": "t1", "prompt": "summarise this", "chat_id": 10, "user_id": 20, "context": {"k": "v"}}
+    body = {
+        "task_id": "t1",
+        "channel": "telegram",
+        "prompt": "summarise this",
+        "chat_id": 10,
+        "user_id": 20,
+        "context": {"k": "v"},
+    }
     msg = _make_message(json.dumps(body).encode())
 
     await service._dispatch(msg)
@@ -121,6 +128,7 @@ async def test_dispatch_valid_message_delegates_to_task_manager() -> None:
     task_manager.spawn.assert_called_once()
     kw = task_manager.spawn.call_args.kwargs
     assert kw["task_id"] == "t1"
+    assert kw["channel"] == "telegram"
     assert kw["prompt"] == "summarise this"
     assert kw["chat_id"] == 10
     assert kw["user_id"] == 20
@@ -133,12 +141,13 @@ async def test_dispatch_optional_fields_default_to_none() -> None:
     task_manager.spawn = AsyncMock()
     service = _make_service(task_manager=task_manager)
 
-    body = {"task_id": "t1", "prompt": "hello"}
+    body = {"task_id": "t1", "channel": "console", "prompt": "hello"}
     msg = _make_message(json.dumps(body).encode())
 
     await service._dispatch(msg)
 
     kw = task_manager.spawn.call_args.kwargs
+    assert kw["channel"] == "console"
     assert kw["chat_id"] is None
     assert kw["user_id"] is None
     assert kw["context"] == {}

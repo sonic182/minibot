@@ -21,6 +21,7 @@ from minibot.core.events import MessageEvent
 @dataclass
 class Task:
     task_id: str
+    channel: str
     chat_id: int | None
     user_id: int | None
     proc: Process
@@ -41,6 +42,7 @@ class TaskManager:
     async def spawn(
         self,
         task_id: str,
+        channel: str,
         prompt: str,
         context: dict[str, Any],
         chat_id: int | None,
@@ -51,6 +53,7 @@ class TaskManager:
     ) -> None:
         payload = {
             "task_id": task_id,
+            "channel": channel,
             "prompt": prompt,
             "context": context,
             "chat_id": chat_id,
@@ -67,6 +70,7 @@ class TaskManager:
         )
         self._tasks[task_id] = Task(
             task_id=task_id,
+            channel=channel,
             chat_id=chat_id,
             user_id=user_id,
             proc=proc,
@@ -115,10 +119,17 @@ class TaskManager:
                 self._logger.warning("worker returned invalid JSON", extra={"task_id": task_id})
                 await nack_cb()
                 return
+            if result.get("error"):
+                self._logger.warning(
+                    "worker returned error",
+                    extra={"task_id": task_id, "error": str(result.get("error"))},
+                )
+                await nack_cb()
+                return
 
             await ack_cb()
             channel_message = ChannelMessage(
-                channel="rabbitmq",
+                channel=str(payload.get("channel") or "rabbitmq"),
                 user_id=payload.get("user_id"),
                 chat_id=payload.get("chat_id"),
                 message_id=None,

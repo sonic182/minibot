@@ -11,7 +11,6 @@ from minibot.adapters.tasks.manager import TaskManager
 from minibot.app.event_bus import EventBus
 from minibot.core.events import MessageEvent
 
-
 # ---------------------------------------------------------------------------
 # Fake pipe helpers
 # ---------------------------------------------------------------------------
@@ -71,6 +70,25 @@ class _PipeInvalidJSON:
         yield _RX(), _TX()
 
 
+class _PipeWorkerError:
+    def __init__(self, error: str) -> None:
+        self._error = error
+
+    @asynccontextmanager
+    async def open(self):
+        error = self._error
+
+        class _RX:
+            async def readline(self) -> bytes:
+                return json.dumps({"task_id": "t-error", "error": error}).encode() + b"\n"
+
+        class _TX:
+            def write(self, _data: bytes) -> None:
+                pass
+
+        yield _RX(), _TX()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -80,7 +98,13 @@ def _make_manager(bus: EventBus, timeout: float = 5.0) -> TaskManager:
     return TaskManager(event_bus=bus, worker_timeout_seconds=timeout)
 
 
-async def _spawn(manager: TaskManager, pipe, task_id: str = "t1", prompt: str = "hello"):
+async def _spawn(
+    manager: TaskManager,
+    pipe,
+    task_id: str = "t1",
+    prompt: str = "hello",
+    channel: str = "console",
+):
     """Spawn a task with a fake pipe and return the mocked callbacks + semaphore."""
     ack_cb = AsyncMock()
     nack_cb = AsyncMock()
@@ -95,6 +119,7 @@ async def _spawn(manager: TaskManager, pipe, task_id: str = "t1", prompt: str = 
     ):
         await manager.spawn(
             task_id=task_id,
+            channel=channel,
             prompt=prompt,
             context={},
             chat_id=1,
@@ -124,6 +149,7 @@ async def test_reader_success_publishes_message_event() -> None:
     event = await asyncio.wait_for(sub._queue.get(), timeout=2.0)
     assert isinstance(event, MessageEvent)
     assert event.message.text == "the answer"
+    assert event.message.channel == "console"
     assert event.message.metadata["task_id"] == "t1"
     assert event.message.metadata["source"] == "task_worker"
     assert event.message.chat_id == 1
@@ -215,6 +241,23 @@ async def test_reader_invalid_json_nacks() -> None:
     ack_cb.assert_not_called()
     assert sem._value == 1
     assert manager.active() == []
+
+
+@pytest.mark.asyncio
+async def test_reader_worker_error_nacks_without_publishing_event() -> None:
+    bus = EventBus()
+    sub = bus.subscribe()
+    manager = _make_manager(bus)
+
+    ack_cb, nack_cb, sem, _ = await _spawn(manager, _PipeWorkerError("boom"), task_id="t-error")
+    await asyncio.sleep(0.2)
+
+    nack_cb.assert_called_once()
+    ack_cb.assert_not_called()
+    assert sub._queue.empty()
+    assert sem._value == 1
+    assert manager.active() == []
+    await sub.close()
 
 
 # ---------------------------------------------------------------------------
