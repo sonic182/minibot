@@ -6,7 +6,7 @@ Loads full instructions for a discovered skill so the model can follow that skil
 
 ## Availability
 
-Enabled when `[tools.skills].enabled = true` and the skill registry has discovered at least one skill.
+Enabled when `[tools.skills].enabled = true`.
 
 ## Configuration
 
@@ -18,9 +18,15 @@ Important field: `paths`. Leave it empty to use default discovery paths or set i
 
 Inputs:
 
-- `name`: exact skill name from the available skills list.
+- `name`: exact skill name returned by `list_skills`.
 
 The response includes full skill instructions, the skill directory, and supporting resource information.
+
+## Typical Flow
+
+1. Call `list_skills` to discover the current available skills.
+2. Choose a returned skill name.
+3. Call `activate_skill` with that exact name.
 
 ## Safety Notes
 

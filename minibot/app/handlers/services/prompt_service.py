@@ -146,7 +146,11 @@ class PromptService:
         return (
             "Skill support is available in this turn.\n"
             "- Use `list_skills` to discover the current skill names and descriptions from disk.\n"
-            "- Use `activate_skill` with the exact skill name returned by `list_skills` to load full instructions."
+            "- When a request looks like a repetitive playbook, recurring task pattern, or reusable workflow, "
+            "consider checking `list_skills` before proceeding.\n"
+            "- Use `activate_skill` with the exact skill name returned by `list_skills` to load full instructions.\n"
+            "- After completing a clearly reusable multi-step workflow, you may briefly suggest creating a skill "
+            "if that would help with similar future requests."
         )
 
     def _task_worker_guidance_fragment(self, *, task_tools_available: bool) -> str:

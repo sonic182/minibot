@@ -257,7 +257,9 @@ def test_prompt_service_points_to_list_skills_instead_of_embedding_catalog() -> 
     prompt = prompt_service.compose_system_prompt("telegram")
 
     assert "Use `list_skills` to discover the current skill names and descriptions from disk." in prompt
+    assert "repetitive playbook, recurring task pattern, or reusable workflow" in prompt
     assert "Use `activate_skill` with the exact skill name returned by `list_skills`" in prompt
+    assert "you may briefly suggest creating a skill" in prompt
     assert "Available skills (call activate_skill" not in prompt
 
 
