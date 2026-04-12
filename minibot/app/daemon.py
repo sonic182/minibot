@@ -5,10 +5,14 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from minibot.adapters.container import AppContainer
-from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
 from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.dispatcher import Dispatcher
 from minibot.llm.tools.factory import configured_tool_labels
+
+try:
+    from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
+except ModuleNotFoundError:
+    RabbitMQConsumerService = None
 
 
 async def run() -> None:
@@ -33,8 +37,11 @@ async def run() -> None:
     rabbitmq_config = settings.rabbitmq
     rabbitmq_service = None
     if rabbitmq_config.enabled:
+        rabbitmq_service_cls = RabbitMQConsumerService
+        if rabbitmq_service_cls is None:
+            from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService as rabbitmq_service_cls
         task_manager = AppContainer.get_task_manager()
-        rabbitmq_service = RabbitMQConsumerService(rabbitmq_config, event_bus, task_manager)
+        rabbitmq_service = rabbitmq_service_cls(rabbitmq_config, event_bus, task_manager)
 
     services: list[Any] = [dispatcher]
     if telegram_service is not None:

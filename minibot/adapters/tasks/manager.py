@@ -281,14 +281,21 @@ class TaskManager:
         chat_id = payload.get("chat_id")
         if channel != "telegram" or not isinstance(chat_id, int):
             return
-        base_dir = Path(managed_files_root or "data/files")
+        base_dir = Path(managed_files_root or "data/files").resolve()
         for attachment in attachments:
+            file_path = _resolve_managed_attachment_path(
+                base_dir=base_dir,
+                relative_path=attachment["path"],
+                logger=self._logger,
+            )
+            if file_path is None:
+                continue
             await self._event_bus.publish(
                 OutboundFileEvent(
                     response=ChannelFileResponse(
                         channel=channel,
                         chat_id=chat_id,
-                        file_path=str(base_dir / attachment["path"]),
+                        file_path=str(file_path),
                         caption=attachment.get("caption"),
                         metadata={"task_id": payload.get("task_id"), "source": "task_worker"},
                     )
@@ -328,6 +335,18 @@ def _validated_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
             attachment["caption"] = caption.strip()
         validated.append(attachment)
     return validated
+
+
+def _resolve_managed_attachment_path(*, base_dir: Path, relative_path: str, logger: logging.Logger) -> Path | None:
+    candidate = Path(relative_path)
+    if candidate.is_absolute():
+        logger.warning("managed attachment rejected absolute path", extra={"path": relative_path})
+        return None
+    resolved = (base_dir / candidate).resolve()
+    if not resolved.is_relative_to(base_dir):
+        logger.warning("managed attachment rejected path escape", extra={"path": relative_path})
+        return None
+    return resolved
 
 
 def _append_attachment_paths(*, text: str, channel: str, attachments: list[dict[str, Any]]) -> str:

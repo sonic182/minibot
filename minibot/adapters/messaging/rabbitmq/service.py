@@ -4,14 +4,16 @@ import asyncio
 import contextlib
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aio_pika
 import aio_pika.abc
 
 from minibot.adapters.config.schema import RabbitMQConsumerConfig
-from minibot.adapters.tasks.manager import TaskManager
 from minibot.app.event_bus import EventBus
+
+if TYPE_CHECKING:
+    from minibot.adapters.tasks.manager import TaskManager
 
 
 class RabbitMQConsumerService:
@@ -94,18 +96,23 @@ class RabbitMQConsumerService:
             await message.nack(requeue=True)
 
         if self._task_manager is not None:
-            await self._task_manager.spawn(
-                task_id=task_id,
-                channel=channel,
-                prompt=prompt,
-                agent_name=agent_name if isinstance(agent_name, str) and agent_name.strip() else None,
-                context=context,
-                chat_id=chat_id,
-                user_id=user_id,
-                ack_cb=ack_cb,
-                nack_cb=nack_cb,
-                semaphore=self._semaphore,
-            )
+            try:
+                await self._task_manager.spawn(
+                    task_id=task_id,
+                    channel=channel,
+                    prompt=prompt,
+                    agent_name=agent_name if isinstance(agent_name, str) and agent_name.strip() else None,
+                    context=context,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    ack_cb=ack_cb,
+                    nack_cb=nack_cb,
+                    semaphore=self._semaphore,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._semaphore.release()
+                self._logger.exception("failed to spawn task worker", exc_info=exc, extra={"task_id": task_id})
+                await message.nack(requeue=True)
         else:
             self._semaphore.release()
             self._logger.warning("no task manager configured, discarding message", extra={"task_id": task_id})
