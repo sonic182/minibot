@@ -9,6 +9,11 @@ from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.dispatcher import Dispatcher
 from minibot.llm.tools.factory import configured_tool_labels
 
+try:
+    from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
+except ModuleNotFoundError:
+    RabbitMQConsumerService = None
+
 
 async def run() -> None:
     AppContainer.configure()
@@ -29,11 +34,22 @@ async def run() -> None:
     if telegram_config.enabled and telegram_config.bot_token:
         telegram_service = TelegramService(telegram_config, event_bus, settings.tools.file_storage)
 
+    rabbitmq_config = settings.rabbitmq
+    rabbitmq_service = None
+    if rabbitmq_config.enabled:
+        rabbitmq_service_cls = RabbitMQConsumerService
+        if rabbitmq_service_cls is None:
+            from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService as rabbitmq_service_cls
+        task_manager = AppContainer.get_task_manager()
+        rabbitmq_service = rabbitmq_service_cls(rabbitmq_config, event_bus, task_manager)
+
     services: list[Any] = [dispatcher]
     if telegram_service is not None:
         services.append(telegram_service)
     if scheduler_service is not None:
         services.append(scheduler_service)
+    if rabbitmq_service is not None:
+        services.append(rabbitmq_service)
 
     async with _graceful_shutdown(services, logger) as stop_event:
         logger.info("starting dispatcher", extra={"component": "dispatcher"})
@@ -44,6 +60,9 @@ async def run() -> None:
         if telegram_service is not None:
             logger.info("starting telegram service", extra={"component": "telegram"})
             await telegram_service.start()
+        if rabbitmq_service is not None:
+            logger.info("starting rabbitmq consumer", extra={"component": "rabbitmq"})
+            await rabbitmq_service.start()
         logger.info("daemon running in foreground", extra={"component": "daemon"})
         await stop_event.wait()
 

@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from minibot.app.event_bus import EventBus
 from minibot.adapters.messaging.console.service import ConsoleService
+from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent
 

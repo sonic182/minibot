@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from typing import Sequence
-
-from minibot.app.response_parser import extract_answer, plain_render
-from minibot.core.memory import MemoryBackend
-from minibot.llm.provider_factory import LLMClient
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from minibot.app.handlers.services.prompt_service import PromptService
 from minibot.app.handlers.services.session_state_service import SessionStateService
+from minibot.app.response_parser import extract_answer, plain_render
+from minibot.core.memory import MemoryBackend
+from minibot.llm.provider_factory import LLMClient
 
 
 @dataclass(frozen=True)

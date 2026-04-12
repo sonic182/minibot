@@ -27,7 +27,7 @@ def test_local_storage_creates_and_lists_files(tmp_path: Path) -> None:
     entries = storage.list_files("notes")
 
     assert result["path"] == "notes/today.md"
-    assert result["bytes_written"] == len("# hello".encode("utf-8"))
+    assert result["bytes_written"] == len(b"# hello")
     assert len(entries) == 1
     assert entries[0]["name"] == "today.md"
     assert entries[0]["is_dir"] is False

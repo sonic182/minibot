@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import mimetypes
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from minibot.core.channels import IncomingFileRef
 

@@ -200,6 +200,10 @@ default_limit = 20
 max_limit = 100
 default_owner_id = "primary"
 
+# Optional async task tools.
+[tools.tasks]
+enabled = false
+
 # Optional HTTP fetch tool.
 [tools.http_client]
 enabled = false
@@ -395,3 +399,19 @@ timeout_seconds = 30
 enabled = false
 # Recommended: create a ./skills directory and set paths to load only your own skills.
 # paths = ["./skills"]
+
+# Optional RabbitMQ consumer (requires extras: rabbitmq).
+# Each message body must be a JSON object with at least a "text" field.
+# Optional fields: "user_id" (int), "chat_id" (int).
+# Example body: {"text": "summarise this report", "user_id": 1, "chat_id": 1}
+[rabbitmq]
+enabled = false
+broker_url = "amqp://guest:guest@minibot-rabbitmq:5672/"
+queue_name = "minibot.tasks.worker"
+exchange_name = "minibot.tasks"
+# Max messages delivered to the consumer before acknowledgement.
+prefetch_count = 1
+# Seconds to wait for a spawned worker process to return a result before it is terminated.
+worker_timeout_seconds = 60
+# Max subprocesses running simultaneously; excess messages wait in the queue.
+max_concurrent_workers = 4

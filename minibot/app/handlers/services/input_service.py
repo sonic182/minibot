@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from minibot.app.incoming_files_context import build_incoming_files_text, incoming_files_from_metadata
 from minibot.core.channels import ChannelMessage

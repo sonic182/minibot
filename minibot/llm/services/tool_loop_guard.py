@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from llm_async.models.tool_call import ToolCall
 
 from minibot.llm.services.reasoning_replay import apply_reasoning_replay, extract_reasoning_replay
 from minibot.llm.services.tool_executor import decode_tool_arguments, stringify_result, tool_name_from_call
-
 
 MAX_REPEATED_TOOL_ITERATIONS = 3
 

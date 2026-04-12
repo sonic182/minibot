@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from aiogram import Bot
 from aiogram.types import Message as TelegramMessage
 
+from aiogram import Bot
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.messaging.telegram.incoming_media_mapper import TelegramIncomingMediaMapper
@@ -312,5 +312,5 @@ class TelegramIncomingMediaCollector:
 
     @staticmethod
     def _upload_filename(prefix: str, message_id: int, chat_id: int, suffix: str) -> str:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         return f"{prefix}_{chat_id}_{message_id}_{timestamp}{suffix}"

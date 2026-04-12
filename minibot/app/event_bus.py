@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, List
+from collections.abc import AsyncIterator
 
 from minibot.core.events import BaseEvent
 
 
 class EventSubscription:
-    def __init__(self, queue: asyncio.Queue[BaseEvent | None], bus: "EventBus") -> None:
+    def __init__(self, queue: asyncio.Queue[BaseEvent | None], bus: EventBus) -> None:
         self._queue = queue
         self._bus = bus
 
@@ -26,7 +26,7 @@ class EventSubscription:
 
 class EventBus:
     def __init__(self, maxsize: int = 128) -> None:
-        self._subscribers: List[asyncio.Queue[BaseEvent | None]] = []
+        self._subscribers: list[asyncio.Queue[BaseEvent | None]] = []
         self._maxsize = maxsize
         self._closed = False
 

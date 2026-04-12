@@ -1,19 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Mapping, Protocol, Sequence
+from enum import StrEnum
+from typing import Any, Protocol
 
 
-class PromptRole(str, Enum):
+class PromptRole(StrEnum):
     USER = "user"
     SYSTEM = "system"
     DEVELOPER = "developer"
     AGENT = "agent"
 
 
-class ScheduledPromptStatus(str, Enum):
+class ScheduledPromptStatus(StrEnum):
     PENDING = "pending"
     LEASED = "leased"
     COMPLETED = "completed"
@@ -21,7 +22,7 @@ class ScheduledPromptStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class PromptRecurrence(str, Enum):
+class PromptRecurrence(StrEnum):
     NONE = "none"
     INTERVAL = "interval"
 

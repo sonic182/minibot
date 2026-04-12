@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-
 _BASE_URL_PROVIDER_ALIAS = {
     "openrouter.ai": "openrouter",
     "api.openrouter.ai": "openrouter",

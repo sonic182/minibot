@@ -9,7 +9,7 @@ TResult = TypeVar("TResult")
 ActionHandler = Callable[[dict[str, Any], ToolContext], Awaitable[TResult]]
 
 
-async def dispatch_action(
+async def dispatch_action(  # noqa: UP047
     *,
     action: str,
     payload: dict[str, Any],

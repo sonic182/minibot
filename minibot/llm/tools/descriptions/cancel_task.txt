@@ -1,0 +1,6 @@
+Cancel an active background worker task by task_id.
+
+Use this when the user wants a task stopped, or when a queued/in-flight worker result is no longer needed.
+
+Provide:
+- task_id: identifier previously returned by spawn_task.

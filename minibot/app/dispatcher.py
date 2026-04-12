@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import Optional
 
 from minibot.adapters.container import AppContainer
 from minibot.app.environment_context import build_environment_prompt_fragment
@@ -42,6 +41,7 @@ class Dispatcher:
             agent_registry,
             llm_factory,
             skill_registry=skill_registry,
+            task_manager=AppContainer.get_task_manager(),
         )
         main_agent_tools_view = main_agent_tool_view(
             tools=tools,
@@ -114,7 +114,7 @@ class Dispatcher:
                 "main agent tools hidden due to exclusive ownership",
                 extra={"hidden_tools": main_agent_tools_view.hidden_tool_names},
             )
-        self._task: Optional[asyncio.Task[None]] = None
+        self._task: asyncio.Task[None] | None = None
 
     @property
     def main_agent_tool_names(self) -> list[str]:

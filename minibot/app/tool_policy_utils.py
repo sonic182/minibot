@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 from fnmatch import fnmatch
-from typing import Callable, Iterable, Sequence, TypeVar
-
+from typing import TypeVar
 
 _T = TypeVar("_T")
 
@@ -20,7 +20,7 @@ def validate_allow_deny(allow_patterns: Sequence[str], deny_patterns: Sequence[s
         raise ValueError("only one of tools_allow or tools_deny can be set")
 
 
-def apply_allow_deny(
+def apply_allow_deny(  # noqa: UP047
     items: Sequence[_T],
     *,
     name_of: Callable[[_T], str],

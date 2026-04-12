@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from minibot.llm.tools.base import ToolContext
 
@@ -135,7 +134,7 @@ def int_with_default(
     return parsed
 
 
-def enum_by_value(
+def enum_by_value(  # noqa: UP047
     value: Any,
     *,
     enum_type: type[_EnumT],

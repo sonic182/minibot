@@ -6,8 +6,8 @@ from typing import Any
 from llm_async.models import Tool
 
 from minibot.core.memory import KeyValueEntry, KeyValueMemory
-from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str, require_owner
 from minibot.llm.tools.action_dispatcher import dispatch_action
+from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str, require_owner
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import (

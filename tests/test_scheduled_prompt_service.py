@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -51,7 +51,7 @@ async def test_service_dispatches_user_prompt(tmp_path: Path) -> None:
         owner_id="tenant",
         channel="telegram",
         text="wake up",
-        run_at=datetime.now(timezone.utc),
+        run_at=datetime.now(UTC),
         chat_id=123,
         user_id=456,
         role=PromptRole.USER,
@@ -86,7 +86,7 @@ async def test_service_retries_on_publish_failure(tmp_path: Path) -> None:
         owner_id="tenant",
         channel="telegram",
         text="ping",
-        run_at=datetime.now(timezone.utc),
+        run_at=datetime.now(UTC),
     )
 
     await svc.run_pending()
@@ -95,7 +95,7 @@ async def test_service_retries_on_publish_failure(tmp_path: Path) -> None:
     assert stored is not None
     assert stored.status == ScheduledPromptStatus.PENDING
     assert stored.retry_count == 1
-    assert stored.run_at > datetime.now(timezone.utc)
+    assert stored.run_at > datetime.now(UTC)
 
 
 @pytest.mark.asyncio
@@ -117,7 +117,7 @@ async def test_background_scheduler_wakes_for_near_term_jobs(tmp_path: Path) -> 
     subscription = bus.subscribe()
     await svc.start()
 
-    run_at = datetime.now(timezone.utc) + timedelta(seconds=2)
+    run_at = datetime.now(UTC) + timedelta(seconds=2)
     await svc.schedule_prompt(
         owner_id="tenant",
         channel="telegram",
@@ -148,7 +148,7 @@ async def test_service_reschedules_recurring_job_and_skips_missed_runs(tmp_path:
     bus = EventBus()
     svc = ScheduledPromptService(store, bus, config)
 
-    run_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+    run_at = datetime.now(UTC) - timedelta(minutes=30)
     interval_seconds = 300
     job = await svc.schedule_prompt(
         owner_id="tenant",
@@ -165,7 +165,7 @@ async def test_service_reschedules_recurring_job_and_skips_missed_runs(tmp_path:
     assert stored is not None
     assert stored.status == ScheduledPromptStatus.PENDING
     assert stored.recurrence == PromptRecurrence.INTERVAL
-    assert stored.run_at > datetime.now(timezone.utc)
+    assert stored.run_at > datetime.now(UTC)
 
 
 @pytest.mark.asyncio
@@ -181,7 +181,7 @@ async def test_service_cancel_prompt_scoped_to_owner_and_chat(tmp_path: Path) ->
         owner_id="tenant-a",
         channel="telegram",
         text="ping",
-        run_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+        run_at=datetime.now(UTC) + timedelta(minutes=1),
         chat_id=100,
         user_id=200,
     )
@@ -219,7 +219,7 @@ async def test_service_delete_prompt_stops_active_job_before_delete(tmp_path: Pa
         owner_id="tenant-a",
         channel="telegram",
         text="ping",
-        run_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        run_at=datetime.now(UTC) + timedelta(minutes=5),
         chat_id=100,
         user_id=200,
     )
@@ -251,7 +251,7 @@ async def test_service_delete_prompt_deletes_terminal_job_directly(tmp_path: Pat
         owner_id="tenant",
         channel="telegram",
         text="done",
-        run_at=datetime.now(timezone.utc),
+        run_at=datetime.now(UTC),
         chat_id=1,
         user_id=2,
     )
@@ -284,7 +284,7 @@ async def test_service_delete_prompt_respects_scope(tmp_path: Path) -> None:
         owner_id="tenant-a",
         channel="telegram",
         text="ping",
-        run_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+        run_at=datetime.now(UTC) + timedelta(minutes=1),
         chat_id=100,
         user_id=200,
     )

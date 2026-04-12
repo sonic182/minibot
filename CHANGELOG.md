@@ -11,12 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `pre_response` tool: agents call this before their final plain-text answer to declare `kind`, `meta`, and `attachments` metadata. Replaces the structured `AssistantRuntimePayload` JSON schema as the mechanism for conveying render hints and file attachments.
 - `shell_agent` specialist (`agents/shell_agent.md`) using `gpt-5.4-nano` with high reasoning for bash and filesystem tasks.
+- Async task execution over RabbitMQ: new `spawn_task`, `cancel_task`, and `list_tasks` tools plus `RabbitMQConsumerService`, `TaskManager`, and an isolated subprocess worker that can run specialist agents with a restricted tool allowlist, retry on provider rate limits, and emit message / file events back into the main event bus.
+- Optional task-system configuration under `[tools.tasks]` and `[rabbitmq]`, plus a `rabbitmq` Poetry extra (`aio-pika`, `aiopipe`) and Docker/dev wiring for a local RabbitMQ service.
 
 ### Changed
 
 - Agent runtime continuation is now driven purely by the tool-call loop: any step with tool calls continues; a step with no tool calls is the final answer. The outer `should_continue` / `_resolve_continuations` loop is removed entirely.
 - `browser_agent.md` system prompt rewritten to remove the old structured JSON output contract (`answer`, `should_continue`, `attachments`); screenshot attachments are now declared via `pre_response` before the final answer. `pre_response` added to `tools_allow`.
 - `count_tool_messages` (used by `RuntimeOrchestrationService` guardrail checks and delegated tool-use enforcement) now excludes `pre_response` calls from the count, so a turn that only calls `pre_response` is not treated as having executed a real tool.
+- Container / daemon wiring now instantiates the task manager and RabbitMQ consumer only when `rabbitmq.enabled` is set, and tool assembly exposes task tools only when both RabbitMQ and `[tools.tasks]` are enabled.
+- Telegram channel guidance now tells agents to answer with direct renderable text instead of the old `{"answer": ...}` wrapper, while `response_parser` still accepts the legacy structured answer shape for compatibility during migration.
 
 ### Removed
 
@@ -27,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `provider_factory._complete` was calling `self._provider.complete(...)` instead of `acomplete`; fixed to use the correct async method, resolving an `AttributeError` at runtime.
+- Default installs without the `rabbitmq` extra no longer fail on startup when RabbitMQ is disabled; optional RabbitMQ / task imports are now deferred behind the feature flag.
+- RabbitMQ dispatch now guards task-spawn failures so messages are requeued and semaphore permits are not leaked, and Telegram task attachments reject paths that escape the managed files root.
 
 ## [0.2.0] - 2026-04-07
 

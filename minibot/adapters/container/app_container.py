@@ -1,40 +1,44 @@
 from __future__ import annotations
 
-import logging
 import inspect
+import logging
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
-from minibot.app.agent_definitions_loader import load_agent_specs
-from minibot.app.agent_registry import AgentRegistry
-from minibot.app.skill_definitions_loader import load_skill_specs
-from minibot.app.skill_registry import SkillRegistry
-from minibot.app.event_bus import EventBus
-from minibot.app.llm_client_factory import LLMClientFactory
-from minibot.app.scheduler_service import ScheduledPromptService
-from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_async
-from minibot.core.memory import KeyValueMemory, MemoryBackend
-from minibot.llm.provider_factory import LLMClient
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings, TelegramChannelConfig
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
+from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_registry import AgentRegistry
+from minibot.app.event_bus import EventBus
+from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.scheduler_service import ScheduledPromptService
+from minibot.app.skill_definitions_loader import load_skill_specs
+from minibot.app.skill_registry import SkillRegistry
+from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_async
+from minibot.core.memory import KeyValueMemory, MemoryBackend
+from minibot.llm.provider_factory import LLMClient
+
+if TYPE_CHECKING:
+    from minibot.adapters.tasks.manager import TaskManager
 
 
 class AppContainer:
-    _settings: Optional[Settings] = None
-    _logger: Optional[logging.Logger] = None
-    _event_bus: Optional[EventBus] = None
-    _memory_backend: Optional[MemoryBackend] = None
-    _kv_memory_backend: Optional[KeyValueMemory] = None
-    _llm_client: Optional[LLMClient] = None
-    _llm_factory: Optional[LLMClientFactory] = None
-    _agent_registry: Optional[AgentRegistry] = None
-    _skill_registry: Optional[SkillRegistry] = None
-    _prompt_store: Optional[SQLAlchemyScheduledPromptStore] = None
-    _prompt_service: Optional[ScheduledPromptService] = None
+    _settings: Settings | None = None
+    _logger: logging.Logger | None = None
+    _event_bus: EventBus | None = None
+    _memory_backend: MemoryBackend | None = None
+    _kv_memory_backend: KeyValueMemory | None = None
+    _llm_client: LLMClient | None = None
+    _llm_factory: LLMClientFactory | None = None
+    _agent_registry: AgentRegistry | None = None
+    _skill_registry: SkillRegistry | None = None
+    _prompt_store: SQLAlchemyScheduledPromptStore | None = None
+    _prompt_service: ScheduledPromptService | None = None
+    _task_manager: TaskManager | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -44,6 +48,15 @@ class AppContainer:
         cls._logger = configure_logging(cls._settings.logging)
         agent_specs = load_agent_specs(cls._settings.orchestration.directory)
         cls._event_bus = EventBus()
+        if cls._settings.rabbitmq.enabled:
+            from minibot.adapters.tasks.manager import TaskManager
+
+            cls._task_manager = TaskManager(
+                event_bus=cls._event_bus,
+                worker_timeout_seconds=cls._settings.rabbitmq.worker_timeout_seconds,
+            )
+        else:
+            cls._task_manager = None
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
         if cls._settings.tools.kv_memory.enabled:
             cls._kv_memory_backend = SQLAlchemyKeyValueMemory(cls._settings.tools.kv_memory)
@@ -126,6 +139,10 @@ class AppContainer:
     @classmethod
     def get_scheduled_prompt_service(cls) -> ScheduledPromptService | None:
         return cls._prompt_service
+
+    @classmethod
+    def get_task_manager(cls) -> TaskManager | None:
+        return cls._task_manager
 
     @classmethod
     def get_telegram_config(cls) -> TelegramChannelConfig:

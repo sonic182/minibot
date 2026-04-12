@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from minibot.app.mcp_tool_name import extract_mcp_server, is_mcp_tool_name
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns, validate_allow_deny
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
+
+RESERVED_DELEGATION_TOOL_NAMES = {
+    "invoke_agent",
+    "fetch_agent_info",
+    "spawn_task",
+    "list_tasks",
+    "cancel_task",
+}
 
 
 def filter_tools_for_agent(tools: Sequence[ToolBinding], spec: AgentSpec) -> list[ToolBinding]:
@@ -39,3 +47,7 @@ def filter_tools_for_agent(tools: Sequence[ToolBinding], spec: AgentSpec) -> lis
             continue
         # Neither allow nor deny: no non-MCP tools are exposed.
     return filtered
+
+
+def strip_reserved_delegation_tools(tools: Sequence[ToolBinding]) -> list[ToolBinding]:
+    return [binding for binding in tools if binding.tool.name not in RESERVED_DELEGATION_TOOL_NAMES]

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Iterable, cast
+from typing import cast
 
 from sqlalchemy import Column, DateTime, Integer, String, Text, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
-from minibot.shared.datetime_utils import utcnow
-from minibot.core.memory import MemoryBackend, MemoryEntry
 from minibot.adapters.config.schema import MemoryConfig
-
+from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.core.memory import MemoryBackend, MemoryEntry
+from minibot.shared.datetime_utils import utcnow
 
 Base = declarative_base()
 

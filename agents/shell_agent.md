@@ -3,9 +3,9 @@ name: shell_agent
 description: Specialist agent for shell and bash command execution.
 enabled: true
 mode: agent
-model_provider: openai_responses
-model: gpt-5.4-nano
-reasoning_effort: high
+# model_provider: openai_responses
+# model: gpt-5.4-nano
+# reasoning_effort: high
 tools_allow:
   - bash
   - filesystem

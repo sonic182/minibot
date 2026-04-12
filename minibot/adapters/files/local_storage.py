@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import mimetypes
 import os
-from pathlib import Path
 import re
 import shutil
 import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 from minibot.shared.path_utils import to_posix_relative
@@ -38,7 +38,7 @@ class LocalFileStorage:
                     "path": self._relative_to_root(item),
                     "is_dir": item.is_dir(),
                     "size_bytes": int(stat.st_size),
-                    "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
                 }
             )
         return entries
@@ -75,7 +75,7 @@ class LocalFileStorage:
                     "path": self._relative_to_root(item),
                     "is_dir": False,
                     "size_bytes": int(stat.st_size),
-                    "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
                 }
             )
         return entries
@@ -296,7 +296,7 @@ class LocalFileStorage:
             "extension": extension,
             "mime": mime_type or "application/octet-stream",
             "size_bytes": int(stat.st_size),
-            "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
             "is_image": (mime_type or "").startswith("image/"),
         }
 

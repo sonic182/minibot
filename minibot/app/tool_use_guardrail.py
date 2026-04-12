@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
-from minibot.core.agent_runtime import AgentMessage, AgentState
 from minibot.app.tool_guardrail_validator import ToolGuardrailValidator, _FailResult, _RetryResult, _ValidResult
+from minibot.core.agent_runtime import AgentMessage, AgentState
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 

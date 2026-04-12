@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import time
 import logging
+import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Sequence
+from typing import Any, Literal
 
 from llm_async.models import Tool
 
-from minibot.app.agent_policies import filter_tools_for_agent
+from minibot.app.agent_policies import filter_tools_for_agent, strip_reserved_delegation_tools
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.llm_client_factory import LLMClientFactory
@@ -343,7 +344,7 @@ class AgentDelegateTool:
 
     def _scoped_tools(self, spec: AgentSpec) -> list[ToolBinding]:
         scoped = filter_tools_for_agent(self._tools, spec)
-        return [binding for binding in scoped if binding.tool.name not in {"invoke_agent", "fetch_agent_info"}]
+        return strip_reserved_delegation_tools(scoped)
 
     def _build_state(
         self,

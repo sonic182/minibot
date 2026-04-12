@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from minibot.app.event_bus import EventBus
 from minibot.app.agent_registry import AgentRegistry
+from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from llm_async.models import Tool
 import pytest
+from llm_async.models import Tool
 
-from minibot.app.agent_policies import filter_tools_for_agent
+from minibot.app.agent_policies import filter_tools_for_agent, strip_reserved_delegation_tools
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
 
@@ -111,3 +111,19 @@ def test_agent_policy_rejects_allow_and_deny_together() -> None:
 
     with pytest.raises(ValueError):
         filter_tools_for_agent(tools, spec)
+
+
+def test_strip_reserved_delegation_tools_removes_recursive_tools() -> None:
+    tools = [
+        _binding("invoke_agent"),
+        _binding("fetch_agent_info"),
+        _binding("spawn_task"),
+        _binding("cancel_task"),
+        _binding("list_tasks"),
+        _binding("current_datetime"),
+    ]
+
+    filtered = strip_reserved_delegation_tools(tools)
+    names = [binding.tool.name for binding in filtered]
+
+    assert names == ["current_datetime"]

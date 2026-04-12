@@ -5,9 +5,7 @@ This prevents expensive token waste from returning base64-encoded images.
 
 from pathlib import Path
 
-
 from minibot.shared.prompt_loader import load_channel_prompt
-
 
 _ROOT = Path(__file__).resolve().parent.parent
 

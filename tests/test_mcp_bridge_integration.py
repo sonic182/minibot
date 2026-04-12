@@ -23,8 +23,8 @@ from minibot.adapters.config.schema import (
     MCPServerConfig,
     MCPToolConfig,
     PythonExecToolConfig,
-    SchedulerConfig,
     ScheduledPromptsConfig,
+    SchedulerConfig,
     Settings,
     TimeToolConfig,
     ToolsConfig,
@@ -33,7 +33,6 @@ from minibot.adapters.mcp.client import MCPClient
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.factory import build_enabled_tools
 from minibot.llm.tools.mcp_bridge import MCPToolBridge
-
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "mcp"
 

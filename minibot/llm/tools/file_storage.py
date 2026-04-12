@@ -3,8 +3,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Any
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from llm_async.models import Tool
 
@@ -13,8 +12,8 @@ from minibot.app.event_bus import EventBus
 from minibot.core.agent_runtime import AgentMessage, AppendMessageDirective, MessagePart, MessageRole, ToolResult
 from minibot.core.channels import ChannelFileResponse
 from minibot.core.events import OutboundFileEvent
-from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str
 from minibot.llm.tools.action_dispatcher import dispatch_action
+from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_boolean, nullable_integer, nullable_string, strict_object

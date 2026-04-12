@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import re
 import sys
 from typing import Any
-import re
 
 try:
     from rich.console import Console as RichConsole
-    from rich.panel import Panel as RichPanel
     from rich.markdown import Markdown as RichMarkdown
+    from rich.panel import Panel as RichPanel
     from rich.prompt import Prompt as RichPrompt
     from rich.text import Text as RichText
 except Exception:  # noqa: BLE001

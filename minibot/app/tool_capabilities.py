@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from minibot.adapters.config.schema import MainAgentConfig, OrchestrationConfig
 from minibot.app.agent_policies import filter_tools_for_agent

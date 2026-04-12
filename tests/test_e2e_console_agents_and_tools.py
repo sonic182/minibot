@@ -5,15 +5,14 @@ import json
 import logging
 import os
 import shutil
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from minibot.adapters.container.app_container import AppContainer
 from minibot.adapters.messaging.console.service import ConsoleService
 from minibot.app.dispatcher import Dispatcher
-
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CONFIG_TEMPLATE_PATH = _ROOT / "tests" / "config.test.toml"

@@ -3,8 +3,8 @@ name: workspace_manager_agent
 description: Specialist for managed file workspace operations.
 enabled: false
 mode: agent
-model_provider: openai_responses
-model: gpt-5-mini
+# model_provider: openai_responses
+# model: gpt-5-mini
 tools_allow:
   - filesystem
   - self_insert_artifact

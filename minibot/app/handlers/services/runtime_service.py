@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from typing import Any, Sequence, cast
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, cast
 
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.delegation_trace import count_tool_messages, extract_delegation_trace
+from minibot.app.handlers.services.session_state_service import SessionStateService
 from minibot.app.response_parser import extract_answer, plain_render
-from minibot.core.channels import RenderableResponse
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole
+from minibot.core.channels import RenderableResponse
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.tools.base import ToolContext
-
-from minibot.app.handlers.services.session_state_service import SessionStateService
 
 
 @dataclass(frozen=True)

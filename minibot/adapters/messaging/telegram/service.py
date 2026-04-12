@@ -4,11 +4,10 @@ import asyncio
 import contextlib
 import logging
 from pathlib import Path
-from typing import Optional
 
-from aiogram import Bot, Dispatcher
 from aiogram.types import Message as TelegramMessage
 
+from aiogram import Bot, Dispatcher
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.messaging.telegram.authorization import is_authorized
@@ -52,8 +51,8 @@ class TelegramService:
             config=self._config,
             logger=self._logger,
         )
-        self._poll_task: Optional[asyncio.Task[None]] = None
-        self._outgoing_task: Optional[asyncio.Task[None]] = None
+        self._poll_task: asyncio.Task[None] | None = None
+        self._outgoing_task: asyncio.Task[None] | None = None
         self._outgoing_subscription = event_bus.subscribe()
 
         self._dp.message.register(self._handle_message)

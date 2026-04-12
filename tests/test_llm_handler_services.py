@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from llm_async.models import Tool
 
-from minibot.app.agent_runtime import RuntimeResult
-from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.agent_registry import AgentRegistry
+from minibot.app.agent_runtime import AgentRuntime, RuntimeResult
 from minibot.app.handlers.services import (
     HistoryCompactionService,
     PromptService,
@@ -18,11 +20,11 @@ from minibot.app.handlers.services import (
 )
 from minibot.app.tool_use_guardrail import GuardrailDecision
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
+from minibot.core.agents import AgentSpec
 from minibot.core.channels import ChannelMessage
-from minibot.core.memory import MemoryEntry
-from minibot.core.memory import MemoryBackend
+from minibot.core.memory import MemoryBackend, MemoryEntry
 from minibot.llm.provider_factory import LLMClient, LLMCompaction, LLMGeneration
-from minibot.llm.tools.base import ToolContext
+from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
 class _StubClient:
@@ -78,7 +80,7 @@ class _StubMemory:
 
     async def append_history(self, session_id: str, role: str, content: str) -> None:
         self._store.setdefault(session_id, []).append(
-            MemoryEntry(role=role, content=content, created_at=datetime.now(timezone.utc))
+            MemoryEntry(role=role, content=content, created_at=datetime.now(UTC))
         )
 
     async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:
@@ -182,6 +184,61 @@ def test_prompt_service_builds_format_repair_prompt() -> None:
     assert "Telegram" in prompt
     assert "can't parse entities" in prompt
     assert "placeholder" in prompt
+
+
+def test_prompt_service_prefers_task_delegation_guidance_when_task_tools_available() -> None:
+    tools = [
+        ToolBinding(tool=Tool(name="spawn_task", description="", parameters={"type": "object"}), handler=_noop_tool),
+        ToolBinding(tool=Tool(name="cancel_task", description="", parameters={"type": "object"}), handler=_noop_tool),
+        ToolBinding(tool=Tool(name="list_tasks", description="", parameters={"type": "object"}), handler=_noop_tool),
+        ToolBinding(tool=Tool(name="invoke_agent", description="", parameters={"type": "object"}), handler=_noop_tool),
+    ]
+    prompt_service = PromptService(
+        llm_client=cast(LLMClient, _StubClient()),
+        tools=tools,
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+        agent_registry=AgentRegistry(
+            [AgentSpec(name="worker", description="Does work", system_prompt="x", source_path=Path("worker.md"))]
+        ),
+    )
+
+    prompt = prompt_service.compose_system_prompt("telegram")
+
+    assert "Asynchronous delegation is available now via `spawn_task`" in prompt
+    assert "`invoke_agent` is also available as a local fallback" in prompt
+    assert 'metadata.source == "task_worker"' in prompt
+    assert "Use `list_tasks` to verify which tasks are still active." in prompt
+
+
+def test_prompt_service_uses_invoke_agent_guidance_when_task_tools_unavailable() -> None:
+    tools = [
+        ToolBinding(tool=Tool(name="invoke_agent", description="", parameters={"type": "object"}), handler=_noop_tool),
+        ToolBinding(
+            tool=Tool(name="fetch_agent_info", description="", parameters={"type": "object"}),
+            handler=_noop_tool,
+        ),
+    ]
+    prompt_service = PromptService(
+        llm_client=cast(LLMClient, _StubClient()),
+        tools=tools,
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+        agent_registry=AgentRegistry(
+            [AgentSpec(name="worker", description="Does work", system_prompt="x", source_path=Path("worker.md"))]
+        ),
+    )
+
+    prompt = prompt_service.compose_system_prompt("telegram")
+
+    assert "Delegation is available now via `invoke_agent`" in prompt
+    assert "`fetch_agent_info` is available" in prompt
+    assert "Asynchronous delegation is available now via `spawn_task`" not in prompt
+    assert 'metadata.source == "task_worker"' not in prompt
+
+
+async def _noop_tool(_: Any, __: ToolContext) -> dict[str, Any]:
+    return {}
 
 
 def test_session_state_service_tracks_tokens_and_previous_response_id() -> None:

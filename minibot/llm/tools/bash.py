@@ -77,7 +77,7 @@ class BashTool:
         timed_out = False
         try:
             stdout_data, stderr_data = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             timed_out = True
             await self._terminate_process(process)
             stdout_data, stderr_data = await process.communicate()

@@ -70,7 +70,7 @@ class LLMExecutionProfile:
     provider_capability_hints: tuple[str, ...] = ()
 
     @classmethod
-    def from_client(cls, client: Any) -> "LLMExecutionProfile":
+    def from_client(cls, client: Any) -> LLMExecutionProfile:
         profile_getter = getattr(client, "features", None)
         if callable(profile_getter):
             maybe_profile = profile_getter()

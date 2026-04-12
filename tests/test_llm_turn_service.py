@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -9,8 +9,13 @@ import pytest
 from llm_async.models import Tool
 
 from minibot.app.agent_runtime import RuntimeResult
-from minibot.app.handlers.services import AudioAutoTranscribePolicy, AudioAutoTranscriptionService, LLMTurnService
-from minibot.app.handlers.services import ToolBindingAudioTranscriptionExecutor, build_llm_turn_service
+from minibot.app.handlers.services import (
+    AudioAutoTranscribePolicy,
+    AudioAutoTranscriptionService,
+    LLMTurnService,
+    ToolBindingAudioTranscriptionExecutor,
+    build_llm_turn_service,
+)
 from minibot.app.tool_use_guardrail import NoopToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
@@ -45,7 +50,7 @@ class StubMemory:
         self.trim_calls: list[tuple[str, int]] = []
 
     async def append_history(self, session_id: str, role: str, content: str) -> None:
-        entry = MemoryEntry(role=role, content=content, created_at=datetime.now(timezone.utc))
+        entry = MemoryEntry(role=role, content=content, created_at=datetime.now(UTC))
         self._store.setdefault(session_id, []).append(entry)
 
     async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:
