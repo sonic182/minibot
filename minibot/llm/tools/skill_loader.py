@@ -102,10 +102,7 @@ def _match_skills(skills: list[SkillSpec], query: str | None) -> tuple[list[Skil
         return sorted(skills, key=lambda spec: spec.name)[:_LIST_SKILLS_LIMIT], False
 
     normalized_query = query.casefold()
-    ranked = [
-        (_skill_match_key(spec, normalized_query), spec)
-        for spec in skills
-    ]
+    ranked = [(_skill_match_key(spec, normalized_query), spec) for spec in skills]
     non_fuzzy = [entry for entry in ranked if entry[0][0] < 4]
     if non_fuzzy:
         ordered = [spec for _key, spec in sorted(non_fuzzy, key=lambda item: item[0])]

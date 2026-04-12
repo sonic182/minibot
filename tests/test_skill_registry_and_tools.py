@@ -13,14 +13,7 @@ def _write_skill(base_dir: Path, slug: str, *, name: str, description: str, body
     skill_dir = base_dir / slug
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
-        (
-            "---\n"
-            f"name: {name}\n"
-            f"description: {description}\n"
-            "enabled: true\n"
-            "---\n\n"
-            f"{body}\n"
-        ),
+        (f"---\nname: {name}\ndescription: {description}\nenabled: true\n---\n\n{body}\n"),
         encoding="utf-8",
     )
 

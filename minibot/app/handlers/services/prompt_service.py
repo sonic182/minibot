@@ -141,16 +141,28 @@ class PromptService:
         if self._skill_registry is None:
             return ""
         tool_names = {binding.tool.name for binding in self._tools}
-        if "activate_skill" not in tool_names or "list_skills" not in tool_names:
+        if "activate_skill" not in tool_names:
+            return ""
+        if "list_skills" in tool_names:
+            return (
+                "Skill support is available in this turn.\n"
+                "- Use `list_skills` to discover the current skill names and descriptions from disk.\n"
+                "- When a request looks like a repetitive playbook, recurring task pattern, or reusable workflow, "
+                "consider checking `list_skills` before proceeding.\n"
+                "- Use `activate_skill` with the exact skill name returned by `list_skills` "
+                "to load full instructions.\n"
+                "- After completing a clearly reusable multi-step workflow, you may briefly suggest creating a skill "
+                "if that would help with similar future requests."
+            )
+        catalog = self._skill_registry.prompt_catalog()
+        if not catalog:
             return ""
         return (
-            "Skill support is available in this turn.\n"
-            "- Use `list_skills` to discover the current skill names and descriptions from disk.\n"
+            f"Skill support is available in this turn (`list_skills` is not attached).\n"
+            f"{catalog}\n"
+            "- Use `activate_skill` with an exact skill name above to load full instructions.\n"
             "- When a request looks like a repetitive playbook, recurring task pattern, or reusable workflow, "
-            "consider checking `list_skills` before proceeding.\n"
-            "- Use `activate_skill` with the exact skill name returned by `list_skills` to load full instructions.\n"
-            "- After completing a clearly reusable multi-step workflow, you may briefly suggest creating a skill "
-            "if that would help with similar future requests."
+            "check the list above before proceeding."
         )
 
     def _task_worker_guidance_fragment(self, *, task_tools_available: bool) -> str:
@@ -162,14 +174,12 @@ class PromptService:
                 "Task-worker result handling:",
                 '- Messages with `metadata.source == "task_worker"` are asynchronous worker results '
                 "from earlier `spawn_task` calls.",
-                "- Track pending task ids explicitly. Use `list_tasks` to verify which tasks are "
-                "still active.",
+                "- Track pending task ids explicitly. Use `list_tasks` to verify which tasks are still active.",
                 "- When only some task results have arrived, acknowledge the partial completion "
                 "briefly and wait for the remaining tasks.",
                 "- When all required task results have arrived, synthesize them and continue the "
                 "tool loop or answer the user.",
-                "- Use `cancel_task` only when the user asks to stop or the remaining work is no "
-                "longer useful.",
+                "- Use `cancel_task` only when the user asks to stop or the remaining work is no longer useful.",
             ]
         )
 

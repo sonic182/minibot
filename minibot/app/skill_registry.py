@@ -15,9 +15,7 @@ class SkillRegistry:
     def __init__(self, specs: Sequence[SkillSpec] | None = None, paths: list[str] | None = None) -> None:
         self._paths = list(paths) if paths is not None else None
         self._resolved_paths = (
-            resolve_skill_discovery_paths(self._paths)
-            if self._paths is not None or specs is None
-            else []
+            resolve_skill_discovery_paths(self._paths) if self._paths is not None or specs is None else []
         )
         self._fingerprint = fingerprint_skill_paths(self._resolved_paths)
         self._by_name: dict[str, SkillSpec] = {}

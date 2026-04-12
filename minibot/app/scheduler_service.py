@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -47,6 +48,7 @@ class ScheduledPromptService:
         self._stop_event.clear()
         self._wake_event.clear()
         self._task = asyncio.create_task(self._run_loop())
+        await self._schedule_nearest_wake()
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -66,8 +68,12 @@ class ScheduledPromptService:
             limit=self._batch_size,
             lease_timeout_seconds=self._lease_timeout,
         )
-        for job in jobs:
-            await self._dispatch_job(job)
+        if not jobs:
+            return 0
+        results = await asyncio.gather(*[self._dispatch_job(job) for job in jobs], return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                self._logger.exception("unexpected error dispatching job", exc_info=result)
         return len(jobs)
 
     async def schedule_prompt(
@@ -305,8 +311,14 @@ class ScheduledPromptService:
             extra={"job_id": job.id, "retry_count": job.retry_count + 1, "delay_seconds": delay},
         )
 
-    def _retry_delay(self, job: ScheduledPrompt) -> int:
-        return min((job.retry_count + 1) * 30, 300)
+    def _retry_delay(self, job: ScheduledPrompt) -> float:
+        base = min((job.retry_count + 1) * 30, 300)
+        return base + random.uniform(0, 10)
+
+    async def _schedule_nearest_wake(self) -> None:
+        run_at = await self._repository.get_nearest_pending_run_at()
+        if run_at is not None:
+            self._schedule_wake(run_at)
 
     def _message_metadata(self, job: ScheduledPrompt) -> dict[str, Any]:
         metadata = dict(job.metadata or {})
@@ -377,7 +389,12 @@ class ScheduledPromptService:
             elapsed_seconds = (now - job.run_at).total_seconds()
             steps = int(elapsed_seconds // interval) + 1
             next_run = job.run_at + timedelta(seconds=steps * interval)
+            if steps >= 2:
+                self._logger.warning(
+                    "skipped recurrence intervals",
+                    extra={"job_id": job.id, "skipped": steps - 1},
+                )
 
-        if job.recurrence_end_at is not None and next_run > job.recurrence_end_at:
+        if job.recurrence_end_at is not None and next_run >= job.recurrence_end_at:
             return None
         return next_run

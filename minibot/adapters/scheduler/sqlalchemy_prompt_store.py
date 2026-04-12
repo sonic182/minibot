@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, and_, delete, or_, select, text, update
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, and_, delete, func, or_, select, text, update
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
@@ -297,6 +297,15 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             )
             result = await session.execute(stmt)
             return [self._to_domain(model) for model in result.scalars().all()]
+
+    async def get_nearest_pending_run_at(self) -> datetime | None:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(func.min(ScheduledPromptModel.run_at)).where(
+                    ScheduledPromptModel.status == ScheduledPromptStatus.PENDING.value
+                )
+            )
+            return result.scalar_one_or_none()
 
     async def _update_job(self, job_id: str, values: dict[str, Any]) -> None:
         now = utcnow()

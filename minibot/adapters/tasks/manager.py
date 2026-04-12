@@ -66,9 +66,7 @@ class TaskManager:
         }
         mainpipe, proc = self._start_worker_process()
 
-        reader = asyncio.create_task(
-            self._reader(task_id, mainpipe, proc, ack_cb, nack_cb, semaphore, payload)
-        )
+        reader = asyncio.create_task(self._reader(task_id, mainpipe, proc, ack_cb, nack_cb, semaphore, payload))
         self._tasks[task_id] = Task(
             task_id=task_id,
             channel=channel,
