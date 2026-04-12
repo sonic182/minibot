@@ -1,0 +1,8 @@
+Discover the currently available skills from disk.
+
+Use this before `activate_skill` when you need to find a skill name, confirm whether a skill exists, or search for the best matching skill.
+
+Provide:
+- query: optional search text to filter and rank skills by name or description.
+
+The response includes the current matching skill names and descriptions. If you want full instructions, call `activate_skill` with the exact returned skill name.

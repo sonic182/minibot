@@ -22,10 +22,12 @@ from minibot.adapters.config.schema import (
     ScheduledPromptsConfig,
     SchedulerConfig,
     Settings,
+    SkillsToolConfig,
     TaskToolConfig,
     TimeToolConfig,
     ToolsConfig,
 )
+from minibot.app.skill_registry import SkillRegistry
 from minibot.llm.tools.factory import build_enabled_tools
 
 
@@ -107,6 +109,7 @@ def _settings(
     file_storage_enabled: bool,
     audio_transcription_enabled: bool,
     grep_enabled: bool,
+    skills_enabled: bool = True,
     tasks_enabled: bool = False,
     rabbitmq_enabled: bool = False,
 ) -> Settings:
@@ -124,6 +127,7 @@ def _settings(
             grep=GrepToolConfig(enabled=grep_enabled),
             browser=BrowserToolConfig(output_dir="./data/files/browser"),
             audio_transcription=AudioTranscriptionToolConfig(enabled=audio_transcription_enabled),
+            skills=SkillsToolConfig(enabled=skills_enabled),
             tasks=TaskToolConfig(enabled=tasks_enabled),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
@@ -249,6 +253,36 @@ def test_build_enabled_tools_includes_audio_transcription_when_enabled(monkeypat
     names = {binding.tool.name for binding in tools}
 
     assert "transcribe_audio" in names
+
+
+def test_build_enabled_tools_includes_skill_tools_even_when_registry_starts_empty() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=False,
+        audio_transcription_enabled=False,
+        grep_enabled=False,
+        skills_enabled=True,
+    )
+
+    tools = build_enabled_tools(
+        settings,
+        memory=_MemoryStub(),
+        kv_memory=None,
+        prompt_scheduler=None,
+        event_bus=None,
+        skill_registry=SkillRegistry([]),
+    )
+    names = {binding.tool.name for binding in tools}
+
+    assert "list_skills" in names
+    assert "activate_skill" in names
 
 
 def test_build_enabled_tools_rejects_audio_transcription_without_file_storage() -> None:

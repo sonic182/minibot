@@ -138,12 +138,16 @@ class PromptService:
         return roster
 
     def _skill_catalog_fragment(self) -> str:
-        if self._skill_registry is None or self._skill_registry.is_empty():
+        if self._skill_registry is None:
             return ""
         tool_names = {binding.tool.name for binding in self._tools}
-        if "activate_skill" not in tool_names:
+        if "activate_skill" not in tool_names or "list_skills" not in tool_names:
             return ""
-        return self._skill_registry.prompt_catalog()
+        return (
+            "Skill support is available in this turn.\n"
+            "- Use `list_skills` to discover the current skill names and descriptions from disk.\n"
+            "- Use `activate_skill` with the exact skill name returned by `list_skills` to load full instructions."
+        )
 
     def _task_worker_guidance_fragment(self, *, task_tools_available: bool) -> str:
         tool_names = {binding.tool.name for binding in self._tools}

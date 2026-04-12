@@ -18,6 +18,7 @@ from minibot.app.handlers.services import (
     SessionStateService,
     UserInputService,
 )
+from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import GuardrailDecision
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
@@ -235,6 +236,29 @@ def test_prompt_service_uses_invoke_agent_guidance_when_task_tools_unavailable()
     assert "`fetch_agent_info` is available" in prompt
     assert "Asynchronous delegation is available now via `spawn_task`" not in prompt
     assert 'metadata.source == "task_worker"' not in prompt
+
+
+def test_prompt_service_points_to_list_skills_instead_of_embedding_catalog() -> None:
+    tools = [
+        ToolBinding(tool=Tool(name="list_skills", description="", parameters={"type": "object"}), handler=_noop_tool),
+        ToolBinding(
+            tool=Tool(name="activate_skill", description="", parameters={"type": "object"}),
+            handler=_noop_tool,
+        ),
+    ]
+    prompt_service = PromptService(
+        llm_client=cast(LLMClient, _StubClient()),
+        tools=tools,
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+        skill_registry=SkillRegistry([]),
+    )
+
+    prompt = prompt_service.compose_system_prompt("telegram")
+
+    assert "Use `list_skills` to discover the current skill names and descriptions from disk." in prompt
+    assert "Use `activate_skill` with the exact skill name returned by `list_skills`" in prompt
+    assert "Available skills (call activate_skill" not in prompt
 
 
 async def _noop_tool(_: Any, __: ToolContext) -> dict[str, Any]:

@@ -211,7 +211,7 @@ def _build_mcp_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> li
 
 
 def _build_skill_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
-    if context.skill_registry is None or context.skill_registry.is_empty():
+    if context.skill_registry is None:
         return []
     from minibot.llm.tools.skill_loader import SkillLoaderTool
 
@@ -331,7 +331,7 @@ _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (
     ),
     ToolFeature(
         key="skills",
-        labels=("activate_skill",),
+        labels=("list_skills", "activate_skill"),
         enabled_in_config=lambda settings: _tool_enabled(settings, "skills"),
         builder=_build_skill_feature,
     ),
