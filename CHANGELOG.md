@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Scheduler wake-on-startup: on `start()`, the nearest pending job is queried and an early wake task is scheduled so jobs due immediately after a restart are not delayed by the full poll interval.
+- `get_nearest_pending_run_at()` added to `ScheduledPromptRepository` protocol and `SQLAlchemyScheduledPromptStore`, returning the minimum `run_at` across all pending jobs.
+- Skill catalog fallback in system prompt: when `activate_skill` is available but `list_skills` is not attached (e.g. filtered by tool policy), the embedded skill catalog from `SkillRegistry.prompt_catalog()` is injected directly so the model has valid skill names without needing dynamic discovery.
+
+### Changed
+
+- Scheduler batch dispatch is now concurrent: `run_pending()` uses `asyncio.gather` so a slow publish no longer blocks other jobs in the same batch; unexpected per-job exceptions are logged individually.
+- Scheduler retry delay now includes a `random.uniform(0, 10)` second jitter to prevent thundering-herd retries across a failing batch.
+- Recurrence `end_at` boundary is now exclusive: a job whose computed `next_run` equals `recurrence_end_at` will not be rescheduled (changed `>` to `>=`).
+
+### Fixed
+
+- Scheduler no longer silently skips missed recurrence intervals; a `WARNING` is logged with `job_id` and the number of skipped intervals when the scheduler catches up after a gap.
+
+### Added
+
 - `pre_response` tool: agents call this before their final plain-text answer to declare `kind`, `meta`, and `attachments` metadata. Replaces the structured `AssistantRuntimePayload` JSON schema as the mechanism for conveying render hints and file attachments.
 - `shell_agent` specialist (`agents/shell_agent.md`) using `gpt-5.4-nano` with high reasoning for bash and filesystem tasks.
 - Async task execution over RabbitMQ: new `spawn_task`, `cancel_task`, and `list_tasks` tools plus `RabbitMQConsumerService`, `TaskManager`, and an isolated subprocess worker that can run specialist agents with a restricted tool allowlist, retry on provider rate limits, and emit message / file events back into the main event bus.
