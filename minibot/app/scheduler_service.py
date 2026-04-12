@@ -318,7 +318,7 @@ class ScheduledPromptService:
     async def _schedule_nearest_wake(self) -> None:
         run_at = await self._repository.get_nearest_pending_run_at()
         if run_at is not None:
-            self._schedule_wake(run_at)
+            self._schedule_wake(ensure_utc(run_at))
 
     def _message_metadata(self, job: ScheduledPrompt) -> dict[str, Any]:
         metadata = dict(job.metadata or {})
