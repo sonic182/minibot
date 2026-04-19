@@ -5,7 +5,7 @@ MiniBot 🤖
 
 Your personal AI assistant for Telegram - self-hosted, auditable, and intentionally opinionated.
 
-📖 **[Full documentation](https://sonic182.github.io/minibot/)**
+📖 **[Full documentation](https://sonic182.github.io/minibot)**
 
 Top features
 ------------

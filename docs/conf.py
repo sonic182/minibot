@@ -11,9 +11,11 @@ release = '0.2.0'
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.napoleon',
+    'sphinx.ext.githubpages',
 ]
 
 autodoc_member_order = 'bysource'
+autodoc_mock_imports = ['faster_whisper', 'mcp']
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
