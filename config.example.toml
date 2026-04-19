@@ -255,6 +255,11 @@ auto_transcribe_max_duration_seconds = 45
 [tools.browser]
 output_dir = "./data/files/browser"
 
+# Optional sleep/wait tool.
+[tools.wait]
+enabled = false
+max_milliseconds = 30000
+
 # Built-in calculator tool.
 [tools.calculator]
 enabled = true

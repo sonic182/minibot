@@ -147,6 +147,10 @@ auto_transcribe_max_duration_seconds = 45
 [tools.browser]
 output_dir = "./data/files/browser"
 
+[tools.wait]
+enabled = true
+max_milliseconds = 30000
+
 [tools.calculator]
 enabled = true
 default_scale = 28
