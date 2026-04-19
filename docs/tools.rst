@@ -44,6 +44,9 @@ Requires ``[tools.file_storage]``.
 Code Execution
 --------------
 
+Run arbitrary code on the host. Two backends are available: a shell executor
+and a Python executor with configurable sandbox isolation.
+
 Bash
 ~~~~
 
