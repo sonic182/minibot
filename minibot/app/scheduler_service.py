@@ -47,8 +47,8 @@ class ScheduledPromptService:
             return
         self._stop_event.clear()
         self._wake_event.clear()
-        self._task = asyncio.create_task(self._run_loop())
         await self._schedule_nearest_wake()
+        self._task = asyncio.create_task(self._run_loop())
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -395,6 +395,6 @@ class ScheduledPromptService:
                     extra={"job_id": job.id, "skipped": steps - 1},
                 )
 
-        if job.recurrence_end_at is not None and next_run >= job.recurrence_end_at:
+        if job.recurrence_end_at is not None and next_run > job.recurrence_end_at:
             return None
         return next_run
