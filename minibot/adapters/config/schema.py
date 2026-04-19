@@ -88,12 +88,33 @@ ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
 
 
 class RuntimeConfig(BaseModel):
+    """Top-level runtime settings. TOML section: ``[runtime]``
+
+    - ``log_level`` — root log level (default: ``"INFO"``).
+    - ``environment`` — label used in log context (default: ``"development"``).
+    - ``agent_timeout_seconds`` — hard wall-clock timeout for any agent turn (min/default: ``120``).
+    """
+
     log_level: str = "INFO"
     environment: str = "development"
     agent_timeout_seconds: int = Field(default=120, ge=120)
 
 
 class TelegramChannelConfig(BaseModel):
+    """Telegram channel settings. TOML section: ``[channels.telegram]``
+
+    - ``bot_token`` — BotFather token (required).
+    - ``allowed_chat_ids`` / ``allowed_user_ids`` — access control lists.
+    - ``mode`` — ``"long_polling"`` (default) or ``"webhook"``.
+    - ``webhook_url`` — required when ``mode = "webhook"``.
+    - ``require_authorized`` — reject messages from unlisted IDs (default: ``true``).
+    - ``media_enabled`` — accept photo/document attachments (default: ``true``).
+    - ``max_photo_bytes`` / ``max_document_bytes`` / ``max_total_media_bytes`` — per-message size caps.
+    - ``max_attachments_per_message`` — attachment count cap (default: ``3``).
+    - ``allowed_document_mime_types`` — MIME whitelist; empty means all types are allowed.
+    - ``format_repair_enabled`` — auto-repair malformed Markdown before sending (default: ``true``).
+    """
+
     enabled: bool = True
     bot_token: str = ""
     allowed_chat_ids: list[int] = Field(default_factory=list)
@@ -193,6 +214,27 @@ class XAILLMConfig(BaseModel):
 
 
 class LLMMConfig(BaseModel):
+    """Main LLM settings. TOML section: ``[llm]``
+
+    - ``provider`` — provider name: ``"openai"``, ``"anthropic"``, ``"openrouter"``, ``"xai"``, etc.
+    - ``api_key`` — provider API key.
+    - ``base_url`` — optional base URL (for proxies or OpenAI-compatible local servers).
+    - ``model`` — model identifier (default: ``"gpt-4o-mini"``).
+    - ``temperature`` — sampling temperature (``null`` uses provider default).
+    - ``max_new_tokens`` — max tokens to generate per turn.
+    - ``max_tool_iterations`` — maximum tool-call rounds before forcing a final answer (default: ``15``).
+    - ``request_timeout_seconds`` — HTTP timeout per LLM request (min: ``45``).
+    - ``system_prompt`` — inline system prompt (overridden by ``system_prompt_file``).
+    - ``system_prompt_file`` — path to the main system prompt markdown file.
+    - ``prompts_dir`` — directory for runtime prompt fragments.
+    - ``reasoning_effort`` — reasoning budget hint for supported models (e.g. ``"high"``).
+    - ``main_responses_state_mode`` — how conversation state is passed for the main agent
+      (``"full_messages"`` or ``"previous_response_id"``).
+    - ``prompt_cache_enabled`` — enable provider-side prompt caching (default: ``true``).
+    - ``openrouter`` — OpenRouter-specific routing overrides (``[llm.openrouter]``).
+    - ``xai`` — xAI web/X search integration (``[llm.xai]``).
+    """
+
     provider: str = "openai"
     api_key: str = ""
     base_url: str | None = None
@@ -220,6 +262,15 @@ class LLMMConfig(BaseModel):
 
 
 class ProviderConfig(BaseModel):
+    """Named LLM provider credentials. TOML section: ``[providers.<name>]``
+
+    Used to supply API keys and base URLs for secondary providers referenced
+    by agent definitions (``model_provider``).
+
+    - ``api_key`` — provider API key.
+    - ``base_url`` — optional base URL override (e.g. for proxies or local endpoints).
+    """
+
     api_key: str = ""
     base_url: str | None = None
 
@@ -289,6 +340,19 @@ class MainAgentConfig(BaseModel):
 
 
 class OrchestrationConfig(BaseModel):
+    """Multi-agent orchestration settings. TOML section: ``[orchestration]``
+
+    - ``directory`` — path to agent definition files (default: ``"./agents"``).
+    - ``default_timeout_seconds`` — per-agent-call timeout (default: ``90``).
+    - ``tool_ownership_mode`` — how tools are shared between agents:
+      ``"shared"`` (default), ``"exclusive"``, or ``"exclusive_mcp"``.
+    - ``delegated_tool_call_policy`` — whether delegated agents may call tools:
+      ``"auto"`` (default), ``"always"``, or ``"never"``.
+    - ``main_tool_use_guardrail`` — optional guardrail before tool execution:
+      ``"disabled"`` (default) or ``"llm_classifier"``.
+    - ``main_agent`` — tool allow/deny policy for the main agent (``[orchestration.main_agent]``).
+    """
+
     directory: str = "./agents"
     default_timeout_seconds: PositiveInt = 90
     tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
@@ -298,6 +362,18 @@ class OrchestrationConfig(BaseModel):
 
 
 class MemoryConfig(BaseModel):
+    """Conversation history memory settings. TOML section: ``[memory]``
+
+    - ``backend`` — storage backend (currently only ``"sqlite"``).
+    - ``sqlite_url`` — SQLite database URL (default: ``"sqlite+aiosqlite:///./data/minibot.db"``).
+    - ``max_history_messages`` — hard cap on stored messages per conversation (``null`` = unlimited).
+    - ``max_history_tokens`` — token budget for history sent to the LLM (``null`` = unlimited).
+    - ``context_ratio_before_compact`` — fraction of context window used before triggering
+      automatic compaction (default: ``0.95``).
+    - ``notify_compaction_updates`` — send a user-visible message when history is compacted
+      (default: ``false``).
+    """
+
     backend: str = "sqlite"
     sqlite_url: str = "sqlite+aiosqlite:///./data/minibot.db"
     max_history_messages: int | None = Field(default=None, ge=1)
@@ -494,6 +570,19 @@ class ToolsConfig(BaseModel):
 
 
 class RabbitMQConsumerConfig(BaseModel):
+    """RabbitMQ task consumer settings. TOML section: ``[rabbitmq]``
+
+    Requires the ``rabbitmq`` extra: ``poetry install --extras rabbitmq``.
+
+    - ``enabled`` — enable the RabbitMQ consumer (default: ``false``).
+    - ``broker_url`` — AMQP connection URL (default: ``"amqp://guest:guest@localhost:5672/"``).
+    - ``queue_name`` — queue to consume from (default: ``"minibot"``).
+    - ``exchange_name`` — fanout exchange name (default: ``"minibot.tasks"``).
+    - ``prefetch_count`` — max unacknowledged messages per worker (default: ``1``).
+    - ``worker_timeout_seconds`` — per-task processing timeout (default: ``60``).
+    - ``max_concurrent_workers`` — maximum parallel task handlers (default: ``4``).
+    """
+
     enabled: bool = False
     broker_url: str = "amqp://guest:guest@localhost:5672/"
     queue_name: str = "minibot"
@@ -504,6 +593,17 @@ class RabbitMQConsumerConfig(BaseModel):
 
 
 class ScheduledPromptsConfig(BaseModel):
+    """Scheduler persistence and polling settings. TOML section: ``[scheduler.prompts]``
+
+    - ``enabled`` — enable the scheduler (default: ``true``).
+    - ``sqlite_url`` — SQLite database URL for job storage.
+    - ``poll_interval_seconds`` — how often due jobs are checked (default: ``60``).
+    - ``lease_timeout_seconds`` — lease duration before a stalled job is retried (default: ``120``).
+    - ``batch_size`` — max jobs processed per poll cycle (default: ``10``).
+    - ``max_attempts`` — retries before a job is marked failed (default: ``3``).
+    - ``min_recurrence_interval_seconds`` — floor for recurring job intervals (default: ``60``).
+    """
+
     enabled: bool = True
     sqlite_url: str = "sqlite+aiosqlite:///./data/scheduled_prompts.db"
     poll_interval_seconds: PositiveInt = 60
@@ -520,6 +620,15 @@ class SchedulerConfig(BaseModel):
 
 
 class LoggingConfig(BaseModel):
+    """Structured logging settings. TOML section: ``[logging]``
+
+    - ``structured`` — enable structured (JSON-like) log output (default: ``true``).
+    - ``logfmt_enabled`` — use logfmt key=value format instead of JSON (default: ``true``).
+    - ``log_level`` — log level for the logging subsystem (default: ``"INFO"``).
+    - ``kv_separator`` — separator between key and value in logfmt (default: ``"="``).
+    - ``record_separator`` — separator between fields in logfmt (default: ``" "``).
+    """
+
     structured: bool = True
     logfmt_enabled: bool = True
     log_level: str = "INFO"

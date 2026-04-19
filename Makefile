@@ -1,4 +1,4 @@
-.PHONY: clean check build publish upload_pypi publish-test publish-dry-run
+.PHONY: clean check build publish upload_pypi publish-test publish-dry-run docs
 
 clean:
 	rm -rf build dist .pytest_cache .ruff_cache .mypy_cache .coverage htmlcov
@@ -20,3 +20,6 @@ publish-test: build
 
 publish-dry-run: build
 	@echo "Dry run: build + twine check only (no upload)"
+
+docs:
+	cd docs && poetry run make html

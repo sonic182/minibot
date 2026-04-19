@@ -20,6 +20,32 @@ class MCPDynamicTool:
 
 
 class MCPToolBridge:
+    """Bridge Model Context Protocol (MCP) servers to LLM tool bindings.
+
+    Enabled by ``[tools.mcp]`` in ``config.toml``.  Each entry under
+    ``[[tools.mcp.servers]]`` creates one bridge instance.
+    Requires the ``mcp`` extra: ``poetry install --extras mcp``.
+
+    Remote tools are exposed with the naming convention::
+
+        <name_prefix>_<server_name>__<remote_tool_name>
+
+    The default prefix is ``mcp``.
+
+    Filtering:
+
+    - ``enabled_tools`` — whitelist; only listed remote tool names are exposed.
+    - ``disabled_tools`` — blacklist; listed names are always excluded.
+
+    Key config options:
+
+    - ``name_prefix`` — prefix for all bridged tool names (default: ``"mcp"``).
+    - ``timeout_seconds`` — call timeout.
+    - ``[[tools.mcp.servers]]`` — list of server definitions; each supports
+      ``transport``, ``command``, ``args``, ``env``, ``cwd``, ``url``,
+      ``headers``, ``enabled_tools``, ``disabled_tools``.
+    """
+
     def __init__(
         self,
         *,

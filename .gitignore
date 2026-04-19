@@ -76,3 +76,4 @@ config.*.bckp
 data/
 testdata/
 skills/
+docs/_build/

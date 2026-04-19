@@ -14,6 +14,29 @@ from minibot.llm.tools.schema_utils import nullable_string, strict_object
 
 
 class AudioTranscriptionTool:
+    """Transcribe or translate audio files using faster-whisper.
+
+    Enabled by ``[tools.audio_transcription]`` in ``config.toml``.
+    Requires the ``stt`` extra: ``poetry install --extras stt``.
+    Also requires ``[tools.file_storage]`` to resolve managed audio paths.
+
+    Exposes the ``transcribe_audio`` LLM tool with two task modes:
+
+    - ``transcribe`` — output in the source language.
+    - ``translate`` — output translated to English.
+
+    Auto-transcription: when ``auto_transcribe_short_incoming = true``, incoming
+    voice messages shorter than ``auto_transcribe_max_duration_seconds`` are
+    transcribed automatically before the LLM processes them.
+
+    Key config options:
+
+    - ``model`` — Whisper model size (``tiny``, ``base``, ``small``, ``medium``, ``large-v3``).
+    - ``device`` — ``auto``, ``cpu``, or ``cuda``.
+    - ``compute_type`` — quantization (``int8``, ``float16``, etc.).
+    - ``beam_size``, ``vad_filter``.
+    """
+
     def __init__(
         self,
         config: AudioTranscriptionToolConfig,

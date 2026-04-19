@@ -16,6 +16,23 @@ from minibot.llm.tools.schema_utils import nullable_boolean, nullable_integer, n
 
 
 class GrepTool:
+    """Regex or fixed-string search over managed files.
+
+    Enabled by ``[tools.file_storage]`` in ``config.toml`` (requires file storage).
+    The grep config is read from ``[tools.grep]``.
+
+    Exposes the ``grep`` LLM tool.
+
+    Supports recursive search, case-insensitive matching, fixed-string (literal)
+    mode, hidden file inclusion, and configurable context lines before/after each
+    match.  Files exceeding ``max_file_size_bytes`` are skipped.
+
+    Key config options:
+
+    - ``max_matches`` — global per-call match cap.
+    - ``max_file_size_bytes`` — skip files larger than this.
+    """
+
     def __init__(self, storage: LocalFileStorage, config: GrepToolConfig) -> None:
         self._storage = storage
         self._config = config

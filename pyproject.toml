@@ -50,6 +50,11 @@ pytest-cov = "^7.0.0"
 ruff = "^0.15.0"
 pyright = "^1.1.408"
 
+
+[tool.poetry.group.docs.dependencies]
+sphinx = "^9.1.0"
+shibuya = "^2026.1.9"
+
 [tool.poetry.scripts]
 minibot = "minibot.app.daemon:main"
 minibot-console = "minibot.app.console:main"

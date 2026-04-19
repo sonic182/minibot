@@ -1,3 +1,21 @@
+"""Key-value memory tools for persistent user data.
+
+Enabled by ``[tools.kv_memory]`` in ``config.toml``.
+
+:func:`build_kv_tools` returns the ``memory`` LLM tool binding, which
+supports the following actions: ``save``, ``get``, ``search``,
+``delete``, and ``list_titles``.
+
+Each entry has an ``entry_id``, ``title``, ``data``, optional ``metadata``
+(JSON), ``source``, and ``expires_at``.  Listing supports ``limit`` and
+``offset`` for pagination.
+
+Key config options:
+
+- ``sqlite_url`` — SQLite backend (default: ``sqlite+aiosqlite:///./data/kv_memory.db``).
+- ``default_limit`` / ``max_limit`` — pagination controls.
+- ``default_owner_id`` — fallback owner when no user context is available.
+"""
 from __future__ import annotations
 
 import json

@@ -17,6 +17,21 @@ from minibot.llm.tools.schema_utils import nullable_integer, nullable_string, st
 
 
 class BashTool:
+    """Execute shell commands via ``/bin/bash -lc``.
+
+    Enabled by ``[tools.bash]`` in ``config.toml``.
+
+    Key config options:
+
+    - ``default_timeout_seconds`` / ``max_timeout_seconds`` — execution time limits.
+    - ``pass_parent_env`` — pass the full parent environment; when ``false``, only
+      keys in ``env_allowlist`` are forwarded.
+    - ``max_output_bytes`` — combined stdout+stderr cap; excess is truncated.
+
+    Returns ``ok``, ``exit_code``, ``stdout``, ``stderr``, ``timed_out``,
+    ``truncated``, and ``duration_ms``.
+    """
+
     def __init__(self, config: BashToolConfig) -> None:
         self._config = config
 
