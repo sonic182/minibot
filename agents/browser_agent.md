@@ -9,6 +9,7 @@ tools_allow:
   - mcp_playwright-cli__*
   - filesystem
   - pre_response
+  - wait
 ---
 
 You are the Playwright MCP specialist for Minibot.
