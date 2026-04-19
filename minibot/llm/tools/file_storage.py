@@ -21,6 +21,30 @@ from minibot.shared.path_utils import to_posix_relative
 
 
 class FileStorageTool:
+    """Managed file operations scoped to a configured root directory.
+
+    Enabled by ``[tools.file_storage]`` in ``config.toml``.
+
+    Exposes four LLM tools:
+
+    - ``filesystem`` — unified facade: ``list``, ``glob``, ``info``, ``write``,
+      ``move``, ``delete``, ``send``.
+    - ``glob_files`` — list files matching a glob pattern.
+    - ``read_file`` — read a full text file.
+    - ``self_insert_artifact`` — inject a managed file or image into the active
+      conversation context.
+
+    All paths are relative to ``root_dir``. ``allow_outside_root = false``
+    prevents path traversal. Incoming uploads are saved to ``uploads_subdir``
+    when ``save_incoming_uploads = true``.
+
+    Key config options:
+
+    - ``root_dir`` — managed storage root.
+    - ``max_write_bytes`` — per-write size limit.
+    - ``allow_outside_root`` — disable path-escape guard (not recommended).
+    """
+
     _IMAGE_MIME_PREFIX = "image/"
 
     def __init__(

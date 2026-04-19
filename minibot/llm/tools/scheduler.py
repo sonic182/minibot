@@ -22,6 +22,31 @@ from minibot.shared.datetime_utils import parse_iso_datetime_utc, parse_optional
 
 
 class SchedulePromptTool:
+    """Create, list, cancel, and delete scheduled prompt jobs.
+
+    Enabled by ``[scheduler.prompts]`` in ``config.toml``.
+
+    Exposes five LLM tools:
+
+    - ``schedule`` — unified action interface (``create`` / ``list`` / ``cancel`` / ``delete``).
+    - ``schedule_prompt`` — create a future prompt job.
+    - ``list_scheduled_prompts`` — list jobs for the current owner/chat context.
+    - ``cancel_scheduled_prompt`` — mark a job as cancelled.
+    - ``delete_scheduled_prompt`` — cancel and permanently remove a job.
+
+    Recurrence: set ``recurrence_type = "interval"`` and provide
+    ``recurrence_interval_seconds`` (minimum enforced by ``min_recurrence_interval_seconds``).
+
+    Prompt roles: ``user`` (bot answers), ``assistant`` (sent directly to the user),
+    ``system``, or ``developer``.
+
+    Key config options:
+
+    - ``sqlite_url`` — SQLite backend for job persistence.
+    - ``poll_interval_seconds`` — how often due jobs are dispatched.
+    - ``min_recurrence_interval_seconds`` — floor for recurring intervals.
+    """
+
     def __init__(self, service: ScheduledPromptService, min_recurrence_interval_seconds: int = 60) -> None:
         self._service = service
         self._min_recurrence_interval_seconds = max(1, min_recurrence_interval_seconds)

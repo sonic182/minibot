@@ -11,7 +11,7 @@
 - **Tests**: `poetry run pytest` (single test via `poetry run pytest <file>::<TestClass>::<test_method>` or `poetry run pytest <file> -k <test_name>`)
 
 ## Documentation & Comments
-- **No extra comments** — avoid adding comments or docstrings unless explicitly requested.
+- **Comments/docstrings** — avoid incidental comments; public documentation docstrings are acceptable when they feed generated docs or clarify public config/tool surfaces.
 - **No automated tests** unless asked — prefer linting or formatting to verify changes.
 - **Linting is welcome** — run `ruff check` or `ruff format`; this repo does not configure `flake8` despite it being available.
 

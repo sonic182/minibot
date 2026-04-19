@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sphinx documentation site under `docs/`, covering getting started, agents, architecture, configuration, tools, scheduler, audio transcription, MCP, security, and prompt packs.
+- GitHub Pages deployment workflow for the Sphinx docs, with warning-as-error builds and rebuild triggers for docs, metadata, config examples, and documentation inputs.
+- Grouped public tool surface table and `[tools.*]` configuration reference in the generated docs.
 - Scheduler wake-on-startup: on `start()`, the nearest pending job is queried and an early wake task is scheduled so jobs due immediately after a restart are not delayed by the full poll interval.
 - `get_nearest_pending_run_at()` added to `ScheduledPromptRepository` protocol and `SQLAlchemyScheduledPromptStore`, returning the minimum `run_at` across all pending jobs.
 - `list_skills` tool for live skill discovery from disk, with optional query ranking and fuzzy fallback before loading full instructions via `activate_skill`.
@@ -17,9 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- README slimmed down to project summary, feature list, demo images, and a link to the full documentation site.
+- Tool and config documentation now lives in Sphinx docs instead of standalone `tools/*.md` files.
+- Package metadata now points `documentation` at the GitHub Pages documentation site.
+- Agent documentation guidance now allows public docstrings when they feed generated docs or clarify public config/tool surfaces.
 - Scheduler batch dispatch is now concurrent: `run_pending()` uses `asyncio.gather` so a slow publish no longer blocks other jobs in the same batch; unexpected per-job exceptions are logged individually.
 - Scheduler retry delay now includes a `random.uniform(0, 10)` second jitter to prevent thundering-herd retries across a failing batch.
 - Skill support no longer embeds the full catalog by default; the main prompt points to `list_skills`, and `activate_skill` remains responsible for loading full skill bodies on demand.
+
+### Removed
+
+- Legacy `tools/*.md` documentation files after migrating the public tool reference into Sphinx.
+- Remaining Lua/Lupa config documentation and loader compatibility remnants.
 
 ### Fixed
 

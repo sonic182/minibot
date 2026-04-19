@@ -30,6 +30,31 @@ from minibot.shared.path_utils import normalize_path_separators, to_posix_relati
 
 
 class HostPythonExecTool:
+    """Execute Python code on the host with configurable sandbox controls.
+
+    Enabled by ``[tools.python_exec]`` in ``config.toml``.
+
+    Exposes two LLM tools: ``python_execute`` and ``python_environment_info``.
+
+    Sandbox modes (``sandbox_mode``):
+
+    - ``basic`` — no isolation, same process user.
+    - ``rlimit`` — POSIX resource limits (CPU, memory, file size, open files).
+    - ``cgroup`` — Linux only; wraps execution with ``systemd-run --scope``.
+    - ``jail`` — arbitrary command prefix (e.g. ``nsjail``, ``firejail``).
+
+    Artifacts: when ``save_artifacts = true`` and ``[tools.file_storage]`` is
+    enabled, generated files matching ``artifact_globs`` are copied into managed
+    storage after execution.
+
+    Key config options:
+
+    - ``default_timeout_seconds`` / ``max_timeout_seconds``
+    - ``max_output_bytes`` — combined stdout+stderr cap.
+    - ``python_path`` / ``venv_path`` — override the Python interpreter.
+    - ``artifacts_enabled``, ``artifacts_default_subdir``, ``artifacts_max_files``.
+    """
+
     def __init__(self, config: PythonExecToolConfig, storage: LocalFileStorage | None = None) -> None:
         self._config = config
         self._storage = storage

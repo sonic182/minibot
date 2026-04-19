@@ -22,6 +22,28 @@ _SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"
 
 
 class HTTPClientTool:
+    """Fetch HTTP/HTTPS resources on behalf of the LLM.
+
+    Enabled by ``[tools.http_client]`` in ``config.toml``.
+
+    Exposes the ``http_request`` LLM tool supporting GET, POST, PUT, DELETE,
+    PATCH, HEAD, and OPTIONS.
+
+    Response handling:
+
+    - HTML responses are converted to plain text by default (``response_processing_mode = "auto"``).
+    - Whitespace is normalized when ``normalize_whitespace = true``.
+    - When the decoded body exceeds ``spill_after_chars`` characters and
+      ``[tools.file_storage]`` is enabled, the full body is saved to a managed
+      temp file and a short preview is returned inline.
+
+    Key config options:
+
+    - ``timeout_seconds``, ``max_bytes`` — request limits.
+    - ``max_chars`` — inline body character cap.
+    - ``spill_to_managed_file``, ``spill_after_chars``, ``spill_preview_chars``, ``max_spill_bytes``.
+    """
+
     def __init__(self, config: HTTPClientToolConfig, storage: LocalFileStorage | None = None) -> None:
         self._config = config
         self._storage = storage

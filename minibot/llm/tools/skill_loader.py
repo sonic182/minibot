@@ -17,6 +17,23 @@ _LIST_SKILLS_LIMIT = 8
 
 
 class SkillLoaderTool:
+    """Discover and load agent skills at runtime.
+
+    Enabled when ``[tools.skills]`` is configured in ``config.toml``
+    (skill discovery paths are set via ``skills.paths``).
+
+    Exposes two LLM tools:
+
+    - ``list_skills`` — returns up to 8 skills ranked by relevance to an
+      optional search query.  Ranking order: exact match → prefix → substring →
+      description substring → fuzzy similarity.
+    - ``activate_skill`` — loads the full instructions for a named skill and
+      injects them into the context.
+
+    Skills are markdown files (``SKILL.md``) discovered from the configured
+    paths; the registry refreshes automatically when files change.
+    """
+
     def __init__(self, registry: SkillRegistry) -> None:
         self._registry = registry
 

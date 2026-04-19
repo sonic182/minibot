@@ -312,7 +312,6 @@ Current notes:
 - Config:
   - `adapters/config/schema.py` holds Pydantic settings models.
   - `adapters/config/loader.py` resolves config discovery and format-aware loading for TOML/Lua files.
-  - `adapters/lua/runtime.py` owns the optional Lupa integration used by Lua config/custom-tool loading.
 - Container:
   - `adapters/container/app_container.py` wires singleton-style service graph.
 - Shared SQLAlchemy utilities:
