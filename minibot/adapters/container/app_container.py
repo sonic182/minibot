@@ -16,7 +16,6 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.scheduler_service import ScheduledPromptService
-from minibot.app.skill_definitions_loader import load_skill_specs
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_async
 from minibot.core.memory import KeyValueMemory, MemoryBackend
@@ -67,10 +66,9 @@ class AppContainer:
         cls._agent_registry = AgentRegistry(agent_specs)
         if cls._settings.tools.skills.enabled:
             skill_paths = list(cls._settings.tools.skills.paths) or None
-            skill_specs = load_skill_specs(skill_paths)
+            cls._skill_registry = SkillRegistry(paths=skill_paths)
         else:
-            skill_specs = []
-        cls._skill_registry = SkillRegistry(skill_specs)
+            cls._skill_registry = SkillRegistry([])
         cls._token_autoconfig_applied = False
         prompts_config = cls._settings.scheduler.prompts
         if prompts_config.enabled:

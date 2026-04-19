@@ -43,18 +43,14 @@ class RabbitMQConsumerService:
             await self._task_manager.stop()
 
     async def _consume(self) -> None:
-        connection: aio_pika.abc.AbstractRobustConnection = await aio_pika.connect_robust(
-            self._config.broker_url
-        )
+        connection: aio_pika.abc.AbstractRobustConnection = await aio_pika.connect_robust(self._config.broker_url)
         async with connection:
             channel = await connection.channel()
             await channel.set_qos(prefetch_count=self._config.prefetch_count)
             self._exchange = await channel.declare_exchange(
                 self._config.exchange_name, aio_pika.ExchangeType.FANOUT, durable=True
             )
-            queue: aio_pika.abc.AbstractQueue = await channel.declare_queue(
-                self._config.queue_name, durable=True
-            )
+            queue: aio_pika.abc.AbstractQueue = await channel.declare_queue(self._config.queue_name, durable=True)
             await queue.bind(self._exchange)
             self._logger.info(
                 "rabbitmq consumer started",

@@ -49,6 +49,7 @@ This directory documents the current public MiniBot tool surface. Tool names her
 
 - [fetch_agent_info](fetch_agent_info.md): inspect a specialist agent definition.
 - [invoke_agent](invoke_agent.md): delegate a task to a specialist agent.
+- [list_skills](list_skills.md): discover current skills from disk, with optional search.
 - [activate_skill](activate_skill.md): load full instructions for a discovered skill.
 
 ## Dynamic Tool Surfaces

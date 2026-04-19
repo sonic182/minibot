@@ -7,6 +7,7 @@ import pytest
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.skill_registry import SkillRegistry
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 
@@ -28,10 +29,14 @@ class _FakeSettings:
             enabled = False
             root_dir = "./data/files"
 
+        class _Skills:
+            preload_catalog = False
+
         kv_memory = _KV()
         browser = _Browser()
         mcp = _MCP()
         file_storage = _FileStorage()
+        skills = _Skills()
 
     class _Memory:
         max_history_messages = None
@@ -117,6 +122,7 @@ async def test_dispatcher_publishes_outbound_reply(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
 
     bus = EventBus()
@@ -157,6 +163,7 @@ async def test_dispatcher_skips_outbound_when_handler_marks_silent(monkeypatch: 
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
 
     bus = EventBus()
@@ -197,6 +204,7 @@ async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
 
     bus = EventBus()
@@ -259,6 +267,7 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
 
     bus = EventBus()

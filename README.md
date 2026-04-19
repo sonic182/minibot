@@ -217,7 +217,7 @@ Use `config.example.toml` as the source of truth, then update secrets before lau
 - `[tools.grep]`: optional text-search tool over files managed by `tools.file_storage`, with limits for `max_matches` and `max_file_size_bytes`.
 - `[tools.audio_transcription]`: optional speech-to-text tool powered by `faster-whisper`; configure model/runtime defaults (`model`, `device`, `compute_type`, `beam_size`, `vad_filter`) plus short-audio auto-transcription policy (`auto_transcribe_short_incoming`, `auto_transcribe_max_duration_seconds`), and enable only when the `stt` extra is installed. Runtime decoding also requires ffmpeg available on the host.
 - `[tools.browser]`: configures browser artifact paths used by prompts and Playwright MCP launch defaults. `output_dir` is the canonical directory for screenshots/downloads/session artifacts.
-- `[tools.skills]`: configures skill discovery. Leave `paths` empty to use default locations (see Agent Skills section), or set `paths` to a non-empty list to override them entirely with your own directories. Set `enabled = false` to disable skill support.
+- `[tools.skills]`: configures skill discovery. Leave `paths` empty to use default locations (see Agent Skills section), or set `paths` to a non-empty list to override them entirely with your own directories. When enabled, MiniBot exposes `list_skills` for live discovery and `activate_skill` for loading full instructions. Set `preload_catalog = true` to include a prompt-time names/descriptions snapshot. Set `enabled = false` to disable skill support.
 - `[tools.mcp]`: configures optional Model Context Protocol bridge discovery. Set `enabled`, `name_prefix`, and `timeout_seconds`, then register one or more `[[tools.mcp.servers]]` entries using either `transport = "stdio"` (`command`, optional `args`/`env`/`cwd`) or `transport = "http"` (`url`, optional `headers`).
 - `[logging]`: structured log flags (logfmt, separators) consumed by `adapters/logging/setup.py`.
 
@@ -517,9 +517,9 @@ Useful patterns and behavior:
 Agent Skills
 ------------
 
-Skills are reusable instruction packs the model loads on demand via the `activate_skill` tool. Each skill is a
-directory containing a `SKILL.md` file (YAML frontmatter + instruction body). The model sees a short catalog in
-its system prompt and fetches full instructions only when it needs them.
+Skills are reusable instruction packs the model loads on demand. Each skill is a directory containing a `SKILL.md`
+file (YAML frontmatter + instruction body). The model uses `list_skills` to discover the current skill names and
+descriptions from disk, then calls `activate_skill` with the exact chosen name to load full instructions.
 
 ### Skill file format
 
@@ -536,6 +536,13 @@ Full instructions here...
 ```
 
 Frontmatter fields: `name` (required), `description` (optional), `enabled` (default `true`).
+
+### Runtime behavior
+
+- `list_skills` rescans the configured skill directories on demand, so added or deleted skills are picked up without restarting MiniBot.
+- `activate_skill` requires the exact skill name returned by `list_skills`.
+- By default, the main prompt includes only a short pointer to these tools; set `tools.skills.preload_catalog = true` to also embed a names/descriptions snapshot.
+- Even with `preload_catalog = true`, `list_skills` remains the live source for newly added or deleted skills.
 
 ### Discovery paths
 
@@ -559,6 +566,7 @@ The conventional place to add your own skills to a MiniBot deployment is a `./sk
 ```toml
 [tools.skills]
 enabled = true
+preload_catalog = false
 paths = ["./skills"]
 ```
 
@@ -584,7 +592,7 @@ paths = [
 ]
 ```
 
-Each entry is a directory whose subdirectories each contain a `SKILL.md`. Relative paths are resolved from the working directory at startup.
+Each entry is a directory whose subdirectories each contain a `SKILL.md`. Relative paths are resolved from the working directory.
 
 To disable skill discovery entirely:
 
@@ -761,7 +769,7 @@ To enable optional speech-to-text tooling, install the `stt` extra (`poetry inst
 - 🧩 `apply_patch`: optional structured file edits via patch envelopes (`*** Begin Patch ... *** End Patch`) with add/update/delete/move operations.
 - 🎙️ `transcribe_audio`: optional managed-file audio transcription via `faster-whisper` (install with extras: `stt`).
 - 🤝 Delegation tools: `fetch_agent_info`, `invoke_agent`.
-- 🎓 `activate_skill`: loads full instructions for a named skill discovered from the skills directories (see Agent Skills section).
+- 🎓 Skill tools: `list_skills` discovers the live skill catalog from disk, and `activate_skill` loads full instructions for an exact returned skill name (see Agent Skills section).
 - 🧭 `mcp_*` dynamic tools (optional): tool bindings discovered from configured MCP servers.
 - 🖼️ Telegram media inputs (`photo`/`document`/`audio`/`voice`) are supported on `openai_responses`, `openai`, and `openrouter`.
 

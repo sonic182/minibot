@@ -9,10 +9,11 @@ import pytest_asyncio
 
 from minibot.adapters.config.schema import ScheduledPromptsConfig
 from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
+from minibot.app import scheduler_service as scheduler_module
 from minibot.app.event_bus import EventBus
 from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.core.events import MessageEvent
-from minibot.core.jobs import PromptRecurrence, PromptRole, ScheduledPromptStatus
+from minibot.core.jobs import PromptRecurrence, PromptRole, ScheduledPrompt, ScheduledPromptStatus
 
 
 def _config(db_path: Path) -> ScheduledPromptsConfig:
@@ -140,6 +141,26 @@ async def test_background_scheduler_wakes_for_near_term_jobs(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_start_does_not_spawn_loop_when_initial_wake_lookup_fails(tmp_path: Path) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    async def _fail_nearest_run_at() -> datetime | None:
+        raise RuntimeError("lookup failed")
+
+    store.get_nearest_pending_run_at = _fail_nearest_run_at  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="lookup failed"):
+        await svc.start()
+
+    assert svc._task is None
+
+
+@pytest.mark.asyncio
 async def test_service_reschedules_recurring_job_and_skips_missed_runs(tmp_path: Path) -> None:
     db_path = tmp_path / "scheduler.db"
     config = _config(db_path)
@@ -166,6 +187,34 @@ async def test_service_reschedules_recurring_job_and_skips_missed_runs(tmp_path:
     assert stored.status == ScheduledPromptStatus.PENDING
     assert stored.recurrence == PromptRecurrence.INTERVAL
     assert stored.run_at > datetime.now(UTC)
+
+
+@pytest.mark.asyncio
+async def test_service_keeps_recurring_run_at_exact_end_time(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    now = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(scheduler_module, "utcnow", lambda: now)
+    job = ScheduledPrompt(
+        id="job-1",
+        owner_id="tenant",
+        channel="telegram",
+        text="heartbeat",
+        run_at=now,
+        recurrence=PromptRecurrence.INTERVAL,
+        recurrence_interval_seconds=300,
+        recurrence_end_at=now + timedelta(minutes=5),
+    )
+
+    assert svc._next_run_for_recurrence(job) == job.recurrence_end_at
 
 
 @pytest.mark.asyncio

@@ -23,11 +23,14 @@ class SkillDefinitionConfig(BaseModel):
 
 
 def load_skill_specs(paths: list[str] | None = None) -> list[SkillSpec]:
-    if paths:
-        resolved = [(Path(p).expanduser().resolve(), True) for p in paths]
-    else:
-        resolved = _default_discovery_paths()
+    resolved = resolve_skill_discovery_paths(paths)
     return _load_from_paths(resolved)
+
+
+def resolve_skill_discovery_paths(paths: list[str] | None = None) -> list[tuple[Path, bool]]:
+    if paths:
+        return [(Path(p).expanduser().resolve(), True) for p in paths]
+    return _default_discovery_paths()
 
 
 def _default_discovery_paths() -> list[tuple[Path, bool]]:
@@ -80,6 +83,29 @@ def _load_from_paths(resolved: list[tuple[Path, bool]]) -> list[SkillSpec]:
                     continue
             by_name[spec.name] = (spec, is_project_level)
     return [entry[0] for entry in by_name.values()]
+
+
+def fingerprint_skill_paths(resolved: list[tuple[Path, bool]]) -> tuple[tuple[str, int, int], ...]:
+    entries: list[tuple[str, int, int]] = []
+    for base_path, _is_project_level in resolved:
+        if not base_path.exists() or not base_path.is_dir():
+            continue
+        try:
+            subdirs = sorted(p for p in base_path.iterdir() if p.is_dir())
+        except OSError as exc:
+            logger.warning("could not list skills directory", extra={"path": str(base_path), "error": str(exc)})
+            continue
+        for skill_dir in subdirs:
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_file.exists() or not skill_file.is_file():
+                continue
+            try:
+                stat = skill_file.stat()
+            except OSError as exc:
+                logger.warning("could not stat skill file", extra={"path": str(skill_file), "error": str(exc)})
+                continue
+            entries.append((skill_file.as_posix(), stat.st_mtime_ns, stat.st_size))
+    return tuple(entries)
 
 
 def _parse_skill_file(skill_file: Path, skill_dir: Path) -> SkillSpec | None:

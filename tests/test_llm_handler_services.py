@@ -18,11 +18,13 @@ from minibot.app.handlers.services import (
     SessionStateService,
     UserInputService,
 )
+from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import GuardrailDecision
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
 from minibot.core.channels import ChannelMessage
 from minibot.core.memory import MemoryBackend, MemoryEntry
+from minibot.core.skills import SkillSpec
 from minibot.llm.provider_factory import LLMClient, LLMCompaction, LLMGeneration
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
@@ -235,6 +237,66 @@ def test_prompt_service_uses_invoke_agent_guidance_when_task_tools_unavailable()
     assert "`fetch_agent_info` is available" in prompt
     assert "Asynchronous delegation is available now via `spawn_task`" not in prompt
     assert 'metadata.source == "task_worker"' not in prompt
+
+
+def test_prompt_service_points_to_list_skills_instead_of_embedding_catalog() -> None:
+    tools = [
+        ToolBinding(tool=Tool(name="list_skills", description="", parameters={"type": "object"}), handler=_noop_tool),
+        ToolBinding(
+            tool=Tool(name="activate_skill", description="", parameters={"type": "object"}),
+            handler=_noop_tool,
+        ),
+    ]
+    prompt_service = PromptService(
+        llm_client=cast(LLMClient, _StubClient()),
+        tools=tools,
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+        skill_registry=SkillRegistry([]),
+    )
+
+    prompt = prompt_service.compose_system_prompt("telegram")
+
+    assert "Use `list_skills` to discover the current skill names and descriptions from disk." in prompt
+    assert "repetitive playbook, recurring task pattern, or reusable workflow" in prompt
+    assert "Use `activate_skill` with the exact skill name returned by `list_skills`" in prompt
+    assert "you may briefly suggest creating a skill" in prompt
+    assert "Available skills (call activate_skill" not in prompt
+
+
+def test_prompt_service_can_preload_skill_catalog_snapshot() -> None:
+    tools = [
+        ToolBinding(tool=Tool(name="list_skills", description="", parameters={"type": "object"}), handler=_noop_tool),
+        ToolBinding(
+            tool=Tool(name="activate_skill", description="", parameters={"type": "object"}),
+            handler=_noop_tool,
+        ),
+    ]
+    prompt_service = PromptService(
+        llm_client=cast(LLMClient, _StubClient()),
+        tools=tools,
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+        skill_registry=SkillRegistry(
+            [
+                SkillSpec(
+                    name="python-review",
+                    description="Review Python changes.",
+                    body="Full instructions stay out of the prompt.",
+                    skill_dir=Path("skills/python-review"),
+                )
+            ]
+        ),
+        preload_skill_catalog=True,
+    )
+
+    prompt = prompt_service.compose_system_prompt("telegram")
+
+    assert "Available skills snapshot:" in prompt
+    assert "- python-review: Review Python changes." in prompt
+    assert "prompt-time snapshot" in prompt
+    assert "Call `list_skills` to search or refresh live skills from disk." in prompt
+    assert "Full instructions stay out of the prompt." not in prompt
 
 
 async def _noop_tool(_: Any, __: ToolContext) -> dict[str, Any]:

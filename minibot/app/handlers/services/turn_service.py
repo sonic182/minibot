@@ -433,6 +433,7 @@ def build_llm_turn_service(
     logger: logging.Logger | None = None,
     agent_registry: AgentRegistry | None = None,
     skill_registry: SkillRegistry | None = None,
+    preload_skill_catalog: bool = False,
 ) -> LLMTurnService:
     service_logger = logger or logging.getLogger("minibot.handler")
     tool_bindings = list(tools or [])
@@ -446,6 +447,7 @@ def build_llm_turn_service(
         logger=service_logger,
         agent_registry=agent_registry,
         skill_registry=skill_registry,
+        preload_skill_catalog=preload_skill_catalog,
     )
     compaction_service = HistoryCompactionService(
         memory=memory,
