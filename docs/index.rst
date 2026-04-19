@@ -7,6 +7,8 @@ MiniBot is a lightweight personal AI assistant you run on your own infrastructur
 It is built for people who want reliable automation and chat assistance without a giant
 platform footprint: Telegram-first, SQLite-first, async-first.
 
+Project repository: `sonic182/minibot <https://github.com/sonic182/minibot>`_.
+
 Why self-host
 -------------
 

@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/sonic182/minibot"
 repository = "https://github.com/sonic182/minibot"
-documentation = "https://github.com/sonic182/minibot#readme"
+documentation = "https://sonic182.github.io/minibot"
 keywords = ["telegram", "assistant", "llm", "bot", "automation", "self-hosted"]
 classifiers = [
   "Development Status :: 3 - Alpha",
