@@ -561,13 +561,6 @@ class ToolsConfig(BaseModel):
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
     tasks: TaskToolConfig = Field(default_factory=TaskToolConfig)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_removed_keys(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "lua_custom" in data:
-            raise ValueError("[tools.lua_custom] is no longer supported; remove it from your config")
-        return data
-
 
 class RabbitMQConsumerConfig(BaseModel):
     """RabbitMQ task consumer settings. TOML section: ``[rabbitmq]``
