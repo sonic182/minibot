@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `wait` tool: pauses execution for a given number of milliseconds (clamped to `[tools.wait].max_milliseconds`, default 30 000 ms). Useful for browser automation and human-paced interaction flows.
+- `minibot-create-tool` Agent Skill wizard under `.agents/skills/minibot-create-tool/`: guided Q&A that scaffolds all required files (tool class, description `.txt`, config model, factory registration) for a new LLM tool.
 - Sphinx documentation site under `docs/`, covering getting started, agents, architecture, configuration, tools, scheduler, audio transcription, MCP, security, and prompt packs.
 - GitHub Pages deployment workflow for the Sphinx docs, with warning-as-error builds and rebuild triggers for docs, metadata, config examples, and documentation inputs.
 - Grouped public tool surface table and `[tools.*]` configuration reference in the generated docs.
