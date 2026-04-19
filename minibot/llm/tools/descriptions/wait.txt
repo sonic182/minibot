@@ -1,0 +1,5 @@
+Pause execution for a given number of milliseconds.
+
+Use to introduce deliberate delays between actions — for example, waiting for a page to settle after a click or simulating human-paced interaction in browser automation. Do not use for polling or retrying; use only when a fixed pause is genuinely needed.
+
+Returns slept_ms (actual sleep, clamped to the configured maximum) and requested_ms.

@@ -31,6 +31,7 @@ from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.scheduler import SchedulePromptTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.llm.tools.user_memory import build_kv_tools
+from minibot.llm.tools.wait import WaitTool
 
 if TYPE_CHECKING:  # pragma: no cover
     from minibot.adapters.tasks.manager import TaskManager
@@ -117,6 +118,10 @@ def _build_http_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> l
 
 def _build_time_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
     return CurrentTimeTool(context.settings.tools.time.default_format).bindings()
+
+
+def _build_wait_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
+    return WaitTool(max_milliseconds=context.settings.tools.wait.max_milliseconds).bindings()
 
 
 def _build_calculator_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
@@ -274,6 +279,12 @@ _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (
         labels=("current_datetime",),
         enabled_in_config=lambda settings: _tool_enabled(settings, "time"),
         builder=_build_time_feature,
+    ),
+    ToolFeature(
+        key="wait",
+        labels=("wait",),
+        enabled_in_config=lambda settings: _tool_enabled(settings, "wait"),
+        builder=_build_wait_feature,
     ),
     ToolFeature(
         key="calculator",

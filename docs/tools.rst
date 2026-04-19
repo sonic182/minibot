@@ -33,6 +33,10 @@ Tool Surface
      - ``[tools.time]``; enabled by default
      - Return the current UTC datetime using an optional ``strftime`` format.
    * - Utility
+     - ``wait``
+     - ``[tools.wait]``
+     - Pause execution for a given number of milliseconds (clamped to ``max_milliseconds``).
+   * - Utility
      - ``calculate_expression``
      - ``[tools.calculator]``; enabled by default
      - Evaluate bounded arithmetic with Decimal precision.

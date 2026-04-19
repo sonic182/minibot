@@ -411,6 +411,11 @@ class TimeToolConfig(BaseModel):
     default_format: str = "%Y-%m-%dT%H:%M:%SZ"
 
 
+class WaitToolConfig(BaseModel):
+    enabled: bool = False
+    max_milliseconds: PositiveInt = 30000
+
+
 class CalculatorToolConfig(BaseModel):
     enabled: bool = True
     default_scale: PositiveInt = 28
@@ -549,6 +554,7 @@ class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
     time: TimeToolConfig = TimeToolConfig()
+    wait: WaitToolConfig = WaitToolConfig()
     calculator: CalculatorToolConfig = CalculatorToolConfig()
     python_exec: PythonExecToolConfig = PythonExecToolConfig()
     bash: BashToolConfig = BashToolConfig()
