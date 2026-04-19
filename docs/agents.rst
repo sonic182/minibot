@@ -5,6 +5,19 @@ Agent definitions live in ``./agents/*.md`` as markdown files with YAML frontmat
 followed by a system prompt body. The main agent discovers and delegates to specialists
 at runtime.
 
+Delegation Tools
+----------------
+
+Always enabled — no config flag required. Available to the main agent when specialist
+definitions exist:
+
+- ``fetch_agent_info`` — inspect a specialist's name, description, and system prompt.
+- ``invoke_agent`` — run a specialist with a ``task`` and optional ``context``; returns
+  the specialist's final text plus metadata (tokens, tool call count, attachments).
+
+Delegation policy (whether tool use is required from the specialist) is controlled by
+``[orchestration].delegated_tool_call_policy``.
+
 Agent Definitions
 -----------------
 
