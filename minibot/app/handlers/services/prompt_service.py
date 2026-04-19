@@ -20,6 +20,7 @@ class PromptService:
         logger: logging.Logger,
         agent_registry: AgentRegistry | None = None,
         skill_registry: SkillRegistry | None = None,
+        preload_skill_catalog: bool = False,
     ) -> None:
         self._profile = LLMExecutionProfile.from_client(llm_client)
         self._tools = list(tools)
@@ -28,6 +29,7 @@ class PromptService:
         self._prompts_dir = self._profile.prompts_dir
         self._agent_registry = agent_registry
         self._skill_registry = skill_registry
+        self._preload_skill_catalog = preload_skill_catalog
 
     @property
     def prompts_dir(self) -> str:
@@ -144,6 +146,16 @@ class PromptService:
         if "activate_skill" not in tool_names:
             return ""
         if "list_skills" in tool_names:
+            if self._preload_skill_catalog:
+                catalog = self._skill_registry.prompt_catalog(title="Available skills snapshot:")
+                if catalog:
+                    return (
+                        "Skill support is available in this turn.\n"
+                        f"{catalog}\n"
+                        "This catalog is a prompt-time snapshot. Call `list_skills` to search or refresh live "
+                        "skills from disk.\n"
+                        "- Use `activate_skill` with an exact skill name before starting work covered by that skill."
+                    )
             return (
                 "Skill support is available in this turn.\n"
                 "- Use `list_skills` to discover the current skill names and descriptions from disk.\n"

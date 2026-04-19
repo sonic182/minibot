@@ -462,6 +462,7 @@ class AudioTranscriptionToolConfig(BaseModel):
 class SkillsToolConfig(BaseModel):
     enabled: bool = True
     paths: list[str] = Field(default_factory=list)
+    preload_catalog: bool = False
 
 
 class TaskToolConfig(BaseModel):

@@ -397,6 +397,9 @@ timeout_seconds = 30
 # development skills bundled with the MiniBot project directory.
 [tools.skills]
 enabled = false
+# When true, embed skill names/descriptions in the main prompt as a snapshot.
+# list_skills still refreshes live skills from disk.
+preload_catalog = false
 # Recommended: create a ./skills directory and set paths to load only your own skills.
 # paths = ["./skills"]
 

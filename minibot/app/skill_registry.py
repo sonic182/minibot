@@ -37,11 +37,12 @@ class SkillRegistry:
         self.refresh_if_stale()
         return not self._by_name
 
-    def prompt_catalog(self) -> str:
+    def prompt_catalog(self, *, title: str | None = None) -> str:
         self.refresh_if_stale()
         if not self._by_name:
             return ""
-        lines = ["Available skills (call activate_skill with the exact skill name to load full instructions):"]
+        default_title = "Available skills (call activate_skill with the exact skill name to load full instructions):"
+        lines = [title or default_title]
         for name in self.names():
             spec = self._by_name[name]
             description = spec.description.strip() or "No description provided."

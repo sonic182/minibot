@@ -12,7 +12,10 @@ Enabled when `[tools.skills].enabled = true`.
 
 Relevant config: `[tools.skills]`.
 
-Important field: `paths`. Leave it empty to use default discovery paths or set it to replace defaults entirely.
+Important fields:
+
+- `paths`: leave empty to use default discovery paths or set it to replace defaults entirely.
+- `preload_catalog`: when true, the main prompt also includes a prompt-time snapshot of skill names/descriptions.
 
 ## Interface
 
@@ -32,3 +35,5 @@ The response includes the matching skills currently available from disk, along w
 ## Safety Notes
 
 `list_skills` reflects the configured discovery paths at call time, so newly added or deleted `SKILL.md` files can appear or disappear without restarting MiniBot. Configure `paths` deliberately to control which skill packs are discoverable.
+
+If `preload_catalog` is enabled, that prompt catalog is only a snapshot. Use `list_skills` when live state matters.

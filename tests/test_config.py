@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from minibot.adapters.config.loader import load_settings
+from minibot.adapters.config.schema import SkillsToolConfig
 
 
 def test_load_settings_from_file(tmp_path: Path) -> None:
@@ -59,6 +60,9 @@ bot_token = "token"
 
 [memory]
 context_ratio_before_compact = 0.9
+
+[tools.skills]
+preload_catalog = true
 """
     )
 
@@ -95,6 +99,11 @@ context_ratio_before_compact = 0.9
     assert settings.channels["telegram"].bot_token == "token"
     assert settings.memory.context_ratio_before_compact == 0.9
     assert settings.tools.browser.output_dir == "./data/files/browser"
+    assert settings.tools.skills.preload_catalog is True
+
+
+def test_skills_preload_catalog_defaults_false() -> None:
+    assert SkillsToolConfig().preload_catalog is False
 
 
 def test_load_settings_accepts_human_readable_byte_sizes(tmp_path: Path) -> None:
