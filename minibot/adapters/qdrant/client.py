@@ -32,6 +32,14 @@ class AsyncQdrantClient:
             payload={"points": points},
         )
 
+    async def delete_by_filter(self, collection_name: str, filters: dict[str, Any]) -> None:
+        encoded_collection = _encode_path_segment(collection_name)
+        await self._request(
+            "POST",
+            f"/collections/{encoded_collection}/points/delete?wait=true",
+            payload={"filter": filters},
+        )
+
     async def search(
         self,
         collection_name: str,

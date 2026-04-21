@@ -14,7 +14,7 @@ from minibot.llm.tools.arg_utils import int_with_default, optional_str, require_
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_integer, nullable_string, strict_object
-from minibot.rag.retrieval import index_document, retrieve_context
+from minibot.rag.retrieval import delete_document, index_document, retrieve_context
 
 _logger = logging.getLogger("minibot.rag_tools")
 
@@ -34,6 +34,7 @@ class RagTools:
         return [
             ToolBinding(tool=self._index_schema(), handler=self._handle_index),
             ToolBinding(tool=self._search_schema(), handler=self._handle_search),
+            ToolBinding(tool=self._delete_schema(), handler=self._handle_delete),
         ]
 
     def _index_schema(self) -> Tool:
@@ -94,6 +95,30 @@ class RagTools:
 
         _logger.info("rag indexed", extra={"document_id": document_id, "chunks": chunks})
         return {"document_id": document_id, "chunks_indexed": chunks}
+
+    def _delete_schema(self) -> Tool:
+        return Tool(
+            name="rag_delete",
+            description=load_tool_description("rag_delete"),
+            parameters=strict_object(
+                properties={
+                    "document_id": nullable_string("Delete all chunks for this document."),
+                    "user_id": nullable_string("Delete all chunks tagged with this user scope."),
+                    "agent_id": nullable_string("Delete all chunks tagged with this agent scope."),
+                },
+                required=[],
+            ),
+        )
+
+    async def _handle_delete(self, payload: dict[str, Any], _context: ToolContext) -> dict[str, Any]:
+        await delete_document(
+            client=self._qdrant,
+            collection=self._config.collection_name,
+            document_id=optional_str(payload.get("document_id")),
+            user_id=optional_str(payload.get("user_id")),
+            agent_id=optional_str(payload.get("agent_id")),
+        )
+        return {"deleted": True}
 
     async def _handle_search(self, payload: dict[str, Any], _context: ToolContext) -> dict[str, Any]:
         query = require_non_empty_str(payload, "query")

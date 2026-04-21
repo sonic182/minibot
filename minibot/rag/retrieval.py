@@ -4,7 +4,6 @@ import uuid
 from typing import Any
 
 from minibot.adapters.qdrant.client import AsyncQdrantClient
-
 from minibot.rag.chunking import chunk_text
 from minibot.rag.embeddings import embed_text, embed_texts
 
@@ -58,6 +57,26 @@ async def index_document(
 
     await client.upsert_points(collection, points)
     return len(points)
+
+
+async def delete_document(
+    *,
+    client: AsyncQdrantClient,
+    collection: str,
+    document_id: str | None = None,
+    user_id: str | None = None,
+    agent_id: str | None = None,
+) -> None:
+    conditions: list[dict[str, Any]] = []
+    if document_id:
+        conditions.append({"key": "document_id", "match": {"value": document_id}})
+    if user_id:
+        conditions.append({"key": "user_id", "match": {"value": user_id}})
+    if agent_id:
+        conditions.append({"key": "agent_id", "match": {"value": agent_id}})
+    if not conditions:
+        raise ValueError("at least one of document_id, user_id, or agent_id is required")
+    await client.delete_by_filter(collection, {"must": conditions})
 
 
 async def retrieve_context(
