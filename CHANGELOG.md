@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-21
+
 ### Added
 
 - `wait` tool: pauses execution for a given number of milliseconds (clamped to `[tools.wait].max_milliseconds`, default 30 000 ms). Useful for browser automation and human-paced interaction flows.
@@ -324,7 +326,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.2.0..HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.3.0..HEAD
+[0.3.0]: https://github.com/sonic182/minibot/compare/0.2.0..0.3.0
 [0.2.0]: https://github.com/sonic182/minibot/compare/0.1.1..0.2.0
 [0.1.1]: https://github.com/sonic182/minibot/compare/0.1.0..0.1.1
 [0.1.0]: https://github.com/sonic182/minibot/compare/0.0.9..0.1.0
