@@ -140,6 +140,10 @@ Tool Surface
      - ``mcp_<server>__<remote_tool>``
      - ``[tools.mcp]``
      - Dynamically discovered Model Context Protocol tools.
+   * - RAG / vector store
+     - ``rag_index``, ``rag_search``
+     - ``[tools.rag]``
+     - Index text files into Qdrant and retrieve semantically relevant chunks.
 
 Runtime Notes
 -------------
@@ -149,6 +153,7 @@ Runtime Notes
 - ``[tools.audio_transcription]`` requires the ``stt`` extra: ``poetry install --extras stt``.
 - ``[tools.mcp]`` requires the ``mcp`` extra: ``poetry install --extras mcp``.
 - ``[tools.tasks]`` requires the ``rabbitmq`` extra and ``[rabbitmq].enabled = true``.
+- ``[tools.rag]`` requires torch and sentence-transformers installed manually and a running Qdrant instance; see :doc:`rag`.
 - Hidden compatibility aliases are normalized at execution time; prefer the public names in the table.
 
 Implementation Reference
