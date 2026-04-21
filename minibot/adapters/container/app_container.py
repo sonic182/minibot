@@ -165,7 +165,8 @@ class AppContainer:
 
         cfg = settings.tools.rag
         client = AsyncQdrantClient(url=cfg.qdrant_url)
-        await client.ensure_collection(cfg.collection_name, cfg.embedding.dim)
+        vector_size = cfg.embedding.truncate_dim if cfg.embedding.truncate_dim is not None else cfg.embedding.dim
+        await client.ensure_collection(cfg.collection_name, vector_size)
 
     @classmethod
     async def _apply_runtime_token_autoconfig_if_needed(cls) -> None:
