@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from minibot.adapters.qdrant.client import AsyncQdrantClient
+
 from minibot.rag.chunking import chunk_text
 from minibot.rag.embeddings import embed_text, embed_texts
 
@@ -42,7 +44,7 @@ async def index_document(
 
     points = [
         {
-            "id": f"{document_id}:{idx}",
+            "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{document_id}:{idx}")),
             "vector": vectors[idx],
             "payload": {
                 **payload_base,
