@@ -11,6 +11,8 @@ tools_allow:
   - read_file
   - code_read
   - calculate_expression
+  - rag_index
+  - rag_search
   - pre_response
 ---
 

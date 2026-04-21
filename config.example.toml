@@ -216,7 +216,7 @@ chunk_overlap = 120
 search_limit = 5
 
 [tools.rag.embedding]
-model = "sentence-transformers/all-MiniLM-L6-v2"
+model = "sentence-transformers/all-MiniLM-L12-v2"
 dim = 384
 # truncate_dim = 256  # Uncomment for Matryoshka embedding truncation (must be <= dim)
 

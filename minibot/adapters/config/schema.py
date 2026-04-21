@@ -551,7 +551,7 @@ class TaskToolConfig(BaseModel):
 
 
 class RagEmbeddingConfig(BaseModel):
-    model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    model: str = "sentence-transformers/all-MiniLM-L12-v2"
     dim: int = 384
     truncate_dim: int | None = None
 

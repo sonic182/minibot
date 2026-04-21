@@ -21,7 +21,7 @@ async def index_document(
     chat_id: str | None = None,
     chunk_size: int = 800,
     chunk_overlap: int = 120,
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+    embedding_model: str = "sentence-transformers/all-MiniLM-L12-v2",
     truncate_dim: int | None = None,
 ) -> int:
     raw_chunks = chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
@@ -67,7 +67,7 @@ async def retrieve_context(
     document_id: str | None = None,
     user_id: str | None = None,
     agent_id: str | None = None,
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+    embedding_model: str = "sentence-transformers/all-MiniLM-L12-v2",
     truncate_dim: int | None = None,
 ) -> list[dict[str, Any]]:
     vector = await embed_text(embedding_model, truncate_dim, query)
