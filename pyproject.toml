@@ -42,11 +42,10 @@ telegramify-markdown = "^0.5.4"
 faster-whisper = {version = ">=1.0.0,<2.0.0", optional = true}
 aio-pika = {version = ">=9.6.2", optional = true}
 aiopipe = {version = ">=0.2.2", optional = true}
-sentence-transformers = {version = ">=3.0.0,<6.0.0", optional = true}
-numpy = {version = ">=1.26.0,<3.0.0", optional = true}
-# torch is not pinned here — install it before `poetry install --extras rag`:
-#   CPU: pip install torch --index-url https://download.pytorch.org/whl/cpu
-#   GPU: pip install torch  (default PyPI wheel includes CUDA)
+# RAG deps (sentence-transformers, torch) are not managed by Poetry.
+# Install manually before running minibot with [tools.rag] enabled:
+#   CPU: pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install sentence-transformers
+#   GPU: pip install torch && pip install sentence-transformers
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"
@@ -68,7 +67,6 @@ minibot-console = "minibot.app.console:main"
 mcp = ["mcp"]
 stt = ["faster-whisper"]
 rabbitmq = ["aio-pika", "aiopipe"]
-rag = ["sentence-transformers", "numpy"]
 
 
 [build-system]
