@@ -1,0 +1,12 @@
+Search the vector store for text chunks semantically similar to `query`.
+
+Embeds the query and returns the top-k most relevant chunks with their similarity score,
+raw text, and stored metadata (source_name, document_id, chunk_index, etc.).
+
+Use this tool after indexing a large file with `rag_index`, or whenever the user asks
+a question that could be answered from previously indexed documents.
+
+Optional filters:
+- `document_id` — restrict search to a single document.
+- `user_id` / `agent_id` — restrict to chunks tagged with these values.
+- `limit` — number of results (default configured server-side, usually 5).

@@ -234,6 +234,15 @@ def _build_task_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> l
     ).bindings()
 
 
+def _build_rag_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
+    from minibot.adapters.qdrant.client import AsyncQdrantClient
+    from minibot.llm.tools.rag_tools import RagTools
+
+    cfg = context.settings.tools.rag
+    qdrant = AsyncQdrantClient(url=cfg.qdrant_url)
+    return RagTools(config=cfg, qdrant=qdrant, storage=context.managed_storage).bindings()
+
+
 def _build_agent_delegate_feature(context: ToolAssemblyContext, tools: list[ToolBinding]) -> list[ToolBinding]:
     if context.agent_registry is None or context.llm_factory is None or context.agent_registry.is_empty():
         return []
@@ -351,6 +360,12 @@ _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (
         labels=("tasks",),
         enabled_in_config=_tasks_enabled,
         builder=_build_task_feature,
+    ),
+    ToolFeature(
+        key="rag",
+        labels=("rag_index", "rag_search"),
+        enabled_in_config=lambda settings: _tool_enabled(settings, "rag"),
+        builder=_build_rag_feature,
     ),
     ToolFeature(
         key="agent_delegate",

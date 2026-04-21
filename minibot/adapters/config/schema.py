@@ -550,6 +550,22 @@ class TaskToolConfig(BaseModel):
     enabled: bool = False
 
 
+class RagEmbeddingConfig(BaseModel):
+    model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    dim: int = 384
+    truncate_dim: int | None = None
+
+
+class RagToolConfig(BaseModel):
+    enabled: bool = False
+    qdrant_url: str = "http://localhost:6333"
+    collection_name: str = "minibot_chunks"
+    embedding: RagEmbeddingConfig = RagEmbeddingConfig()
+    chunk_size: int = 800
+    chunk_overlap: int = 120
+    search_limit: int = 5
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
@@ -566,6 +582,7 @@ class ToolsConfig(BaseModel):
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
     tasks: TaskToolConfig = Field(default_factory=TaskToolConfig)
+    rag: RagToolConfig = RagToolConfig()
 
 
 class RabbitMQConsumerConfig(BaseModel):

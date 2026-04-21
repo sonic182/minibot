@@ -204,6 +204,22 @@ default_owner_id = "primary"
 [tools.tasks]
 enabled = false
 
+# Optional RAG (Retrieval-Augmented Generation) via Qdrant.
+# Requires the `rag` extra: poetry install --extras rag
+# Run Qdrant locally: ./qdrant/qdrant  (see qdrant/download_bin.sh)
+[tools.rag]
+enabled = false
+qdrant_url = "http://localhost:6333"
+collection_name = "minibot_chunks"
+chunk_size = 800
+chunk_overlap = 120
+search_limit = 5
+
+[tools.rag.embedding]
+model = "sentence-transformers/all-MiniLM-L6-v2"
+dim = 384
+# truncate_dim = 256  # Uncomment for Matryoshka embedding truncation (must be <= dim)
+
 # Optional HTTP fetch tool.
 [tools.http_client]
 enabled = false

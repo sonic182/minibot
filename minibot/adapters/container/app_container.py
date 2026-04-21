@@ -154,6 +154,18 @@ class AppContainer:
             await cls._initialize_backend(cls._kv_memory_backend)
         if cls._prompt_store is not None:
             await cls._initialize_backend(cls._prompt_store)
+        await cls._initialize_qdrant_if_enabled()
+
+    @classmethod
+    async def _initialize_qdrant_if_enabled(cls) -> None:
+        settings = cls.get_settings()
+        if not settings.tools.rag.enabled:
+            return
+        from minibot.adapters.qdrant.client import AsyncQdrantClient
+
+        cfg = settings.tools.rag
+        client = AsyncQdrantClient(url=cfg.qdrant_url)
+        await client.ensure_collection(cfg.collection_name, cfg.embedding.dim)
 
     @classmethod
     async def _apply_runtime_token_autoconfig_if_needed(cls) -> None:
