@@ -1,12 +1,15 @@
 import sys
+import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+_pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+
 project = 'minibot'
 copyright = '2026, sonic182'
 author = 'sonic182'
-release = '0.2.0'
+release = _pyproject["tool"]["poetry"]["version"]
 
 extensions = [
     'sphinx.ext.autodoc',
