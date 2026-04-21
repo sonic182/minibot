@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- RAG integration via Qdrant: `rag_index` tool chunks and embeds a text file into a Qdrant vector store; `rag_search` tool retrieves semantically relevant passages for a query. Backed by `sentence-transformers` (default model: `all-MiniLM-L12-v2`, 384d) running via `asyncio.to_thread` for non-blocking embedding. Model is lazy-loaded on first use.
+- `minibot/adapters/qdrant/AsyncQdrantClient`: thin async Qdrant HTTP client built on aiosonic (no `qdrant-client` dependency) supporting collection bootstrap, point upsert, vector search, and delete-by-document-id.
+- `minibot/rag/` package: `chunking.py` (character-based overlap chunking), `embeddings.py` (lazy sentence-transformers with Matryoshka `truncate_dim` support), `retrieval.py` (high-level `index_document` / `retrieve_context`).
+- `[tools.rag]` config block with `qdrant_url`, `collection_name`, `chunk_size`, `chunk_overlap`, `search_limit`, and nested `[tools.rag.embedding]` (`model`, `dim`, `truncate_dim`).
+- `rag` Poetry extra (`sentence-transformers`, `numpy`); torch is not pinned — install CPU or GPU wheel separately before `poetry install --extras rag`.
+- `qdrant/download_bin.sh`: script to download the Qdrant binary for the current platform (macOS x86_64/arm64, Linux x86_64/aarch64) as a lightweight alternative to Docker.
+- Qdrant service added to `docker-compose.yml` (disabled by default, no other service depends on it).
+- `scripts/rag_clear_collection.sh`: one-liner to delete and reset a Qdrant collection; collection is recreated automatically on next startup.
+
 ## [0.3.0] - 2026-04-21
 
 ### Added
