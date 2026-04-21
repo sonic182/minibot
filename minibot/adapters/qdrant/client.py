@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+from urllib.parse import quote
+
+import aiosonic
+
+
+class AsyncQdrantClient:
+    def __init__(self, url: str) -> None:
+        self._url = url.rstrip("/")
+        self._client = aiosonic.HTTPClient()
+
+    async def ensure_collection(self, collection_name: str, vector_size: int) -> None:
+        encoded_collection = _encode_path_segment(collection_name)
+        response = await self._request("GET", f"/collections/{encoded_collection}", allow_not_found=True)
+        if response is not None:
+            return
+
+        await self._request(
+            "PUT",
+            f"/collections/{encoded_collection}",
+            payload={"vectors": {"size": vector_size, "distance": "Cosine"}},
+        )
+
+    async def upsert_points(self, collection_name: str, points: list[dict[str, Any]]) -> None:
+        encoded_collection = _encode_path_segment(collection_name)
+        await self._request(
+            "PUT",
+            f"/collections/{encoded_collection}/points?wait=true",
+            payload={"points": points},
+        )
+
+    async def search(
+        self,
+        collection_name: str,
+        vector: list[float],
+        *,
+        limit: int,
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        encoded_collection = _encode_path_segment(collection_name)
+        payload: dict[str, Any] = {
+            "vector": vector,
+            "limit": limit,
+            "with_payload": True,
+        }
+        if filters:
+            payload["filter"] = filters
+
+        response = await self._request("POST", f"/collections/{encoded_collection}/points/search", payload=payload)
+        result = response.get("result", [])
+        if not isinstance(result, list):
+            raise RuntimeError("qdrant search returned an unexpected response")
+        return result
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        allow_not_found: bool = False,
+    ) -> dict[str, Any] | None:
+        kwargs: dict[str, Any] = {"headers": {"Accept": "application/json"}}
+        if payload is not None:
+            kwargs["headers"]["Content-Type"] = "application/json"
+            kwargs["data"] = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        response = await self._client.request(f"{self._url}{path}", method=method, **kwargs)
+        body = await response.content()
+        if allow_not_found and response.status_code == 404:
+            return None
+        if response.status_code < 200 or response.status_code >= 300:
+            message = body.decode("utf-8", errors="replace")
+            raise RuntimeError(f"qdrant request failed: {response.status_code} {message}")
+        if not body:
+            return {}
+        return json.loads(body.decode("utf-8"))
+
+
+def _encode_path_segment(value: str) -> str:
+    return quote(value, safe="")

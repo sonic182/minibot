@@ -49,7 +49,8 @@ COPY pyproject.toml poetry.lock* ./
 RUN poetry install --no-ansi --all-extras --no-root
 
 COPY docker-requirements.txt ./
-RUN pip install --no-cache-dir -r docker-requirements.txt
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r docker-requirements.txt
 
 # Static infra — only rebuilds if UIDs or paths change
 RUN groupadd --gid 1000 minibot \
