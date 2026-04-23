@@ -10,6 +10,7 @@ from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.qdrant.client import AsyncQdrantClient
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.rag_tools import RagTools, _normalize_string_list
+from minibot.rag.document_ingestion import IndexableDocument
 from minibot.rag.retrieval import _build_filters, list_metadata_facets
 
 
@@ -60,6 +61,7 @@ async def test_rag_index_defaults_user_and_chat_scope_from_context(
     assert result["chunks_indexed"] == 1
     assert captured["user_id"] == "7"
     assert captured["chat_id"] == "99"
+    assert captured["mime_type"] == "text/plain"
 
 
 @pytest.mark.asyncio
@@ -147,6 +149,39 @@ async def test_rag_index_allows_absolute_path_only_when_storage_allows_outside_r
     )
 
     assert captured["source_name"] == "shared.txt"
+
+
+@pytest.mark.asyncio
+async def test_rag_index_extracts_pdf_content_and_sets_pdf_mime_type(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _storage(tmp_path)
+    pdf_path = tmp_path / "docs" / "report.pdf"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4")
+    tool = _tool(storage)
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_index")
+    captured: dict[str, Any] = {}
+
+    def _fake_extract(_path: Path) -> IndexableDocument:
+        return IndexableDocument(text="[PAGE 1]\nhello pdf", mime_type="application/pdf")
+
+    async def _fake_index_document(**kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.extract_indexable_document", _fake_extract)
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.index_document", _fake_index_document)
+
+    result = await binding.handler(
+        {"file_path": "docs/report.pdf"},
+        ToolContext(owner_id="owner", channel="telegram", chat_id=99, user_id=7),
+    )
+
+    assert result["chunks_indexed"] == 1
+    assert captured["text"] == "[PAGE 1]\nhello pdf"
+    assert captured["mime_type"] == "application/pdf"
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from typing import Any
@@ -13,6 +14,7 @@ from minibot.llm.tools.arg_utils import int_with_default, optional_str, require_
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_integer, nullable_string, strict_object
+from minibot.rag.document_ingestion import extract_indexable_document
 from minibot.rag.retrieval import delete_document, index_document, list_metadata_facets, retrieve_context
 
 _logger = logging.getLogger("minibot.rag_tools")
@@ -43,7 +45,7 @@ class RagTools:
             description=load_tool_description("rag_index"),
             parameters=strict_object(
                 properties={
-                    "file_path": {"type": "string", "description": "Path to the text file to index."},
+                    "file_path": {"type": "string", "description": "Path to the text or PDF file to index."},
                     "document_id": nullable_string("Stable identifier for this document. Auto-generated if omitted."),
                     "source_name": nullable_string("Human-readable label stored with each chunk."),
                     "user_id": nullable_string("Optional user scope tag."),
@@ -78,7 +80,7 @@ class RagTools:
     async def _handle_index(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         file_path_raw = require_non_empty_str(payload, "file_path")
         file_path = self._resolve_path(file_path_raw)
-        text = file_path.read_text(encoding="utf-8", errors="replace")
+        document = await asyncio.to_thread(extract_indexable_document, file_path)
 
         document_id = optional_str(payload.get("document_id")) or _hash_path(file_path_raw)
         source_name = optional_str(payload.get("source_name")) or file_path.name
@@ -87,8 +89,10 @@ class RagTools:
             client=self._qdrant,
             collection=self._config.collection_name,
             document_id=document_id,
-            text=text,
+            text=document.text,
             source_name=source_name,
+            source_type=document.source_type,
+            mime_type=document.mime_type,
             user_id=_scope_value(payload.get("user_id"), context.user_id),
             agent_id=optional_str(payload.get("agent_id")),
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
