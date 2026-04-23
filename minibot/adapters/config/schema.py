@@ -480,6 +480,10 @@ class BashToolConfig(BaseModel):
     max_output_bytes: ByteSizeValue = 128000
     pass_parent_env: bool = True
     env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"])
+    spill_to_managed_file: bool = False
+    spill_after_chars: PositiveInt = 2000
+    spill_preview_chars: PositiveInt = 500
+    spill_subdir: str = "bash_output/tmp"
 
 
 class ApplyPatchToolConfig(BaseModel):
