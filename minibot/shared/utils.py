@@ -23,3 +23,13 @@ def humanize_token_count(value: int) -> str:
         return str(value)
     short = f"{value / 1000:.1f}".rstrip("0").rstrip(".")
     return f"{short}k"
+
+
+def summarize_items(items: list[str], *, preview_limit: int = 3) -> dict[str, object]:
+    normalized = [item for item in items if item]
+    preview = normalized[:preview_limit]
+    suffix = ", ..." if len(normalized) > preview_limit else ""
+    return {
+        "count": len(normalized),
+        "preview": ", ".join(preview) + suffix if preview else "none",
+    }

@@ -8,6 +8,7 @@ from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.dispatcher import Dispatcher
 from minibot.llm.tools.factory import configured_tool_labels
+from minibot.shared.utils import summarize_items
 
 try:
     from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
@@ -20,10 +21,18 @@ async def run() -> None:
     await AppContainer.initialize_storage()
     logger = AppContainer.get_logger()
     settings = AppContainer.get_settings()
+    strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     enabled_tools = configured_tool_labels(settings)
+    tool_log_extra: dict[str, Any] = {"tools_enabled": enabled_tools or ["none"]}
+    if strip_logs:
+        tool_summary = summarize_items(enabled_tools)
+        tool_log_extra = {
+            "tools_enabled_count": tool_summary["count"],
+            "tools_enabled_preview": tool_summary["preview"],
+        }
     logger.info(
         "tool configuration loaded",
-        extra={"tools_enabled": enabled_tools or ["none"]},
+        extra=tool_log_extra,
     )
     logger.info("booting minibot", extra={"component": "daemon"})
     event_bus = AppContainer.get_event_bus()

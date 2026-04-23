@@ -19,7 +19,7 @@ from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopTo
 from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 from minibot.llm.tools.factory import build_enabled_tools
-from minibot.shared.utils import humanize_token_count
+from minibot.shared.utils import humanize_token_count, summarize_items
 
 
 class Dispatcher:
@@ -86,10 +86,18 @@ class Dispatcher:
         )
         self._handler = LLMMessageHandler(turn_service)
         self._logger = logging.getLogger("minibot.dispatcher")
+        strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
         self._main_agent_tool_names = sorted(binding.tool.name for binding in main_agent_tools_view.tools)
+        main_tools_log_extra: dict[str, object] = {"main_agent_tools_enabled": self._main_agent_tool_names or ["none"]}
+        if strip_logs:
+            tool_summary = summarize_items(self._main_agent_tool_names)
+            main_tools_log_extra = {
+                "main_agent_tools_count": tool_summary["count"],
+                "main_agent_tools_preview": tool_summary["preview"],
+            }
         self._logger.info(
             "main agent tool configuration loaded",
-            extra={"main_agent_tools_enabled": self._main_agent_tool_names or ["none"]},
+            extra=main_tools_log_extra,
         )
         if not skill_registry.is_empty():
             self._logger.info(
@@ -103,12 +111,20 @@ class Dispatcher:
                 for binding in tools
                 if binding.tool.name.startswith(mcp_prefix) and "__" in binding.tool.name
             )
+            mcp_log_extra: dict[str, object] = {
+                "mcp_servers_configured": len(settings.tools.mcp.servers),
+                "mcp_tools_enabled": mcp_tool_names or ["none"],
+            }
+            if strip_logs:
+                tool_summary = summarize_items(mcp_tool_names)
+                mcp_log_extra = {
+                    "mcp_servers_configured": len(settings.tools.mcp.servers),
+                    "mcp_tools_count": tool_summary["count"],
+                    "mcp_tools_preview": tool_summary["preview"],
+                }
             self._logger.info(
                 "mcp tool configuration loaded",
-                extra={
-                    "mcp_servers_configured": len(settings.tools.mcp.servers),
-                    "mcp_tools_enabled": mcp_tool_names or ["none"],
-                },
+                extra=mcp_log_extra,
             )
         if main_agent_tools_view.hidden_tool_names:
             self._logger.info(

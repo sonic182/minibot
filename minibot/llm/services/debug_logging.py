@@ -5,9 +5,17 @@ import logging
 from typing import Any
 
 _MAX_PREVIEW_CHARS = 4000
+_STRIPPED_RESPONSE_ORIGINAL_CHARS = 70
 
 
-def log_provider_response(*, logger: logging.Logger, response: Any, context: str, provider_name: str) -> None:
+def log_provider_response(
+    *,
+    logger: logging.Logger,
+    response: Any,
+    context: str,
+    provider_name: str,
+    strip_logs: bool = False,
+) -> None:
     original = getattr(response, "original", None)
     message = getattr(response, "main_response", None)
     message_original = getattr(message, "original", None) if message is not None else None
@@ -19,7 +27,7 @@ def log_provider_response(*, logger: logging.Logger, response: Any, context: str
         extra={
             "context": context,
             "provider": provider_name,
-            "response_original": _safe_dump(original),
+            "response_original": _dump_response_original(original, strip_logs=strip_logs),
             "message_original": _safe_dump(message_original),
             "message_content_type": type(content).__name__ if content is not None else "NoneType",
             "message_content_preview": _preview_content(content),
@@ -53,14 +61,20 @@ def _preview_content(content: Any) -> str:
     return _truncate(str(content))
 
 
-def _safe_dump(value: Any) -> str:
+def _dump_response_original(value: Any, *, strip_logs: bool) -> str:
+    if not strip_logs:
+        return _safe_dump(value)
+    return _safe_dump(value, max_chars=_STRIPPED_RESPONSE_ORIGINAL_CHARS, suffix="...")
+
+
+def _safe_dump(value: Any, *, max_chars: int = _MAX_PREVIEW_CHARS, suffix: str = "...<truncated>") -> str:
     try:
-        return _truncate(json.dumps(value, ensure_ascii=True, default=str))
+        return _truncate(json.dumps(value, ensure_ascii=True, default=str), max_chars=max_chars, suffix=suffix)
     except Exception:
-        return _truncate(str(value))
+        return _truncate(str(value), max_chars=max_chars, suffix=suffix)
 
 
-def _truncate(value: str) -> str:
-    if len(value) <= _MAX_PREVIEW_CHARS:
+def _truncate(value: str, *, max_chars: int = _MAX_PREVIEW_CHARS, suffix: str = "...<truncated>") -> str:
+    if len(value) <= max_chars:
         return value
-    return f"{value[:_MAX_PREVIEW_CHARS]}...<truncated>"
+    return f"{value[:max_chars]}{suffix}"
