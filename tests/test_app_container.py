@@ -106,3 +106,17 @@ async def test_app_container_configures_and_initializes_backends(monkeypatch: py
     sync_backend = _SyncBackend()
     await app_container.AppContainer._initialize_backend(sync_backend)
     assert sync_backend.initialized is True
+
+
+@pytest.mark.asyncio
+async def test_app_container_rejects_rag_without_file_storage() -> None:
+    from minibot.adapters.container import app_container
+
+    _reset_container(app_container)
+    settings = Settings(llm=LLMMConfig(api_key="secret"))
+    settings.tools.rag.enabled = True
+    settings.tools.file_storage.enabled = False
+    app_container.AppContainer._settings = settings
+
+    with pytest.raises(ValueError, match="tools.rag.enabled requires tools.file_storage.enabled"):
+        await app_container.AppContainer._initialize_qdrant_if_enabled()

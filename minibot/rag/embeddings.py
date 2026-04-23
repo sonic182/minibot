@@ -9,27 +9,29 @@ if TYPE_CHECKING:
 
 _model_lock = threading.Lock()
 _model_instance: SentenceTransformer | None = None
-_model_name: str | None = None
+_model_key: tuple[str, int | None] | None = None
 
 
 def _get_model(model_name: str, truncate_dim: int | None) -> Any:
-    global _model_instance, _model_name  # noqa: PLW0603
+    global _model_instance, _model_key  # noqa: PLW0603
 
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError as exc:
         raise RuntimeError(
             "sentence-transformers is required for RAG. "
-            "Install with `poetry install --extras rag` or `poetry install --all-extras`."
+            "Install the base project with `poetry install --all-extras`, then install "
+            "`torch` and `sentence-transformers` manually."
         ) from exc
 
+    model_key = (model_name, truncate_dim)
     with _model_lock:
-        if _model_instance is None or _model_name != model_name:
+        if _model_instance is None or _model_key != model_key:
             kwargs: dict[str, Any] = {}
             if truncate_dim is not None:
                 kwargs["truncate_dim"] = truncate_dim
             _model_instance = SentenceTransformer(model_name, **kwargs)
-            _model_name = model_name
+            _model_key = model_key
     return _model_instance
 
 

@@ -69,7 +69,7 @@ Setup
 Usage
 -----
 
-Once enabled, the bot has access to two tools:
+Once enabled, the bot has access to three tools:
 
 - **rag_index** — provide a file path (managed workspace or absolute). The bot reads the
   file, splits it into overlapping chunks, embeds each chunk, and upserts the vectors into
@@ -77,6 +77,9 @@ Once enabled, the bot has access to two tools:
 
 - **rag_search** — provide a natural language query. The bot embeds the query and returns
   the top-k most relevant chunks with their similarity score and source metadata.
+
+- **rag_delete** — remove indexed chunks by ``document_id`` and/or scope tags when the
+  data should no longer be searchable.
 
 Example interaction::
 
@@ -132,7 +135,7 @@ Configuration reference
      - Description
    * - ``enabled``
      - ``false``
-     - Enable ``rag_index`` and ``rag_search`` tools.
+     - Enable ``rag_index``, ``rag_search``, and ``rag_delete`` tools.
    * - ``qdrant_url``
      - ``http://localhost:6333``
      - Qdrant HTTP endpoint.
@@ -148,6 +151,9 @@ Configuration reference
    * - ``search_limit``
      - ``5``
      - Default number of results returned by ``rag_search``.
+   * - ``tools.file_storage.enabled``
+     - required
+     - RAG reads files through managed storage and inherits its path restrictions.
 
 ``[tools.rag.embedding]``
 

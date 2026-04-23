@@ -161,6 +161,8 @@ class AppContainer:
         settings = cls.get_settings()
         if not settings.tools.rag.enabled:
             return
+        if not settings.tools.file_storage.enabled:
+            raise ValueError("tools.rag.enabled requires tools.file_storage.enabled")
         from minibot.adapters.qdrant.client import AsyncQdrantClient
 
         cfg = settings.tools.rag

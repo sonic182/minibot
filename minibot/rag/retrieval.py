@@ -66,6 +66,7 @@ async def delete_document(
     document_id: str | None = None,
     user_id: str | None = None,
     agent_id: str | None = None,
+    chat_id: str | None = None,
 ) -> None:
     conditions: list[dict[str, Any]] = []
     if document_id:
@@ -74,8 +75,10 @@ async def delete_document(
         conditions.append({"key": "user_id", "match": {"value": user_id}})
     if agent_id:
         conditions.append({"key": "agent_id", "match": {"value": agent_id}})
+    if chat_id:
+        conditions.append({"key": "chat_id", "match": {"value": chat_id}})
     if not conditions:
-        raise ValueError("at least one of document_id, user_id, or agent_id is required")
+        raise ValueError("at least one of document_id, user_id, agent_id, or chat_id is required")
     await client.delete_by_filter(collection, {"must": conditions})
 
 
@@ -88,6 +91,7 @@ async def retrieve_context(
     document_id: str | None = None,
     user_id: str | None = None,
     agent_id: str | None = None,
+    chat_id: str | None = None,
     embedding_model: str = "sentence-transformers/all-MiniLM-L12-v2",
     truncate_dim: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -100,6 +104,8 @@ async def retrieve_context(
         conditions.append({"key": "user_id", "match": {"value": user_id}})
     if agent_id:
         conditions.append({"key": "agent_id", "match": {"value": agent_id}})
+    if chat_id:
+        conditions.append({"key": "chat_id", "match": {"value": chat_id}})
 
     filters = {"must": conditions} if conditions else None
 

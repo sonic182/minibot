@@ -205,7 +205,8 @@ default_owner_id = "primary"
 enabled = false
 
 # Optional RAG (Retrieval-Augmented Generation) via Qdrant.
-# Requires the `rag` extra: poetry install --extras rag
+# Requires `tools.file_storage.enabled = true`, a running Qdrant instance,
+# and manual `torch` + `sentence-transformers` installation.
 # Run Qdrant locally: ./qdrant/qdrant  (see qdrant/download_bin.sh)
 [tools.rag]
 enabled = false

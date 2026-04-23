@@ -8,5 +8,5 @@ a question that could be answered from previously indexed documents.
 
 Optional filters:
 - `document_id` — restrict search to a single document.
-- `user_id` / `agent_id` — restrict to chunks tagged with these values.
+- `user_id` / `agent_id` / `chat_id` — restrict to chunks tagged with these values.
 - `limit` — number of results (default configured server-side, usually 5).

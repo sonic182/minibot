@@ -141,7 +141,7 @@ Tool Surface
      - ``[tools.mcp]``
      - Dynamically discovered Model Context Protocol tools.
    * - RAG / vector store
-     - ``rag_index``, ``rag_search``
+     - ``rag_index``, ``rag_search``, ``rag_delete``
      - ``[tools.rag]``
      - Index text files into Qdrant and retrieve semantically relevant chunks.
 
