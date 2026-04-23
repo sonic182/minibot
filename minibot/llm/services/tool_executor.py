@@ -301,7 +301,6 @@ async def execute_tool_calls_for_runtime(
                     "call_id": call_id,
                     "owner_id": context.owner_id,
                     "argument_keys": sorted(arguments.keys()),
-                    "arguments": sanitize_tool_arguments_for_log(arguments),
                 },
             )
             raw_result = await binding.handler(arguments, context)

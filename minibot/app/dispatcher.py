@@ -158,7 +158,7 @@ class Dispatcher:
                     "event_id": event.event_id,
                     "chat_id": message.chat_id,
                     "user_id": message.user_id,
-                    "text": message.text,
+                    "text_length": len(message.text),
                 },
             )
             response = await self._handler.handle(event)
@@ -169,7 +169,7 @@ class Dispatcher:
                 extra={
                     "event_id": event.event_id,
                     "chat_id": response.chat_id,
-                    "text": response.text,
+                    "text_length": len(response.text),
                     "should_reply": should_reply,
                     "llm_provider": response.metadata.get("llm_provider"),
                     "llm_model": response.metadata.get("llm_model"),
