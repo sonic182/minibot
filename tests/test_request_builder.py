@@ -18,6 +18,7 @@ def _ctx(
         max_new_tokens=None,
         prompt_cache_enabled=True,
         prompt_cache_retention=None,
+        strip_logs=False,
         reasoning_effort=reasoning_effort,
         openrouter_models=(),
         openrouter_provider={},

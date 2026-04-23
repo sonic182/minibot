@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import signal
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from llm_async.models import Tool
 
@@ -14,6 +15,9 @@ from minibot.llm.tools.arg_utils import int_with_default, optional_str, require_
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_integer, nullable_string, strict_object
+
+if TYPE_CHECKING:
+    from minibot.adapters.files.local_storage import LocalFileStorage
 
 
 class BashTool:
@@ -27,13 +31,16 @@ class BashTool:
     - ``pass_parent_env`` — pass the full parent environment; when ``false``, only
       keys in ``env_allowlist`` are forwarded.
     - ``max_output_bytes`` — combined stdout+stderr cap; excess is truncated.
+    - ``spill_to_managed_file`` — when ``true``, output exceeding ``spill_after_chars``
+      is saved to a managed temp file instead of being returned inline.
 
     Returns ``ok``, ``exit_code``, ``stdout``, ``stderr``, ``timed_out``,
     ``truncated``, and ``duration_ms``.
     """
 
-    def __init__(self, config: BashToolConfig) -> None:
+    def __init__(self, config: BashToolConfig, storage: LocalFileStorage | None = None) -> None:
         self._config = config
+        self._storage = storage
 
     def bindings(self) -> list[ToolBinding]:
         return [ToolBinding(tool=self._schema(), handler=self._handle)]
@@ -97,9 +104,34 @@ class BashTool:
             await self._terminate_process(process)
             stdout_data, stderr_data = await process.communicate()
 
-        stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
         duration_ms = int((time.perf_counter() - started) * 1000)
         ok = process.returncode == 0 and not timed_out
+
+        if self._should_spill(stdout_data, stderr_data):
+            spill_info = self._save_spilled_output(command, stdout_data, stderr_data)
+            if spill_info is not None:
+                stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
+                preview_len = self._config.spill_preview_chars
+                return {
+                    "ok": ok,
+                    "exit_code": process.returncode,
+                    "stdout_storage": "managed_file",
+                    "stdout_file_path": spill_info["path"],
+                    "stdout_file_absolute_path": spill_info["absolute_path"],
+                    "stdout_bytes_written": spill_info["bytes_written"],
+                    "stdout_preview": (stdout_text + stderr_text)[:preview_len],
+                    "stdout_notice": (
+                        f"Output exceeded {self._config.spill_after_chars} chars and was saved to a managed temp file."
+                        " Use grep or read on stdout_file_absolute_path to inspect the full output."
+                    ),
+                    "timed_out": timed_out,
+                    "truncated": truncated,
+                    "duration_ms": duration_ms,
+                    "cwd": cwd,
+                    "command": command,
+                }
+
+        stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
 
         return {
             "ok": ok,
@@ -112,6 +144,28 @@ class BashTool:
             "cwd": cwd,
             "command": command,
         }
+
+    def _should_spill(self, stdout: bytes, stderr: bytes) -> bool:
+        return (
+            self._config.spill_to_managed_file
+            and self._storage is not None
+            and len(stdout) + len(stderr) > self._config.spill_after_chars
+        )
+
+    def _save_spilled_output(self, command: str, stdout: bytes, stderr: bytes) -> dict[str, str | int] | None:
+        try:
+            if self._storage is None:
+                return None
+            digest = hashlib.sha256(command.encode("utf-8")).hexdigest()[:8]
+            stem = f"bash-{digest}"
+            return self._storage.create_managed_temp_bytes_file(
+                subdir=self._config.spill_subdir,
+                stem=stem,
+                suffix=".txt",
+                content=stdout + stderr,
+            )
+        except Exception:  # noqa: BLE001
+            return None
 
     def _coerce_timeout(self, value: Any) -> int:
         return int_with_default(

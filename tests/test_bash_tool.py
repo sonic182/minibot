@@ -9,8 +9,19 @@ from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.bash import BashTool
 
 
-def _binding(config: BashToolConfig):
-    return {item.tool.name: item for item in BashTool(config).bindings()}["bash"]
+def _binding(config: BashToolConfig, storage=None):
+    return {item.tool.name: item for item in BashTool(config, storage=storage).bindings()}["bash"]
+
+
+class _FakeStorage:
+    """Minimal stand-in for LocalFileStorage used in spill tests."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def create_managed_temp_bytes_file(self, *, subdir: str, stem: str, suffix: str, content: bytes) -> dict:
+        self.calls.append({"subdir": subdir, "stem": stem, "suffix": suffix, "content": content})
+        return {"path": f"{subdir}/{stem}{suffix}", "absolute_path": f"/tmp/{stem}{suffix}", "bytes_written": len(content)}
 
 
 @pytest.mark.asyncio
@@ -118,3 +129,85 @@ async def test_bash_rejects_invalid_cwd() -> None:
             },
             ToolContext(),
         )
+
+
+# ---------------------------------------------------------------------------
+# Spill-to-managed-file tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bash_spills_large_output_to_managed_file() -> None:
+    storage = _FakeStorage()
+    config = BashToolConfig(spill_to_managed_file=True, spill_after_chars=10, spill_preview_chars=5)
+    binding = _binding(config, storage=storage)
+
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"command": "printf 'abcdefghijklmnopqrstuvwxyz'", "timeout_seconds": None, "cwd": None, "env": None},
+            ToolContext(),
+        ),
+    )
+
+    assert result["stdout_storage"] == "managed_file"
+    assert result["stdout_file_absolute_path"].endswith(".txt")
+    assert result["stdout_bytes_written"] > 0
+    assert len(result["stdout_preview"]) <= 5
+    assert "stdout_file_absolute_path" in result["stdout_notice"]
+    assert len(storage.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_bash_spill_disabled_by_default() -> None:
+    storage = _FakeStorage()
+    config = BashToolConfig()  # spill_to_managed_file=False by default
+    binding = _binding(config, storage=storage)
+
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"command": "printf 'x'%.0s {1..5000}", "timeout_seconds": None, "cwd": None, "env": None},
+            ToolContext(),
+        ),
+    )
+
+    assert "stdout" in result
+    assert "stdout_storage" not in result
+    assert len(storage.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_bash_spill_no_storage_falls_back_to_inline() -> None:
+    config = BashToolConfig(spill_to_managed_file=True, spill_after_chars=5)
+    binding = _binding(config, storage=None)
+
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"command": "printf 'abcdefghijklmnopqrstuvwxyz'", "timeout_seconds": None, "cwd": None, "env": None},
+            ToolContext(),
+        ),
+    )
+
+    assert "stdout" in result
+    assert "stdout_storage" not in result
+
+
+@pytest.mark.asyncio
+async def test_bash_no_spill_when_output_under_threshold() -> None:
+    storage = _FakeStorage()
+    config = BashToolConfig(spill_to_managed_file=True, spill_after_chars=10000)
+    binding = _binding(config, storage=storage)
+
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"command": "echo hi", "timeout_seconds": None, "cwd": None, "env": None},
+            ToolContext(),
+        ),
+    )
+
+    assert "stdout" in result
+    assert "stdout_storage" not in result
+    assert len(storage.calls) == 0
