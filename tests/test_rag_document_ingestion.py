@@ -19,6 +19,16 @@ def test_extract_indexable_document_reads_plain_text_file(tmp_path: Path) -> Non
     assert document.source_type == "file"
 
 
+def test_extract_indexable_document_reads_utf8_text_without_known_text_mime(tmp_path: Path) -> None:
+    path = tmp_path / "README"
+    path.write_text("hello world", encoding="utf-8")
+
+    document = extract_indexable_document(path)
+
+    assert document.text == "hello world"
+    assert document.mime_type == "text/plain"
+
+
 def test_extract_indexable_document_extracts_pdf_text_with_page_markers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -59,4 +69,12 @@ def test_extract_indexable_document_fails_when_pdf_has_no_extractable_text(
     monkeypatch.setattr("minibot.rag.document_ingestion._load_pdf_reader_class", lambda: _FakeReader)
 
     with pytest.raises(ValueError, match="OCR is not supported in v1"):
+        extract_indexable_document(path)
+
+
+def test_extract_indexable_document_rejects_binary_files(tmp_path: Path) -> None:
+    path = tmp_path / "archive.zip"
+    path.write_bytes(b"PK\x03\x04\x00binary")
+
+    with pytest.raises(ValueError, match="Only UTF-8 text and PDF files are supported"):
         extract_indexable_document(path)

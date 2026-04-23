@@ -29,6 +29,14 @@ async def index_document(
     truncate_dim: int | None = None,
 ) -> int:
     raw_chunks = chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
+    await delete_document(
+        client=client,
+        collection=collection,
+        document_id=document_id,
+        user_id=user_id,
+        agent_id=agent_id,
+        chat_id=chat_id,
+    )
     if not raw_chunks:
         return 0
 

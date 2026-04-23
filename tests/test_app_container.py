@@ -154,6 +154,10 @@ async def test_app_container_initializes_rag_payload_indexes(monkeypatch: pytest
 
     assert calls == [
         ("minibot_chunks", "vector:384"),
+        ("minibot_chunks", "document_id:keyword"),
+        ("minibot_chunks", "user_id:keyword"),
+        ("minibot_chunks", "agent_id:keyword"),
+        ("minibot_chunks", "chat_id:keyword"),
         ("minibot_chunks", "tags:keyword"),
         ("minibot_chunks", "categories:keyword"),
     ]

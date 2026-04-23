@@ -11,7 +11,7 @@ from minibot.adapters.qdrant.client import AsyncQdrantClient
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.rag_tools import RagTools, _normalize_string_list
 from minibot.rag.document_ingestion import IndexableDocument
-from minibot.rag.retrieval import _build_filters, list_metadata_facets
+from minibot.rag.retrieval import _build_filters, index_document, list_metadata_facets
 
 
 def _storage(root: Path, *, allow_outside_root: bool = False) -> LocalFileStorage:
@@ -292,6 +292,79 @@ async def test_rag_delete_normalizes_metadata_filters(monkeypatch: pytest.Monkey
 
     assert captured["tags"] == ["alpha"]
     assert captured["categories"] == ["docs"]
+
+
+@pytest.mark.asyncio
+async def test_index_document_deletes_existing_chunks_before_upsert(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, Any] | list[dict[str, Any]]]] = []
+
+    class _Client:
+        async def delete_by_filter(self, collection_name: str, filters: dict[str, Any]) -> None:
+            calls.append(("delete", {"collection_name": collection_name, "filters": filters}))
+
+        async def upsert_points(self, collection_name: str, points: list[dict[str, Any]]) -> None:
+            calls.append(("upsert", [{"collection_name": collection_name, "count": len(points)}]))
+
+    async def _fake_embed_texts(_model_name: str, _truncate_dim: int | None, texts: list[str]) -> list[list[float]]:
+        return [[0.1, 0.2] for _ in texts]
+
+    monkeypatch.setattr("minibot.rag.retrieval.embed_texts", _fake_embed_texts)
+
+    result = await index_document(
+        client=_Client(),  # type: ignore[arg-type]
+        collection="chunks",
+        document_id="doc-1",
+        text="hello world",
+        source_name="notes.txt",
+        user_id="user-1",
+        chat_id="chat-1",
+        embedding_model="mini",
+    )
+
+    assert result == 1
+    assert calls[0] == (
+        "delete",
+        {
+            "collection_name": "chunks",
+            "filters": {
+                "must": [
+                    {"key": "document_id", "match": {"value": "doc-1"}},
+                    {"key": "user_id", "match": {"value": "user-1"}},
+                    {"key": "chat_id", "match": {"value": "chat-1"}},
+                ]
+            },
+        },
+    )
+    assert calls[1] == ("upsert", [{"collection_name": "chunks", "count": 1}])
+
+
+@pytest.mark.asyncio
+async def test_index_document_deletes_existing_chunks_for_empty_reindex() -> None:
+    calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    class _Client:
+        async def delete_by_filter(self, collection_name: str, filters: dict[str, Any]) -> None:
+            calls.append(("delete", collection_name, filters))
+
+        async def upsert_points(self, collection_name: str, points: list[dict[str, Any]]) -> None:
+            calls.append(("upsert", collection_name, {"count": len(points)}))
+
+    result = await index_document(
+        client=_Client(),  # type: ignore[arg-type]
+        collection="chunks",
+        document_id="doc-1",
+        text="   ",
+        source_name="notes.txt",
+    )
+
+    assert result == 0
+    assert calls == [
+        (
+            "delete",
+            "chunks",
+            {"must": [{"key": "document_id", "match": {"value": "doc-1"}}]},
+        )
+    ]
 
 
 def test_normalize_string_list_rejects_non_list() -> None:
