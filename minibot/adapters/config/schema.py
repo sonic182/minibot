@@ -562,14 +562,24 @@ class RagEmbeddingConfig(BaseModel):
     truncate_dim: int | None = None
 
 
+class RagRerankConfig(BaseModel):
+    enabled: bool = False
+    model: str = "cross-encoder/ms-marco-MiniLM-L2-v2"
+    candidate_limit: PositiveInt = 50
+    max_results: PositiveInt = 7
+
+
 class RagToolConfig(BaseModel):
     enabled: bool = False
     qdrant_url: str = "http://localhost:6333"
     collection_name: str = "minibot_chunks"
     embedding: RagEmbeddingConfig = RagEmbeddingConfig()
+    rerank: RagRerankConfig = RagRerankConfig()
     chunk_size: int = 800
     chunk_overlap: int = 120
     search_limit: int = 5
+    truncate_result_chars: bool = False
+    max_result_chars: PositiveInt = 6000
 
 
 class ToolsConfig(BaseModel):

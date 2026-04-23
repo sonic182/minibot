@@ -3,7 +3,8 @@ RAG (Retrieval-Augmented Generation)
 
 MiniBot can index text documents into a `Qdrant <https://qdrant.tech>`_ vector store and
 retrieve semantically relevant passages at query time using
-`sentence-transformers <https://www.sbert.net>`_.
+`sentence-transformers <https://www.sbert.net>`_. It can also optionally rerank the semantic
+candidate set with a cross-encoder for higher precision on the final results.
 
 This is useful when:
 
@@ -32,6 +33,9 @@ Setup
    .. code-block:: bash
 
       pip install sentence-transformers
+
+   Reranking uses ``sentence-transformers.CrossEncoder`` from this same install family, so
+   no separate package is needed beyond ``torch`` and ``sentence-transformers``.
 
 3. **Start Qdrant**
 
@@ -64,6 +68,12 @@ Setup
       dim = 384
       # truncate_dim = 256  # Matryoshka truncation — see below
 
+      [tools.rag.rerank]
+      enabled = false
+      model = "cross-encoder/ms-marco-MiniLM-L2-v2"
+      candidate_limit = 50
+      max_results = 7
+
    On startup, MiniBot creates the Qdrant collection automatically if it does not exist.
 
 Usage
@@ -77,7 +87,10 @@ Once enabled, the bot has access to four tools:
 
 - **rag_search** — provide a natural language query. The bot embeds the query and returns
   the top-k most relevant chunks with their similarity score and source metadata. Optional
-  ``tags`` and ``categories`` filters match any of the provided values.
+  ``tags`` and ``categories`` filters match any of the provided values. When reranking is
+  enabled, MiniBot first pulls a larger semantic candidate set from Qdrant, reranks it with
+  a cross-encoder, then returns only the final top results. Reranked responses use ``score``
+  for the rerank score and also include ``semantic_score`` from Qdrant.
 
 - **rag_list_metadata** — list available ``tags`` and ``categories`` values, with counts,
   so the bot can choose real filters before calling ``rag_search``.
@@ -155,7 +168,7 @@ Configuration reference
      - Character overlap between consecutive chunks.
    * - ``search_limit``
      - ``5``
-     - Default number of results returned by ``rag_search``.
+     - Default final number of results returned by ``rag_search`` when ``limit`` is omitted.
    * - ``tags`` / ``categories``
      - optional
      - LLM-supplied string lists stored on each chunk; values are trimmed, lowercased,
@@ -163,6 +176,30 @@ Configuration reference
    * - ``tools.file_storage.enabled``
      - required
      - RAG reads files through managed storage and inherits its path restrictions.
+
+``[tools.rag.rerank]``
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Key
+     - Default
+     - Description
+   * - ``enabled``
+     - ``false``
+     - Enable cross-encoder reranking after the initial semantic Qdrant search.
+   * - ``model``
+     - ``cross-encoder/ms-marco-MiniLM-L2-v2``
+     - Cross-encoder model ID loaded lazily on first reranked search.
+   * - ``candidate_limit``
+     - ``50``
+     - Number of semantic candidates to fetch before reranking. MiniBot always fetches at least
+       the requested final result count even if this value is smaller.
+   * - ``max_results``
+     - ``7``
+     - Hard cap on final returned results when reranking is enabled. ``rag_search.limit`` and
+       ``tools.rag.search_limit`` still define the requested final result count before this cap.
 
 ``[tools.rag.embedding]``
 

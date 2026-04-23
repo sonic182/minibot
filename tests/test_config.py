@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from minibot.adapters.config.loader import load_settings
-from minibot.adapters.config.schema import SkillsToolConfig
+from minibot.adapters.config.schema import RagToolConfig, SkillsToolConfig
 
 
 def test_load_settings_from_file(tmp_path: Path) -> None:
@@ -104,6 +104,15 @@ preload_catalog = true
 
 def test_skills_preload_catalog_defaults_false() -> None:
     assert SkillsToolConfig().preload_catalog is False
+
+
+def test_rag_rerank_defaults() -> None:
+    config = RagToolConfig()
+
+    assert config.rerank.enabled is False
+    assert config.rerank.model == "cross-encoder/ms-marco-MiniLM-L2-v2"
+    assert config.rerank.candidate_limit == 50
+    assert config.rerank.max_results == 7
 
 
 def test_load_settings_accepts_human_readable_byte_sizes(tmp_path: Path) -> None:
@@ -239,6 +248,38 @@ auto_transcribe_max_duration_seconds = 30
     assert settings.tools.audio_transcription.vad_filter is False
     assert settings.tools.audio_transcription.auto_transcribe_short_incoming is True
     assert settings.tools.audio_transcription.auto_transcribe_max_duration_seconds == 30
+
+
+def test_load_settings_rag_rerank_config(tmp_path: Path) -> None:
+    config_file = tmp_path / "bot.toml"
+    config_file.write_text(
+        """
+[llm]
+provider = "openai"
+api_key = "secret"
+
+[channels.telegram]
+bot_token = "token"
+
+[tools.rag]
+enabled = true
+search_limit = 5
+
+[tools.rag.rerank]
+enabled = true
+model = "cross-encoder/custom"
+candidate_limit = 20
+max_results = 6
+"""
+    )
+
+    settings = load_settings(config_file)
+    assert settings.tools.rag.enabled is True
+    assert settings.tools.rag.search_limit == 5
+    assert settings.tools.rag.rerank.enabled is True
+    assert settings.tools.rag.rerank.model == "cross-encoder/custom"
+    assert settings.tools.rag.rerank.candidate_limit == 20
+    assert settings.tools.rag.rerank.max_results == 6
 
 
 def test_load_settings_rejects_invalid_xai_limits(tmp_path: Path) -> None:

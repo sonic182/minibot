@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any
 
 from minibot.adapters.qdrant.client import AsyncQdrantClient
 from minibot.rag.chunking import chunk_text
 from minibot.rag.embeddings import embed_text, embed_texts
+from minibot.rag.reranking import rerank_texts
+
+_logger = logging.getLogger("minibot.rag.retrieval")
 
 
 async def index_document(
@@ -110,6 +114,10 @@ async def retrieve_context(
     categories: list[str] | None = None,
     embedding_model: str = "sentence-transformers/all-MiniLM-L12-v2",
     truncate_dim: int | None = None,
+    rerank_enabled: bool = False,
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L2-v2",
+    rerank_candidate_limit: int = 50,
+    rerank_max_results: int = 7,
 ) -> list[dict[str, Any]]:
     vector = await embed_text(embedding_model, truncate_dim, query)
     filters = _build_filters(
@@ -121,14 +129,73 @@ async def retrieve_context(
         categories=categories,
     )
 
-    results = await client.search(collection, vector, limit=limit, filters=filters)
+    if not rerank_enabled:
+        results = await client.search(collection, vector, limit=limit, filters=filters)
+        _logger.debug(
+            "rag semantic search completed",
+            extra={"limit": limit, "results_count": len(results), "rerank_enabled": False},
+        )
+        return [
+            {
+                "score": r["score"],
+                "text": r["payload"].get("text", ""),
+                "metadata": {k: v for k, v in r["payload"].items() if k != "text"},
+            }
+            for r in results
+        ]
+
+    effective_final_limit = min(limit, rerank_max_results)
+    semantic_candidate_limit = max(effective_final_limit, rerank_candidate_limit)
+    results = await client.search(collection, vector, limit=semantic_candidate_limit, filters=filters)
+    _logger.info(
+        "rag rerank candidate search completed",
+        extra={
+            "requested_final_limit": limit,
+            "effective_final_limit": effective_final_limit,
+            "semantic_candidate_limit": semantic_candidate_limit,
+            "candidate_count": len(results),
+            "rerank_model": rerank_model,
+        },
+    )
+    if len(results) < 2:
+        _logger.info(
+            "rag rerank skipped",
+            extra={
+                "reason": "candidate_count_lt_2",
+                "candidate_count": len(results),
+                "effective_final_limit": effective_final_limit,
+                "rerank_model": rerank_model,
+            },
+        )
+        return [
+            {
+                "score": r["score"],
+                "text": r["payload"].get("text", ""),
+                "metadata": {k: v for k, v in r["payload"].items() if k != "text"},
+            }
+            for r in results[:effective_final_limit]
+        ]
+
+    texts = [result["payload"].get("text", "") for result in results]
+    rerank_scores = await rerank_texts(rerank_model, query, texts)
+    ranked_pairs = sorted(zip(results, rerank_scores, strict=True), key=lambda item: item[1], reverse=True)
+    _logger.info(
+        "rag rerank applied",
+        extra={
+            "candidate_count": len(results),
+            "returned_count": min(len(ranked_pairs), effective_final_limit),
+            "effective_final_limit": effective_final_limit,
+            "rerank_model": rerank_model,
+        },
+    )
     return [
         {
-            "score": r["score"],
-            "text": r["payload"].get("text", ""),
-            "metadata": {k: v for k, v in r["payload"].items() if k != "text"},
+            "score": rerank_score,
+            "semantic_score": result["score"],
+            "text": result["payload"].get("text", ""),
+            "metadata": {k: v for k, v in result["payload"].items() if k != "text"},
         }
-        for r in results
+        for result, rerank_score in ranked_pairs[:effective_final_limit]
     ]
 
 

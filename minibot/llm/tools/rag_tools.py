@@ -94,7 +94,7 @@ class RagTools:
             source_type=document.source_type,
             mime_type=document.mime_type,
             user_id=_scope_value(payload.get("user_id"), context.user_id),
-            agent_id=optional_str(payload.get("agent_id")) or context.owner_id,
+            agent_id=_agent_scope_value(payload.get("agent_id"), context.owner_id),
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
             tags=_normalize_string_list(payload.get("tags"), field="tags"),
             categories=_normalize_string_list(payload.get("categories"), field="categories"),
@@ -148,7 +148,7 @@ class RagTools:
             collection=self._config.collection_name,
             document_id=optional_str(payload.get("document_id")),
             user_id=_scope_value(payload.get("user_id"), context.user_id),
-            agent_id=optional_str(payload.get("agent_id")) or context.owner_id,
+            agent_id=_agent_scope_value(payload.get("agent_id"), context.owner_id),
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
             tags=_normalize_string_list(payload.get("tags"), field="tags"),
             categories=_normalize_string_list(payload.get("categories"), field="categories"),
@@ -171,15 +171,40 @@ class RagTools:
             limit=limit,
             document_id=optional_str(payload.get("document_id")),
             user_id=_scope_value(payload.get("user_id"), context.user_id),
-            agent_id=optional_str(payload.get("agent_id")) or context.owner_id,
+            agent_id=_agent_scope_value(payload.get("agent_id"), context.owner_id),
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
             tags=_normalize_string_list(payload.get("tags"), field="tags"),
             categories=_normalize_string_list(payload.get("categories"), field="categories"),
             embedding_model=self._config.embedding.model,
             truncate_dim=self._config.embedding.truncate_dim,
+            rerank_enabled=self._config.rerank.enabled,
+            rerank_model=self._config.rerank.model,
+            rerank_candidate_limit=self._config.rerank.candidate_limit,
+            rerank_max_results=self._config.rerank.max_results,
         )
 
-        return {"results": results}
+        if self._config.truncate_result_chars:
+            results, truncated, truncated_chars = _truncate_search_results(
+                results,
+                max_chars=self._config.max_result_chars,
+            )
+            if truncated:
+                _logger.info(
+                    "rag search results truncated",
+                    extra={
+                        "query_length": len(query),
+                        "max_result_chars": self._config.max_result_chars,
+                        "truncated_chars": truncated_chars,
+                        "returned_results": len(results),
+                    },
+                )
+            return {
+                "results": results,
+                "truncated": truncated,
+                "truncated_chars": truncated_chars,
+            }
+
+        return {"results": results, "truncated": False, "truncated_chars": 0}
 
     async def _handle_list_metadata(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         limit = int_with_default(
@@ -194,7 +219,7 @@ class RagTools:
             limit=limit,
             document_id=optional_str(payload.get("document_id")),
             user_id=_scope_value(payload.get("user_id"), context.user_id),
-            agent_id=optional_str(payload.get("agent_id")) or context.owner_id,
+            agent_id=_agent_scope_value(payload.get("agent_id"), context.owner_id),
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
         )
         return facets
@@ -216,6 +241,13 @@ def _scope_value(raw_value: Any, context_value: int | None) -> str | None:
     if context_value is None:
         return None
     return str(context_value)
+
+
+def _agent_scope_value(raw_value: Any, owner_id: str | None) -> str | None:
+    value = optional_str(raw_value)
+    if value is not None:
+        return value
+    return owner_id
 
 
 def _normalize_string_list(raw_value: Any, *, field: str) -> list[str] | None:
@@ -243,3 +275,37 @@ def _nullable_string_list_schema(description: str) -> dict[str, Any]:
         "description": description,
         "items": {"type": "string"},
     }
+
+
+def _truncate_search_results(
+    results: list[dict[str, Any]],
+    *,
+    max_chars: int,
+) -> tuple[list[dict[str, Any]], bool, int]:
+    total_chars = sum(len(str(item.get("text", ""))) for item in results)
+    if total_chars <= max_chars:
+        return results, False, 0
+
+    remaining = max_chars
+    truncated_results: list[dict[str, Any]] = []
+    for item in results:
+        if remaining <= 0:
+            break
+
+        text = str(item.get("text", ""))
+        if len(text) <= remaining:
+            truncated_results.append(item)
+            remaining -= len(text)
+            continue
+
+        kept = text[:remaining]
+        omitted = len(text) - remaining
+        truncated_results.append(
+            {
+                **item,
+                "text": f"{kept}\n...[truncated {omitted} chars]",
+            }
+        )
+        remaining = 0
+
+    return truncated_results, True, total_chars - max_chars

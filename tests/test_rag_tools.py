@@ -30,6 +30,12 @@ def _tool(storage: LocalFileStorage) -> RagTools:
             chunk_overlap=120,
             search_limit=5,
             embedding=SimpleNamespace(model="mini", truncate_dim=None),
+            rerank=SimpleNamespace(
+                enabled=False,
+                model="cross-encoder/ms-marco-MiniLM-L2-v2",
+                candidate_limit=50,
+                max_results=7,
+            ),
         ),
         qdrant=AsyncQdrantClient(url="http://example.com"),
         storage=storage,
@@ -204,6 +210,10 @@ async def test_rag_search_defaults_scope_from_context(monkeypatch: pytest.Monkey
     assert result == {"results": []}
     assert captured["user_id"] == "123"
     assert captured["chat_id"] == "321"
+    assert captured["rerank_enabled"] is False
+    assert captured["rerank_model"] == "cross-encoder/ms-marco-MiniLM-L2-v2"
+    assert captured["rerank_candidate_limit"] == 50
+    assert captured["rerank_max_results"] == 7
 
 
 @pytest.mark.asyncio
