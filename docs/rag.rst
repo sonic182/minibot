@@ -69,7 +69,7 @@ Setup
 Usage
 -----
 
-Once enabled, the bot has access to three tools:
+Once enabled, the bot has access to four tools:
 
 - **rag_index** — provide a file path plus optional ``tags`` and ``categories`` metadata.
   The bot reads the file, splits it into overlapping chunks, embeds each chunk, and upserts
@@ -78,6 +78,9 @@ Once enabled, the bot has access to three tools:
 - **rag_search** — provide a natural language query. The bot embeds the query and returns
   the top-k most relevant chunks with their similarity score and source metadata. Optional
   ``tags`` and ``categories`` filters match any of the provided values.
+
+- **rag_list_metadata** — list available ``tags`` and ``categories`` values, with counts,
+  so the bot can choose real filters before calling ``rag_search``.
 
 - **rag_delete** — remove indexed chunks by ``document_id`` and/or scope tags when the
   data should no longer be searchable. Optional ``tags`` and ``categories`` filters are also
@@ -137,7 +140,7 @@ Configuration reference
      - Description
    * - ``enabled``
      - ``false``
-     - Enable ``rag_index``, ``rag_search``, and ``rag_delete`` tools.
+     - Enable ``rag_index``, ``rag_search``, ``rag_list_metadata``, and ``rag_delete`` tools.
    * - ``qdrant_url``
      - ``http://localhost:6333``
      - Qdrant HTTP endpoint.

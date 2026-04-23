@@ -120,3 +120,40 @@ async def test_app_container_rejects_rag_without_file_storage() -> None:
 
     with pytest.raises(ValueError, match="tools.rag.enabled requires tools.file_storage.enabled"):
         await app_container.AppContainer._initialize_qdrant_if_enabled()
+
+
+@pytest.mark.asyncio
+async def test_app_container_initializes_rag_payload_indexes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.adapters.container import app_container
+
+    _reset_container(app_container)
+    settings = Settings(llm=LLMMConfig(api_key="secret"))
+    settings.tools.rag.enabled = True
+    settings.tools.file_storage.enabled = True
+    app_container.AppContainer._settings = settings
+    calls: list[tuple[str, str]] = []
+
+    class _FakeQdrantClient:
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+        async def ensure_collection(self, collection_name: str, vector_size: int) -> None:
+            calls.append((collection_name, f"vector:{vector_size}"))
+
+        async def create_payload_index(
+            self,
+            collection_name: str,
+            field_name: str,
+            field_schema: str = "keyword",
+        ) -> None:
+            calls.append((collection_name, f"{field_name}:{field_schema}"))
+
+    monkeypatch.setattr("minibot.adapters.qdrant.client.AsyncQdrantClient", _FakeQdrantClient)
+
+    await app_container.AppContainer._initialize_qdrant_if_enabled()
+
+    assert calls == [
+        ("minibot_chunks", "vector:384"),
+        ("minibot_chunks", "tags:keyword"),
+        ("minibot_chunks", "categories:keyword"),
+    ]

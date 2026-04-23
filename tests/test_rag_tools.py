@@ -10,7 +10,7 @@ from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.qdrant.client import AsyncQdrantClient
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.rag_tools import RagTools, _normalize_string_list
-from minibot.rag.retrieval import _build_filters
+from minibot.rag.retrieval import _build_filters, list_metadata_facets
 
 
 def _storage(root: Path, *, allow_outside_root: bool = False) -> LocalFileStorage:
@@ -193,6 +193,32 @@ async def test_rag_search_normalizes_metadata_filters(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_rag_list_metadata_defaults_scope_from_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    tool = _tool(_storage(tmp_path))
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_list_metadata")
+    captured: dict[str, Any] = {}
+
+    async def _fake_list_metadata_facets(**kwargs: Any) -> dict[str, list[dict[str, Any]]]:
+        captured.update(kwargs)
+        return {"tags": [{"value": "plan", "count": 2}], "categories": [{"value": "docs", "count": 1}]}
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.list_metadata_facets", _fake_list_metadata_facets)
+
+    result = await binding.handler(
+        {},
+        ToolContext(owner_id="owner", channel="telegram", chat_id=456, user_id=123),
+    )
+
+    assert result == {"tags": [{"value": "plan", "count": 2}], "categories": [{"value": "docs", "count": 1}]}
+    assert captured["user_id"] == "123"
+    assert captured["chat_id"] == "456"
+    assert captured["limit"] == 5
+
+
+@pytest.mark.asyncio
 async def test_rag_delete_defaults_scope_from_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tool = _tool(_storage(tmp_path))
     binding = next(item for item in tool.bindings() if item.tool.name == "rag_delete")
@@ -269,3 +295,61 @@ def test_build_filters_combines_scalar_and_match_any_list_filters() -> None:
 
 def test_build_filters_returns_none_without_conditions() -> None:
     assert _build_filters() is None
+
+
+@pytest.mark.asyncio
+async def test_list_metadata_facets_requests_tags_and_categories_in_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class _Client:
+        async def facet(self, collection_name: str, *, key: str, limit: int, filters: dict[str, Any] | None = None,
+                        exact: bool = False) -> list[dict[str, Any]]:
+            calls.append(
+                {
+                    "collection_name": collection_name,
+                    "key": key,
+                    "limit": limit,
+                    "filters": filters,
+                    "exact": exact,
+                }
+            )
+            return [{"value": f"{key}-value", "count": 1}]
+
+    result = await list_metadata_facets(
+        client=_Client(),  # type: ignore[arg-type]
+        collection="chunks",
+        limit=7,
+        user_id="user-1",
+        chat_id="chat-1",
+    )
+
+    assert result == {
+        "tags": [{"value": "tags-value", "count": 1}],
+        "categories": [{"value": "categories-value", "count": 1}],
+    }
+    assert calls == [
+        {
+            "collection_name": "chunks",
+            "key": "tags",
+            "limit": 7,
+            "filters": {
+                "must": [
+                    {"key": "user_id", "match": {"value": "user-1"}},
+                    {"key": "chat_id", "match": {"value": "chat-1"}},
+                ]
+            },
+            "exact": False,
+        },
+        {
+            "collection_name": "chunks",
+            "key": "categories",
+            "limit": 7,
+            "filters": {
+                "must": [
+                    {"key": "user_id", "match": {"value": "user-1"}},
+                    {"key": "chat_id", "match": {"value": "chat-1"}},
+                ]
+            },
+            "exact": False,
+        },
+    ]

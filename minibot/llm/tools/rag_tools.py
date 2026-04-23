@@ -13,7 +13,7 @@ from minibot.llm.tools.arg_utils import int_with_default, optional_str, require_
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_integer, nullable_string, strict_object
-from minibot.rag.retrieval import delete_document, index_document, retrieve_context
+from minibot.rag.retrieval import delete_document, index_document, list_metadata_facets, retrieve_context
 
 _logger = logging.getLogger("minibot.rag_tools")
 
@@ -33,6 +33,7 @@ class RagTools:
         return [
             ToolBinding(tool=self._index_schema(), handler=self._handle_index),
             ToolBinding(tool=self._search_schema(), handler=self._handle_search),
+            ToolBinding(tool=self._list_metadata_schema(), handler=self._handle_list_metadata),
             ToolBinding(tool=self._delete_schema(), handler=self._handle_delete),
         ]
 
@@ -102,6 +103,22 @@ class RagTools:
         _logger.info("rag indexed", extra={"document_id": document_id, "chunks": chunks})
         return {"document_id": document_id, "chunks_indexed": chunks}
 
+    def _list_metadata_schema(self) -> Tool:
+        return Tool(
+            name="rag_list_metadata",
+            description=load_tool_description("rag_list_metadata"),
+            parameters=strict_object(
+                properties={
+                    "document_id": nullable_string("Restrict metadata discovery to this document."),
+                    "user_id": nullable_string("Restrict metadata discovery to this user scope."),
+                    "agent_id": nullable_string("Restrict metadata discovery to this agent scope."),
+                    "chat_id": nullable_string("Restrict metadata discovery to this chat scope."),
+                    "limit": nullable_integer(minimum=1, description="Maximum number of facet values to return."),
+                },
+                required=[],
+            ),
+        )
+
     def _delete_schema(self) -> Tool:
         return Tool(
             name="rag_delete",
@@ -159,6 +176,24 @@ class RagTools:
         )
 
         return {"results": results}
+
+    async def _handle_list_metadata(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        limit = int_with_default(
+            payload.get("limit"),
+            default=self._config.search_limit,
+            field="limit",
+            min_value=1,
+        )
+        facets = await list_metadata_facets(
+            client=self._qdrant,
+            collection=self._config.collection_name,
+            limit=limit,
+            document_id=optional_str(payload.get("document_id")),
+            user_id=_scope_value(payload.get("user_id"), context.user_id),
+            agent_id=optional_str(payload.get("agent_id")),
+            chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
+        )
+        return facets
 
     def _resolve_path(self, raw: str):
         if self._storage is None:

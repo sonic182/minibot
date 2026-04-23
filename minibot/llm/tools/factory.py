@@ -367,7 +367,7 @@ _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (
     ),
     ToolFeature(
         key="rag",
-        labels=("rag_index", "rag_search", "rag_delete"),
+        labels=("rag_index", "rag_search", "rag_list_metadata", "rag_delete"),
         enabled_in_config=lambda settings: _tool_enabled(settings, "rag"),
         builder=_build_rag_feature,
     ),
