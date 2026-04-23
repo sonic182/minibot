@@ -138,7 +138,7 @@ def _build_python_feature(context: ToolAssemblyContext, _: list[ToolBinding]) ->
 
 
 def _build_bash_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
-    return BashTool(context.settings.tools.bash).bindings()
+    return BashTool(context.settings.tools.bash, storage=context.managed_storage).bindings()
 
 
 def _build_apply_patch_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
