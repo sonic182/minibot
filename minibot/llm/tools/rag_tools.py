@@ -48,6 +48,8 @@ class RagTools:
                     "user_id": nullable_string("Optional user scope tag."),
                     "agent_id": nullable_string("Optional agent scope tag."),
                     "chat_id": nullable_string("Optional chat scope tag."),
+                    "tags": _nullable_string_list_schema("Optional tags stored with each chunk."),
+                    "categories": _nullable_string_list_schema("Optional categories stored with each chunk."),
                 },
                 required=["file_path"],
             ),
@@ -64,6 +66,8 @@ class RagTools:
                     "user_id": nullable_string("Restrict results to this user scope."),
                     "agent_id": nullable_string("Restrict results to this agent scope."),
                     "chat_id": nullable_string("Restrict results to this chat scope."),
+                    "tags": _nullable_string_list_schema("Restrict results to matching tags."),
+                    "categories": _nullable_string_list_schema("Restrict results to matching categories."),
                     "limit": nullable_integer(minimum=1, description="Number of results to return."),
                 },
                 required=["query"],
@@ -87,6 +91,8 @@ class RagTools:
             user_id=_scope_value(payload.get("user_id"), context.user_id),
             agent_id=optional_str(payload.get("agent_id")),
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
+            tags=_normalize_string_list(payload.get("tags"), field="tags"),
+            categories=_normalize_string_list(payload.get("categories"), field="categories"),
             chunk_size=self._config.chunk_size,
             chunk_overlap=self._config.chunk_overlap,
             embedding_model=self._config.embedding.model,
@@ -106,6 +112,10 @@ class RagTools:
                     "user_id": nullable_string("Delete all chunks tagged with this user scope."),
                     "agent_id": nullable_string("Delete all chunks tagged with this agent scope."),
                     "chat_id": nullable_string("Delete all chunks tagged with this chat scope."),
+                    "tags": _nullable_string_list_schema("Delete all chunks tagged with any of these tags."),
+                    "categories": _nullable_string_list_schema(
+                        "Delete all chunks tagged with any of these categories."
+                    ),
                 },
                 required=[],
             ),
@@ -119,6 +129,8 @@ class RagTools:
             user_id=_scope_value(payload.get("user_id"), context.user_id),
             agent_id=optional_str(payload.get("agent_id")),
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
+            tags=_normalize_string_list(payload.get("tags"), field="tags"),
+            categories=_normalize_string_list(payload.get("categories"), field="categories"),
         )
         return {"deleted": True}
 
@@ -140,6 +152,8 @@ class RagTools:
             user_id=_scope_value(payload.get("user_id"), context.user_id),
             agent_id=optional_str(payload.get("agent_id")),
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
+            tags=_normalize_string_list(payload.get("tags"), field="tags"),
+            categories=_normalize_string_list(payload.get("categories"), field="categories"),
             embedding_model=self._config.embedding.model,
             truncate_dim=self._config.embedding.truncate_dim,
         )
@@ -163,3 +177,30 @@ def _scope_value(raw_value: Any, context_value: int | None) -> str | None:
     if context_value is None:
         return None
     return str(context_value)
+
+
+def _normalize_string_list(raw_value: Any, *, field: str) -> list[str] | None:
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, list):
+        raise ValueError(f"{field} must be a list of strings")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_value:
+        if not isinstance(item, str):
+            raise ValueError(f"{field} must be a list of strings")
+        candidate = item.strip().lower()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        normalized.append(candidate)
+    return normalized or None
+
+
+def _nullable_string_list_schema(description: str) -> dict[str, Any]:
+    return {
+        "type": ["array", "null"],
+        "description": description,
+        "items": {"type": "string"},
+    }

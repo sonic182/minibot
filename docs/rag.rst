@@ -71,15 +71,17 @@ Usage
 
 Once enabled, the bot has access to three tools:
 
-- **rag_index** — provide a file path (managed workspace or absolute). The bot reads the
-  file, splits it into overlapping chunks, embeds each chunk, and upserts the vectors into
-  Qdrant. Returns the number of chunks indexed and the ``document_id`` used.
+- **rag_index** — provide a file path plus optional ``tags`` and ``categories`` metadata.
+  The bot reads the file, splits it into overlapping chunks, embeds each chunk, and upserts
+  the vectors into Qdrant. Returns the number of chunks indexed and the ``document_id`` used.
 
 - **rag_search** — provide a natural language query. The bot embeds the query and returns
-  the top-k most relevant chunks with their similarity score and source metadata.
+  the top-k most relevant chunks with their similarity score and source metadata. Optional
+  ``tags`` and ``categories`` filters match any of the provided values.
 
 - **rag_delete** — remove indexed chunks by ``document_id`` and/or scope tags when the
-  data should no longer be searchable.
+  data should no longer be searchable. Optional ``tags`` and ``categories`` filters are also
+  supported.
 
 Example interaction::
 
@@ -151,6 +153,10 @@ Configuration reference
    * - ``search_limit``
      - ``5``
      - Default number of results returned by ``rag_search``.
+   * - ``tags`` / ``categories``
+     - optional
+     - LLM-supplied string lists stored on each chunk; values are trimmed, lowercased,
+       deduplicated, and can be used as any-match filters in search/delete.
    * - ``tools.file_storage.enabled``
      - required
      - RAG reads files through managed storage and inherits its path restrictions.

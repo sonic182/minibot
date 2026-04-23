@@ -1,1 +1,1 @@
-Remove indexed chunks from the vector store. Provide at least one of document_id, user_id, agent_id, or chat_id to scope the deletion. All matching chunks are permanently deleted.
+Remove indexed chunks from the vector store. Provide at least one of document_id, user_id, agent_id, chat_id, tags, or categories to scope the deletion. All matching chunks are permanently deleted.

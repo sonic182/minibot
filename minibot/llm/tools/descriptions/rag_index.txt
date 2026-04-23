@@ -12,3 +12,5 @@ Returns the number of chunks indexed and the document_id used (useful if auto-ge
 `document_id` defaults to a hash of the file path when omitted.
 `source_name` is a human-readable label stored with every chunk (defaults to the filename).
 `user_id`, `agent_id`, `chat_id` are optional filter tags for scoped retrieval.
+`tags` and `categories` are optional string lists for LLM-generated metadata. They are normalized
+to lowercase, empty values are dropped, and duplicates are removed.

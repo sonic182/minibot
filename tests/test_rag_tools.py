@@ -9,7 +9,8 @@ import pytest
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.qdrant.client import AsyncQdrantClient
 from minibot.llm.tools.base import ToolContext
-from minibot.llm.tools.rag_tools import RagTools
+from minibot.llm.tools.rag_tools import RagTools, _normalize_string_list
+from minibot.rag.retrieval import _build_filters
 
 
 def _storage(root: Path, *, allow_outside_root: bool = False) -> LocalFileStorage:
@@ -59,6 +60,36 @@ async def test_rag_index_defaults_user_and_chat_scope_from_context(
     assert result["chunks_indexed"] == 1
     assert captured["user_id"] == "7"
     assert captured["chat_id"] == "99"
+
+
+@pytest.mark.asyncio
+async def test_rag_index_normalizes_tags_and_categories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _storage(tmp_path)
+    storage.create_text_file("docs/report.txt", "hello", overwrite=False)
+    tool = _tool(storage)
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_index")
+    captured: dict[str, Any] = {}
+
+    async def _fake_index_document(**kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.index_document", _fake_index_document)
+
+    await binding.handler(
+        {
+            "file_path": "docs/report.txt",
+            "tags": [" Plan ", "plan", "", "Notes"],
+            "categories": [" Work ", "work", "Docs"],
+        },
+        ToolContext(owner_id="owner", channel="telegram", chat_id=99, user_id=7),
+    )
+
+    assert captured["tags"] == ["plan", "notes"]
+    assert captured["categories"] == ["work", "docs"]
 
 
 @pytest.mark.asyncio
@@ -141,6 +172,27 @@ async def test_rag_search_defaults_scope_from_context(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_rag_search_normalizes_metadata_filters(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tool = _tool(_storage(tmp_path))
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_search")
+    captured: dict[str, Any] = {}
+
+    async def _fake_retrieve_context(**kwargs: Any) -> list[dict[str, Any]]:
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.retrieve_context", _fake_retrieve_context)
+
+    await binding.handler(
+        {"query": "hello", "tags": [" Alpha ", "alpha", "Beta"], "categories": ["Docs", " docs "]},
+        ToolContext(owner_id="owner", channel="telegram", chat_id=321, user_id=123),
+    )
+
+    assert captured["tags"] == ["alpha", "beta"]
+    assert captured["categories"] == ["docs"]
+
+
+@pytest.mark.asyncio
 async def test_rag_delete_defaults_scope_from_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tool = _tool(_storage(tmp_path))
     binding = next(item for item in tool.bindings() if item.tool.name == "rag_delete")
@@ -159,3 +211,61 @@ async def test_rag_delete_defaults_scope_from_context(monkeypatch: pytest.Monkey
     assert result == {"deleted": True}
     assert captured["user_id"] == "123"
     assert captured["chat_id"] == "456"
+
+
+@pytest.mark.asyncio
+async def test_rag_delete_normalizes_metadata_filters(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tool = _tool(_storage(tmp_path))
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_delete")
+    captured: dict[str, Any] = {}
+
+    async def _fake_delete_document(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.delete_document", _fake_delete_document)
+
+    await binding.handler(
+        {"tags": [" Alpha ", "alpha"], "categories": ["Docs", " docs "]},
+        ToolContext(owner_id="owner", channel="telegram", chat_id=456, user_id=123),
+    )
+
+    assert captured["tags"] == ["alpha"]
+    assert captured["categories"] == ["docs"]
+
+
+def test_normalize_string_list_rejects_non_list() -> None:
+    with pytest.raises(ValueError, match="tags must be a list of strings"):
+        _normalize_string_list("plan", field="tags")
+
+
+def test_normalize_string_list_rejects_non_string_items() -> None:
+    with pytest.raises(ValueError, match="categories must be a list of strings"):
+        _normalize_string_list(["docs", 1], field="categories")
+
+
+def test_normalize_string_list_returns_none_for_empty_normalized_values() -> None:
+    assert _normalize_string_list(["", "   "], field="tags") is None
+
+
+def test_build_filters_combines_scalar_and_match_any_list_filters() -> None:
+    filters = _build_filters(
+        document_id="doc-1",
+        user_id="user-1",
+        chat_id="chat-1",
+        tags=["alpha", "beta"],
+        categories=["docs"],
+    )
+
+    assert filters == {
+        "must": [
+            {"key": "document_id", "match": {"value": "doc-1"}},
+            {"key": "user_id", "match": {"value": "user-1"}},
+            {"key": "chat_id", "match": {"value": "chat-1"}},
+            {"key": "tags", "match": {"any": ["alpha", "beta"]}},
+            {"key": "categories", "match": {"any": ["docs"]}},
+        ]
+    }
+
+
+def test_build_filters_returns_none_without_conditions() -> None:
+    assert _build_filters() is None
