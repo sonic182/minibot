@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -20,6 +21,8 @@ async def index_document(
     user_id: str | None = None,
     agent_id: str | None = None,
     chat_id: str | None = None,
+    tags: list[str] | None = None,
+    categories: list[str] | None = None,
     chunk_size: int = 800,
     chunk_overlap: int = 120,
     embedding_model: str = "sentence-transformers/all-MiniLM-L12-v2",
@@ -39,6 +42,8 @@ async def index_document(
         "user_id": user_id,
         "agent_id": agent_id,
         "chat_id": chat_id,
+        "tags": tags,
+        "categories": categories,
     }
 
     points = [
@@ -66,17 +71,21 @@ async def delete_document(
     document_id: str | None = None,
     user_id: str | None = None,
     agent_id: str | None = None,
+    chat_id: str | None = None,
+    tags: list[str] | None = None,
+    categories: list[str] | None = None,
 ) -> None:
-    conditions: list[dict[str, Any]] = []
-    if document_id:
-        conditions.append({"key": "document_id", "match": {"value": document_id}})
-    if user_id:
-        conditions.append({"key": "user_id", "match": {"value": user_id}})
-    if agent_id:
-        conditions.append({"key": "agent_id", "match": {"value": agent_id}})
-    if not conditions:
-        raise ValueError("at least one of document_id, user_id, or agent_id is required")
-    await client.delete_by_filter(collection, {"must": conditions})
+    filters = _build_filters(
+        document_id=document_id,
+        user_id=user_id,
+        agent_id=agent_id,
+        chat_id=chat_id,
+        tags=tags,
+        categories=categories,
+    )
+    if filters is None:
+        raise ValueError("at least one filter is required for delete")
+    await client.delete_by_filter(collection, filters)
 
 
 async def retrieve_context(
@@ -88,20 +97,21 @@ async def retrieve_context(
     document_id: str | None = None,
     user_id: str | None = None,
     agent_id: str | None = None,
+    chat_id: str | None = None,
+    tags: list[str] | None = None,
+    categories: list[str] | None = None,
     embedding_model: str = "sentence-transformers/all-MiniLM-L12-v2",
     truncate_dim: int | None = None,
 ) -> list[dict[str, Any]]:
     vector = await embed_text(embedding_model, truncate_dim, query)
-
-    conditions: list[dict[str, Any]] = []
-    if document_id:
-        conditions.append({"key": "document_id", "match": {"value": document_id}})
-    if user_id:
-        conditions.append({"key": "user_id", "match": {"value": user_id}})
-    if agent_id:
-        conditions.append({"key": "agent_id", "match": {"value": agent_id}})
-
-    filters = {"must": conditions} if conditions else None
+    filters = _build_filters(
+        document_id=document_id,
+        user_id=user_id,
+        agent_id=agent_id,
+        chat_id=chat_id,
+        tags=tags,
+        categories=categories,
+    )
 
     results = await client.search(collection, vector, limit=limit, filters=filters)
     return [
@@ -112,3 +122,53 @@ async def retrieve_context(
         }
         for r in results
     ]
+
+
+async def list_metadata_facets(
+    *,
+    client: AsyncQdrantClient,
+    collection: str,
+    limit: int = 10,
+    document_id: str | None = None,
+    user_id: str | None = None,
+    agent_id: str | None = None,
+    chat_id: str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    filters = _build_filters(
+        document_id=document_id,
+        user_id=user_id,
+        agent_id=agent_id,
+        chat_id=chat_id,
+    )
+    tags, categories = await asyncio.gather(
+        client.facet(collection, key="tags", limit=limit, filters=filters),
+        client.facet(collection, key="categories", limit=limit, filters=filters),
+    )
+    return {"tags": tags, "categories": categories}
+
+
+def _build_filters(
+    *,
+    document_id: str | None = None,
+    user_id: str | None = None,
+    agent_id: str | None = None,
+    chat_id: str | None = None,
+    tags: list[str] | None = None,
+    categories: list[str] | None = None,
+) -> dict[str, Any] | None:
+    conditions: list[dict[str, Any]] = []
+    if document_id:
+        conditions.append({"key": "document_id", "match": {"value": document_id}})
+    if user_id:
+        conditions.append({"key": "user_id", "match": {"value": user_id}})
+    if agent_id:
+        conditions.append({"key": "agent_id", "match": {"value": agent_id}})
+    if chat_id:
+        conditions.append({"key": "chat_id", "match": {"value": chat_id}})
+    if tags:
+        conditions.append({"key": "tags", "match": {"any": tags}})
+    if categories:
+        conditions.append({"key": "categories", "match": {"any": categories}})
+    if not conditions:
+        return None
+    return {"must": conditions}

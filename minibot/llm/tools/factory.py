@@ -239,8 +239,12 @@ def _build_rag_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> li
     from minibot.llm.tools.rag_tools import RagTools
 
     cfg = context.settings.tools.rag
+    storage = _require_managed_storage(
+        context.managed_storage,
+        error_message="tools.rag.enabled requires tools.file_storage.enabled",
+    )
     qdrant = AsyncQdrantClient(url=cfg.qdrant_url)
-    return RagTools(config=cfg, qdrant=qdrant, storage=context.managed_storage).bindings()
+    return RagTools(config=cfg, qdrant=qdrant, storage=storage).bindings()
 
 
 def _build_agent_delegate_feature(context: ToolAssemblyContext, tools: list[ToolBinding]) -> list[ToolBinding]:
@@ -363,7 +367,7 @@ _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (
     ),
     ToolFeature(
         key="rag",
-        labels=("rag_index", "rag_search"),
+        labels=("rag_index", "rag_search", "rag_list_metadata", "rag_delete"),
         enabled_in_config=lambda settings: _tool_enabled(settings, "rag"),
         builder=_build_rag_feature,
     ),

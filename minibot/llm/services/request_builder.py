@@ -14,6 +14,7 @@ class RequestContext:
     max_new_tokens: int | None
     prompt_cache_enabled: bool
     prompt_cache_retention: str | None
+    strip_logs: bool
     reasoning_effort: str | None
     openrouter_models: tuple[str, ...]
     openrouter_provider: dict[str, Any]

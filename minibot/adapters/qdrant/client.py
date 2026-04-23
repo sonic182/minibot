@@ -24,6 +24,14 @@ class AsyncQdrantClient:
             payload={"vectors": {"size": vector_size, "distance": "Cosine"}},
         )
 
+    async def create_payload_index(self, collection_name: str, field_name: str, field_schema: str = "keyword") -> None:
+        encoded_collection = _encode_path_segment(collection_name)
+        await self._request(
+            "PUT",
+            f"/collections/{encoded_collection}/index?wait=true",
+            payload={"field_name": field_name, "field_schema": field_schema},
+        )
+
     async def upsert_points(self, collection_name: str, points: list[dict[str, Any]]) -> None:
         encoded_collection = _encode_path_segment(collection_name)
         await self._request(
@@ -62,6 +70,27 @@ class AsyncQdrantClient:
         if not isinstance(result, list):
             raise RuntimeError("qdrant search returned an unexpected response")
         return result
+
+    async def facet(
+        self,
+        collection_name: str,
+        *,
+        key: str,
+        limit: int,
+        filters: dict[str, Any] | None = None,
+        exact: bool = False,
+    ) -> list[dict[str, Any]]:
+        encoded_collection = _encode_path_segment(collection_name)
+        payload: dict[str, Any] = {"key": key, "limit": limit, "exact": exact}
+        if filters:
+            payload["filter"] = filters
+
+        response = await self._request("POST", f"/collections/{encoded_collection}/facet", payload=payload)
+        result = response.get("result", {})
+        hits = result.get("hits", [])
+        if not isinstance(hits, list):
+            raise RuntimeError("qdrant facet returned an unexpected response")
+        return hits
 
     async def _request(
         self,

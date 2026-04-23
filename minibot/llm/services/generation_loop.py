@@ -100,6 +100,7 @@ async def generate_with_tools(
             response=response,
             context="generate_with_tools",
             provider_name=provider_name,
+            strip_logs=request_ctx.strip_logs,
         )
         usage = extract_usage_from_response(response)
         usage_tokens = extract_total_tokens(response)

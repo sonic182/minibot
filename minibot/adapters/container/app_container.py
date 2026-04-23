@@ -161,12 +161,16 @@ class AppContainer:
         settings = cls.get_settings()
         if not settings.tools.rag.enabled:
             return
+        if not settings.tools.file_storage.enabled:
+            raise ValueError("tools.rag.enabled requires tools.file_storage.enabled")
         from minibot.adapters.qdrant.client import AsyncQdrantClient
 
         cfg = settings.tools.rag
         client = AsyncQdrantClient(url=cfg.qdrant_url)
         vector_size = cfg.embedding.truncate_dim if cfg.embedding.truncate_dim is not None else cfg.embedding.dim
         await client.ensure_collection(cfg.collection_name, vector_size)
+        await client.create_payload_index(cfg.collection_name, "tags", field_schema="keyword")
+        await client.create_payload_index(cfg.collection_name, "categories", field_schema="keyword")
 
     @classmethod
     async def _apply_runtime_token_autoconfig_if_needed(cls) -> None:

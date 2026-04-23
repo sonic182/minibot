@@ -46,6 +46,7 @@ aiopipe = {version = ">=0.2.2", optional = true}
 # Install manually before running minibot with [tools.rag] enabled:
 #   CPU: pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install sentence-transformers
 #   GPU: pip install torch && pip install sentence-transformers
+pypdf = {version = "^6.10.2", optional = true}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"

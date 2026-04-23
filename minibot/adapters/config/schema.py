@@ -231,6 +231,7 @@ class LLMMConfig(BaseModel):
     - ``main_responses_state_mode`` — how conversation state is passed for the main agent
       (``"full_messages"`` or ``"previous_response_id"``).
     - ``prompt_cache_enabled`` — enable provider-side prompt caching (default: ``true``).
+    - ``strip_logs`` — shorten selected fields in the provider raw-response debug log (default: ``false``).
     - ``openrouter`` — OpenRouter-specific routing overrides (``[llm.openrouter]``).
     - ``xai`` — xAI web/X search integration (``[llm.xai]``).
     """
@@ -257,6 +258,7 @@ class LLMMConfig(BaseModel):
     responses_state_mode: Literal["full_messages", "previous_response_id"] = "full_messages"
     prompt_cache_enabled: bool = True
     prompt_cache_retention: Literal["in-memory", "24h"] | None = None
+    strip_logs: bool = False
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
     xai: XAILLMConfig = XAILLMConfig()
 

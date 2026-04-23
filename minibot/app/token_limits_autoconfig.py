@@ -11,6 +11,7 @@ import aiosonic
 from minibot.adapters.config.schema import Settings
 from minibot.core.agents import AgentSpec
 from minibot.llm.services.provider_target import infer_provider_from_base_url, resolve_target_provider
+from minibot.shared.utils import summarize_items
 
 _MODELS_API_URL = "https://models.dev/api.json"
 _REQUEST_TIMEOUT_SECONDS = 20
@@ -66,6 +67,13 @@ async def apply_runtime_token_autoconfig_async(
         )
 
     adjusted_specs: list[AgentSpec] = []
+    updated_agent_names: list[str] = []
+    first_agent_provider: str | None = None
+    first_agent_model: str | None = None
+    first_catalog_provider: str | None = None
+    first_context_limit: int | None = None
+    first_output_limit: int | None = None
+    had_mixed_agent_targets = False
     for spec in agent_specs:
         provider_name = spec.model_provider or settings.llm.provider
         model_name = spec.model or settings.llm.model
@@ -81,22 +89,43 @@ async def apply_runtime_token_autoconfig_async(
             continue
         derived_budget = max(1, int(limits["context"] * ratio))
         derived_max_new_tokens = max(1, min(limits["output"], derived_budget))
-        logger.info(
-            "token auto-config applied for agent model",
-            extra={
-                "component": "startup",
-                "agent_name": spec.name,
-                "provider": provider_name,
-                "model": model_name,
-                "catalog_provider": limits["catalog_provider"],
-                "context_limit": limits["context"],
-                "output_limit": limits["output"],
-                "ratio": ratio,
-                "agent_max_new_tokens_before": spec.max_new_tokens,
-                "agent_max_new_tokens_after": derived_max_new_tokens,
-            },
-        )
+        updated_agent_names.append(spec.name)
+        if first_agent_provider is None:
+            first_agent_provider = provider_name
+            first_agent_model = model_name
+            first_catalog_provider = limits["catalog_provider"]
+            first_context_limit = limits["context"]
+            first_output_limit = limits["output"]
+        elif (
+            provider_name != first_agent_provider
+            or model_name != first_agent_model
+            or limits["catalog_provider"] != first_catalog_provider
+            or limits["context"] != first_context_limit
+            or limits["output"] != first_output_limit
+        ):
+            had_mixed_agent_targets = True
         adjusted_specs.append(replace(spec, max_new_tokens=derived_max_new_tokens))
+    if updated_agent_names:
+        summary = summarize_items(updated_agent_names, preview_limit=5)
+        extra: dict[str, Any] = {
+            "component": "startup",
+            "agent_count": summary["count"],
+            "agent_names_preview": summary["preview"],
+            "ratio": ratio,
+        }
+        if first_agent_provider is not None:
+            extra["provider"] = first_agent_provider
+        if first_agent_model is not None:
+            extra["model"] = first_agent_model
+        if first_catalog_provider is not None and first_catalog_provider != first_agent_provider:
+            extra["catalog_provider"] = first_catalog_provider
+        if first_context_limit is not None:
+            extra["context_limit"] = first_context_limit
+        if first_output_limit is not None:
+            extra["output_limit"] = first_output_limit
+        if had_mixed_agent_targets:
+            extra["mixed_agent_targets"] = True
+        logger.info("token auto-config applied for agent models", extra=extra)
     return adjusted_specs
 
 

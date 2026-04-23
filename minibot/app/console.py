@@ -9,6 +9,7 @@ from pathlib import Path
 from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.console.service import ConsoleService
 from minibot.app.dispatcher import Dispatcher
+from minibot.shared.utils import summarize_items
 from minibot.shared.console_compat import CompatConsole, prompt_input
 
 
@@ -38,14 +39,22 @@ async def run(
     AppContainer.configure(resolved_config_path)
     await AppContainer.initialize_storage()
     logger = AppContainer.get_logger()
+    settings = AppContainer.get_settings()
     _configure_console_file_only_logging(logger, verbose=verbose)
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
     main_agent_tools_enabled = getattr(dispatcher, "main_agent_tool_names", None) or ["none"]
+    log_extra: dict[str, object] = {"main_agent_tools_enabled": main_agent_tools_enabled}
+    if bool(getattr(getattr(settings, "llm", None), "strip_logs", False)):
+        tool_summary = summarize_items(main_agent_tools_enabled)
+        log_extra = {
+            "main_agent_tools_count": tool_summary["count"],
+            "main_agent_tools_preview": tool_summary["preview"],
+        }
     _log_info(
         logger,
         "console tool configuration loaded",
-        extra={"main_agent_tools_enabled": main_agent_tools_enabled},
+        extra=log_extra,
     )
     console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
     await dispatcher.start()

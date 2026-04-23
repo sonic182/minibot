@@ -69,14 +69,22 @@ Setup
 Usage
 -----
 
-Once enabled, the bot has access to two tools:
+Once enabled, the bot has access to four tools:
 
-- **rag_index** — provide a file path (managed workspace or absolute). The bot reads the
-  file, splits it into overlapping chunks, embeds each chunk, and upserts the vectors into
-  Qdrant. Returns the number of chunks indexed and the ``document_id`` used.
+- **rag_index** — provide a file path plus optional ``tags`` and ``categories`` metadata.
+  The bot reads the file, splits it into overlapping chunks, embeds each chunk, and upserts
+  the vectors into Qdrant. Returns the number of chunks indexed and the ``document_id`` used.
 
 - **rag_search** — provide a natural language query. The bot embeds the query and returns
-  the top-k most relevant chunks with their similarity score and source metadata.
+  the top-k most relevant chunks with their similarity score and source metadata. Optional
+  ``tags`` and ``categories`` filters match any of the provided values.
+
+- **rag_list_metadata** — list available ``tags`` and ``categories`` values, with counts,
+  so the bot can choose real filters before calling ``rag_search``.
+
+- **rag_delete** — remove indexed chunks by ``document_id`` and/or scope tags when the
+  data should no longer be searchable. Optional ``tags`` and ``categories`` filters are also
+  supported.
 
 Example interaction::
 
@@ -132,7 +140,7 @@ Configuration reference
      - Description
    * - ``enabled``
      - ``false``
-     - Enable ``rag_index`` and ``rag_search`` tools.
+     - Enable ``rag_index``, ``rag_search``, ``rag_list_metadata``, and ``rag_delete`` tools.
    * - ``qdrant_url``
      - ``http://localhost:6333``
      - Qdrant HTTP endpoint.
@@ -148,6 +156,13 @@ Configuration reference
    * - ``search_limit``
      - ``5``
      - Default number of results returned by ``rag_search``.
+   * - ``tags`` / ``categories``
+     - optional
+     - LLM-supplied string lists stored on each chunk; values are trimmed, lowercased,
+       deduplicated, and can be used as any-match filters in search/delete.
+   * - ``tools.file_storage.enabled``
+     - required
+     - RAG reads files through managed storage and inherits its path restrictions.
 
 ``[tools.rag.embedding]``
 

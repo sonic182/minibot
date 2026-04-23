@@ -53,6 +53,7 @@ main_responses_state_mode = "full_messages"
 # previous_response_id: continue server-side state for lower latency/token usage.
 agent_responses_state_mode = "previous_response_id"
 prompt_cache_enabled = true
+strip_logs = false
 # Optional retention hint for OpenAI Responses prompt cache.
 # prompt_cache_retention = "24h"
 # Base system prompt (used when system_prompt_file is not configured or set to null)
@@ -205,7 +206,8 @@ default_owner_id = "primary"
 enabled = false
 
 # Optional RAG (Retrieval-Augmented Generation) via Qdrant.
-# Requires the `rag` extra: poetry install --extras rag
+# Requires `tools.file_storage.enabled = true`, a running Qdrant instance,
+# and manual `torch` + `sentence-transformers` installation.
 # Run Qdrant locally: ./qdrant/qdrant  (see qdrant/download_bin.sh)
 [tools.rag]
 enabled = false
