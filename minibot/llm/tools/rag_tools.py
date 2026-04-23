@@ -70,7 +70,7 @@ class RagTools:
             ),
         )
 
-    async def _handle_index(self, payload: dict[str, Any], _context: ToolContext) -> dict[str, Any]:
+    async def _handle_index(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         file_path_raw = require_non_empty_str(payload, "file_path")
         file_path = self._resolve_path(file_path_raw)
         text = file_path.read_text(encoding="utf-8", errors="replace")
@@ -84,9 +84,9 @@ class RagTools:
             document_id=document_id,
             text=text,
             source_name=source_name,
-            user_id=optional_str(payload.get("user_id")),
-            agent_id=optional_str(payload.get("agent_id")),
-            chat_id=optional_str(payload.get("chat_id")),
+            user_id=_scope_str(payload.get("user_id"), context.user_id),
+            agent_id=optional_str(payload.get("agent_id")) or context.owner_id,
+            chat_id=_scope_str(payload.get("chat_id"), context.chat_id),
             chunk_size=self._config.chunk_size,
             chunk_overlap=self._config.chunk_overlap,
             embedding_model=self._config.embedding.model,
@@ -110,17 +110,17 @@ class RagTools:
             ),
         )
 
-    async def _handle_delete(self, payload: dict[str, Any], _context: ToolContext) -> dict[str, Any]:
+    async def _handle_delete(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         await delete_document(
             client=self._qdrant,
             collection=self._config.collection_name,
             document_id=optional_str(payload.get("document_id")),
-            user_id=optional_str(payload.get("user_id")),
-            agent_id=optional_str(payload.get("agent_id")),
+            user_id=_scope_str(payload.get("user_id"), context.user_id),
+            agent_id=optional_str(payload.get("agent_id")) or context.owner_id,
         )
         return {"deleted": True}
 
-    async def _handle_search(self, payload: dict[str, Any], _context: ToolContext) -> dict[str, Any]:
+    async def _handle_search(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         query = require_non_empty_str(payload, "query")
         limit = int_with_default(
             payload.get("limit"),
@@ -135,8 +135,8 @@ class RagTools:
             query=query,
             limit=limit,
             document_id=optional_str(payload.get("document_id")),
-            user_id=optional_str(payload.get("user_id")),
-            agent_id=optional_str(payload.get("agent_id")),
+            user_id=_scope_str(payload.get("user_id"), context.user_id),
+            agent_id=optional_str(payload.get("agent_id")) or context.owner_id,
             embedding_model=self._config.embedding.model,
             truncate_dim=self._config.embedding.truncate_dim,
         )
@@ -145,10 +145,7 @@ class RagTools:
 
     def _resolve_path(self, raw: str) -> Path:
         if self._storage is not None:
-            try:
-                return self._storage.resolve_existing_file(raw)
-            except Exception:  # noqa: BLE001
-                pass
+            return self._storage.resolve_existing_file(raw)
         path = Path(raw)
         if not path.exists():
             raise ValueError(f"file not found: {raw}")
@@ -157,3 +154,7 @@ class RagTools:
 
 def _hash_path(path: str) -> str:
     return "doc_" + hashlib.sha1(path.encode()).hexdigest()[:16]  # noqa: S324
+
+
+def _scope_str(payload_value: Any, context_value: int | str | None) -> str | None:
+    return optional_str(payload_value) or (str(context_value) if context_value is not None else None)

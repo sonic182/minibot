@@ -104,13 +104,13 @@ class BashTool:
             await self._terminate_process(process)
             stdout_data, stderr_data = await process.communicate()
 
-        stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
         duration_ms = int((time.perf_counter() - started) * 1000)
         ok = process.returncode == 0 and not timed_out
 
-        if self._should_spill(stdout_text, stderr_text):
-            spill_info = self._save_spilled_output(command, stdout_text, stderr_text)
+        if self._should_spill(stdout_data, stderr_data):
+            spill_info = self._save_spilled_output(command, stdout_data, stderr_data)
             if spill_info is not None:
+                stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
                 preview_len = self._config.spill_preview_chars
                 return {
                     "ok": ok,
@@ -131,6 +131,8 @@ class BashTool:
                     "command": command,
                 }
 
+        stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
+
         return {
             "ok": ok,
             "exit_code": process.returncode,
@@ -143,25 +145,24 @@ class BashTool:
             "command": command,
         }
 
-    def _should_spill(self, stdout: str, stderr: str) -> bool:
+    def _should_spill(self, stdout: bytes, stderr: bytes) -> bool:
         return (
             self._config.spill_to_managed_file
             and self._storage is not None
             and len(stdout) + len(stderr) > self._config.spill_after_chars
         )
 
-    def _save_spilled_output(self, command: str, stdout: str, stderr: str) -> dict[str, str | int] | None:
+    def _save_spilled_output(self, command: str, stdout: bytes, stderr: bytes) -> dict[str, str | int] | None:
         try:
             if self._storage is None:
                 return None
-            combined = stdout + stderr
             digest = hashlib.sha256(command.encode("utf-8")).hexdigest()[:8]
             stem = f"bash-{digest}"
             return self._storage.create_managed_temp_bytes_file(
                 subdir=self._config.spill_subdir,
                 stem=stem,
                 suffix=".txt",
-                content=combined.encode("utf-8"),
+                content=stdout + stderr,
             )
         except Exception:  # noqa: BLE001
             return None
