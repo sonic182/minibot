@@ -93,9 +93,9 @@ class RagTools:
             filename=file_path.name,
             source_type=document.source_type,
             mime_type=document.mime_type,
-            user_id=_scope_value(payload.get("user_id"), context.user_id),
+            user_id=_scope_value(payload.get("user_id"), context.user_id, field="user_id"),
             agent_id=_agent_scope_value(payload.get("agent_id"), context.owner_id),
-            chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
+            chat_id=_scope_value(payload.get("chat_id"), context.chat_id, field="chat_id"),
             tags=_normalize_string_list(payload.get("tags"), field="tags"),
             categories=_normalize_string_list(payload.get("categories"), field="categories"),
             chunk_size_tokens=self._config.chunk_size_tokens,
@@ -157,9 +157,9 @@ class RagTools:
             client=self._qdrant,
             collection=self._config.collection_name,
             document_id=document_id,
-            user_id=_scope_value(explicit_user_id, context.user_id),
+            user_id=_scope_value(explicit_user_id, context.user_id, field="user_id"),
             agent_id=_agent_scope_value(explicit_agent_id, context.owner_id),
-            chat_id=_scope_value(explicit_chat_id, context.chat_id),
+            chat_id=_scope_value(explicit_chat_id, context.chat_id, field="chat_id"),
             tags=tags,
             categories=categories,
         )
@@ -180,9 +180,9 @@ class RagTools:
             query=query,
             limit=limit,
             document_id=optional_str(payload.get("document_id")),
-            user_id=_scope_value(payload.get("user_id"), context.user_id),
+            user_id=_scope_value(payload.get("user_id"), context.user_id, field="user_id"),
             agent_id=_agent_scope_value(payload.get("agent_id"), context.owner_id),
-            chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
+            chat_id=_scope_value(payload.get("chat_id"), context.chat_id, field="chat_id"),
             filename=optional_str(payload.get("filename")),
             tags=_normalize_string_list(payload.get("tags"), field="tags"),
             categories=_normalize_string_list(payload.get("categories"), field="categories"),
@@ -232,9 +232,9 @@ class RagTools:
             collection=self._config.collection_name,
             limit=limit,
             document_id=optional_str(payload.get("document_id")),
-            user_id=_scope_value(payload.get("user_id"), context.user_id),
+            user_id=_scope_value(payload.get("user_id"), context.user_id, field="user_id"),
             agent_id=_agent_scope_value(payload.get("agent_id"), context.owner_id),
-            chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
+            chat_id=_scope_value(payload.get("chat_id"), context.chat_id, field="chat_id"),
         )
         return facets
 
@@ -248,19 +248,27 @@ def _hash_path(path: str) -> str:
     return "doc_" + hashlib.sha1(path.encode()).hexdigest()[:16]  # noqa: S324
 
 
-def _scope_value(raw_value: Any, context_value: int | None) -> str | None:
+def _scope_value(raw_value: Any, context_value: int | None, *, field: str) -> str | None:
     value = optional_str(raw_value)
-    if value is not None:
-        return value
     if context_value is None:
-        return None
-    return str(context_value)
+        return value
+
+    context_resolved = str(context_value)
+    if value is None:
+        return context_resolved
+    if value != context_resolved:
+        raise ValueError(f"{field} must match the current runtime context")
+    return context_resolved
 
 
 def _agent_scope_value(raw_value: Any, owner_id: str | None) -> str | None:
     value = optional_str(raw_value)
-    if value is not None:
+    if owner_id is None:
         return value
+    if value is None:
+        return owner_id
+    if value != owner_id:
+        raise ValueError("agent_id must match the current runtime context")
     return owner_id
 
 

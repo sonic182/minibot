@@ -22,6 +22,11 @@ class AsyncQdrantClient:
                     f"qdrant collection '{collection_name}' has vector size {existing_vector_size}, "
                     f"expected {vector_size}"
                 )
+            if not _has_payload_field(response, "filename"):
+                raise ValueError(
+                    f"qdrant collection '{collection_name}' is missing the 'filename' payload schema; "
+                    "reset the collection and reindex documents"
+                )
             return
 
         await self._request(
@@ -136,3 +141,8 @@ def _extract_vector_size(response: dict[str, Any]) -> int:
         if isinstance(size, int):
             return size
     raise RuntimeError("qdrant collection returned an unexpected vector config")
+
+
+def _has_payload_field(response: dict[str, Any], field_name: str) -> bool:
+    payload_schema = response.get("result", {}).get("payload_schema", {})
+    return isinstance(payload_schema, dict) and field_name in payload_schema

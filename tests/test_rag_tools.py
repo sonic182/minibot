@@ -221,6 +221,24 @@ async def test_rag_search_defaults_scope_from_context(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_rag_search_rejects_cross_scope_user_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tool = _tool(_storage(tmp_path))
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_search")
+
+    async def _fake_retrieve_context(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return []
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.retrieve_context", _fake_retrieve_context)
+
+    with pytest.raises(ValueError, match="user_id must match the current runtime context"):
+        await binding.handler(
+            {"query": "hello", "user_id": "999"},
+            ToolContext(owner_id="owner", channel="telegram", chat_id=321, user_id=123),
+        )
+
+
+@pytest.mark.asyncio
 async def test_rag_search_normalizes_metadata_filters(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tool = _tool(_storage(tmp_path))
     binding = next(item for item in tool.bindings() if item.tool.name == "rag_search")
@@ -350,6 +368,46 @@ async def test_rag_delete_explicit_scope_is_narrowed_by_context(
     assert captured["document_id"] == "doc-1"
     assert captured["user_id"] == "123"
     assert captured["chat_id"] == "456"
+
+
+@pytest.mark.asyncio
+async def test_rag_delete_rejects_cross_scope_chat_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tool = _tool(_storage(tmp_path))
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_delete")
+
+    async def _fake_delete_document(**kwargs: Any) -> None:
+        del kwargs
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.delete_document", _fake_delete_document)
+
+    with pytest.raises(ValueError, match="chat_id must match the current runtime context"):
+        await binding.handler(
+            {"document_id": "doc-1", "chat_id": "999"},
+            ToolContext(owner_id="owner", channel="telegram", chat_id=456, user_id=123),
+        )
+
+
+@pytest.mark.asyncio
+async def test_rag_index_rejects_cross_scope_agent_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    storage = _storage(tmp_path)
+    storage.create_text_file("docs/report.txt", "hello", overwrite=False)
+    tool = _tool(storage)
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_index")
+
+    async def _fake_index_document(**kwargs: Any) -> int:
+        del kwargs
+        return 1
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.index_document", _fake_index_document)
+
+    with pytest.raises(ValueError, match="agent_id must match the current runtime context"):
+        await binding.handler(
+            {"file_path": "docs/report.txt", "agent_id": "other-agent"},
+            ToolContext(owner_id="owner", channel="telegram", chat_id=99, user_id=7),
+        )
 
 
 @pytest.mark.asyncio

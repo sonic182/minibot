@@ -78,7 +78,8 @@ Setup
       max_results = 7
 
    On startup, MiniBot creates the Qdrant collection automatically if it does not exist.
-   If it already exists with an incompatible vector size, startup fails fast.
+   If it already exists with an incompatible vector size, or from the older ``source_name``
+   era without the ``filename`` payload schema, startup fails fast.
 
 Usage
 -----
@@ -144,7 +145,8 @@ vector size at startup and fails if the existing collection is incompatible:
    ./scripts/rag_clear_collection.sh            # default collection
    ./scripts/rag_clear_collection.sh my_chunks  # custom name
 
-MiniBot recreates the collection automatically on next startup.
+MiniBot recreates the collection automatically on next startup. This reset is required for
+older collections that were indexed before ``filename`` replaced ``source_name``.
 
 Configuration reference
 -----------------------
