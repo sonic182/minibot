@@ -9,6 +9,7 @@ a question that could be answered from previously indexed documents.
 Optional filters:
 - `document_id` — restrict search to a single document.
 - `filename` — restrict search to chunks from one exact filename.
-- `user_id` / `agent_id` / `chat_id` — restrict to chunks tagged with these values.
+- `user_id` / `agent_id` / `chat_id` — restrict to chunks tagged with these values. If supplied
+  explicitly, they must match the current runtime context.
 - `tags` / `categories` — restrict to chunks matching any of the provided normalized values.
 - `limit` — number of results (default configured server-side, usually 5).

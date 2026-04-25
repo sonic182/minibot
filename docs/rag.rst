@@ -93,7 +93,9 @@ Once enabled, the bot has access to four tools:
 - **rag_search** — provide a natural language query. The bot embeds the query and returns
   the top-k most relevant chunks with their similarity score and source metadata. Optional
   ``filename``, ``tags``, and ``categories`` filters narrow the result set. Tag/category
-  filters match any of the provided values. When reranking is
+  filters match any of the provided values. Scope filters are bound to the active runtime
+  context; if ``user_id``, ``agent_id``, or ``chat_id`` is provided explicitly, it must match
+  the current context. When reranking is
   enabled, MiniBot first pulls a larger semantic candidate set from Qdrant, reranks it with
   a cross-encoder, then returns only the final top results. Reranked responses use ``score``
   for the rerank score and also include ``semantic_score`` from Qdrant.
@@ -104,7 +106,8 @@ Once enabled, the bot has access to four tools:
 - **rag_delete** — remove indexed chunks by ``document_id`` and/or scope tags when the
   data should no longer be searchable. Optional ``tags`` and ``categories`` filters are also
   supported. The tool call must include at least one explicit filter; context defaults alone
-  do not trigger deletion.
+  do not trigger deletion. Scope filters are bound to the active runtime context; explicit
+  scope values must match it.
 
 Example interaction::
 
