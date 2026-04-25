@@ -56,8 +56,10 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── mcp_tool_name.py
 │   │   ├── response_parser.py
 │   │   ├── runtime_limits.py
-│   │   ├── runtime_structured_output.py
 │   │   ├── scheduler_service.py
+│   │   ├── skill_definitions_loader.py
+│   │   ├── skill_registry.py
+│   │   ├── token_limits_autoconfig.py
 │   │   ├── tool_capabilities.py
 │   │   ├── tool_guardrail_validator.py
 │   │   ├── tool_policy_utils.py
@@ -70,16 +72,19 @@ and emit outbound responses back to the active channel adapter.
 │   │           ├── input_service.py
 │   │           ├── metadata_service.py
 │   │           ├── prompt_service.py
+│   │           ├── recent_file_tracking_service.py
 │   │           ├── runtime_service.py
 │   │           ├── session_state_service.py
-│   │           └── tool_audio_executor.py
+│   │           ├── tool_audio_executor.py
+│   │           └── turn_service.py
 │   ├── core/
 │   │   ├── agent_runtime.py
 │   │   ├── agents.py
 │   │   ├── channels.py
 │   │   ├── events.py
 │   │   ├── jobs.py
-│   │   └── memory.py
+│   │   ├── memory.py
+│   │   └── skills.py
 │   ├── adapters/
 │   │   ├── config/
 │   │   │   ├── loader.py
@@ -99,26 +104,44 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── messaging/
 │   │   │   ├── console/
 │   │   │   │   └── service.py
+│   │   │   ├── rabbitmq/          (optional RabbitMQ channel adapter)
+│   │   │   │   └── service.py
 │   │   │   └── telegram/
+│   │   │       ├── authorization.py
+│   │   │       ├── incoming_media_collector.py
 │   │   │       ├── incoming_media_mapper.py
+│   │   │       ├── outbound_sender.py
 │   │   │       └── service.py
-│   │   └── scheduler/
-│   │       └── sqlalchemy_prompt_store.py
+│   │   ├── qdrant/
+│   │   │   └── client.py
+│   │   ├── scheduler/
+│   │   │   └── sqlalchemy_prompt_store.py
+│   │   └── tasks/
+│   │       ├── manager.py
+│   │       └── worker.py
 │   ├── llm/
 │   │   ├── provider_factory.py
+│   │   ├── providers/
+│   │   │   └── openai_responses.py
 │   │   ├── services/
 │   │   │   ├── client_bootstrap.py
 │   │   │   ├── compaction.py
+│   │   │   ├── debug_logging.py
+│   │   │   ├── generation_loop.py
 │   │   │   ├── models.py
+│   │   │   ├── provider_capabilities.py
 │   │   │   ├── provider_registry.py
+│   │   │   ├── provider_target.py
+│   │   │   ├── reasoning_replay.py
 │   │   │   ├── request_builder.py
-│   │   │   ├── schema_fallback.py
+│   │   │   ├── runtime_message_renderer.py
 │   │   │   ├── schema_policy.py
 │   │   │   ├── tool_executor.py
 │   │   │   ├── tool_loop_guard.py
 │   │   │   └── usage_parser.py
 │   │   └── tools/
 │   │       ├── descriptions/      (tool description .txt files, loaded at runtime)
+│   │       ├── action_dispatcher.py
 │   │       ├── agent_delegate.py
 │   │       ├── arg_utils.py
 │   │       ├── audio_transcription.py
@@ -135,16 +158,27 @@ and emit outbound responses back to the active channel adapter.
 │   │       ├── grep.py
 │   │       ├── http_client.py
 │   │       ├── mcp_bridge.py
+│   │       ├── pre_response.py
 │   │       ├── python_exec.py
 │   │       ├── patch_engine.py
+│   │       ├── rag_tools.py
 │   │       ├── schema_utils.py
 │   │       ├── scheduler.py
+│   │       ├── skill_loader.py
+│   │       ├── tasks.py
 │   │       ├── time.py
-│   │       └── user_memory.py
+│   │       ├── user_memory.py
+│   │       └── wait.py
+│   ├── rag/
+│   │   ├── chunking.py
+│   │   ├── document_ingestion.py
+│   │   ├── embeddings.py
+│   │   ├── reranking.py
+│   │   └── retrieval.py
 │   └── shared/
-│       ├── assistant_response.py
 │       ├── console_compat.py
 │       ├── datetime_utils.py
+│       ├── frontmatter.py
 │       ├── json_schema.py
 │       ├── parse_utils.py
 │       ├── path_utils.py
@@ -242,6 +276,7 @@ flowchart TD
 - `core/events.py`: event types (`MessageEvent`, `OutboundEvent`, base event envelope).
 - `core/memory.py`: transcript and KV memory protocols.
 - `core/jobs.py`: scheduled prompt entities, status enums, recurrence model, and repository protocol.
+- `core/skills.py`: immutable data structure representing a skill's metadata and content (`SkillSpec`).
 
 ## Application Layer
 
@@ -270,7 +305,9 @@ flowchart TD
   - `compaction_service.py`: token-pressure checks and compaction strategy (Responses compact endpoint or summary fallback),
   - `session_state_service.py`: per-session token counters and `previous_response_id` tracking,
   - `metadata_service.py`: provider/model metadata extraction for outbound responses,
-  - `tool_audio_executor.py`: adapter for executing `transcribe_audio` tool bindings from app services.
+  - `recent_file_tracking_service.py`: tracks recently accessed filesystem paths and augments model prompts with recent file context,
+  - `tool_audio_executor.py`: adapter for executing `transcribe_audio` tool bindings from app services,
+  - `turn_service.py`: orchestrates the full LLM turn lifecycle including tool execution, history management, and response parsing.
 - `app/agent_runtime.py`:
   - owns directive-loop execution (`provider step -> tool calls -> tool output append -> directive apply -> next step`),
   - maintains runtime `AgentState` (`messages`, `meta`),
@@ -278,6 +315,9 @@ flowchart TD
   - enforces loop limits (`max_steps`, `max_tool_calls`, timeout) and directive trust policy.
 - `app/llm_client_factory.py`: builds/caches default and per-agent LLM clients, resolving credentials from `[providers.<name>]`.
 - `app/scheduler_service.py`: scheduled prompt orchestration (`schedule`, `list`, `cancel`, `delete`, polling loop, retry/recurrence handling, event publishing).
+- `app/skill_definitions_loader.py`: discovers and loads skill definitions from Markdown files with frontmatter configuration.
+- `app/skill_registry.py`: in-memory registry of available skills with change detection and metadata generation.
+- `app/token_limits_autoconfig.py`: automatically configures model token limits and context windows by querying provider capabilities.
 - `app/console.py`: interactive `minibot-console` runner on top of `ConsoleService` + dispatcher.
 
 ## Agent Architecture (Current)
@@ -320,8 +360,17 @@ Current notes:
   - `adapters/logging/setup.py` configures structured logfmt-friendly logging.
 - Messaging:
   - `adapters/messaging/console/service.py` handles local console I/O with EventBus publish/subscribe semantics.
-  - `adapters/messaging/telegram/service.py` handles Telegram authorization, inbound text/media extraction, outbound message sending, and long-message chunking.
+  - `adapters/messaging/rabbitmq/service.py` (optional) consumes messages from RabbitMQ exchanges and dispatches them to the event bus; also required by the tasks subsystem.
+  - `adapters/messaging/telegram/service.py` handles Telegram inbound text/media extraction, coordinates authorization, media collection, and outbound sending.
+  - `adapters/messaging/telegram/authorization.py` validates senders against configured chat/user allow-lists.
+  - `adapters/messaging/telegram/incoming_media_collector.py` downloads and stores media attachments from Telegram messages.
   - `adapters/messaging/telegram/incoming_media_mapper.py` normalizes media-target paths and `IncomingFileRef` mapping for photo/document/audio/voice uploads.
+  - `adapters/messaging/telegram/outbound_sender.py` sends text and file responses with formatting, link previews, and message splitting.
+- Qdrant:
+  - `adapters/qdrant/client.py` async HTTP client for Qdrant vector database collections and operations.
+- Tasks:
+  - `adapters/tasks/manager.py` manages subprocess-based task workers with lifecycle management and IPC.
+  - `adapters/tasks/worker.py` initializes and runs a worker agent in a subprocess with filtered tools.
 - Files:
   - `adapters/files/local_storage.py` handles managed workspace path-safe list/write/read operations.
 - MCP:
@@ -334,14 +383,22 @@ Current notes:
 
 ## LLM Layer
 
-- `llm/provider_factory.py`: high-level `LLMClient` that orchestrates generate/step flows and delegates request assembly, schema fallback, tool execution, and usage parsing to `llm/services/*`.
+- `llm/provider_factory.py`: high-level `LLMClient` that orchestrates generate/step flows and delegates request assembly, schema policy, tool execution, and usage parsing to `llm/services/*`.
+- `llm/providers/openai_responses.py`: patches OpenAI Responses provider to handle mixed function and native tool formats.
 - `llm/services/client_bootstrap.py`: provider construction, timeout/retry wiring, provider selection, and system-prompt loading (including HTTP/2 disablement for `http://` base URLs).
+- `llm/services/debug_logging.py`: logs provider responses with structured metadata about content, tool calls, and response IDs.
+- `llm/services/generation_loop.py`: core LLM generation loop with tool execution, continuations, and error recovery.
+- `llm/services/provider_capabilities.py`: constructs provider-specific native tools (web search, etc.) for supported models.
+- `llm/services/provider_target.py`: resolves and infers LLM provider names from configuration and base URL patterns.
+- `llm/services/reasoning_replay.py`: extracts and reapplies extended reasoning metadata from provider responses.
 - `llm/services/request_builder.py`: canonical request kwargs/message assembly for `generate` and runtime `complete_once` calls.
-- `llm/services/schema_policy.py` + `schema_fallback.py`: strict schema preparation and compatibility fallback behavior when providers reject schema mode.
+- `llm/services/runtime_message_renderer.py`: converts provider message objects to internal agent message format with reasoning and media handling.
+- `llm/services/schema_policy.py`: strict schema preparation and compatibility fallback behavior when providers reject schema mode.
 - `llm/services/tool_executor.py` + `tool_loop_guard.py`: tool call execution and repeated-loop safeguards/fallback payloads.
 - `llm/services/usage_parser.py` + `models.py`: usage/response parsing and typed return models (`LLMGeneration`, `LLMCompletionStep`, `LLMCompaction`).
 - `llm/tools/factory.py`: builds enabled tool bindings from settings.
 - `llm/tools/description_loader.py`: loads per-tool description strings from the `descriptions/` package at runtime.
+- `llm/tools/action_dispatcher.py`: routes tool actions to registered handlers by action type with error handling.
 - `llm/tools/*`: concrete tool schemas + handlers:
   - agent delegation (`fetch_agent_info`, `invoke_agent`),
   - chat memory management (`chat_history_info`, `chat_history_trim`),
@@ -353,8 +410,44 @@ Current notes:
   - structured patch editing (`apply_patch`),
   - file storage/workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `code_read`, `grep`, `self_insert_artifact` (path confinement defaults to `tools.file_storage.root_dir` and can be relaxed with `allow_outside_root`),
   - audio transcription: `transcribe_audio` (backed by `audio_transcription_facade.py` for model lifecycle/transcription normalization),
+  - RAG: `rag_index`, `rag_search`, `rag_delete`, `rag_list_metadata` (backed by `minibot/rag/` module and Qdrant),
   - scheduler controls (`schedule` action facade, `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`),
-  - time helpers (`current_datetime`).
+  - skills: `list_skills`, `activate_skill` (via `skill_loader.py`),
+  - tasks: `spawn_task`, `cancel_task`, `list_tasks` (subprocess workers via `adapters/tasks/`),
+  - pre-response metadata declaration (`pre_response`),
+  - time helpers (`current_datetime`),
+  - wait/pause (`wait`).
+
+## RAG Module
+
+The `minibot/rag/` package provides vector-search-backed retrieval-augmented generation:
+
+- `rag/document_ingestion.py`: extracts and normalizes text from files (PDF, plain text) into indexable documents.
+- `rag/chunking.py`: splits text into overlapping token-aware chunks.
+- `rag/embeddings.py`: lazy-loads sentence transformer models and generates vector embeddings.
+- `rag/reranking.py`: lazy-loads cross-encoder models to rerank retrieved chunks by relevance.
+- `rag/retrieval.py`: indexes documents into Qdrant, retrieves similar chunks, and deletes documents by ID.
+
+The LLM-facing tools (`rag_index`, `rag_search`, `rag_delete`, `rag_list_metadata`) live in `llm/tools/rag_tools.py` and use `adapters/qdrant/client.py` as the storage backend.
+
+## Skills
+
+Skills are dynamically loadable prompt packs that extend or override agent behavior at runtime:
+
+- `core/skills.py`: `SkillSpec` domain model (metadata + content).
+- `app/skill_definitions_loader.py`: discovers skill definitions from Markdown files with frontmatter.
+- `app/skill_registry.py`: in-memory registry with change detection.
+- `llm/tools/skill_loader.py`: LLM-facing `list_skills` / `activate_skill` tools.
+
+Skill definitions live in a configurable directory (analogous to `agents/` for agent definitions).
+
+## Tasks (Subprocess Workers)
+
+The tasks subsystem runs agent work in isolated subprocesses. It depends on RabbitMQ (optional) for task dispatch and result delivery.
+
+- `adapters/tasks/manager.py`: manages worker subprocess lifecycle and IPC.
+- `adapters/tasks/worker.py`: initializes a worker agent with filtered tools inside a subprocess.
+- `llm/tools/tasks.py`: LLM-facing `spawn_task`, `cancel_task`, `list_tasks` tools.
 
 ## MCP Tool Bridge Flow
 
