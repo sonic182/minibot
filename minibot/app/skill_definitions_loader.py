@@ -7,10 +7,10 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from minibot.core.skills import SkillSpec
-from minibot.shared.frontmatter import parse_frontmatter, split_frontmatter
+from minibot.shared.frontmatter import parse_scalar, split_frontmatter
 
 logger = logging.getLogger("minibot.skill_definitions_loader")
-_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{2,60}$")
+_NAME_RE = re.compile(r"^[^\r\n/\\]{2,60}$")
 _DESCRIPTION_MAX_CHARS = 300
 
 
@@ -123,7 +123,7 @@ def _parse_skill_file(skill_file: Path, skill_dir: Path) -> SkillSpec | None:
         logger.warning("skill file has no frontmatter", extra={"path": str(skill_file)})
         return None
     try:
-        payload = parse_frontmatter(frontmatter_text)
+        payload = parse_skill_frontmatter(frontmatter_text)
     except ValueError as exc:
         logger.warning("could not parse skill frontmatter", extra={"path": str(skill_file), "error": str(exc)})
         return None
@@ -152,3 +152,20 @@ def _parse_skill_file(skill_file: Path, skill_dir: Path) -> SkillSpec | None:
             extra={"skill_name": cfg.name, "length": len(cfg.description), "max": _DESCRIPTION_MAX_CHARS},
         )
     return SkillSpec(name=cfg.name, description=cfg.description, body=body, skill_dir=skill_dir)
+
+
+def parse_skill_frontmatter(frontmatter: str) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for raw_line in frontmatter.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or line.startswith(" "):
+            continue
+        if ":" not in stripped:
+            raise ValueError(f"invalid frontmatter line: {raw_line}")
+        key, value = stripped.split(":", 1)
+        key = key.strip()
+        if key not in {"name", "description", "enabled"}:
+            continue
+        result[key] = parse_scalar(value.strip())
+    return result

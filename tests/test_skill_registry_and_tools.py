@@ -9,11 +9,19 @@ from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.skill_loader import SkillLoaderTool
 
 
-def _write_skill(base_dir: Path, slug: str, *, name: str, description: str, body: str = "Use the skill.") -> None:
+def _write_skill(
+    base_dir: Path,
+    slug: str,
+    *,
+    name: str,
+    description: str,
+    body: str = "Use the skill.",
+    extra_frontmatter: str = "",
+) -> None:
     skill_dir = base_dir / slug
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
-        (f"---\nname: {name}\ndescription: {description}\nenabled: true\n---\n\n{body}\n"),
+        (f"---\nname: {name}\ndescription: {description}\nenabled: true\n{extra_frontmatter}---\n\n{body}\n"),
         encoding="utf-8",
     )
 
@@ -45,6 +53,31 @@ def test_skill_registry_refreshes_when_skill_is_deleted(tmp_path: Path) -> None:
 
     assert registry.refresh_if_stale() is True
     assert registry.names() == []
+
+
+def test_skill_registry_accepts_nested_frontmatter_and_human_readable_names(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "skills"
+    registry = SkillRegistry(paths=[str(skills_dir)])
+
+    _write_skill(
+        skills_dir,
+        "browser-screenshot-crop-guide",
+        name="Browser Screenshot Crop Guide",
+        description="Capture and optionally crop web screenshots.",
+        extra_frontmatter=(
+            "metadata:\n"
+            "  openclaw:\n"
+            "    requires:\n"
+            "      env:\n"
+            "        - BROWSER_TOKEN\n"
+            "      bins:\n"
+            "        - node\n"
+        ),
+    )
+
+    assert registry.refresh_if_stale() is True
+    assert registry.names() == ["Browser Screenshot Crop Guide"]
+    assert registry.get("Browser Screenshot Crop Guide") is not None
 
 
 @pytest.mark.asyncio
