@@ -53,6 +53,7 @@ main_responses_state_mode = "full_messages"
 # previous_response_id: continue server-side state for lower latency/token usage.
 agent_responses_state_mode = "previous_response_id"
 prompt_cache_enabled = true
+strip_logs = false
 # Optional retention hint for OpenAI Responses prompt cache.
 # prompt_cache_retention = "24h"
 # Base system prompt (used when system_prompt_file is not configured or set to null)
@@ -203,6 +204,32 @@ default_owner_id = "primary"
 # Optional async task tools.
 [tools.tasks]
 enabled = false
+
+# Optional RAG (Retrieval-Augmented Generation) via Qdrant.
+# Requires `tools.file_storage.enabled = true`, a running Qdrant instance,
+# and manual `torch` + `sentence-transformers` installation.
+# Run Qdrant locally: ./qdrant/qdrant  (see qdrant/download_bin.sh)
+[tools.rag]
+enabled = false
+qdrant_url = "http://localhost:6333"
+collection_name = "minibot_chunks"
+chunk_size_tokens = 96
+chunk_overlap_tokens = 20
+search_limit = 5
+truncate_result_tokens = false
+max_result_tokens = 1500
+
+[tools.rag.embedding]
+model = "sentence-transformers/all-MiniLM-L12-v2"
+dim = 384
+max_sequence_tokens = 128
+# truncate_dim = 256  # Uncomment for Matryoshka embedding truncation (must be <= dim)
+
+[tools.rag.rerank]
+enabled = false
+model = "cross-encoder/ms-marco-MiniLM-L2-v2"
+candidate_limit = 50
+max_results = 7
 
 # Optional HTTP fetch tool.
 [tools.http_client]

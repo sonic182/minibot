@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+import asyncio
+import threading
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
+
+_model_lock = threading.Lock()
+_model_instance: SentenceTransformer | None = None
+_model_key: tuple[str, int | None] | None = None
+
+
+def _get_model(model_name: str, truncate_dim: int | None) -> Any:
+    global _model_instance, _model_key  # noqa: PLW0603
+
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise RuntimeError(
+            "sentence-transformers is required for RAG. "
+            "Install the base project with `poetry install --all-extras`, then install "
+            "`torch` and `sentence-transformers` manually."
+        ) from exc
+
+    model_key = (model_name, truncate_dim)
+    with _model_lock:
+        if _model_instance is None or _model_key != model_key:
+            kwargs: dict[str, Any] = {}
+            if truncate_dim is not None:
+                kwargs["truncate_dim"] = truncate_dim
+            _model_instance = SentenceTransformer(model_name, **kwargs)
+            _model_key = model_key
+    return _model_instance
+
+
+def _encode_sync(model_name: str, truncate_dim: int | None, texts: list[str]) -> list[list[float]]:
+    model = _get_model(model_name, truncate_dim)
+    vectors = model.encode(texts, normalize_embeddings=True)
+    return [v.tolist() for v in vectors]
+
+
+async def embed_texts(model_name: str, truncate_dim: int | None, texts: list[str]) -> list[list[float]]:
+    return await asyncio.to_thread(_encode_sync, model_name, truncate_dim, texts)
+
+
+async def embed_text(model_name: str, truncate_dim: int | None, text: str) -> list[float]:
+    results = await embed_texts(model_name, truncate_dim, [text])
+    return results[0]
+
+
+def get_tokenizer(model_name: str, truncate_dim: int | None) -> Any:
+    tokenizer = getattr(_get_model(model_name, truncate_dim), "tokenizer", None)
+    if tokenizer is None:
+        raise RuntimeError(f"embedding model {model_name!r} does not expose a tokenizer")
+    return tokenizer

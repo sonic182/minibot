@@ -138,7 +138,7 @@ def _build_python_feature(context: ToolAssemblyContext, _: list[ToolBinding]) ->
 
 
 def _build_bash_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
-    return BashTool(context.settings.tools.bash).bindings()
+    return BashTool(context.settings.tools.bash, storage=context.managed_storage).bindings()
 
 
 def _build_apply_patch_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
@@ -232,6 +232,19 @@ def _build_task_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> l
         rabbitmq_config=context.settings.rabbitmq,
         task_manager=context.task_manager,
     ).bindings()
+
+
+def _build_rag_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
+    from minibot.adapters.qdrant.client import AsyncQdrantClient
+    from minibot.llm.tools.rag_tools import RagTools
+
+    cfg = context.settings.tools.rag
+    storage = _require_managed_storage(
+        context.managed_storage,
+        error_message="tools.rag.enabled requires tools.file_storage.enabled",
+    )
+    qdrant = AsyncQdrantClient(url=cfg.qdrant_url)
+    return RagTools(config=cfg, qdrant=qdrant, storage=storage).bindings()
 
 
 def _build_agent_delegate_feature(context: ToolAssemblyContext, tools: list[ToolBinding]) -> list[ToolBinding]:
@@ -351,6 +364,12 @@ _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (
         labels=("tasks",),
         enabled_in_config=_tasks_enabled,
         builder=_build_task_feature,
+    ),
+    ToolFeature(
+        key="rag",
+        labels=("rag_index", "rag_search", "rag_list_metadata", "rag_delete"),
+        enabled_in_config=lambda settings: _tool_enabled(settings, "rag"),
+        builder=_build_rag_feature,
     ),
     ToolFeature(
         key="agent_delegate",

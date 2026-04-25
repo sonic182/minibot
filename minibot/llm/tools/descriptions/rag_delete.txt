@@ -1,0 +1,1 @@
+Remove indexed chunks from the vector store. Provide at least one explicit filter in the tool call: document_id, user_id, agent_id, chat_id, tags, or categories. Context defaults alone are not enough. If scope fields are supplied explicitly, they must match the current runtime context. All matching chunks are permanently deleted.

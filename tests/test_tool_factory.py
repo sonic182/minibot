@@ -19,6 +19,7 @@ from minibot.adapters.config.schema import (
     MCPToolConfig,
     PythonExecToolConfig,
     RabbitMQConsumerConfig,
+    RagToolConfig,
     ScheduledPromptsConfig,
     SchedulerConfig,
     Settings,
@@ -129,6 +130,7 @@ def _settings(
             audio_transcription=AudioTranscriptionToolConfig(enabled=audio_transcription_enabled),
             skills=SkillsToolConfig(enabled=skills_enabled),
             tasks=TaskToolConfig(enabled=tasks_enabled),
+            rag=RagToolConfig(enabled=False),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
         rabbitmq=RabbitMQConsumerConfig(enabled=rabbitmq_enabled),
@@ -431,6 +433,26 @@ def test_build_enabled_tools_rejects_grep_without_file_storage() -> None:
     )
 
     with pytest.raises(ValueError, match="tools.grep.enabled requires tools.file_storage.enabled"):
+        _ = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
+
+
+def test_build_enabled_tools_rejects_rag_without_file_storage() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=False,
+        audio_transcription_enabled=False,
+        grep_enabled=False,
+    )
+    settings.tools.rag.enabled = True
+
+    with pytest.raises(ValueError, match="tools.rag.enabled requires tools.file_storage.enabled"):
         _ = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
 
 

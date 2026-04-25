@@ -16,6 +16,7 @@ Key config options:
 - ``default_limit`` / ``max_limit`` — pagination controls.
 - ``default_owner_id`` — fallback owner when no user context is available.
 """
+
 from __future__ import annotations
 
 import json

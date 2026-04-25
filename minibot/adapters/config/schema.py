@@ -231,6 +231,7 @@ class LLMMConfig(BaseModel):
     - ``main_responses_state_mode`` — how conversation state is passed for the main agent
       (``"full_messages"`` or ``"previous_response_id"``).
     - ``prompt_cache_enabled`` — enable provider-side prompt caching (default: ``true``).
+    - ``strip_logs`` — shorten selected fields in the provider raw-response debug log (default: ``false``).
     - ``openrouter`` — OpenRouter-specific routing overrides (``[llm.openrouter]``).
     - ``xai`` — xAI web/X search integration (``[llm.xai]``).
     """
@@ -257,6 +258,7 @@ class LLMMConfig(BaseModel):
     responses_state_mode: Literal["full_messages", "previous_response_id"] = "full_messages"
     prompt_cache_enabled: bool = True
     prompt_cache_retention: Literal["in-memory", "24h"] | None = None
+    strip_logs: bool = False
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
     xai: XAILLMConfig = XAILLMConfig()
 
@@ -478,6 +480,10 @@ class BashToolConfig(BaseModel):
     max_output_bytes: ByteSizeValue = 128000
     pass_parent_env: bool = True
     env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"])
+    spill_to_managed_file: bool = False
+    spill_after_chars: PositiveInt = 2000
+    spill_preview_chars: PositiveInt = 500
+    spill_subdir: str = "bash_output/tmp"
 
 
 class ApplyPatchToolConfig(BaseModel):
@@ -550,6 +556,35 @@ class TaskToolConfig(BaseModel):
     enabled: bool = False
 
 
+class RagEmbeddingConfig(BaseModel):
+    model: str = "sentence-transformers/all-MiniLM-L12-v2"
+    dim: int = 384
+    truncate_dim: int | None = None
+    max_sequence_tokens: PositiveInt = 128
+
+
+class RagRerankConfig(BaseModel):
+    enabled: bool = False
+    model: str = "cross-encoder/ms-marco-MiniLM-L2-v2"
+    candidate_limit: PositiveInt = 50
+    max_results: PositiveInt = 7
+
+
+class RagToolConfig(BaseModel):
+    enabled: bool = False
+    qdrant_url: str = "http://localhost:6333"
+    collection_name: str = "minibot_chunks"
+    embedding: RagEmbeddingConfig = RagEmbeddingConfig()
+    rerank: RagRerankConfig = RagRerankConfig()
+    chunk_size_tokens: PositiveInt = 96
+    chunk_overlap_tokens: int = Field(default=20, ge=0)
+    search_limit: int = 5
+    truncate_result_tokens: bool = False
+    max_result_tokens: PositiveInt = 1500
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ToolsConfig(BaseModel):
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
@@ -566,6 +601,7 @@ class ToolsConfig(BaseModel):
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
     tasks: TaskToolConfig = Field(default_factory=TaskToolConfig)
+    rag: RagToolConfig = RagToolConfig()
 
 
 class RabbitMQConsumerConfig(BaseModel):

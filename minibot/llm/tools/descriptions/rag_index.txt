@@ -1,0 +1,18 @@
+Index a text or PDF file into the vector store for later semantic search.
+
+Read the file at `file_path`, extract text if needed, split it into overlapping chunks,
+embed each chunk, and upsert all chunks into Qdrant under `document_id`.
+
+Use this tool when:
+- An HTTP response was too large and was saved to a temp file — index it so you can search it later.
+- The user uploads a text or PDF document and wants to query it semantically.
+
+Returns the number of chunks indexed and the document_id used (useful if auto-generated).
+
+`document_id` defaults to a hash of the file path when omitted.
+`filename` is stored with every chunk and comes from the indexed file basename.
+`user_id`, `agent_id`, `chat_id` are optional filter tags for scoped retrieval.
+`tags` and `categories` are optional string lists for LLM-generated metadata. They are normalized
+to lowercase, empty values are dropped, and duplicates are removed.
+
+PDF indexing in v1 uses text extraction only. Scanned/image-only PDFs may fail because OCR is not supported.

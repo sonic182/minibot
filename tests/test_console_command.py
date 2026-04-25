@@ -30,6 +30,10 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
             return _Logger()
 
         @classmethod
+        def get_settings(cls):
+            return None
+
+        @classmethod
         def get_event_bus(cls):
             return object()
 
@@ -111,6 +115,10 @@ async def test_console_run_once_reads_stdin_when_dash(monkeypatch: pytest.Monkey
             return _Logger()
 
         @classmethod
+        def get_settings(cls):
+            return None
+
+        @classmethod
         def get_event_bus(cls):
             return object()
 
@@ -186,6 +194,10 @@ async def test_console_repl_requires_double_ctrl_c_to_exit(monkeypatch: pytest.M
                     return None
 
             return _Logger()
+
+        @classmethod
+        def get_settings(cls):
+            return None
 
         @classmethod
         def get_event_bus(cls):
@@ -273,6 +285,10 @@ async def test_console_run_once_timeout_shows_warning_without_crash(monkeypatch:
                     return None
 
             return _Logger()
+
+        @classmethod
+        def get_settings(cls):
+            return None
 
         @classmethod
         def get_event_bus(cls):

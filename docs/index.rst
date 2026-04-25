@@ -29,6 +29,7 @@ Why self-host
    tools
    scheduler
    audio
+   rag
    mcp
    security
    prompts

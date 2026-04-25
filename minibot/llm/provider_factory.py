@@ -55,6 +55,7 @@ class LLMClient:
         self._responses_state_mode = getattr(config, "responses_state_mode", "full_messages")
         self._prompt_cache_enabled = bool(getattr(config, "prompt_cache_enabled", True))
         self._prompt_cache_retention = getattr(config, "prompt_cache_retention", None)
+        self._strip_logs = bool(getattr(config, "strip_logs", False))
         self._compaction_retry_attempts = 3
         self._compaction_retry_base_delay_seconds = float(config.retry_delay_seconds)
         self._compaction_retry_max_delay_seconds = min(self._compaction_retry_base_delay_seconds * 4, 10.0)
@@ -159,6 +160,7 @@ class LLMClient:
             response=response,
             context="complete_once",
             provider_name=self.provider_name(),
+            strip_logs=self._strip_logs,
         )
         message = response.main_response
         if not message:
@@ -249,6 +251,7 @@ class LLMClient:
             max_new_tokens=self._max_new_tokens,
             prompt_cache_enabled=self._prompt_cache_enabled,
             prompt_cache_retention=self._prompt_cache_retention,
+            strip_logs=self._strip_logs,
             reasoning_effort=self._reasoning_effort,
             openrouter_models=self._openrouter_models,
             openrouter_provider=self._openrouter_provider,

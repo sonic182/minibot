@@ -12,6 +12,16 @@ services:
       timeout: 5s
       retries: 10
 
+  minibot-qdrant:
+    image: qdrant/qdrant:latest
+    container_name: minibot-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+
   minibot:
     build: .
     container_name: minibot
@@ -19,6 +29,8 @@ services:
     depends_on:
       minibot-rabbitmq:
         condition: service_healthy
+      minibot-qdrant:
+        condition: service_started
     init: true
     volumes:
       - ./config.toml:/app/config.toml:ro

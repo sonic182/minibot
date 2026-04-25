@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-25
+
+### Added
+
+- RAG support backed by Qdrant, with `rag_index`, `rag_search`, `rag_list_metadata`, and `rag_delete` tools for indexing files, searching chunks, discovering facet values, and deleting indexed data by explicit filters.
+- `minibot/adapters/qdrant/AsyncQdrantClient`: async Qdrant HTTP client built on `aiosonic`, with collection bootstrap, point upsert, filtered delete, metadata facet listing, and vector search.
+- `minibot/rag/` package for token-aware chunking, document ingestion, sentence-transformer embeddings, optional cross-encoder reranking, and retrieval orchestration.
+- PDF ingestion for RAG via optional `pypdf`, with page markers in extracted text and startup/docs wiring for the extra dependency.
+- Metadata-aware RAG filters and payloads, including `filename`, `document_id`, `user_id`, `agent_id`, `chat_id`, `tags`, and `categories`.
+- `[tools.rag]` config block with embedding, rerank, and result-truncation settings, plus docs for setup, usage, and collection resets.
+- RAG dependencies remain manual outside Poetry extras: install `torch` and `sentence-transformers`, and add `pypdf` support via `poetry install --all-extras`.
+- RAG setup assets: `docs/rag.rst`, `scripts/rag_clear_collection.sh`, and a disabled-by-default Qdrant service in `docker-compose.yml`.
+
+### Changed
+
+- `bash` can now spill oversized output into a managed temp file and return preview/path metadata instead of forcing large responses inline.
+- RAG chunking now uses embedding-token budgets instead of character counts, and the default embedding model changed to `sentence-transformers/all-MiniLM-L12-v2`.
+- `rag_search` can optionally rerank a larger semantic candidate set with a cross-encoder before returning final results, and can truncate returned context to a configured token budget.
+- Provider debug logging now records response metadata and tool-call names without logging raw provider payloads.
+
+### Fixed
+
+- Re-indexing a document now deletes stale chunks before upserting replacements, including empty re-index passes.
+- RAG payload metadata now stores the resolved `filename`, and chunk IDs include scope values to avoid cross-scope collisions.
+- RAG indexing rejects binary / non-UTF-8 inputs and enforces managed-root access rules unless file storage explicitly allows outside-root paths.
+- Runtime-bound RAG scope filters now reject explicit `user_id`, `agent_id`, or `chat_id` values that do not match the active context.
+
 ## [0.3.0] - 2026-04-21
 
 ### Added
@@ -326,7 +353,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.3.0..HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.4.0..HEAD
+[0.4.0]: https://github.com/sonic182/minibot/compare/0.3.0..0.4.0
 [0.3.0]: https://github.com/sonic182/minibot/compare/0.2.0..0.3.0
 [0.2.0]: https://github.com/sonic182/minibot/compare/0.1.1..0.2.0
 [0.1.1]: https://github.com/sonic182/minibot/compare/0.1.0..0.1.1

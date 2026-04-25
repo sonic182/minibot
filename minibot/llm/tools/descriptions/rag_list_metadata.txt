@@ -1,0 +1,13 @@
+List available RAG tags, categories, and filenames so you can choose real filter values before searching.
+
+Returns facet counts for the current scope, including:
+- `tags` — available tag values with document counts
+- `categories` — available category values with document counts
+- `filenames` — available exact filename values with document counts
+
+Optional filters:
+- `document_id` — restrict metadata discovery to a single document
+- `user_id` / `agent_id` / `chat_id` — restrict discovery to this scope
+- `limit` — max values returned for each field
+
+Use this before `rag_search` when you want to filter by known metadata instead of guessing.
