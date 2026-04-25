@@ -238,13 +238,16 @@ enabled = true
 enabled = true
 qdrant_url = "http://minibot-qdrant:6333"
 collection_name = "minibot_chunks"
-chunk_size = 800
-chunk_overlap = 120
+chunk_size_tokens = 96
+chunk_overlap_tokens = 20
 search_limit = 5
+truncate_result_tokens = true
+max_result_tokens = 1500
 
 [tools.rag.embedding]
 model = "sentence-transformers/all-MiniLM-L12-v2"
 dim = 384
+max_sequence_tokens = 128
 
 [tools.rag.rerank]
 enabled = true

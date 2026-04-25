@@ -14,6 +14,7 @@ from minibot.llm.tools.arg_utils import int_with_default, optional_str, require_
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_integer, nullable_string, strict_object
+from minibot.rag.chunking import count_text_tokens, truncate_text_tokens
 from minibot.rag.document_ingestion import extract_indexable_document
 from minibot.rag.retrieval import delete_document, index_document, list_metadata_facets, retrieve_context
 
@@ -98,8 +99,8 @@ class RagTools:
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
             tags=_normalize_string_list(payload.get("tags"), field="tags"),
             categories=_normalize_string_list(payload.get("categories"), field="categories"),
-            chunk_size=self._config.chunk_size,
-            chunk_overlap=self._config.chunk_overlap,
+            chunk_size_tokens=self._config.chunk_size_tokens,
+            chunk_overlap_tokens=self._config.chunk_overlap_tokens,
             embedding_model=self._config.embedding.model,
             truncate_dim=self._config.embedding.truncate_dim,
         )
@@ -183,28 +184,31 @@ class RagTools:
             rerank_max_results=self._config.rerank.max_results,
         )
 
-        if self._config.truncate_result_chars:
-            results, truncated, truncated_chars = _truncate_search_results(
+        if self._config.truncate_result_tokens:
+            results, truncated, truncated_tokens = await asyncio.to_thread(
+                _truncate_search_results,
                 results,
-                max_chars=self._config.max_result_chars,
+                max_tokens=self._config.max_result_tokens,
+                embedding_model=self._config.embedding.model,
+                truncate_dim=self._config.embedding.truncate_dim,
             )
             if truncated:
                 _logger.info(
                     "rag search results truncated",
                     extra={
                         "query_length": len(query),
-                        "max_result_chars": self._config.max_result_chars,
-                        "truncated_chars": truncated_chars,
+                        "max_result_tokens": self._config.max_result_tokens,
+                        "truncated_tokens": truncated_tokens,
                         "returned_results": len(results),
                     },
                 )
             return {
                 "results": results,
                 "truncated": truncated,
-                "truncated_chars": truncated_chars,
+                "truncated_tokens": truncated_tokens,
             }
 
-        return {"results": results, "truncated": False, "truncated_chars": 0}
+        return {"results": results, "truncated": False, "truncated_tokens": 0}
 
     async def _handle_list_metadata(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         limit = int_with_default(
@@ -280,32 +284,46 @@ def _nullable_string_list_schema(description: str) -> dict[str, Any]:
 def _truncate_search_results(
     results: list[dict[str, Any]],
     *,
-    max_chars: int,
+    max_tokens: int,
+    embedding_model: str,
+    truncate_dim: int | None,
 ) -> tuple[list[dict[str, Any]], bool, int]:
-    total_chars = sum(len(str(item.get("text", ""))) for item in results)
-    if total_chars <= max_chars:
+    total_tokens = sum(
+        count_text_tokens(
+            str(item.get("text", "")),
+            embedding_model=embedding_model,
+            truncate_dim=truncate_dim,
+        )
+        for item in results
+    )
+    if total_tokens <= max_tokens:
         return results, False, 0
 
-    remaining = max_chars
+    remaining = max_tokens
     truncated_results: list[dict[str, Any]] = []
     for item in results:
         if remaining <= 0:
             break
 
         text = str(item.get("text", ""))
-        if len(text) <= remaining:
+        text_tokens = count_text_tokens(text, embedding_model=embedding_model, truncate_dim=truncate_dim)
+        if text_tokens <= remaining:
             truncated_results.append(item)
-            remaining -= len(text)
+            remaining -= text_tokens
             continue
 
-        kept = text[:remaining]
-        omitted = len(text) - remaining
+        kept, omitted = truncate_text_tokens(
+            text,
+            max_tokens=remaining,
+            embedding_model=embedding_model,
+            truncate_dim=truncate_dim,
+        )
         truncated_results.append(
             {
                 **item,
-                "text": f"{kept}\n...[truncated {omitted} chars]",
+                "text": f"{kept}\n...[truncated {omitted} tokens]",
             }
         )
         remaining = 0
 
-    return truncated_results, True, total_chars - max_chars
+    return truncated_results, True, total_tokens - max_tokens

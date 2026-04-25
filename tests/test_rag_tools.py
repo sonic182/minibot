@@ -3,13 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.qdrant.client import AsyncQdrantClient
 from minibot.llm.tools.base import ToolContext
-from minibot.llm.tools.rag_tools import RagTools, _normalize_string_list
+from minibot.llm.tools.rag_tools import RagTools, _normalize_string_list, _truncate_search_results
 from minibot.rag.document_ingestion import IndexableDocument
 from minibot.rag.retrieval import _build_filters, index_document, list_metadata_facets
 
@@ -26,9 +27,11 @@ def _tool(storage: LocalFileStorage) -> RagTools:
     return RagTools(
         config=SimpleNamespace(
             collection_name="chunks",
-            chunk_size=800,
-            chunk_overlap=120,
+            chunk_size_tokens=96,
+            chunk_overlap_tokens=20,
             search_limit=5,
+            truncate_result_tokens=False,
+            max_result_tokens=1500,
             embedding=SimpleNamespace(model="mini", truncate_dim=None),
             rerank=SimpleNamespace(
                 enabled=False,
@@ -207,7 +210,7 @@ async def test_rag_search_defaults_scope_from_context(monkeypatch: pytest.Monkey
         ToolContext(owner_id="owner", channel="telegram", chat_id=321, user_id=123),
     )
 
-    assert result == {"results": []}
+    assert result == {"results": [], "truncated": False, "truncated_tokens": 0}
     assert captured["user_id"] == "123"
     assert captured["chat_id"] == "321"
     assert captured["rerank_enabled"] is False
@@ -318,7 +321,12 @@ async def test_index_document_deletes_existing_chunks_before_upsert(monkeypatch:
     async def _fake_embed_texts(_model_name: str, _truncate_dim: int | None, texts: list[str]) -> list[list[float]]:
         return [[0.1, 0.2] for _ in texts]
 
+    def _fake_chunk_text(*args: Any, **kwargs: Any) -> list[str]:
+        del args, kwargs
+        return ["hello world"]
+
     monkeypatch.setattr("minibot.rag.retrieval.embed_texts", _fake_embed_texts)
+    monkeypatch.setattr("minibot.rag.retrieval.chunk_text", _fake_chunk_text)
 
     result = await index_document(
         client=_Client(),  # type: ignore[arg-type]
@@ -391,6 +399,27 @@ def test_normalize_string_list_returns_none_for_empty_normalized_values() -> Non
     assert _normalize_string_list(["", "   "], field="tags") is None
 
 
+def test_truncate_search_results_uses_token_budget(numeric_tokenizer: MagicMock) -> None:
+    results, truncated, truncated_tokens = _truncate_search_results(
+        [
+            {"text": "1 2 3", "score": 0.9},
+            {"text": "4 5 6 7", "score": 0.8},
+        ],
+        max_tokens=5,
+        embedding_model="mini",
+        truncate_dim=None,
+    )
+
+    assert truncated is True
+    assert truncated_tokens == 2
+    assert results == [
+        {"text": "1 2 3", "score": 0.9},
+        {"text": "4 5\n...[truncated 2 tokens]", "score": 0.8},
+    ]
+    assert numeric_tokenizer.call_count == 5
+    numeric_tokenizer.decode.assert_called_once()
+
+
 def test_build_filters_combines_scalar_and_match_any_list_filters() -> None:
     filters = _build_filters(
         document_id="doc-1",
@@ -420,8 +449,15 @@ async def test_list_metadata_facets_requests_tags_and_categories_in_parallel(mon
     calls: list[dict[str, Any]] = []
 
     class _Client:
-        async def facet(self, collection_name: str, *, key: str, limit: int, filters: dict[str, Any] | None = None,
-                        exact: bool = False) -> list[dict[str, Any]]:
+        async def facet(
+            self,
+            collection_name: str,
+            *,
+            key: str,
+            limit: int,
+            filters: dict[str, Any] | None = None,
+            exact: bool = False,
+        ) -> list[dict[str, Any]]:
             calls.append(
                 {
                     "collection_name": collection_name,

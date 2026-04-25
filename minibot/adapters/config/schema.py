@@ -560,6 +560,7 @@ class RagEmbeddingConfig(BaseModel):
     model: str = "sentence-transformers/all-MiniLM-L12-v2"
     dim: int = 384
     truncate_dim: int | None = None
+    max_sequence_tokens: PositiveInt = 128
 
 
 class RagRerankConfig(BaseModel):
@@ -575,11 +576,13 @@ class RagToolConfig(BaseModel):
     collection_name: str = "minibot_chunks"
     embedding: RagEmbeddingConfig = RagEmbeddingConfig()
     rerank: RagRerankConfig = RagRerankConfig()
-    chunk_size: int = 800
-    chunk_overlap: int = 120
+    chunk_size_tokens: PositiveInt = 96
+    chunk_overlap_tokens: int = Field(default=20, ge=0)
     search_limit: int = 5
-    truncate_result_chars: bool = False
-    max_result_chars: PositiveInt = 6000
+    truncate_result_tokens: bool = False
+    max_result_tokens: PositiveInt = 1500
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ToolsConfig(BaseModel):

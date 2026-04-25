@@ -1,9 +1,11 @@
+import logging
 from pathlib import Path
 
 import pytest
 
 from minibot.adapters.config.loader import load_settings
-from minibot.adapters.config.schema import RagToolConfig, SkillsToolConfig
+from minibot.adapters.config.schema import RagToolConfig, Settings, SkillsToolConfig
+from minibot.adapters.container.app_container import AppContainer
 
 
 def test_load_settings_from_file(tmp_path: Path) -> None:
@@ -109,6 +111,11 @@ def test_skills_preload_catalog_defaults_false() -> None:
 def test_rag_rerank_defaults() -> None:
     config = RagToolConfig()
 
+    assert config.chunk_size_tokens == 96
+    assert config.chunk_overlap_tokens == 20
+    assert config.embedding.max_sequence_tokens == 128
+    assert config.truncate_result_tokens is False
+    assert config.max_result_tokens == 1500
     assert config.rerank.enabled is False
     assert config.rerank.model == "cross-encoder/ms-marco-MiniLM-L2-v2"
     assert config.rerank.candidate_limit == 50
@@ -264,6 +271,14 @@ bot_token = "token"
 [tools.rag]
 enabled = true
 search_limit = 5
+chunk_size_tokens = 200
+chunk_overlap_tokens = 30
+truncate_result_tokens = true
+max_result_tokens = 1200
+
+[tools.rag.embedding]
+model = "sentence-transformers/custom"
+max_sequence_tokens = 256
 
 [tools.rag.rerank]
 enabled = true
@@ -276,10 +291,52 @@ max_results = 6
     settings = load_settings(config_file)
     assert settings.tools.rag.enabled is True
     assert settings.tools.rag.search_limit == 5
+    assert settings.tools.rag.chunk_size_tokens == 200
+    assert settings.tools.rag.chunk_overlap_tokens == 30
+    assert settings.tools.rag.truncate_result_tokens is True
+    assert settings.tools.rag.max_result_tokens == 1200
+    assert settings.tools.rag.embedding.model == "sentence-transformers/custom"
+    assert settings.tools.rag.embedding.max_sequence_tokens == 256
     assert settings.tools.rag.rerank.enabled is True
     assert settings.tools.rag.rerank.model == "cross-encoder/custom"
     assert settings.tools.rag.rerank.candidate_limit == 20
     assert settings.tools.rag.rerank.max_results == 6
+
+
+def test_load_settings_rejects_old_rag_character_keys(tmp_path: Path) -> None:
+    config_file = tmp_path / "bot.toml"
+    config_file.write_text(
+        """
+[tools.rag]
+chunk_size = 800
+chunk_overlap = 120
+truncate_result_chars = true
+max_result_chars = 6000
+"""
+    )
+
+    with pytest.raises(ValueError):
+        load_settings(config_file)
+
+
+def test_app_container_rejects_rag_chunk_size_over_embedding_max() -> None:
+    settings = Settings()
+    settings.tools.rag.enabled = True
+    settings.tools.rag.chunk_size_tokens = 300
+    settings.tools.rag.embedding.max_sequence_tokens = 256
+
+    with pytest.raises(ValueError, match="chunk_size_tokens"):
+        AppContainer._validate_rag_token_config(settings, logger=logging.getLogger("test"))
+
+
+def test_app_container_rejects_rag_overlap_not_less_than_chunk_size() -> None:
+    settings = Settings()
+    settings.tools.rag.enabled = True
+    settings.tools.rag.chunk_size_tokens = 40
+    settings.tools.rag.chunk_overlap_tokens = 40
+
+    with pytest.raises(ValueError, match="chunk_overlap_tokens"):
+        AppContainer._validate_rag_token_config(settings, logger=logging.getLogger("test"))
 
 
 def test_load_settings_rejects_invalid_xai_limits(tmp_path: Path) -> None:

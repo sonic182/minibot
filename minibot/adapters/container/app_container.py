@@ -45,6 +45,7 @@ class AppContainer:
         cls._settings = load_settings(config_path)
         cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
+        cls._validate_rag_token_config(cls._settings, cls._logger)
         agent_specs = load_agent_specs(cls._settings.orchestration.directory)
         cls._event_bus = EventBus()
         if cls._settings.rabbitmq.enabled:
@@ -175,6 +176,35 @@ class AppContainer:
         await client.create_payload_index(cfg.collection_name, "chat_id", field_schema="keyword")
         await client.create_payload_index(cfg.collection_name, "tags", field_schema="keyword")
         await client.create_payload_index(cfg.collection_name, "categories", field_schema="keyword")
+
+    @staticmethod
+    def _validate_rag_token_config(settings: Settings, logger: logging.Logger) -> None:
+        cfg = settings.tools.rag
+        if not cfg.enabled:
+            return
+
+        if cfg.chunk_overlap_tokens >= cfg.chunk_size_tokens:
+            logger.error(
+                "invalid rag token chunk config",
+                extra={
+                    "chunk_size_tokens": cfg.chunk_size_tokens,
+                    "chunk_overlap_tokens": cfg.chunk_overlap_tokens,
+                    "embedding_model": cfg.embedding.model,
+                },
+            )
+            raise ValueError("tools.rag.chunk_overlap_tokens must be less than tools.rag.chunk_size_tokens")
+
+        if cfg.chunk_size_tokens > cfg.embedding.max_sequence_tokens:
+            logger.error(
+                "invalid rag token chunk config",
+                extra={
+                    "chunk_size_tokens": cfg.chunk_size_tokens,
+                    "chunk_overlap_tokens": cfg.chunk_overlap_tokens,
+                    "embedding_max_sequence_tokens": cfg.embedding.max_sequence_tokens,
+                    "embedding_model": cfg.embedding.model,
+                },
+            )
+            raise ValueError("tools.rag.chunk_size_tokens must not exceed tools.rag.embedding.max_sequence_tokens")
 
     @classmethod
     async def _apply_runtime_token_autoconfig_if_needed(cls) -> None:

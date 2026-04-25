@@ -59,13 +59,16 @@ Setup
       enabled = true
       qdrant_url = "http://localhost:6333"
       collection_name = "minibot_chunks"
-      chunk_size = 800
-      chunk_overlap = 120
+      chunk_size_tokens = 96
+      chunk_overlap_tokens = 20
       search_limit = 5
+      truncate_result_tokens = false
+      max_result_tokens = 1500
 
       [tools.rag.embedding]
       model = "sentence-transformers/all-MiniLM-L12-v2"
       dim = 384
+      max_sequence_tokens = 128
       # truncate_dim = 256  # Matryoshka truncation — see below
 
       [tools.rag.rerank]
@@ -160,15 +163,21 @@ Configuration reference
    * - ``collection_name``
      - ``minibot_chunks``
      - Qdrant collection used for chunk vectors.
-   * - ``chunk_size``
-     - ``800``
-     - Characters per chunk. Keep below ~1000 chars for 256-token models.
-   * - ``chunk_overlap``
-     - ``120``
-     - Character overlap between consecutive chunks.
+   * - ``chunk_size_tokens``
+     - ``96``
+     - Embedding-token count per chunk. Must not exceed ``tools.rag.embedding.max_sequence_tokens``.
+   * - ``chunk_overlap_tokens``
+     - ``20``
+     - Embedding-token overlap between consecutive chunks. Must be less than ``chunk_size_tokens``.
    * - ``search_limit``
      - ``5``
      - Default final number of results returned by ``rag_search`` when ``limit`` is omitted.
+   * - ``truncate_result_tokens``
+     - ``false``
+     - Truncate returned ``rag_search`` text to a token budget before sending results to the LLM.
+   * - ``max_result_tokens``
+     - ``1500``
+     - Maximum total embedding-token budget for returned ``rag_search`` text when truncation is enabled.
    * - ``tags`` / ``categories``
      - optional
      - LLM-supplied string lists stored on each chunk; values are trimmed, lowercased,
@@ -216,6 +225,10 @@ Configuration reference
    * - ``dim``
      - ``384``
      - Full output dimension; must match the Qdrant collection vector size.
+   * - ``max_sequence_tokens``
+     - ``128``
+     - Hard max input token length for the embedding model. MiniBot fails startup if
+       ``chunk_size_tokens`` exceeds this value.
    * - ``truncate_dim``
      - ``null``
      - Matryoshka truncation size. When set, must equal ``dim``.

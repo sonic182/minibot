@@ -48,3 +48,10 @@ async def embed_texts(model_name: str, truncate_dim: int | None, texts: list[str
 async def embed_text(model_name: str, truncate_dim: int | None, text: str) -> list[float]:
     results = await embed_texts(model_name, truncate_dim, [text])
     return results[0]
+
+
+def get_tokenizer(model_name: str, truncate_dim: int | None) -> Any:
+    tokenizer = getattr(_get_model(model_name, truncate_dim), "tokenizer", None)
+    if tokenizer is None:
+        raise RuntimeError(f"embedding model {model_name!r} does not expose a tokenizer")
+    return tokenizer

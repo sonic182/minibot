@@ -27,12 +27,19 @@ async def index_document(
     chat_id: str | None = None,
     tags: list[str] | None = None,
     categories: list[str] | None = None,
-    chunk_size: int = 800,
-    chunk_overlap: int = 120,
+    chunk_size_tokens: int = 96,
+    chunk_overlap_tokens: int = 20,
     embedding_model: str = "sentence-transformers/all-MiniLM-L12-v2",
     truncate_dim: int | None = None,
 ) -> int:
-    raw_chunks = chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
+    raw_chunks = await asyncio.to_thread(
+        chunk_text,
+        text,
+        chunk_size_tokens=chunk_size_tokens,
+        overlap_tokens=chunk_overlap_tokens,
+        embedding_model=embedding_model,
+        truncate_dim=truncate_dim,
+    )
     await delete_document(
         client=client,
         collection=collection,
