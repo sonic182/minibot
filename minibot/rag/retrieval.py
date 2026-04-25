@@ -19,7 +19,7 @@ async def index_document(
     collection: str,
     document_id: str,
     text: str,
-    source_name: str,
+    filename: str,
     source_type: str = "file",
     mime_type: str = "text/plain",
     user_id: str | None = None,
@@ -55,7 +55,7 @@ async def index_document(
 
     payload_base: dict[str, Any] = {
         "document_id": document_id,
-        "source_name": source_name,
+        "filename": filename,
         "source_type": source_type,
         "mime_type": mime_type,
         "user_id": user_id,
@@ -67,11 +67,23 @@ async def index_document(
 
     points = [
         {
-            "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{document_id}:{idx}")),
+            "id": _build_chunk_id(
+                document_id=document_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                chat_id=chat_id,
+                chunk_index=idx,
+            ),
             "vector": vectors[idx],
             "payload": {
                 **payload_base,
-                "chunk_id": f"{document_id}:{idx}",
+                "chunk_id": _build_chunk_id(
+                    document_id=document_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    chat_id=chat_id,
+                    chunk_index=idx,
+                ),
                 "chunk_index": idx,
                 "text": chunk,
             },
@@ -93,6 +105,7 @@ async def delete_document(
     chat_id: str | None = None,
     tags: list[str] | None = None,
     categories: list[str] | None = None,
+    filename: str | None = None,
 ) -> None:
     filters = _build_filters(
         document_id=document_id,
@@ -101,6 +114,7 @@ async def delete_document(
         chat_id=chat_id,
         tags=tags,
         categories=categories,
+        filename=filename,
     )
     if filters is None:
         raise ValueError("at least one filter is required for delete")
@@ -119,6 +133,7 @@ async def retrieve_context(
     chat_id: str | None = None,
     tags: list[str] | None = None,
     categories: list[str] | None = None,
+    filename: str | None = None,
     embedding_model: str = "sentence-transformers/all-MiniLM-L12-v2",
     truncate_dim: int | None = None,
     rerank_enabled: bool = False,
@@ -134,6 +149,7 @@ async def retrieve_context(
         chat_id=chat_id,
         tags=tags,
         categories=categories,
+        filename=filename,
     )
 
     if not rerank_enabled:
@@ -222,11 +238,12 @@ async def list_metadata_facets(
         agent_id=agent_id,
         chat_id=chat_id,
     )
-    tags, categories = await asyncio.gather(
+    tags, categories, filenames = await asyncio.gather(
         client.facet(collection, key="tags", limit=limit, filters=filters),
         client.facet(collection, key="categories", limit=limit, filters=filters),
+        client.facet(collection, key="filename", limit=limit, filters=filters),
     )
-    return {"tags": tags, "categories": categories}
+    return {"tags": tags, "categories": categories, "filenames": filenames}
 
 
 def _build_filters(
@@ -237,6 +254,7 @@ def _build_filters(
     chat_id: str | None = None,
     tags: list[str] | None = None,
     categories: list[str] | None = None,
+    filename: str | None = None,
 ) -> dict[str, Any] | None:
     conditions: list[dict[str, Any]] = []
     if document_id:
@@ -251,6 +269,32 @@ def _build_filters(
         conditions.append({"key": "tags", "match": {"any": tags}})
     if categories:
         conditions.append({"key": "categories", "match": {"any": categories}})
+    if filename:
+        conditions.append({"key": "filename", "match": {"value": filename}})
     if not conditions:
         return None
     return {"must": conditions}
+
+
+def _build_chunk_id(
+    *,
+    document_id: str,
+    user_id: str | None,
+    agent_id: str | None,
+    chat_id: str | None,
+    chunk_index: int,
+) -> str:
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_DNS,
+            ":".join(
+                [
+                    document_id,
+                    user_id or "",
+                    agent_id or "",
+                    chat_id or "",
+                    str(chunk_index),
+                ]
+            ),
+        )
+    )

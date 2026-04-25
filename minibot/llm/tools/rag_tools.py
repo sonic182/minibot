@@ -48,7 +48,6 @@ class RagTools:
                 properties={
                     "file_path": {"type": "string", "description": "Path to the text or PDF file to index."},
                     "document_id": nullable_string("Stable identifier for this document. Auto-generated if omitted."),
-                    "source_name": nullable_string("Human-readable label stored with each chunk."),
                     "user_id": nullable_string("Optional user scope tag."),
                     "agent_id": nullable_string("Optional agent scope tag."),
                     "chat_id": nullable_string("Optional chat scope tag."),
@@ -70,6 +69,7 @@ class RagTools:
                     "user_id": nullable_string("Restrict results to this user scope."),
                     "agent_id": nullable_string("Restrict results to this agent scope."),
                     "chat_id": nullable_string("Restrict results to this chat scope."),
+                    "filename": nullable_string("Restrict results to chunks from this exact filename."),
                     "tags": _nullable_string_list_schema("Restrict results to matching tags."),
                     "categories": _nullable_string_list_schema("Restrict results to matching categories."),
                     "limit": nullable_integer(minimum=1, description="Number of results to return."),
@@ -84,14 +84,13 @@ class RagTools:
         document = await asyncio.to_thread(extract_indexable_document, file_path)
 
         document_id = optional_str(payload.get("document_id")) or _hash_path(file_path_raw)
-        source_name = optional_str(payload.get("source_name")) or file_path.name
 
         chunks = await index_document(
             client=self._qdrant,
             collection=self._config.collection_name,
             document_id=document_id,
             text=document.text,
-            source_name=source_name,
+            filename=file_path.name,
             source_type=document.source_type,
             mime_type=document.mime_type,
             user_id=_scope_value(payload.get("user_id"), context.user_id),
@@ -144,15 +143,25 @@ class RagTools:
         )
 
     async def _handle_delete(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        document_id = optional_str(payload.get("document_id"))
+        explicit_user_id = optional_str(payload.get("user_id"))
+        explicit_agent_id = optional_str(payload.get("agent_id"))
+        explicit_chat_id = optional_str(payload.get("chat_id"))
+        tags = _normalize_string_list(payload.get("tags"), field="tags")
+        categories = _normalize_string_list(payload.get("categories"), field="categories")
+
+        if not any((document_id, explicit_user_id, explicit_agent_id, explicit_chat_id, tags, categories)):
+            raise ValueError("rag_delete requires at least one explicit filter")
+
         await delete_document(
             client=self._qdrant,
             collection=self._config.collection_name,
-            document_id=optional_str(payload.get("document_id")),
-            user_id=_scope_value(payload.get("user_id"), context.user_id),
-            agent_id=_agent_scope_value(payload.get("agent_id"), context.owner_id),
-            chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
-            tags=_normalize_string_list(payload.get("tags"), field="tags"),
-            categories=_normalize_string_list(payload.get("categories"), field="categories"),
+            document_id=document_id,
+            user_id=_scope_value(explicit_user_id, context.user_id),
+            agent_id=_agent_scope_value(explicit_agent_id, context.owner_id),
+            chat_id=_scope_value(explicit_chat_id, context.chat_id),
+            tags=tags,
+            categories=categories,
         )
         return {"deleted": True}
 
@@ -174,6 +183,7 @@ class RagTools:
             user_id=_scope_value(payload.get("user_id"), context.user_id),
             agent_id=_agent_scope_value(payload.get("agent_id"), context.owner_id),
             chat_id=_scope_value(payload.get("chat_id"), context.chat_id),
+            filename=optional_str(payload.get("filename")),
             tags=_normalize_string_list(payload.get("tags"), field="tags"),
             categories=_normalize_string_list(payload.get("categories"), field="categories"),
             embedding_model=self._config.embedding.model,

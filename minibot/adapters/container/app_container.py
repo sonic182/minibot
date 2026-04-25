@@ -174,6 +174,7 @@ class AppContainer:
         await client.create_payload_index(cfg.collection_name, "user_id", field_schema="keyword")
         await client.create_payload_index(cfg.collection_name, "agent_id", field_schema="keyword")
         await client.create_payload_index(cfg.collection_name, "chat_id", field_schema="keyword")
+        await client.create_payload_index(cfg.collection_name, "filename", field_schema="keyword")
         await client.create_payload_index(cfg.collection_name, "tags", field_schema="keyword")
         await client.create_payload_index(cfg.collection_name, "categories", field_schema="keyword")
 

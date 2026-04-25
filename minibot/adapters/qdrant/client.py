@@ -16,6 +16,12 @@ class AsyncQdrantClient:
         encoded_collection = _encode_path_segment(collection_name)
         response = await self._request("GET", f"/collections/{encoded_collection}", allow_not_found=True)
         if response is not None:
+            existing_vector_size = _extract_vector_size(response)
+            if existing_vector_size != vector_size:
+                raise ValueError(
+                    f"qdrant collection '{collection_name}' has vector size {existing_vector_size}, "
+                    f"expected {vector_size}"
+                )
             return
 
         await self._request(
@@ -119,3 +125,14 @@ class AsyncQdrantClient:
 
 def _encode_path_segment(value: str) -> str:
     return quote(value, safe="")
+
+
+def _extract_vector_size(response: dict[str, Any]) -> int:
+    config = response.get("result", {}).get("config", {})
+    params = config.get("params", {})
+    vectors = params.get("vectors")
+    if isinstance(vectors, dict):
+        size = vectors.get("size")
+        if isinstance(size, int):
+            return size
+    raise RuntimeError("qdrant collection returned an unexpected vector config")

@@ -1,8 +1,9 @@
-List available RAG tags and categories so you can choose real filter values before searching.
+List available RAG tags, categories, and filenames so you can choose real filter values before searching.
 
 Returns facet counts for the current scope, including:
 - `tags` — available tag values with document counts
 - `categories` — available category values with document counts
+- `filenames` — available exact filename values with document counts
 
 Optional filters:
 - `document_id` — restrict metadata discovery to a single document

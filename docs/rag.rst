@@ -78,6 +78,7 @@ Setup
       max_results = 7
 
    On startup, MiniBot creates the Qdrant collection automatically if it does not exist.
+   If it already exists with an incompatible vector size, startup fails fast.
 
 Usage
 -----
@@ -90,17 +91,19 @@ Once enabled, the bot has access to four tools:
 
 - **rag_search** — provide a natural language query. The bot embeds the query and returns
   the top-k most relevant chunks with their similarity score and source metadata. Optional
-  ``tags`` and ``categories`` filters match any of the provided values. When reranking is
+  ``filename``, ``tags``, and ``categories`` filters narrow the result set. Tag/category
+  filters match any of the provided values. When reranking is
   enabled, MiniBot first pulls a larger semantic candidate set from Qdrant, reranks it with
   a cross-encoder, then returns only the final top results. Reranked responses use ``score``
   for the rerank score and also include ``semantic_score`` from Qdrant.
 
-- **rag_list_metadata** — list available ``tags`` and ``categories`` values, with counts,
+- **rag_list_metadata** — list available ``tags``, ``categories``, and ``filenames`` values, with counts,
   so the bot can choose real filters before calling ``rag_search``.
 
 - **rag_delete** — remove indexed chunks by ``document_id`` and/or scope tags when the
   data should no longer be searchable. Optional ``tags`` and ``categories`` filters are also
-  supported.
+  supported. The tool call must include at least one explicit filter; context defaults alone
+  do not trigger deletion.
 
 Example interaction::
 
@@ -133,7 +136,8 @@ Resetting the collection
 ------------------------
 
 When switching embedding models (different model or different ``truncate_dim``), existing
-vectors are incompatible and the collection must be recreated:
+vectors are incompatible and the collection must be recreated. MiniBot validates the expected
+vector size at startup and fails if the existing collection is incompatible:
 
 .. code-block:: bash
 

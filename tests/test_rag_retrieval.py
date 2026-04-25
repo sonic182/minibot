@@ -13,7 +13,7 @@ def _search_result(*, text: str, score: float, document_id: str) -> dict[str, An
         "payload": {
             "text": text,
             "document_id": document_id,
-            "source_name": f"{document_id}.txt",
+            "filename": f"{document_id}.txt",
         },
     }
 
@@ -58,12 +58,12 @@ async def test_retrieve_context_preserves_semantic_only_behavior(monkeypatch: py
         {
             "score": 0.8,
             "text": "second",
-            "metadata": {"document_id": "doc-2", "source_name": "doc-2.txt"},
+            "metadata": {"document_id": "doc-2", "filename": "doc-2.txt"},
         },
         {
             "score": 0.9,
             "text": "first",
-            "metadata": {"document_id": "doc-1", "source_name": "doc-1.txt"},
+            "metadata": {"document_id": "doc-1", "filename": "doc-1.txt"},
         },
     ]
 
@@ -118,13 +118,13 @@ async def test_retrieve_context_reranks_larger_candidate_pool(monkeypatch: pytes
             "score": 0.9,
             "semantic_score": 0.88,
             "text": "beta",
-            "metadata": {"document_id": "doc-2", "source_name": "doc-2.txt"},
+            "metadata": {"document_id": "doc-2", "filename": "doc-2.txt"},
         },
         {
             "score": 0.4,
             "semantic_score": 0.84,
             "text": "gamma",
-            "metadata": {"document_id": "doc-3", "source_name": "doc-3.txt"},
+            "metadata": {"document_id": "doc-3", "filename": "doc-3.txt"},
         },
     ]
 
@@ -221,7 +221,39 @@ async def test_retrieve_context_rerank_skips_for_zero_or_one_candidate(monkeypat
         {
             "score": 0.95,
             "text": "only",
-            "metadata": {"document_id": "doc-1", "source_name": "doc-1.txt"},
+            "metadata": {"document_id": "doc-1", "filename": "doc-1.txt"},
         }
     ]
     assert calls["rerank"] == 0
+
+
+@pytest.mark.asyncio
+async def test_retrieve_context_adds_filename_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
+
+    class _Client:
+        async def search(
+            self,
+            collection_name: str,
+            vector: list[float],
+            *,
+            limit: int,
+            filters: dict[str, Any] | None,
+        ):
+            calls["filters"] = filters
+            return []
+
+    async def _fake_embed_text(_model: str, _truncate_dim: int | None, _text: str) -> list[float]:
+        return [0.1, 0.2]
+
+    monkeypatch.setattr(retrieval, "embed_text", _fake_embed_text)
+
+    result = await retrieval.retrieve_context(
+        client=_Client(),  # type: ignore[arg-type]
+        collection="chunks",
+        query="hello",
+        filename="notes.txt",
+    )
+
+    assert result == []
+    assert calls["filters"] == {"must": [{"key": "filename", "match": {"value": "notes.txt"}}]}

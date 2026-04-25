@@ -71,6 +71,7 @@ async def test_rag_index_defaults_user_and_chat_scope_from_context(
     assert captured["user_id"] == "7"
     assert captured["chat_id"] == "99"
     assert captured["mime_type"] == "text/plain"
+    assert captured["filename"] == "report.txt"
 
 
 @pytest.mark.asyncio
@@ -157,7 +158,7 @@ async def test_rag_index_allows_absolute_path_only_when_storage_allows_outside_r
         ToolContext(owner_id="owner", channel="telegram", chat_id=99, user_id=7),
     )
 
-    assert captured["source_name"] == "shared.txt"
+    assert captured["filename"] == "shared.txt"
 
 
 @pytest.mark.asyncio
@@ -241,6 +242,26 @@ async def test_rag_search_normalizes_metadata_filters(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_rag_search_forwards_filename_filter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tool = _tool(_storage(tmp_path))
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_search")
+    captured: dict[str, Any] = {}
+
+    async def _fake_retrieve_context(**kwargs: Any) -> list[dict[str, Any]]:
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.retrieve_context", _fake_retrieve_context)
+
+    await binding.handler(
+        {"query": "hello", "filename": "notes.txt"},
+        ToolContext(owner_id="owner", channel="telegram", chat_id=321, user_id=123),
+    )
+
+    assert captured["filename"] == "notes.txt"
+
+
+@pytest.mark.asyncio
 async def test_rag_list_metadata_defaults_scope_from_context(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -251,7 +272,11 @@ async def test_rag_list_metadata_defaults_scope_from_context(
 
     async def _fake_list_metadata_facets(**kwargs: Any) -> dict[str, list[dict[str, Any]]]:
         captured.update(kwargs)
-        return {"tags": [{"value": "plan", "count": 2}], "categories": [{"value": "docs", "count": 1}]}
+        return {
+            "tags": [{"value": "plan", "count": 2}],
+            "categories": [{"value": "docs", "count": 1}],
+            "filenames": [{"value": "report.txt", "count": 1}],
+        }
 
     monkeypatch.setattr("minibot.llm.tools.rag_tools.list_metadata_facets", _fake_list_metadata_facets)
 
@@ -260,31 +285,26 @@ async def test_rag_list_metadata_defaults_scope_from_context(
         ToolContext(owner_id="owner", channel="telegram", chat_id=456, user_id=123),
     )
 
-    assert result == {"tags": [{"value": "plan", "count": 2}], "categories": [{"value": "docs", "count": 1}]}
+    assert result == {
+        "tags": [{"value": "plan", "count": 2}],
+        "categories": [{"value": "docs", "count": 1}],
+        "filenames": [{"value": "report.txt", "count": 1}],
+    }
     assert captured["user_id"] == "123"
     assert captured["chat_id"] == "456"
     assert captured["limit"] == 5
 
 
 @pytest.mark.asyncio
-async def test_rag_delete_defaults_scope_from_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+async def test_rag_delete_requires_explicit_filter(tmp_path: Path) -> None:
     tool = _tool(_storage(tmp_path))
     binding = next(item for item in tool.bindings() if item.tool.name == "rag_delete")
-    captured: dict[str, Any] = {}
 
-    async def _fake_delete_document(**kwargs: Any) -> None:
-        captured.update(kwargs)
-
-    monkeypatch.setattr("minibot.llm.tools.rag_tools.delete_document", _fake_delete_document)
-
-    result = await binding.handler(
-        {},
-        ToolContext(owner_id="owner", channel="telegram", chat_id=456, user_id=123),
-    )
-
-    assert result == {"deleted": True}
-    assert captured["user_id"] == "123"
-    assert captured["chat_id"] == "456"
+    with pytest.raises(ValueError, match="at least one explicit filter"):
+        await binding.handler(
+            {},
+            ToolContext(owner_id="owner", channel="telegram", chat_id=456, user_id=123),
+        )
 
 
 @pytest.mark.asyncio
@@ -308,14 +328,41 @@ async def test_rag_delete_normalizes_metadata_filters(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_rag_delete_explicit_scope_is_narrowed_by_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    tool = _tool(_storage(tmp_path))
+    binding = next(item for item in tool.bindings() if item.tool.name == "rag_delete")
+    captured: dict[str, Any] = {}
+
+    async def _fake_delete_document(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("minibot.llm.tools.rag_tools.delete_document", _fake_delete_document)
+
+    result = await binding.handler(
+        {"document_id": "doc-1"},
+        ToolContext(owner_id="owner", channel="telegram", chat_id=456, user_id=123),
+    )
+
+    assert result == {"deleted": True}
+    assert captured["document_id"] == "doc-1"
+    assert captured["user_id"] == "123"
+    assert captured["chat_id"] == "456"
+
+
+@pytest.mark.asyncio
 async def test_index_document_deletes_existing_chunks_before_upsert(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, Any] | list[dict[str, Any]]]] = []
+    captured_points: list[dict[str, Any]] = []
 
     class _Client:
         async def delete_by_filter(self, collection_name: str, filters: dict[str, Any]) -> None:
             calls.append(("delete", {"collection_name": collection_name, "filters": filters}))
 
         async def upsert_points(self, collection_name: str, points: list[dict[str, Any]]) -> None:
+            captured_points.extend(points)
             calls.append(("upsert", [{"collection_name": collection_name, "count": len(points)}]))
 
     async def _fake_embed_texts(_model_name: str, _truncate_dim: int | None, texts: list[str]) -> list[list[float]]:
@@ -333,7 +380,7 @@ async def test_index_document_deletes_existing_chunks_before_upsert(monkeypatch:
         collection="chunks",
         document_id="doc-1",
         text="hello world",
-        source_name="notes.txt",
+        filename="notes.txt",
         user_id="user-1",
         chat_id="chat-1",
         embedding_model="mini",
@@ -354,6 +401,54 @@ async def test_index_document_deletes_existing_chunks_before_upsert(monkeypatch:
         },
     )
     assert calls[1] == ("upsert", [{"collection_name": "chunks", "count": 1}])
+    assert captured_points[0]["payload"]["filename"] == "notes.txt"
+    assert captured_points[0]["payload"]["chunk_id"] == captured_points[0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_index_document_uses_scope_aware_chunk_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_batches: list[list[dict[str, Any]]] = []
+
+    class _Client:
+        async def delete_by_filter(self, collection_name: str, filters: dict[str, Any]) -> None:
+            del collection_name, filters
+
+        async def upsert_points(self, collection_name: str, points: list[dict[str, Any]]) -> None:
+            del collection_name
+            captured_batches.append(points)
+
+    async def _fake_embed_texts(_model_name: str, _truncate_dim: int | None, texts: list[str]) -> list[list[float]]:
+        return [[0.1, 0.2] for _ in texts]
+
+    def _fake_chunk_text(*args: Any, **kwargs: Any) -> list[str]:
+        del args, kwargs
+        return ["hello world"]
+
+    monkeypatch.setattr("minibot.rag.retrieval.embed_texts", _fake_embed_texts)
+    monkeypatch.setattr("minibot.rag.retrieval.chunk_text", _fake_chunk_text)
+
+    await index_document(
+        client=_Client(),  # type: ignore[arg-type]
+        collection="chunks",
+        document_id="doc-1",
+        text="hello world",
+        filename="notes.txt",
+        user_id="user-1",
+        chat_id="chat-1",
+        embedding_model="mini",
+    )
+    await index_document(
+        client=_Client(),  # type: ignore[arg-type]
+        collection="chunks",
+        document_id="doc-1",
+        text="hello world",
+        filename="notes.txt",
+        user_id="user-2",
+        chat_id="chat-1",
+        embedding_model="mini",
+    )
+
+    assert captured_batches[0][0]["id"] != captured_batches[1][0]["id"]
 
 
 @pytest.mark.asyncio
@@ -372,7 +467,7 @@ async def test_index_document_deletes_existing_chunks_for_empty_reindex() -> Non
         collection="chunks",
         document_id="doc-1",
         text="   ",
-        source_name="notes.txt",
+        filename="notes.txt",
     )
 
     assert result == 0
@@ -425,6 +520,7 @@ def test_build_filters_combines_scalar_and_match_any_list_filters() -> None:
         document_id="doc-1",
         user_id="user-1",
         chat_id="chat-1",
+        filename="notes.txt",
         tags=["alpha", "beta"],
         categories=["docs"],
     )
@@ -436,6 +532,7 @@ def test_build_filters_combines_scalar_and_match_any_list_filters() -> None:
             {"key": "chat_id", "match": {"value": "chat-1"}},
             {"key": "tags", "match": {"any": ["alpha", "beta"]}},
             {"key": "categories", "match": {"any": ["docs"]}},
+            {"key": "filename", "match": {"value": "notes.txt"}},
         ]
     }
 
@@ -445,7 +542,9 @@ def test_build_filters_returns_none_without_conditions() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_metadata_facets_requests_tags_and_categories_in_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_list_metadata_facets_requests_tags_categories_and_filenames_in_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[dict[str, Any]] = []
 
     class _Client:
@@ -480,6 +579,7 @@ async def test_list_metadata_facets_requests_tags_and_categories_in_parallel(mon
     assert result == {
         "tags": [{"value": "tags-value", "count": 1}],
         "categories": [{"value": "categories-value", "count": 1}],
+        "filenames": [{"value": "filename-value", "count": 1}],
     }
     assert calls == [
         {
@@ -497,6 +597,18 @@ async def test_list_metadata_facets_requests_tags_and_categories_in_parallel(mon
         {
             "collection_name": "chunks",
             "key": "categories",
+            "limit": 7,
+            "filters": {
+                "must": [
+                    {"key": "user_id", "match": {"value": "user-1"}},
+                    {"key": "chat_id", "match": {"value": "chat-1"}},
+                ]
+            },
+            "exact": False,
+        },
+        {
+            "collection_name": "chunks",
+            "key": "filename",
             "limit": 7,
             "filters": {
                 "must": [
