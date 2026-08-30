@@ -8,13 +8,19 @@ from pathlib import Path
 from typing import Any
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.types import Message as TelegramMessage
+from aiohttp import ClientError
 
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.messaging.telegram.incoming_media_mapper import TelegramIncomingMediaMapper
 from minibot.core.channels import IncomingFileRef
 from minibot.shared.path_utils import to_posix_relative
+from minibot.shared.retries import AsyncRetriesService, RetryPolicy
+
+_MEDIA_DOWNLOAD_MAX_ATTEMPTS = 3
+_MEDIA_DOWNLOAD_DELAY_SECONDS = 2.0
 
 
 class TelegramIncomingMediaCollector:
@@ -34,6 +40,7 @@ class TelegramIncomingMediaCollector:
         self._local_storage = local_storage
         self._managed_root_dir = managed_root_dir
         self._logger = logger
+        self._retries = AsyncRetriesService()
 
     async def collect(self, message: TelegramMessage) -> tuple[list[IncomingFileRef], list[str]]:
         if not self._config.media_enabled:
@@ -286,7 +293,26 @@ class TelegramIncomingMediaCollector:
     async def _download_media_bytes(self, media: Any) -> bytes | None:
         buffer = io.BytesIO()
         try:
-            await self._bot.download(media, destination=buffer)
+            await self._retries.run(
+                lambda: self._bot.download(media, destination=buffer),
+                policy=RetryPolicy(
+                    max_attempts=_MEDIA_DOWNLOAD_MAX_ATTEMPTS,
+                    base_delay_seconds=_MEDIA_DOWNLOAD_DELAY_SECONDS,
+                    max_delay_seconds=_MEDIA_DOWNLOAD_DELAY_SECONDS,
+                    backoff_factor=1.0,
+                    retry_exceptions=(TimeoutError, TelegramNetworkError, ClientError),
+                ),
+                on_retry=lambda exc, attempt, delay: self._logger.warning(
+                    "telegram media download retrying",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_attempts": _MEDIA_DOWNLOAD_MAX_ATTEMPTS,
+                        "delay_seconds": delay,
+                        "media_type": type(media).__name__,
+                        "error_type": type(exc).__name__,
+                    },
+                ),
+            )
         except Exception:
             self._logger.exception("telegram media download failed")
             return None

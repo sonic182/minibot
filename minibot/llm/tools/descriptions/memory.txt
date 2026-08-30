@@ -1,29 +1,35 @@
-Long-term user memory for storing and recalling facts, preferences, and context that should persist across conversations.
+Long-term user memory for facts, preferences, and context that must persist across conversations.
 
-Interpret "memory" requests as this long-term persistent user memory by default (including equivalent wording in other languages, for example "memoria").
-Only switch to chat-history tools when the user explicitly asks about conversation/chat/messages history.
+Interpret "memory" requests as this persistent user memory by default. Use chat-history tools only when the user explicitly asks about the conversation, chat, or message history.
 
-Use this tool proactively when the user request may depend on previously saved user context and you do not already have that context in the active conversation.
+Use memory proactively for durable, confirmed user-provided facts: financial commitments, recurring obligations, preferences, identities, project state, important dates, and ongoing plans. Do not store speculation, temporary chat details, inferred facts, passwords, API keys, tokens, or other credentials.
 
-Priority policy:
-- If context is likely relevant and missing, check memory before asking the user to repeat information.
-- Do not call memory when the required context is already clear in the current conversation.
+Required workflow for durable facts:
+- Search first with action=search (or action=list_titles for a lightweight catalogue), using query and category filters when helpful.
+- If one candidate clearly represents the same fact, use its id with action=update. Never use a title to select an entry for mutation.
+- Use action=create only when no matching entry exists. A duplicate-title response includes the existing entry id; use that id with update instead of retrying create.
+- If multiple candidates could match and the correct one is unclear, ask the user instead of creating a possible duplicate.
+- State that an item was saved only after a successful create or update result.
 
-Use this to remember things about the user that are worth keeping: job, interests, goals, preferences, important dates, project details, or anything the user asks you to remember. Do NOT use this for conversation transcript storage; chat history is managed by chat_history tools.
+Categories are required for create and must be exactly one of:
+- finanzas: debts, balances, investments, remittances, and payments.
+- recordatorios: recurring reminders and scheduled obligations.
+- proyectos: active project state, progress, and priorities.
+- preferencias: durable response, workflow, or presentation preferences.
+- salud: health profile and measurements.
+- viajes: trips, transport, and travel arrangements.
+- vehículos: vehicle preferences, searches, and ownership context.
+- contactos: people and durable contact-related context.
+- seguimiento: unresolved follow-ups, open topics, and current searches.
+- conocimiento: durable reference material, study notes, and research context.
+- otros: durable facts that do not fit another category.
 
-Use the action field to select the operation:
+Actions:
+- action=create: Create a new entry. Requires title, data, and category. Optional metadata, source, and expires_at.
+- action=update: Update an existing entry by entry_id only. The title is immutable. Provide at least one of data, category, metadata, source, or expires_at.
+- action=get: Retrieve one entry by entry_id.
+- action=search: Search titles and data; returns full entries including ids. Optional filters: category, source, updated_after, updated_before, limit, offset.
+- action=list_titles: Return lightweight entries with ids, titles, categories, sources, and update dates. Supports the same filters as search.
+- action=delete: Delete one entry by entry_id only. Confirm destructive requests when appropriate.
 
-- action=save: Store a new memory entry or update an existing one. Requires title (short label, max 100 chars) and data (the content to remember). Optional metadata (JSON object), source, and expires_at (ISO datetime). Use clear, searchable titles.
-
-- action=get: Retrieve a specific entry by entry_id or title when you already know exactly which memory you need.
-
-- action=search: Search across titles and data when you are unsure of exact IDs/titles. Prefer this first for contextual recall. Use a broad query and reasonably high limit when you need to quickly scan many memories.
-
-- action=list_titles: List lightweight memory titles (id, title, updated_at, source) so you can quickly discover candidate entries before get/search. Prefer this when exact title is unknown and the title list is small enough to scan.
-
-- action=delete: Remove stale or outdated memory by entry_id or title when user asks to forget something or when replacing incorrect/outdated facts.
-
-Empty results policy:
-- If list_titles or search returns zero results, do NOT retry with the same parameters. Proceed using your own knowledge or ask the user directly.
-- If get is called without entry_id or title, use action=list_titles first to discover available entries.
-- Repeating identical calls with the same parameters is wasteful and will be aborted automatically.
+`category` is managed separately. Do not put it inside metadata. Metadata is for additional structured context.

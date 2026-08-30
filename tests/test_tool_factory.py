@@ -50,7 +50,11 @@ class _MemoryStub:
 
 
 class _KVStub:
-    async def save_entry(self, **kwargs: Any):
+    async def create_entry(self, **kwargs: Any):
+        del kwargs
+        return None
+
+    async def update_entry(self, **kwargs: Any):
         del kwargs
         return None
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
+from aiogram.exceptions import TelegramNetworkError
+from aiohttp import ClientError
 
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
@@ -64,13 +67,33 @@ class _MediaMessage:
 class _BotStub:
     def __init__(self, payload: bytes) -> None:
         self._payload = payload
+        self.calls = 0
 
     async def download(self, media: Any, destination: Any) -> None:
         _ = media
+        self.calls += 1
         destination.write(self._payload)
 
 
-def _collector(tmp_path: Path, *, payload: bytes = b"abc") -> TelegramIncomingMediaCollector:
+class _RetryBotStub:
+    def __init__(self, outcomes: list[Exception | bytes]) -> None:
+        self._outcomes = outcomes
+        self.calls = 0
+
+    async def download(self, media: Any, destination: Any) -> None:
+        _ = media
+        self.calls += 1
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        destination.write(outcome)
+
+def _collector(
+    tmp_path: Path,
+    *,
+    payload: bytes = b"abc",
+    bot: Any | None = None,
+) -> TelegramIncomingMediaCollector:
     config = TelegramChannelConfig(bot_token="token")
     file_storage_config = FileStorageToolConfig(
         enabled=True,
@@ -78,7 +101,7 @@ def _collector(tmp_path: Path, *, payload: bytes = b"abc") -> TelegramIncomingMe
         incoming_temp_subdir="uploads/temp",
     )
     return TelegramIncomingMediaCollector(
-        bot=_BotStub(payload),
+        bot=bot or _BotStub(payload),
         config=config,
         file_storage_config=file_storage_config,
         local_storage=LocalFileStorage(
@@ -220,3 +243,99 @@ async def test_collect_incoming_files_keeps_unique_name_on_collision(tmp_path: P
     assert len(incoming_files) == 1
     assert incoming_files[0].filename != "report.pdf"
     assert incoming_files[0].path.startswith("uploads/temp/document_")
+
+
+@pytest.mark.asyncio
+async def test_collect_incoming_files_retries_transient_audio_download_failure_then_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    bot = _RetryBotStub(
+        [
+            TimeoutError(),
+            TelegramNetworkError(method="download", message="Request timeout error"),
+            b"audio-bytes",
+        ]
+    )
+    collector = _collector(tmp_path, bot=bot)
+    message = _MediaMessage(
+        chat=_Chat(1),
+        from_user=_User(2),
+        message_id=13,
+        audio=_Audio(file_unique_id="a3", file_name="sample.mp3", mime_type="audio/mpeg"),
+    )
+
+    incoming_files, errors = await collector.collect(message)  # type: ignore[arg-type]
+
+    assert not errors
+    assert len(incoming_files) == 1
+    assert bot.calls == 3
+    assert sleep_calls == [2.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_collect_incoming_files_returns_error_after_transient_voice_download_retries_exhausted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    bot = _RetryBotStub(
+        [
+            ClientError("connection reset"),
+            TimeoutError(),
+            TelegramNetworkError(method="download", message="Request timeout error"),
+        ]
+    )
+    collector = _collector(tmp_path, bot=bot)
+    message = _MediaMessage(
+        chat=_Chat(1),
+        from_user=_User(2),
+        message_id=14,
+        voice=_Voice(file_unique_id="v2", mime_type="audio/ogg"),
+    )
+
+    incoming_files, errors = await collector.collect(message)  # type: ignore[arg-type]
+
+    assert not incoming_files
+    assert errors == ["voice_download_failed"]
+    assert bot.calls == 3
+    assert sleep_calls == [2.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_collect_incoming_files_does_not_retry_non_transient_document_download_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    bot = _RetryBotStub([ValueError("bad state")])
+    collector = _collector(tmp_path, bot=bot)
+    message = _MediaMessage(
+        chat=_Chat(1),
+        from_user=_User(2),
+        message_id=15,
+        document=_Document(file_unique_id="d3", file_name="report.pdf", mime_type="application/pdf"),
+    )
+
+    incoming_files, errors = await collector.collect(message)  # type: ignore[arg-type]
+
+    assert not incoming_files
+    assert errors == ["document_download_failed"]
+    assert bot.calls == 1
+    assert sleep_calls == []

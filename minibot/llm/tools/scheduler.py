@@ -101,21 +101,7 @@ class SchedulePromptTool:
                     "active_only": nullable_boolean("Filter active jobs for action=list."),
                     **pagination_properties(),
                 },
-                required=[
-                    "action",
-                    "job_id",
-                    "content",
-                    "run_at",
-                    "delay_seconds",
-                    "role",
-                    "metadata",
-                    "recurrence_type",
-                    "recurrence_interval_seconds",
-                    "recurrence_end_at",
-                    "active_only",
-                    "limit",
-                    "offset",
-                ],
+                required=["action", "limit", "offset"],
             ),
         )
 
@@ -160,16 +146,7 @@ class SchedulePromptTool:
                     ),
                     "recurrence_end_at": nullable_string("Optional ISO 8601 timestamp after which recurrence stops."),
                 },
-                required=[
-                    "content",
-                    "run_at",
-                    "delay_seconds",
-                    "role",
-                    "metadata",
-                    "recurrence_type",
-                    "recurrence_interval_seconds",
-                    "recurrence_end_at",
-                ],
+                required=["content"],
             ),
         )
 

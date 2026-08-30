@@ -44,8 +44,22 @@ class KeyValueSearchResult:
     offset: int
 
 
+@dataclass(frozen=True)
+class KeyValueCreateResult:
+    entry: KeyValueEntry
+    created: bool
+
+
+@dataclass(frozen=True)
+class KeyValueMemoryFilter:
+    category: str | None = None
+    source: str | None = None
+    updated_after: datetime | None = None
+    updated_before: datetime | None = None
+
+
 class KeyValueMemory(Protocol):
-    async def save_entry(
+    async def create_entry(
         self,
         owner_id: str,
         title: str,
@@ -53,26 +67,35 @@ class KeyValueMemory(Protocol):
         metadata: Mapping[str, Any] | None = None,
         source: str | None = None,
         expires_at: datetime | None = None,
-    ) -> KeyValueEntry: ...
+    ) -> KeyValueCreateResult: ...
+
+    async def update_entry(
+        self,
+        owner_id: str,
+        entry_id: str,
+        data: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        source: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> KeyValueEntry | None: ...
 
     async def get_entry(
         self,
         owner_id: str,
-        entry_id: str | None = None,
-        title: str | None = None,
+        entry_id: str,
     ) -> KeyValueEntry | None: ...
 
     async def delete_entry(
         self,
         owner_id: str,
-        entry_id: str | None = None,
-        title: str | None = None,
+        entry_id: str,
     ) -> bool: ...
 
     async def search_entries(
         self,
         owner_id: str,
         query: str | None = None,
+        filters: KeyValueMemoryFilter | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> KeyValueSearchResult: ...
@@ -80,6 +103,7 @@ class KeyValueMemory(Protocol):
     async def list_entries(
         self,
         owner_id: str,
+        filters: KeyValueMemoryFilter | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> KeyValueSearchResult: ...

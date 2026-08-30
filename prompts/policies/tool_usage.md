@@ -7,4 +7,4 @@ Tool routing hints:
 - For file-management actions such as save, move, delete, send, list, or glob, use `filesystem`.
 - After filesystem operations, reuse canonical path fields from tool output (`path_relative`, `path_absolute`, `path_scope`) in later tool calls.
 - In yolo mode (`allow_outside_root=true`), use absolute paths for files outside the managed root.
-- If the user asks to delete a memory entry without an identifier, infer the likely target from context and ask for confirmation when needed.
+- If the user asks to delete a memory entry without an identifier, use `memory.search` or `memory.list_titles` to find its `entry_id`, then ask for confirmation when needed before deleting it.

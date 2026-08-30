@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The persistent `memory` tool replaces title-based `save` with explicit `create` and ID-only `update`; `get` and `delete` now also require an `entry_id`. Agents must discover IDs with `search` or `list_titles` before mutating an entry.
+- Memory entries now use one validated category: `finanzas`, `recordatorios`, `proyectos`, `preferencias`, `salud`, `viajes`, `vehículos`, `contactos`, `seguimiento`, `conocimiento`, or `otros`. `search` and `list_titles` support category, source, and update-date filters.
+- No `ALTER TABLE` or schema migration is required: categories remain in the existing `metadata` JSON column. Existing installations only need the one-time data backfill described in the release notes for their stored entries.
+
 ## [0.4.0] - 2026-04-25
 
 ### Added

@@ -14,7 +14,13 @@ from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from minibot.adapters.config.schema import KeyValueMemoryConfig
 from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
-from minibot.core.memory import KeyValueEntry, KeyValueMemory, KeyValueSearchResult
+from minibot.core.memory import (
+    KeyValueCreateResult,
+    KeyValueEntry,
+    KeyValueMemory,
+    KeyValueMemoryFilter,
+    KeyValueSearchResult,
+)
 from minibot.shared.datetime_utils import ensure_utc, utcnow
 
 KVBase = declarative_base()
@@ -76,7 +82,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
     def _create_schema(sync_connection: Connection) -> None:
         KVBase.metadata.create_all(sync_connection)
 
-    async def save_entry(
+    async def create_entry(
         self,
         owner_id: str,
         title: str,
@@ -84,7 +90,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
         metadata: Mapping[str, Any] | None = None,
         source: str | None = None,
         expires_at: datetime | None = None,
-    ) -> KeyValueEntry:
+    ) -> KeyValueCreateResult:
         if not owner_id:
             raise ValueError("owner_id is required")
         normalized_title = title.strip()
@@ -105,14 +111,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             result = await session.execute(stmt)
             existing_entry = result.scalars().first()
             if existing_entry:
-                existing_entry.data = data
-                existing_entry.payload = metadata_dict
-                existing_entry.source = source
-                existing_entry.updated_at = now
-                existing_entry.expires_at = expires_at
-                await session.commit()
-                await session.refresh(existing_entry)
-                return self._to_entry(existing_entry)
+                return KeyValueCreateResult(entry=self._to_entry(existing_entry), created=False)
 
             entry = KVEntry(
                 id=uuid4().hex,
@@ -128,29 +127,52 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             session.add(entry)
             await session.commit()
             await session.refresh(entry)
-            return self._to_entry(entry)
+            return KeyValueCreateResult(entry=self._to_entry(entry), created=True)
+
+    async def update_entry(
+        self,
+        owner_id: str,
+        entry_id: str,
+        data: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        source: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> KeyValueEntry | None:
+        if not owner_id:
+            raise ValueError("owner_id is required")
+        if not entry_id:
+            raise ValueError("entry_id is required")
+
+        async with self._session_factory() as session:
+            stmt = select(KVEntry).where(KVEntry.owner_id == owner_id, KVEntry.id == entry_id).limit(1)
+            result = await session.execute(stmt)
+            existing_entry = result.scalars().first()
+            if existing_entry is None:
+                return None
+            if data is not None:
+                if not data:
+                    raise ValueError("data cannot be empty")
+                existing_entry.data = data
+            if metadata is not None:
+                existing_entry.payload = {**dict(existing_entry.payload or {}), **dict(metadata)}
+            if source is not None:
+                existing_entry.source = source
+            if expires_at is not None:
+                existing_entry.expires_at = expires_at
+            existing_entry.updated_at = utcnow()
+            await session.commit()
+            await session.refresh(existing_entry)
+            return self._to_entry(existing_entry)
 
     async def get_entry(
         self,
         owner_id: str,
-        entry_id: str | None = None,
-        title: str | None = None,
+        entry_id: str,
     ) -> KeyValueEntry | None:
-        if not entry_id and not title:
-            raise ValueError("entry_id or title is required")
+        if not entry_id:
+            raise ValueError("entry_id is required")
         async with self._session_factory() as session:
-            stmt = select(KVEntry).where(KVEntry.owner_id == owner_id)
-            if entry_id:
-                stmt = stmt.where(KVEntry.id == entry_id)
-            elif title is not None:
-                normalized = title.strip()
-                if not normalized:
-                    raise ValueError("title cannot be empty")
-                stmt = stmt.where(func.lower(KVEntry.title) == normalized.lower())
-                stmt = stmt.order_by(KVEntry.updated_at.desc(), KVEntry.id.desc())
-            else:
-                raise ValueError("title is required when entry_id is not provided")
-            stmt = stmt.limit(1)
+            stmt = select(KVEntry).where(KVEntry.owner_id == owner_id, KVEntry.id == entry_id).limit(1)
             result = await session.execute(stmt)
             entry = result.scalars().first()
             return self._to_entry(entry) if entry else None
@@ -158,40 +180,15 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
     async def delete_entry(
         self,
         owner_id: str,
-        entry_id: str | None = None,
-        title: str | None = None,
+        entry_id: str,
     ) -> bool:
         if not owner_id:
             raise ValueError("owner_id is required")
-        if not entry_id and not title:
-            raise ValueError("entry_id or title is required")
+        if not entry_id:
+            raise ValueError("entry_id is required")
 
         async with self._session_factory() as session:
-            if entry_id:
-                target_stmt = select(KVEntry.id).where(KVEntry.owner_id == owner_id, KVEntry.id == entry_id).limit(1)
-                target_result = await session.execute(target_stmt)
-                target_id = target_result.scalar_one_or_none()
-                if target_id is None:
-                    return False
-            elif title is not None:
-                normalized = title.strip()
-                if not normalized:
-                    raise ValueError("title cannot be empty")
-                target_stmt = (
-                    select(KVEntry.id)
-                    .where(KVEntry.owner_id == owner_id)
-                    .where(func.lower(KVEntry.title) == normalized.lower())
-                    .order_by(KVEntry.updated_at.desc(), KVEntry.id.desc())
-                    .limit(1)
-                )
-                target_result = await session.execute(target_stmt)
-                target_id = target_result.scalar_one_or_none()
-                if target_id is None:
-                    return False
-            else:
-                raise ValueError("title is required when entry_id is not provided")
-
-            stmt = delete(KVEntry).where(KVEntry.owner_id == owner_id, KVEntry.id == target_id)
+            stmt = delete(KVEntry).where(KVEntry.owner_id == owner_id, KVEntry.id == entry_id)
             result = await session.execute(stmt)
             await session.commit()
             return bool(result)
@@ -200,29 +197,33 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
         self,
         owner_id: str,
         query: str | None = None,
+        filters: KeyValueMemoryFilter | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> KeyValueSearchResult:
-        return await self._query_entries(owner_id, query=query, limit=limit, offset=offset)
+        return await self._query_entries(owner_id, query=query, filters=filters, limit=limit, offset=offset)
 
     async def list_entries(
         self,
         owner_id: str,
+        filters: KeyValueMemoryFilter | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> KeyValueSearchResult:
-        return await self._query_entries(owner_id, limit=limit, offset=offset)
+        return await self._query_entries(owner_id, filters=filters, limit=limit, offset=offset)
 
     async def _query_entries(
         self,
         owner_id: str,
         query: str | None = None,
+        filters: KeyValueMemoryFilter | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> KeyValueSearchResult:
         resolved_limit = self._resolve_limit(limit)
         resolved_offset = max(offset or 0, 0)
-        filters = [KVEntry.owner_id == owner_id]
+        memory_filter = filters or KeyValueMemoryFilter()
+        query_filters = self._entry_filters(owner_id, memory_filter)
         normalized_query = query.strip() if query else ""
 
         async with self._session_factory() as session:
@@ -231,6 +232,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
                     session,
                     owner_id=owner_id,
                     query=normalized_query,
+                    filters=memory_filter,
                     limit=resolved_limit,
                     offset=resolved_offset,
                     token_joiner="AND",
@@ -242,6 +244,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
                     session,
                     owner_id=owner_id,
                     query=normalized_query,
+                    filters=memory_filter,
                     limit=resolved_limit,
                     offset=resolved_offset,
                     token_joiner="OR",
@@ -251,20 +254,20 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
 
             if normalized_query:
                 normalized = f"%{normalized_query.lower()}%"
-                filters.append(
+                query_filters.append(
                     or_(
                         func.lower(KVEntry.title).like(normalized),
                         func.lower(KVEntry.data).like(normalized),
                     )
                 )
 
-            count_stmt = select(func.count()).select_from(KVEntry).where(*filters)
+            count_stmt = select(func.count()).select_from(KVEntry).where(*query_filters)
             total_result = await session.execute(count_stmt)
             total = total_result.scalar_one()
 
             stmt = (
                 select(KVEntry)
-                .where(*filters)
+                .where(*query_filters)
                 .order_by(KVEntry.updated_at.desc())
                 .offset(resolved_offset)
                 .limit(resolved_limit)
@@ -319,6 +322,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
         session: AsyncSession,
         owner_id: str,
         query: str,
+        filters: KeyValueMemoryFilter,
         limit: int,
         offset: int,
         token_joiner: str,
@@ -327,27 +331,31 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
         if not match_query:
             return None
 
+        filter_sql, filter_params = self._fts_filter_sql(filters)
+
         count_sql = text(
             "SELECT COUNT(*) AS total "
             "FROM kv_memory_fts f JOIN kv_memory k ON k.rowid = f.rowid "
             "WHERE k.owner_id = :owner_id AND kv_memory_fts MATCH :match_query"
+            f"{filter_sql}"
         )
         query_sql = text(
             "SELECT k.id, k.owner_id, k.title, k.data, k.metadata, k.source, k.created_at, k.updated_at, k.expires_at "
             "FROM kv_memory_fts f "
             "JOIN kv_memory k ON k.rowid = f.rowid "
             "WHERE k.owner_id = :owner_id AND kv_memory_fts MATCH :match_query "
+            f"{filter_sql} "
             "ORDER BY bm25(kv_memory_fts) ASC, k.updated_at DESC "
             "LIMIT :limit OFFSET :offset"
         )
+        params = {"owner_id": owner_id, "match_query": match_query, **filter_params}
         try:
-            total_result = await session.execute(count_sql, {"owner_id": owner_id, "match_query": match_query})
+            total_result = await session.execute(count_sql, params)
             total = int(total_result.scalar_one() or 0)
             result = await session.execute(
                 query_sql,
                 {
-                    "owner_id": owner_id,
-                    "match_query": match_query,
+                    **params,
                     "limit": limit,
                     "offset": offset,
                 },
@@ -371,6 +379,37 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             for row in result.mappings().all()
         ]
         return KeyValueSearchResult(entries=entries, total=total, limit=limit, offset=offset)
+
+    @staticmethod
+    def _entry_filters(owner_id: str, memory_filter: KeyValueMemoryFilter) -> list[Any]:
+        filters: list[Any] = [KVEntry.owner_id == owner_id]
+        if memory_filter.category:
+            filters.append(KVEntry.payload["category"].as_string() == memory_filter.category)
+        if memory_filter.source:
+            filters.append(KVEntry.source == memory_filter.source)
+        if memory_filter.updated_after:
+            filters.append(KVEntry.updated_at >= memory_filter.updated_after)
+        if memory_filter.updated_before:
+            filters.append(KVEntry.updated_at <= memory_filter.updated_before)
+        return filters
+
+    @staticmethod
+    def _fts_filter_sql(memory_filter: KeyValueMemoryFilter) -> tuple[str, dict[str, Any]]:
+        clauses: list[str] = []
+        params: dict[str, Any] = {}
+        if memory_filter.category:
+            clauses.append(" AND json_extract(k.metadata, '$.category') = :category")
+            params["category"] = memory_filter.category
+        if memory_filter.source:
+            clauses.append(" AND k.source = :source")
+            params["source"] = memory_filter.source
+        if memory_filter.updated_after:
+            clauses.append(" AND k.updated_at >= :updated_after")
+            params["updated_after"] = memory_filter.updated_after
+        if memory_filter.updated_before:
+            clauses.append(" AND k.updated_at <= :updated_before")
+            params["updated_before"] = memory_filter.updated_before
+        return "".join(clauses), params
 
     def _coerce_datetime(self, value: Any) -> datetime | None:
         if value is None or isinstance(value, datetime):
