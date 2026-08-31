@@ -23,3 +23,4 @@ sympy
 orjson
 tenacity
 sentence-transformers
+croniter

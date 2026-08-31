@@ -7,6 +7,9 @@ from typing import Any
 from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.dispatcher import Dispatcher
+from minibot.app.event_bus import EventBus
+from minibot.core.channels import ChannelMessage
+from minibot.core.events import MessageEvent
 from minibot.llm.tools.factory import configured_tool_labels
 from minibot.shared.utils import summarize_items
 
@@ -63,6 +66,7 @@ async def run() -> None:
     async with _graceful_shutdown(services, logger) as stop_event:
         logger.info("starting dispatcher", extra={"component": "dispatcher"})
         await dispatcher.start()
+        await _replay_pending_turns(event_bus, logger)
         if scheduler_service is not None:
             logger.info("starting scheduler service", extra={"component": "scheduler"})
             await scheduler_service.start()
@@ -74,6 +78,26 @@ async def run() -> None:
             await rabbitmq_service.start()
         logger.info("daemon running in foreground", extra={"component": "daemon"})
         await stop_event.wait()
+
+
+async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:
+    """Re-deliver message turns that never finished before the last shutdown/crash.
+
+    ``Dispatcher._handle_message`` marks a turn pending before processing and clears it once the
+    turn finishes (success or a handled exception); a row that survives to boot means the process
+    died mid-turn, so we replay it through the normal event bus path.
+    """
+    store = AppContainer.get_pending_turn_store()
+    pending = await store.list_pending()
+    if not pending:
+        return
+    logger.warning(
+        "replaying pending message turns from previous run",
+        extra={"component": "daemon", "count": len(pending)},
+    )
+    for event_id, message_json in pending:
+        message = ChannelMessage.model_validate_json(message_json)
+        await event_bus.publish(MessageEvent(event_id=event_id, message=message))
 
 
 @asynccontextmanager

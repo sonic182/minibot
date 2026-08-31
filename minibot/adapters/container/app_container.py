@@ -9,6 +9,7 @@ from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings, TelegramChannelConfig
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
+from minibot.adapters.memory.pending_turns import PendingTurnStore
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
 from minibot.app.agent_definitions_loader import load_agent_specs
@@ -30,6 +31,7 @@ class AppContainer:
     _logger: logging.Logger | None = None
     _event_bus: EventBus | None = None
     _memory_backend: MemoryBackend | None = None
+    _pending_turn_store: PendingTurnStore | None = None
     _kv_memory_backend: KeyValueMemory | None = None
     _llm_client: LLMClient | None = None
     _llm_factory: LLMClientFactory | None = None
@@ -58,6 +60,7 @@ class AppContainer:
         else:
             cls._task_manager = None
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
+        cls._pending_turn_store = PendingTurnStore(cls._settings.memory)
         if cls._settings.tools.kv_memory.enabled:
             cls._kv_memory_backend = SQLAlchemyKeyValueMemory(cls._settings.tools.kv_memory)
         else:
@@ -108,6 +111,12 @@ class AppContainer:
         return cls._memory_backend
 
     @classmethod
+    def get_pending_turn_store(cls) -> PendingTurnStore:
+        if cls._pending_turn_store is None:
+            raise RuntimeError("pending turn store not configured")
+        return cls._pending_turn_store
+
+    @classmethod
     def get_kv_memory_backend(cls) -> KeyValueMemory | None:
         return cls._kv_memory_backend
 
@@ -151,6 +160,7 @@ class AppContainer:
     async def initialize_storage(cls) -> None:
         await cls._apply_runtime_token_autoconfig_if_needed()
         await cls._initialize_backend(cls.get_memory_backend())
+        await cls._initialize_backend(cls.get_pending_turn_store())
         if cls._kv_memory_backend is not None:
             await cls._initialize_backend(cls._kv_memory_backend)
         if cls._prompt_store is not None:

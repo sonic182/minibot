@@ -155,6 +155,27 @@ async def test_store_persists_recurrence_and_supports_cancel_and_list(
 
 
 @pytest.mark.asyncio
+async def test_store_persists_cron_recurrence(prompt_store: SQLAlchemyScheduledPromptStore) -> None:
+    now = _utcnow()
+    job = await prompt_store.create(
+        ScheduledPromptCreate(
+            owner_id="tenant",
+            channel="telegram",
+            text="monthly report",
+            run_at=now,
+            recurrence=PromptRecurrence.CRON,
+            recurrence_cron_expression="0 9 2 * *",
+        )
+    )
+
+    loaded = await prompt_store.get(job.id)
+    assert loaded is not None
+    assert loaded.recurrence == PromptRecurrence.CRON
+    assert loaded.recurrence_cron_expression == "0 9 2 * *"
+    assert loaded.recurrence_interval_seconds is None
+
+
+@pytest.mark.asyncio
 async def test_delete_job_removes_record(prompt_store: SQLAlchemyScheduledPromptStore) -> None:
     now = _utcnow()
     job = await prompt_store.create(

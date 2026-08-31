@@ -51,6 +51,7 @@ class ScheduledPromptModel(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     recurrence: Mapped[str] = mapped_column(String(16), nullable=False, default=PromptRecurrence.NONE.value)
     recurrence_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    recurrence_cron_expression: Mapped[str | None] = mapped_column(String(128), nullable=True)
     recurrence_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -96,6 +97,10 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             )
         if "recurrence_interval_seconds" not in columns:
             connection.execute(text("ALTER TABLE scheduled_prompts ADD COLUMN recurrence_interval_seconds INTEGER"))
+        if "recurrence_cron_expression" not in columns:
+            connection.execute(
+                text("ALTER TABLE scheduled_prompts ADD COLUMN recurrence_cron_expression VARCHAR(128)")
+            )
         if "recurrence_end_at" not in columns:
             connection.execute(text("ALTER TABLE scheduled_prompts ADD COLUMN recurrence_end_at DATETIME"))
 
@@ -117,6 +122,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
                 metadata_payload=metadata,
                 recurrence=prompt.recurrence.value,
                 recurrence_interval_seconds=prompt.recurrence_interval_seconds,
+                recurrence_cron_expression=prompt.recurrence_cron_expression,
                 recurrence_end_at=_as_utc(prompt.recurrence_end_at),
             )
             session.add(model)
@@ -344,5 +350,6 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             last_error=model.last_error,
             recurrence=recurrence,
             recurrence_interval_seconds=model.recurrence_interval_seconds,
+            recurrence_cron_expression=model.recurrence_cron_expression,
             recurrence_end_at=_as_utc(model.recurrence_end_at),
         )

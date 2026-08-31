@@ -22,6 +22,9 @@ class _Logger:
     def info(self, *_args, **_kwargs) -> None:
         return None
 
+    def warning(self, *_args, **_kwargs) -> None:
+        return None
+
 
 class _ToolSettings:
     class _KV:
@@ -83,6 +86,11 @@ class _TelegramConfig:
         self.bot_token = bot_token
 
 
+class _EmptyPendingTurnStore:
+    async def list_pending(self) -> list[tuple[str, str]]:
+        return []
+
+
 @pytest.mark.asyncio
 async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.app import daemon as daemon_module
@@ -120,6 +128,10 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
         @classmethod
         def get_task_manager(cls):
             return object()
+
+        @classmethod
+        def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
+            return _EmptyPendingTurnStore()
 
         @classmethod
         async def initialize_storage(cls) -> None:
@@ -216,6 +228,10 @@ async def test_run_skips_telegram_when_disabled(monkeypatch: pytest.MonkeyPatch)
             return _TelegramConfig(enabled=False, bot_token="")
 
         @classmethod
+        def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
+            return _EmptyPendingTurnStore()
+
+        @classmethod
         async def initialize_storage(cls) -> None:
             return None
 
@@ -253,3 +269,62 @@ async def test_run_skips_telegram_when_disabled(monkeypatch: pytest.MonkeyPatch)
 
     assert dispatcher_probe.started == 1
     assert dispatcher_probe.stopped == 1
+
+
+@pytest.mark.asyncio
+async def test_replay_pending_turns_republishes_unfinished_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app import daemon as daemon_module
+    from minibot.core.channels import ChannelMessage
+    from minibot.core.events import MessageEvent
+
+    message = ChannelMessage(channel="telegram", user_id=1, chat_id=1, message_id=1, text="hi")
+
+    class _PendingStore:
+        async def list_pending(self) -> list[tuple[str, str]]:
+            return [("event-123", message.model_dump_json())]
+
+    class _FakeContainer:
+        @classmethod
+        def get_pending_turn_store(cls) -> _PendingStore:
+            return _PendingStore()
+
+    class _FakeBus:
+        def __init__(self) -> None:
+            self.published: list[MessageEvent] = []
+
+        async def publish(self, event: MessageEvent) -> None:
+            self.published.append(event)
+
+    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
+
+    bus = _FakeBus()
+    await daemon_module._replay_pending_turns(bus, _Logger())
+
+    assert len(bus.published) == 1
+    replayed = bus.published[0]
+    assert replayed.event_id == "event-123"
+    assert replayed.message.text == "hi"
+
+
+@pytest.mark.asyncio
+async def test_replay_pending_turns_noop_when_nothing_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app import daemon as daemon_module
+
+    class _FakeContainer:
+        @classmethod
+        def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
+            return _EmptyPendingTurnStore()
+
+    class _FakeBus:
+        def __init__(self) -> None:
+            self.published: list = []
+
+        async def publish(self, event) -> None:
+            self.published.append(event)
+
+    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
+
+    bus = _FakeBus()
+    await daemon_module._replay_pending_turns(bus, _Logger())
+
+    assert bus.published == []

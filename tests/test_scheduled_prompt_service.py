@@ -218,6 +218,127 @@ async def test_service_keeps_recurring_run_at_exact_end_time(
 
 
 @pytest.mark.asyncio
+async def test_service_cron_recurrence_computes_next_occurrence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    # Wednesday 2026-04-22 10:00 UTC; "day 2 of every month at 09:00" next fires 2026-05-02 09:00.
+    now = datetime(2026, 4, 22, 10, 0, tzinfo=UTC)
+    monkeypatch.setattr(scheduler_module, "utcnow", lambda: now)
+    job = ScheduledPrompt(
+        id="job-cron",
+        owner_id="tenant",
+        channel="telegram",
+        text="monthly report",
+        run_at=now - timedelta(days=1),
+        recurrence=PromptRecurrence.CRON,
+        recurrence_cron_expression="0 9 2 * *",
+    )
+
+    next_run = svc._next_run_for_recurrence(job)
+    assert next_run == datetime(2026, 5, 2, 9, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_service_cron_recurrence_respects_end_at(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    now = datetime(2026, 4, 22, 10, 0, tzinfo=UTC)
+    monkeypatch.setattr(scheduler_module, "utcnow", lambda: now)
+    job = ScheduledPrompt(
+        id="job-cron-end",
+        owner_id="tenant",
+        channel="telegram",
+        text="monthly report",
+        run_at=now,
+        recurrence=PromptRecurrence.CRON,
+        recurrence_cron_expression="0 9 2 * *",
+        recurrence_end_at=now,
+    )
+
+    assert svc._next_run_for_recurrence(job) is None
+
+
+@pytest.mark.asyncio
+async def test_schedule_prompt_cron_requires_expression(tmp_path: Path) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    with pytest.raises(ValueError, match="recurrence_cron_expression is required"):
+        await svc.schedule_prompt(
+            owner_id="tenant",
+            channel="telegram",
+            text="ping",
+            run_at=datetime.now(UTC),
+            recurrence=PromptRecurrence.CRON,
+        )
+
+
+@pytest.mark.asyncio
+async def test_schedule_prompt_cron_rejects_invalid_expression(tmp_path: Path) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    with pytest.raises(ValueError, match="invalid recurrence_cron_expression"):
+        await svc.schedule_prompt(
+            owner_id="tenant",
+            channel="telegram",
+            text="ping",
+            run_at=datetime.now(UTC),
+            recurrence=PromptRecurrence.CRON,
+            recurrence_cron_expression="not a cron",
+        )
+
+
+@pytest.mark.asyncio
+async def test_schedule_prompt_cron_persists_and_round_trips(tmp_path: Path) -> None:
+    db_path = tmp_path / "scheduler.db"
+    config = _config(db_path)
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = EventBus()
+    svc = ScheduledPromptService(store, bus, config)
+
+    job = await svc.schedule_prompt(
+        owner_id="tenant",
+        channel="telegram",
+        text="monthly report",
+        run_at=datetime.now(UTC) + timedelta(minutes=1),
+        recurrence=PromptRecurrence.CRON,
+        recurrence_cron_expression="0 9 2 * *",
+    )
+
+    stored = await store.get(job.id)
+    assert stored is not None
+    assert stored.recurrence == PromptRecurrence.CRON
+    assert stored.recurrence_cron_expression == "0 9 2 * *"
+    assert stored.recurrence_interval_seconds is None
+
+
+@pytest.mark.asyncio
 async def test_service_cancel_prompt_scoped_to_owner_and_chat(tmp_path: Path) -> None:
     db_path = tmp_path / "scheduler.db"
     config = _config(db_path)

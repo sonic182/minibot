@@ -7,6 +7,8 @@ import random
 from datetime import datetime, timedelta
 from typing import Any
 
+from croniter import croniter
+
 from minibot.adapters.config.schema import ScheduledPromptsConfig
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage
@@ -89,6 +91,7 @@ class ScheduledPromptService:
         metadata: dict[str, Any] | None = None,
         recurrence: PromptRecurrence = PromptRecurrence.NONE,
         recurrence_interval_seconds: int | None = None,
+        recurrence_cron_expression: str | None = None,
         recurrence_end_at: datetime | None = None,
     ) -> ScheduledPrompt:
         normalized_text = text.strip()
@@ -102,6 +105,7 @@ class ScheduledPromptService:
         resolved_recurrence = self._resolve_recurrence(
             recurrence=recurrence,
             recurrence_interval_seconds=recurrence_interval_seconds,
+            recurrence_cron_expression=recurrence_cron_expression,
             recurrence_end_at=recurrence_end_at,
         )
         recurrence_end = resolved_recurrence["recurrence_end_at"]
@@ -119,6 +123,7 @@ class ScheduledPromptService:
             max_attempts=self._max_attempts,
             recurrence=resolved_recurrence["recurrence"],
             recurrence_interval_seconds=resolved_recurrence["recurrence_interval_seconds"],
+            recurrence_cron_expression=resolved_recurrence["recurrence_cron_expression"],
             recurrence_end_at=recurrence_end,
         )
         job = await self._repository.create(payload)
@@ -349,15 +354,40 @@ class ScheduledPromptService:
         *,
         recurrence: PromptRecurrence,
         recurrence_interval_seconds: int | None,
+        recurrence_cron_expression: str | None,
         recurrence_end_at: datetime | None,
     ) -> dict[str, Any]:
         if recurrence == PromptRecurrence.NONE:
-            if recurrence_interval_seconds is not None or recurrence_end_at is not None:
-                raise ValueError("recurrence_interval_seconds/recurrence_end_at require recurrence='interval'")
+            if (
+                recurrence_interval_seconds is not None
+                or recurrence_cron_expression is not None
+                or recurrence_end_at is not None
+            ):
+                raise ValueError(
+                    "recurrence_interval_seconds/recurrence_cron_expression/recurrence_end_at"
+                    " require recurrence='interval' or 'cron'"
+                )
             return {
                 "recurrence": PromptRecurrence.NONE,
                 "recurrence_interval_seconds": None,
+                "recurrence_cron_expression": None,
                 "recurrence_end_at": None,
+            }
+
+        if recurrence == PromptRecurrence.CRON:
+            if not recurrence_cron_expression or not recurrence_cron_expression.strip():
+                raise ValueError("recurrence_cron_expression is required for cron recurrence")
+            expression = recurrence_cron_expression.strip()
+            if not croniter.is_valid(expression):
+                raise ValueError(f"invalid recurrence_cron_expression: {expression!r}")
+            normalized_end_at = None
+            if recurrence_end_at is not None:
+                normalized_end_at = self._ensure_utc(recurrence_end_at)
+            return {
+                "recurrence": PromptRecurrence.CRON,
+                "recurrence_interval_seconds": None,
+                "recurrence_cron_expression": expression,
+                "recurrence_end_at": normalized_end_at,
             }
 
         if recurrence != PromptRecurrence.INTERVAL:
@@ -373,10 +403,22 @@ class ScheduledPromptService:
         return {
             "recurrence": PromptRecurrence.INTERVAL,
             "recurrence_interval_seconds": interval,
+            "recurrence_cron_expression": None,
             "recurrence_end_at": normalized_end_at,
         }
 
     def _next_run_for_recurrence(self, job: ScheduledPrompt) -> datetime | None:
+        if job.recurrence == PromptRecurrence.CRON:
+            expression = job.recurrence_cron_expression
+            if not expression:
+                return None
+            now = utcnow()
+            base = job.run_at if job.run_at > now else now
+            next_run = croniter(expression, base).get_next(datetime)
+            if job.recurrence_end_at is not None and next_run > job.recurrence_end_at:
+                return None
+            return next_run
+
         if job.recurrence != PromptRecurrence.INTERVAL:
             return None
         interval = job.recurrence_interval_seconds

@@ -26,6 +26,7 @@ class Dispatcher:
     def __init__(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus
         self._subscription = event_bus.subscribe()
+        self._pending_turns = AppContainer.get_pending_turn_store()
         settings = AppContainer.get_settings()
         prompt_service = AppContainer.get_scheduled_prompt_service()
         memory_backend = AppContainer.get_memory_backend()
@@ -150,6 +151,7 @@ class Dispatcher:
                 await self._handle_format_repair(event)
 
     async def _handle_message(self, event: MessageEvent) -> None:
+        await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
         try:
             message = event.message
             self._logger.debug(
@@ -229,6 +231,8 @@ class Dispatcher:
                     )
         except Exception as exc:
             self._logger.exception("failed to handle message", exc_info=exc)
+        finally:
+            await self._pending_turns.clear_pending(event.event_id)
 
     async def _handle_format_repair(self, event: OutboundFormatRepairEvent) -> None:
         try:
