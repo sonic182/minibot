@@ -12,6 +12,19 @@ from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableRes
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
 
 
+class _FakePendingTurnStore:
+    def __init__(self) -> None:
+        self.marked: list[str] = []
+        self.cleared: list[str] = []
+
+    async def mark_pending(self, event_id: str, message_json: str) -> None:
+        del message_json
+        self.marked.append(event_id)
+
+    async def clear_pending(self, event_id: str) -> None:
+        self.cleared.append(event_id)
+
+
 @dataclass
 class _FakeSettings:
     class _Tools:
@@ -124,6 +137,7 @@ async def test_dispatcher_publishes_outbound_reply(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -165,6 +179,7 @@ async def test_dispatcher_skips_outbound_when_handler_marks_silent(monkeypatch: 
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -206,6 +221,7 @@ async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -241,6 +257,89 @@ async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
 
 
 @pytest.mark.asyncio
+async def test_dispatcher_marks_and_clears_pending_turn_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app import dispatcher as dispatcher_module
+
+    class _StubHandler:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        async def handle(self, event: MessageEvent) -> ChannelResponse:
+            return ChannelResponse(
+                channel="telegram", chat_id=1, text=f"ok:{event.message.text}", metadata={"should_reply": True}
+            )
+
+    pending_store = _FakePendingTurnStore()
+    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
+    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: pending_store)
+
+    bus = EventBus()
+    subscription = bus.subscribe()
+    dispatcher = dispatcher_module.Dispatcher(bus)
+    await dispatcher.start()
+    event = _message_event("hello")
+    await bus.publish(event)
+
+    outbound = await _wait_outbound(subscription)
+
+    assert outbound is not None
+    await subscription.close()
+    await dispatcher.stop()
+    assert pending_store.marked == [event.event_id]
+    assert pending_store.cleared == [event.event_id]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_clears_pending_turn_after_handler_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app import dispatcher as dispatcher_module
+
+    class _StubHandler:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        async def handle(self, event: MessageEvent) -> ChannelResponse:
+            del event
+            raise RuntimeError("provider exploded")
+
+    pending_store = _FakePendingTurnStore()
+    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
+    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: pending_store)
+
+    bus = EventBus()
+    subscription = bus.subscribe()
+    dispatcher = dispatcher_module.Dispatcher(bus)
+    await dispatcher.start()
+    event = _message_event("hello")
+    await bus.publish(event)
+
+    outbound = await _wait_outbound(subscription)
+
+    assert outbound is None
+    await subscription.close()
+    await dispatcher.stop()
+    assert pending_store.marked == [event.event_id]
+    assert pending_store.cleared == [event.event_id]
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.app import dispatcher as dispatcher_module
 
@@ -269,6 +368,7 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
 
     bus = EventBus()
     subscription = bus.subscribe()

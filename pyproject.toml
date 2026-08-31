@@ -47,6 +47,7 @@ aiopipe = {version = ">=0.2.2", optional = true}
 #   CPU: pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install sentence-transformers
 #   GPU: pip install torch && pip install sentence-transformers
 pypdf = {version = "^6.10.2", optional = true}
+croniter = "^6.2.4"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"

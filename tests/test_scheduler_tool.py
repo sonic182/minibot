@@ -33,6 +33,7 @@ class StubPromptService:
             metadata=dict(kwargs.get("metadata") or {}),
             recurrence=kwargs.get("recurrence", PromptRecurrence.NONE),
             recurrence_interval_seconds=kwargs.get("recurrence_interval_seconds"),
+            recurrence_cron_expression=kwargs.get("recurrence_cron_expression"),
             recurrence_end_at=kwargs.get("recurrence_end_at"),
         )
 
@@ -151,6 +152,46 @@ async def test_delete_scheduled_prompt_tool_returns_deleted_status() -> None:
     assert result["deleted"] is True
     assert result["stopped_before_delete"] is True
     assert result["status_before_delete"] == ScheduledPromptStatus.PENDING.value
+
+
+@pytest.mark.asyncio
+async def test_schedule_prompt_tool_accepts_cron_recurrence() -> None:
+    service = StubPromptService()
+    tool = SchedulePromptTool(cast(ScheduledPromptService, service))
+    binding = tool.bindings()[0]
+    context = ToolContext(owner_id="owner", channel="telegram", chat_id=1, user_id=2)
+    result = await binding.handler(
+        {
+            "content": "monthly report",
+            "delay_seconds": 5,
+            "recurrence_type": "cron",
+            "recurrence_cron_expression": "0 9 2 * *",
+        },
+        context,
+    )
+    assert result["scheduled"] is True
+    assert service.calls
+    assert service.calls[0]["recurrence"] == PromptRecurrence.CRON
+    assert service.calls[0]["recurrence_cron_expression"] == "0 9 2 * *"
+
+
+@pytest.mark.asyncio
+async def test_schedule_prompt_tool_returns_validation_error_for_missing_cron_expression() -> None:
+    service = StubPromptService()
+    tool = SchedulePromptTool(cast(ScheduledPromptService, service))
+    binding = tool.bindings()[0]
+    context = ToolContext(owner_id="owner", channel="telegram", chat_id=1, user_id=2)
+    result = await binding.handler(
+        {
+            "content": "monthly report",
+            "delay_seconds": 5,
+            "recurrence_type": "cron",
+        },
+        context,
+    )
+    assert result["scheduled"] is False
+    assert "recurrence_cron_expression" in result["error"]
+    assert not service.calls
 
 
 @pytest.mark.asyncio

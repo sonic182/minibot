@@ -35,7 +35,11 @@ class SchedulePromptTool:
     - ``delete_scheduled_prompt`` — cancel and permanently remove a job.
 
     Recurrence: set ``recurrence_type = "interval"`` and provide
-    ``recurrence_interval_seconds`` (minimum enforced by ``min_recurrence_interval_seconds``).
+    ``recurrence_interval_seconds`` (minimum enforced by ``min_recurrence_interval_seconds``),
+    or set ``recurrence_type = "cron"`` and provide a standard 5-field
+    ``recurrence_cron_expression`` (e.g. ``"0 9 * * 1-5"`` for weekdays at 9am,
+    ``"0 0 2 * *"`` for day 2 of every month) for schedules that don't map to a
+    fixed interval.
 
     Prompt roles: ``user`` (bot answers), ``assistant`` (sent directly to the user),
     ``system``, or ``developer``.
@@ -97,6 +101,11 @@ class SchedulePromptTool:
                         minimum=self._min_recurrence_interval_seconds,
                         description="Interval for action=create recurrence.",
                     ),
+                    "recurrence_cron_expression": nullable_string(
+                        "Standard 5-field cron expression for action=create recurrence "
+                        "(e.g. '0 9 * * 1-5' = weekdays at 9am, '0 0 2 * *' = day 2 of every month). "
+                        "Required when recurrence_type='cron'."
+                    ),
                     "recurrence_end_at": nullable_string("Recurrence end timestamp for action=create."),
                     "active_only": nullable_boolean("Filter active jobs for action=list."),
                     **pagination_properties(),
@@ -144,6 +153,10 @@ class SchedulePromptTool:
                             f" Minimum: {self._min_recurrence_interval_seconds}."
                         ),
                     ),
+                    "recurrence_cron_expression": nullable_string(
+                        "Standard 5-field cron expression, used when recurrence_type='cron' "
+                        "(e.g. '0 9 * * 1-5' = weekdays at 9am, '0 0 2 * *' = day 2 of every month)."
+                    ),
                     "recurrence_end_at": nullable_string("Optional ISO 8601 timestamp after which recurrence stops."),
                 },
                 required=["content"],
@@ -184,8 +197,9 @@ class SchedulePromptTool:
         run_at = _resolve_run_at(payload)
         role = _resolve_role(payload.get("role"))
         metadata = _coerce_metadata(payload.get("metadata"))
+        recurrence_cron_expression = payload.get("recurrence_cron_expression")
         recurrence_type = _resolve_recurrence(
-            payload.get("recurrence_type"), payload.get("recurrence_interval_seconds")
+            payload.get("recurrence_type"), payload.get("recurrence_interval_seconds"), recurrence_cron_expression
         )
         recurrence_interval = optional_int(
             payload.get("recurrence_interval_seconds"),
@@ -207,6 +221,11 @@ class SchedulePromptTool:
                     "error": (f"recurrence_interval_seconds must be >= {self._min_recurrence_interval_seconds}"),
                     "min_recurrence_interval_seconds": self._min_recurrence_interval_seconds,
                 }
+        if recurrence_type == PromptRecurrence.CRON and not recurrence_cron_expression:
+            return {
+                "scheduled": False,
+                "error": "recurrence_cron_expression is required for cron recurrence",
+            }
         try:
             job = await self._service.schedule_prompt(
                 owner_id=owner_id,
@@ -219,6 +238,7 @@ class SchedulePromptTool:
                 metadata=metadata,
                 recurrence=recurrence_type,
                 recurrence_interval_seconds=recurrence_interval,
+                recurrence_cron_expression=recurrence_cron_expression,
                 recurrence_end_at=recurrence_end_at,
             )
         except ValueError as exc:
@@ -301,6 +321,7 @@ class SchedulePromptTool:
                     "run_at": job.run_at.isoformat(),
                     "recurrence": job.recurrence.value,
                     "recurrence_interval_seconds": job.recurrence_interval_seconds,
+                    "recurrence_cron_expression": job.recurrence_cron_expression,
                     "recurrence_end_at": job.recurrence_end_at.isoformat() if job.recurrence_end_at else None,
                     "text": job.text,
                 }
@@ -384,9 +405,13 @@ def _coerce_metadata(value: Any) -> dict[str, Any] | None:
     raise ValueError("metadata must be an object")
 
 
-def _resolve_recurrence(value: Any, interval_value: Any) -> PromptRecurrence:
+def _resolve_recurrence(value: Any, interval_value: Any, cron_value: Any) -> PromptRecurrence:
     if value is None:
-        return PromptRecurrence.INTERVAL if interval_value is not None else PromptRecurrence.NONE
+        if interval_value is not None:
+            return PromptRecurrence.INTERVAL
+        if cron_value is not None:
+            return PromptRecurrence.CRON
+        return PromptRecurrence.NONE
     return enum_by_value(value, enum_type=PromptRecurrence, field="recurrence_type", allow_falsy_default=False)
 
 

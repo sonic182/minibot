@@ -474,7 +474,7 @@ Security boundary:
 The scheduler currently focuses on scheduled prompts (not a generic task DAG engine).
 
 - Jobs are persisted in SQLite (`scheduled_prompts` table).
-- Service leases due jobs, dispatches them through the event bus, retries failures with backoff, and supports interval recurrence.
+- Service leases due jobs, dispatches them through the event bus, retries failures with backoff, and supports fixed-interval (`recurrence_type = "interval"`) or cron-expression (`recurrence_type = "cron"`, via `croniter`) recurrence.
 - Scope checks enforce owner/channel/chat/user constraints for cancel/delete/list operations.
 - Deletion is explicit user-triggered behavior; active jobs are cancelled before hard delete.
 - There is no first-class scheduler notification suppression flag yet (for example `notify_user=false`); outbound reply suppression still depends on normal handler response metadata.

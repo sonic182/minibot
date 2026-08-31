@@ -25,6 +25,7 @@ class ScheduledPromptStatus(StrEnum):
 class PromptRecurrence(StrEnum):
     NONE = "none"
     INTERVAL = "interval"
+    CRON = "cron"
 
 
 @dataclass(slots=True)
@@ -45,6 +46,7 @@ class ScheduledPrompt:
     last_error: str | None = None
     recurrence: PromptRecurrence = PromptRecurrence.NONE
     recurrence_interval_seconds: int | None = None
+    recurrence_cron_expression: str | None = None
     recurrence_end_at: datetime | None = None
 
     def should_retry(self) -> bool:
@@ -64,6 +66,7 @@ class ScheduledPromptCreate:
     max_attempts: int = 3
     recurrence: PromptRecurrence = PromptRecurrence.NONE
     recurrence_interval_seconds: int | None = None
+    recurrence_cron_expression: str | None = None
     recurrence_end_at: datetime | None = None
 
 
