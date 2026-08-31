@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import Column, DateTime, String, Text, delete, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
@@ -43,7 +44,12 @@ class PendingTurnStore:
 
     async def mark_pending(self, event_id: str, message_json: str) -> None:
         async with self._session_factory() as session:
-            session.add(PendingTurnRecord(event_id=event_id, message_json=message_json, created_at=utcnow()))
+            stmt = (
+                sqlite_insert(PendingTurnRecord)
+                .values(event_id=event_id, message_json=message_json, created_at=utcnow())
+                .on_conflict_do_nothing()
+            )
+            await session.execute(stmt)
             await session.commit()
 
     async def clear_pending(self, event_id: str) -> None:
