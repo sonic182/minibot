@@ -47,6 +47,7 @@ prompts_dir = "./prompts"
 [providers.openai]
 api_key = ""
 base_url = ""
+# OpenCode Zen/Go setup: see config.example.toml [providers.openai] / [providers.openai_responses]
 
 [providers.openai_responses]
 api_key = ""
