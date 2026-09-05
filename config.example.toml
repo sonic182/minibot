@@ -80,6 +80,14 @@ base_url = ""
 #   model = "kimi-k2.7-code"
 # api_key = "YOUR_OPENCODE_GO_API_KEY"
 # base_url = "https://opencode.ai/zen/go/v1"
+#
+# z.ai GLM Coding Plan (https://docs.z.ai/devpack) — Chat Completions, recommended
+# (documented function calling + streaming; the Responses variant below isn't
+# confirmed to support previous_response_id/reasoning parity, use at your own risk).
+# api_key = "YOUR_ZAI_API_KEY"
+# base_url = "https://api.z.ai/api/coding/paas/v4"
+#   model = "glm-5.3"
+#   model = "glm-5.3-flash"  # cheaper/faster
 
 [providers.openai_responses]
 api_key = ""
@@ -93,6 +101,10 @@ base_url = ""
 # either "https://opencode.ai/zen/v1" (PAYG) or "https://opencode.ai/zen/go/v1" (subscription).
 # api_key = "YOUR_OPENCODE_API_KEY"
 # base_url = "https://opencode.ai/zen/go/v1"
+#
+# z.ai GLM Coding Plan Responses endpoint (unconfirmed feature parity — see note above):
+# api_key = "YOUR_ZAI_API_KEY"
+# base_url = "https://api.z.ai/api/v1"
 
 [providers.openrouter]
 api_key = ""
