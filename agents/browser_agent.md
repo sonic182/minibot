@@ -3,13 +3,10 @@ name: playwright_cli_agent_cheap
 description: Cheap browser specialist for deterministic Playwright CLI tasks. Prefer for direct URL checks, simple extraction, screenshots, and low-ambiguity browsing where speed and cost matter more than deep reasoning.
 enabled: true
 mode: agent
-# model_provider: openai_responses
 model_provider: openrouter
-# model: grok-4.20-0309-non-reasoning
 model: openai/gpt-5.6-luna
 reasoning_effort: high
 openrouter_reasoning_enabled: true
-# model: google/gemini-3.1-flash-lite-preview
 tools_allow:
   - http_request
   - filesystem
