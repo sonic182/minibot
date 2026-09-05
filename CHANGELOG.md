@@ -7,11 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `minibot configure`: an interactive terminal wizard (`minibot/adapters/config/configurator.py`) that creates or updates `config.toml`, covering runtime (log level/environment), Telegram (bot token, allowed chat/user IDs), LLM provider/model/API key (with `openai`, `openai_responses`, xAI, z.ai GLM Coding Plan, and OpenCode Zen/Go presets), and tool enablement, using arrow-key single- and multi-select prompts. New files start from the `example` or `yolo` config template; secrets are entered hidden and the target file is backed up before being overwritten.
+- The configurator's model prompt fetches the live model list from the chosen provider's `/models` endpoint (working unauthenticated when no API key is set yet) and offers arrow-key selection, falling back to manual entry if the endpoint can't be listed.
+- New `tomlkit` and `prompt-toolkit` dependencies backing the configurator's TOML round-tripping and interactive prompts.
+
 ### Changed
 
 - The persistent `memory` tool replaces title-based `save` with explicit `create` and ID-only `update`; `get` and `delete` now also require an `entry_id`. Agents must discover IDs with `search` or `list_titles` before mutating an entry.
 - Memory entries now use one validated category: `finanzas`, `recordatorios`, `proyectos`, `preferencias`, `salud`, `viajes`, `vehículos`, `contactos`, `seguimiento`, `conocimiento`, or `otros`. `search` and `list_titles` support category, source, and update-date filters.
 - No `ALTER TABLE` or schema migration is required: categories remain in the existing `metadata` JSON column. Existing installations only need the one-time data backfill described in the release notes for their stored entries.
+- `poetry run minibot-console` is replaced by the `minibot console` subcommand, dispatched from `minibot/app/daemon.py` alongside the new `minibot configure`; `minibot/adapters/config/loader.py` now exposes a shared `resolve_config_path()` helper used by both the loader and the configurator.
+- Docs (`docs/getting_started.rst`, `ARCHITECTURE.md`) updated for `minibot configure` and the `minibot console` subcommand.
 
 ## [0.4.0] - 2026-04-25
 
