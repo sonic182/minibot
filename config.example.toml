@@ -66,6 +66,28 @@ prompts_dir = "./prompts"
 [providers.openai]
 api_key = ""
 base_url = ""
+# OpenCode Zen (pay-as-you-go, https://opencode.ai/zen) — OpenAI-compatible /chat/completions.
+# Set [llm] provider = "openai" and pick a model from https://opencode.ai/zen/v1/models, e.g.:
+#   model = "kimi-k2.7-code"
+#   model = "glm-5.3"
+#   model = "deepseek-v4-pro"
+# api_key = "YOUR_OPENCODE_ZEN_API_KEY"
+# base_url = "https://opencode.ai/zen/v1"
+#
+# OpenCode Go (subscription) — same OpenAI-compatible shape, different base_url.
+# Model list: https://opencode.ai/zen/go/v1/models
+#   model = "mimo-v2.5"
+#   model = "kimi-k2.7-code"
+# api_key = "YOUR_OPENCODE_GO_API_KEY"
+# base_url = "https://opencode.ai/zen/go/v1"
+#
+# z.ai GLM Coding Plan (https://docs.z.ai/devpack) — Chat Completions, recommended
+# (documented function calling + streaming; the Responses variant below isn't
+# confirmed to support previous_response_id/reasoning parity, use at your own risk).
+# api_key = "YOUR_ZAI_API_KEY"
+# base_url = "https://api.z.ai/api/coding/paas/v4"
+#   model = "glm-5.3"
+#   model = "glm-5.3-flash"  # cheaper/faster
 
 [providers.openai_responses]
 api_key = ""
@@ -73,6 +95,16 @@ base_url = ""
 # xAI-compatible Responses target example:
 # api_key = "xai-..."
 # base_url = "https://api.x.ai/v1"
+#
+# OpenCode Zen/Go — some models (e.g. gpt-5.6-luna, grok-4.6) are only exposed via /responses.
+# Set [llm] provider = "openai_responses" and model to one of those, then point base_url at
+# either "https://opencode.ai/zen/v1" (PAYG) or "https://opencode.ai/zen/go/v1" (subscription).
+# api_key = "YOUR_OPENCODE_API_KEY"
+# base_url = "https://opencode.ai/zen/go/v1"
+#
+# z.ai GLM Coding Plan Responses endpoint (unconfirmed feature parity — see note above):
+# api_key = "YOUR_ZAI_API_KEY"
+# base_url = "https://api.z.ai/api/v1"
 
 [providers.openrouter]
 api_key = ""

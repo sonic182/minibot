@@ -271,6 +271,22 @@ class ProviderConfig(BaseModel):
 
     - ``api_key`` — provider API key.
     - ``base_url`` — optional base URL override (e.g. for proxies or local endpoints).
+
+    OpenAI-compatible third-party endpoints (set under ``[providers.openai]`` with
+    ``[llm].provider = "openai"``, or ``[providers.openai_responses]`` with
+    ``provider = "openai_responses"``):
+
+    - OpenCode Zen (pay-as-you-go): ``base_url = "https://opencode.ai/zen/v1"``,
+      e.g. ``model = "kimi-k2.7-code"``.
+    - OpenCode Go (subscription): ``base_url = "https://opencode.ai/zen/go/v1"``,
+      e.g. ``model = "mimo-v2.5"``. Some models (``gpt-5.6-luna``, ``grok-4.6``) are
+      only exposed via the Responses variant of that base URL.
+    - z.ai GLM Coding Plan: ``base_url = "https://api.z.ai/api/coding/paas/v4"`` (Chat
+      Completions, recommended — documented function calling/streaming support) with
+      ``model = "glm-5.3"`` or the cheaper ``"glm-5.3-flash"``. A Responses-style
+      endpoint also exists at ``https://api.z.ai/api/v1`` but z.ai's docs don't confirm
+      parity with OpenAI Responses semantics (``previous_response_id``, ``reasoning``),
+      so prefer Chat Completions unless you've verified it works for your use case.
     """
 
     api_key: str = ""
