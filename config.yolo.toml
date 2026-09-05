@@ -206,24 +206,26 @@ enabled = true
 name_prefix = "mcp"
 timeout_seconds = 30
 
-[[tools.mcp.servers]]
-name = "playwright-cli"
-transport = "stdio"
-command = "npx"
-args = [
-  "@playwright/mcp@latest",
-  "--headless",
-  "--browser=chromium",
-  "--caps=vision,pdf,network",
-  "--block-service-workers",
-  "--image-responses=omit",
-  "--snapshot-mode=incremental",
-  "--timeout-action=2000",
-]
-env = {}
-cwd = "."
-enabled_tools = []
-disabled_tools = []
+# Browser automation now goes through the `playwright-cli` agent skill (bash-driven
+# `playwright-cli <verb>` commands) instead of the @playwright/mcp server.
+# [[tools.mcp.servers]]
+# name = "playwright-cli"
+# transport = "stdio"
+# command = "npx"
+# args = [
+#   "@playwright/mcp@latest",
+#   "--headless",
+#   "--browser=chromium",
+#   "--caps=vision,pdf,network",
+#   "--block-service-workers",
+#   "--image-responses=omit",
+#   "--snapshot-mode=incremental",
+#   "--timeout-action=2000",
+# ]
+# env = {}
+# cwd = "."
+# enabled_tools = []
+# disabled_tools = []
 
 # Agent Skills support (agentskills.io spec).
 # Setting `paths` to a non-empty list REPLACES the defaults entirely.

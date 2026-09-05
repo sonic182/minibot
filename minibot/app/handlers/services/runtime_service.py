@@ -8,7 +8,7 @@ from typing import Any, cast
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.delegation_trace import count_tool_messages, extract_delegation_trace
 from minibot.app.handlers.services.session_state_service import SessionStateService
-from minibot.app.response_parser import extract_answer, plain_render
+from minibot.app.response_parser import extract_answer, plain_render, resolve_reply_render
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole
 from minibot.core.channels import RenderableResponse
@@ -151,8 +151,8 @@ class RuntimeOrchestrationService:
                 )
 
         parsed = extract_answer(generation.payload, pre_response_meta=generation.pre_response_meta)
-        render = parsed.render
-        should_reply = parsed.has_visible_answer
+        render = resolve_reply_render(parsed)
+        should_reply = True
 
         assert trace_result is not None
         return AgentRuntimeResult(

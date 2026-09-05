@@ -445,6 +445,34 @@ async def test_turn_service_returns_generic_error_when_not_in_debug_mode() -> No
 
 
 @pytest.mark.asyncio
+async def test_turn_service_reports_provider_out_of_credits() -> None:
+    class OutOfCreditsLLMClient(StubLLMClient):
+        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+            _ = args, kwargs
+            raise Exception(
+                'HTTP 403: {"code":"permission-denied","error":"Your team has either used all '
+                'available credits or reached its monthly spending limit."}'
+            )
+
+    memory = StubMemory()
+    service = build_llm_turn_service(
+        memory=cast(Any, memory),
+        llm_client=cast(LLMClient, OutOfCreditsLLMClient(payload=None)),
+        tool_use_guardrail=NoopToolUseGuardrail(),
+    )
+    logger = logging.getLogger("minibot.handler")
+    original_level = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        response = await service.handle(_message_event("ping"))
+    finally:
+        logger.setLevel(original_level)
+
+    assert "out of credits" in response.text
+    assert "monthly spending limit" in response.text
+
+
+@pytest.mark.asyncio
 async def test_turn_service_guardrail_retry_with_runtime() -> None:
     from minibot.app.tool_use_guardrail import GuardrailDecision, ToolUseGuardrail
 

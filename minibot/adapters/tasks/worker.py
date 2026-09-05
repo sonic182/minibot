@@ -31,6 +31,7 @@ from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.mcp_bridge import MCPToolBridge
+from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.shared.utils import session_identifier
@@ -208,7 +209,12 @@ def _build_worker_tools(*, settings: Settings, spec: AgentSpec) -> list[ToolBind
             )
             bindings.extend(bridge.build_bindings())
 
-    return strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))
+    scoped = strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))
+    return apply_tool_output_spill(
+        scoped,
+        storage=managed_storage,
+        config=settings.tools.tool_output_spill,
+    )
 
 
 def _build_worker_spec(*, system_prompt: str, environment_prompt_fragment: str) -> AgentSpec:
