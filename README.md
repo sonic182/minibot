@@ -17,8 +17,9 @@ Top features
 - 💬 Telegram channel with chat/user allowlists, long-polling or webhook modes, and multimodal inputs.
 - 🧠 Provider support via [llm-async]: `openai`, `openai_responses`, `openrouter`, and more.
 - 🧰 Configurable tools: chat memory, KV notes, HTTP fetch, calculator, datetime, Python execution, Bash, file storage, grep, speech-to-text, and MCP server bridges.
-- ⏰ Scheduled prompts (one-shot and interval recurrence) persisted in SQLite.
+- ⏰ Scheduled prompts (one-shot, fixed-interval, and cron recurrence) persisted in SQLite.
 - 🤝 Multi-agent orchestration with specialist agent definitions and skill packs.
+- ⚙️ `minibot configure`: interactive terminal wizard to create or update `config.toml`.
 - 📊 Structured logfmt logs and a focused async test suite.
 
 Demo

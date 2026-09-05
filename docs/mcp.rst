@@ -51,29 +51,13 @@ HTTP transport example:
    url = "http://127.0.0.1:8765/mcp"
    headers = {}
 
-Playwright MCP example (requires Node.js / ``npx`` on the host):
+.. note::
 
-.. code-block:: toml
-
-   [[tools.mcp.servers]]
-   name = "playwright-cli"
-   transport = "stdio"
-   command = "npx"
-   args = [
-     "@playwright/mcp@0.0.64",
-     "--headless",
-     "--browser=chromium",
-     "--caps=vision,pdf,network",
-     "--block-service-workers",
-     "--image-responses=omit",
-     "--snapshot-mode=incremental",
-     "--timeout-action=2000",
-     "--timeout-navigation=8000",
-   ]
-   cwd = "."
-
-For server name ``playwright-cli``, MiniBot injects ``--output-dir`` automatically
-from ``[tools.browser].output_dir``.
+   Browser automation no longer goes through an MCP server. It now drives the
+   ``playwright-cli`` binary directly through the ``bash`` tool via a dedicated
+   agent skill — see ``agents/browser_agent.md`` for the canonical setup
+   (``tools_allow`` includes ``bash``, ``filesystem``, ``grep``, ``http_request``,
+   ``pre_response``, ``wait``; no ``mcp_servers`` entry needed).
 
 Tool Filtering
 --------------

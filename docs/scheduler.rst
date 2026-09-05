@@ -12,6 +12,7 @@ Usage Examples
    Remind me in 30 minutes to check my email.
    At 7:00 AM tomorrow, ask me for my daily priorities.
    Every day at 9 AM, remind me to send standup.
+   Every weekday at 9 AM, remind me to check my calendar.
    List my active reminders.
    Cancel the standup reminder.
 
@@ -19,7 +20,10 @@ How It Works
 ------------
 
 - **One-time**: the bot injects the prompt at the scheduled time as if you sent it.
-- **Recurring**: interval-based; the job re-schedules itself after each run.
+- **Recurring**: either fixed-interval (``recurrence_type = "interval"``) or cron-based
+  (``recurrence_type = "cron"`` with a standard 5-field ``recurrence_cron_expression``,
+  evaluated with `croniter <https://github.com/kiorky/croniter>`_); the model picks the
+  right recurrence from your phrasing, and the job re-schedules itself after each run.
 - Jobs survive restarts — they are stored in SQLite and polled on startup.
 - The minimum recurrence interval is ``scheduler.prompts.min_recurrence_interval_seconds`` (default: ``60`` seconds).
 

@@ -50,8 +50,8 @@ Tool Scoping
 
 ``tools_allow`` and ``tools_deny`` are mutually exclusive. Wildcards (``fnmatch``) are supported:
 
-- ``tools_allow: ["mcp_playwright-cli__*"]``
-- ``tools_deny: ["mcp_playwright-cli__browser_close"]``
+- ``tools_allow: ["mcp_dice_cli__*"]``
+- ``tools_deny: ["mcp_dice_cli__roll_dice"]``
 
 Behavior rules:
 
@@ -85,16 +85,25 @@ Assigning an MCP server to an agent:
 .. code-block:: markdown
 
    ---
-   name: browser_agent
-   description: Browser automation specialist
+   name: dice_agent
+   description: Dice-rolling specialist
    mode: agent
    model_provider: openai_responses
    model: gpt-5-mini
    mcp_servers:
-     - playwright-cli
+     - dice_cli
    ---
 
-   Use browser tools to navigate, inspect, and extract results.
+   Use the dice tools to roll and report results.
+
+Browser Automation
+-------------------
+
+Browser automation is not MCP-based: the specialist drives the ``playwright-cli``
+binary directly through the ``bash`` tool, guided by a skill rather than a remote
+MCP server. See ``agents/browser_agent.md`` for the canonical setup — its
+``tools_allow`` lists ``bash``, ``filesystem``, ``grep``, ``http_request``,
+``pre_response``, and ``wait`` (no ``mcp_servers`` entry).
 
 Agent Skills
 ------------

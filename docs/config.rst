@@ -100,6 +100,9 @@ Tool Configuration
    * - ``[tools.bash]``
      - ``BashToolConfig``
      - ``enabled``, timeout/output limits, parent environment and allowlist policy
+   * - ``[tools.tool_output_spill]``
+     - ``ToolOutputSpillConfig``
+     - ``enabled``, ``spill_after_chars``, ``preview_chars``, ``subdir``, ``exclude_tools``; applies to every tool result (not just ``http_request``)
    * - ``[tools.apply_patch]``
      - ``ApplyPatchToolConfig``
      - ``enabled``, ``restrict_to_workspace``, ``workspace_root``, ``allow_outside_workspace``, ``max_patch_bytes``
@@ -156,6 +159,9 @@ Tool Config Models
    :no-members:
 
 .. autoclass:: minibot.adapters.config.schema.BashToolConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.ToolOutputSpillConfig
    :no-members:
 
 .. autoclass:: minibot.adapters.config.schema.ApplyPatchToolConfig

@@ -152,6 +152,11 @@ Runtime Notes
 
 - Tool defaults are defined in ``minibot.adapters.config.schema`` and configured in ``config.toml``.
 - ``[tools.file_storage]`` is the shared managed-file root used by file, grep, HTTP spillover, and audio tools.
+- ``[tools.tool_output_spill]`` generalizes spillover to every tool binding (main agent, delegated
+  agents, and task workers), not just ``http_request``: an oversized result is swapped for a preview
+  plus a managed-file pointer the agent can read back with ``grep``, ``code_read``, ``read_file``, or
+  ``bash``. Tools in ``exclude_tools`` (``bash``, ``http_request``, ``pre_response`` by default) are
+  skipped since they already manage their own output size.
 - ``[tools.audio_transcription]`` requires the ``stt`` extra: ``poetry install --extras stt``.
 - ``[tools.mcp]`` requires the ``mcp`` extra: ``poetry install --extras mcp``.
 - ``[tools.tasks]`` requires the ``rabbitmq`` extra and ``[rabbitmq].enabled = true``.
