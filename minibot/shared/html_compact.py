@@ -73,7 +73,14 @@ def html_to_compact(html: str, *, base_url: str | None = None) -> str:
     if root is None:
         return ""
     lines: list[str] = []
-    _render(root, 0, lines)
+    try:
+        _render(root, 0, lines)
+    except RecursionError:
+        # Pathologically deep markup (e.g. thousands of nested wrapper <div>s) can exceed
+        # Python's call-stack limit even though `depth` (used for indentation only, and
+        # intentionally not incremented for transparent wrapper tags) stays low. Return
+        # whatever was rendered before the limit was hit rather than propagating.
+        pass
     return "\n".join(lines)
 
 

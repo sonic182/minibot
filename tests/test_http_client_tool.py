@@ -214,6 +214,47 @@ async def test_http_tool_skips_spill_when_response_exceeds_max_spill_bytes(
 
 
 @pytest.mark.asyncio
+async def test_http_tool_spill_write_failure_notice_does_not_blame_max_spill_bytes(
+    tmp_path: Path,
+    http_server: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A storage write failure (not a size overflow) must not be reported as exceeding max_spill_bytes."""
+    response_body = b"a" * 500
+    http_server["state"]["body"] = response_body
+    config = HTTPClientToolConfig(
+        enabled=True,
+        timeout_seconds=5,
+        max_bytes=80,
+        response_processing_mode="auto",
+        max_chars=40,
+        spill_to_managed_file=True,
+        spill_after_chars=100,
+        spill_preview_chars=120,
+        max_spill_bytes=100_000,
+        spill_subdir="http_responses/tmp",
+    )
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10_000_000)
+
+    def _raise(*_args: Any, **_kwargs: Any) -> dict[str, str | int]:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(storage, "create_managed_temp_bytes_file", _raise)
+    binding = HTTPClientTool(config, storage=storage).bindings()[0]
+
+    result = await binding.handler(
+        {"method": "GET", "url": http_server["url"]},
+        ToolContext(owner_id="tester"),
+    )
+
+    assert result["status"] == 200
+    assert result["body_storage"] == "inline"
+    assert result["body_notice"] is not None
+    assert "max_spill_bytes" not in result["body_notice"]
+    assert "could not be saved" in result["body_notice"]
+
+
+@pytest.mark.asyncio
 async def test_http_tool_falls_back_to_inline_when_spill_storage_unavailable(http_server: dict[str, Any]) -> None:
     http_server["state"]["body"] = b"a" * 20050
     config = HTTPClientToolConfig(

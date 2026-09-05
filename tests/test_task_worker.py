@@ -9,6 +9,7 @@ import pytest
 
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.tasks import worker
+from minibot.app.response_parser import EMPTY_REPLY_FALLBACK_TEXT
 from minibot.core.agents import AgentSpec
 
 
@@ -96,6 +97,36 @@ async def test_run_agent_loop_returns_structured_success() -> None:
     assert result["text"] == "worker result"
     assert result["metadata"]["model"] == "fake-model"
     assert result["metadata"]["provider"] == "fake-provider"
+
+
+class _EmptyCompletionRuntime:
+    def __init__(self, **_: object) -> None:
+        pass
+
+    async def run(self, **_: object):
+        return SimpleNamespace(
+            payload="",
+            pre_response_meta=None,
+            state=SimpleNamespace(messages=[]),
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_falls_back_to_placeholder_text_on_empty_completion() -> None:
+    settings = Settings()
+
+    with (
+        patch("minibot.adapters.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.adapters.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.adapters.tasks.worker._build_worker_tools", return_value=[]),
+        patch("minibot.adapters.tasks.worker.AgentRuntime", _EmptyCompletionRuntime),
+    ):
+        result = await worker.run_agent_loop(
+            {"task_id": "t1", "channel": "console", "prompt": "Summarize this", "chat_id": 1, "user_id": 2}
+        )
+
+    assert result["task_id"] == "t1"
+    assert result["text"] == EMPTY_REPLY_FALLBACK_TEXT
 
 
 @pytest.mark.asyncio

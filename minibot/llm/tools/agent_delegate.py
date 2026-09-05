@@ -17,6 +17,7 @@ from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
+from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -341,11 +342,12 @@ class AgentDelegateTool:
                 "delegated agent invocation failed",
                 extra={"agent": spec.name},
             )
+            quota_detail = exc.quota_detail if isinstance(exc, ProviderHTTPError) else None
             return {
                 "ok": False,
                 "agent": spec.name,
-                "error_code": "delegated_agent_failed",
-                "error": str(exc),
+                "error_code": "delegated_agent_quota_exceeded" if quota_detail else "delegated_agent_failed",
+                "error": quota_detail or str(exc),
                 "delegation_attempts": attempts,
             }
 

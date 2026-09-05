@@ -90,7 +90,7 @@ async def apply_runtime_token_autoconfig_async(
             adjusted_specs.append(spec)
             continue
         derived_budget = max(1, int(limits["context"] * ratio))
-        ceilings = (limits["output"], derived_budget, spec.max_new_tokens or configured_llm_max)
+        ceilings = (limits["output"], derived_budget, spec.max_new_tokens)
         derived_max_new_tokens = max(1, min(value for value in ceilings if value))
         updated_agent_names.append(spec.name)
         if first_agent_provider is None:

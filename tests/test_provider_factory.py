@@ -11,6 +11,7 @@ from llm_async.models import Tool
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
+from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.tool_executor import (
     canonical_tool_name,
@@ -165,6 +166,41 @@ async def test_complete_once_captures_total_tokens_from_usage(monkeypatch: pytes
 
     assert result.response_id == "resp-step"
     assert result.total_tokens == 8
+
+
+@pytest.mark.asyncio
+async def test_complete_once_wraps_bare_http_error_from_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import provider_registry
+
+    class _QuotaFailingProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            raise Exception('HTTP 402: {"code":"insufficient_quota","error":"out of credits"}')
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openai_responses", _QuotaFailingProvider)
+    client = LLMClient(LLMMConfig(provider="openai_responses", api_key="secret", model="x"))
+
+    with pytest.raises(ProviderHTTPError) as exc_info:
+        await client.complete_once(messages=[{"role": "user", "content": "hello"}])
+
+    assert exc_info.value.status_code == 402
+    assert exc_info.value.quota_detail == "out of credits"
+
+
+@pytest.mark.asyncio
+async def test_complete_once_passes_through_non_http_exceptions_unwrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import provider_registry
+
+    class _BrokenProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            raise RuntimeError("boom")
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openai_responses", _BrokenProvider)
+    client = LLMClient(LLMMConfig(provider="openai_responses", api_key="secret", model="x"))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await client.complete_once(messages=[{"role": "user", "content": "hello"}])
 
 
 @pytest.mark.asyncio

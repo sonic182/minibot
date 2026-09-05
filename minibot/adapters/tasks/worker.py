@@ -17,7 +17,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.llm_client_factory import LLMClientFactory
-from minibot.app.response_parser import extract_answer
+from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
@@ -129,8 +129,8 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             initial_previous_response_id=None,
         )
         parsed = extract_answer(generation.payload, pre_response_meta=generation.pre_response_meta)
-        render = parsed.render
-        text = render.text if render is not None else ""
+        render = resolve_reply_render(parsed)
+        text = render.text
         metadata = {
             "tool_count": sum(1 for message in generation.state.messages if message.role == "tool"),
             "model": llm_client.model_name(),

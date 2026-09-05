@@ -1,5 +1,5 @@
 ---
-name: playwright_mcp_agent_cheap
+name: playwright_cli_agent_cheap
 description: Cheap browser specialist for deterministic Playwright CLI tasks. Prefer for direct URL checks, simple extraction, screenshots, and low-ambiguity browsing where speed and cost matter more than deep reasoning.
 enabled: true
 mode: agent

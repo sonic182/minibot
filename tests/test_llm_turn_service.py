@@ -21,6 +21,7 @@ from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryEntry
+from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient, LLMGeneration
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import session_id_for
@@ -449,9 +450,10 @@ async def test_turn_service_reports_provider_out_of_credits() -> None:
     class OutOfCreditsLLMClient(StubLLMClient):
         async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
             _ = args, kwargs
-            raise Exception(
-                'HTTP 403: {"code":"permission-denied","error":"Your team has either used all '
-                'available credits or reached its monthly spending limit."}'
+            raise ProviderHTTPError(
+                403,
+                '{"code":"permission-denied","error":"Your team has either used all '
+                'available credits or reached its monthly spending limit."}',
             )
 
     memory = StubMemory()

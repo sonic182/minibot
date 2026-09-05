@@ -102,7 +102,9 @@ class HTTPClientTool:
             body_notice: str | None = None
 
             saved = None
+            exceeds_max_spill = False
             if self._can_spill() and self._should_spill(processed_body):
+                exceeds_max_spill = len(content) > self._config.max_spill_bytes
                 saved = self._save_spilled_body(url=url, content_type=content_type, content=content)
 
             if saved is not None:
@@ -121,12 +123,19 @@ class HTTPClientTool:
             else:
                 final_body, truncated_chars = _apply_char_cap(processed_body, self._inline_char_cap())
                 if self._can_spill() and self._should_spill(processed_body):
-                    body_notice = (
-                        "HTTP response body exceeded "
-                        f"{self._config.spill_after_chars} characters but was not saved because it exceeds "
-                        f"max_spill_bytes ({self._config.max_spill_bytes} bytes). The body field contains "
-                        "the bounded inline preview."
-                    )
+                    if exceeds_max_spill:
+                        body_notice = (
+                            "HTTP response body exceeded "
+                            f"{self._config.spill_after_chars} characters but was not saved because it exceeds "
+                            f"max_spill_bytes ({self._config.max_spill_bytes} bytes). The body field contains "
+                            "the bounded inline preview."
+                        )
+                    else:
+                        body_notice = (
+                            "HTTP response body exceeded "
+                            f"{self._config.spill_after_chars} characters but could not be saved to managed "
+                            "storage. The body field contains the bounded inline preview."
+                        )
             headers_subset = dict(list(response.headers.items())[:10])
             return {
                 "status": response.status_code,

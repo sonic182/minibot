@@ -128,6 +128,11 @@ def test_empty_html_returns_empty_string(html: str) -> None:
     assert html_to_compact(html) == ""
 
 
+def test_deeply_nested_html_does_not_raise_recursion_error() -> None:
+    deep = "<div>" * 3000 + "x" + "</div>" * 3000
+    assert isinstance(html_to_compact(deep), str)
+
+
 def test_compact_is_far_smaller_than_raw_html_and_keeps_more_than_text() -> None:
     raw = _shop_page()
     compact = html_to_compact(raw)

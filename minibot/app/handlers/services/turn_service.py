@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import logging
-import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -24,6 +22,7 @@ from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
+from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -389,7 +388,7 @@ class LLMTurnService:
         await self._memory.trim_history(session_id, self._max_history_messages)
 
     def _format_runtime_error_message(self, exc: Exception) -> str:
-        quota_detail = _provider_quota_error(exc)
+        quota_detail = exc.quota_detail if isinstance(exc, ProviderHTTPError) else None
         if quota_detail:
             return f"\u26a0\ufe0f LLM provider out of credits or over its spending limit: {quota_detail}"
         if not self._logger.isEnabledFor(logging.DEBUG):
@@ -401,38 +400,6 @@ class LLMTurnService:
                 detail = f"{detail[:200]}..."
             return f"LLM error ({error_name}): {detail}"
         return f"LLM error ({error_name})."
-
-
-_HTTP_ERROR_PATTERN = re.compile(r"^HTTP (\d{3}): (.*)$", re.DOTALL)
-_QUOTA_STATUSES = {402, 429}
-_QUOTA_CODES = {"permission-denied", "insufficient_quota"}
-
-
-def _provider_quota_error(exc: Exception) -> str | None:
-    """Return the provider detail when `exc` is a billing/quota rejection, else None."""
-    match = _HTTP_ERROR_PATTERN.match(str(exc).strip())
-    if not match:
-        return None
-    status = int(match.group(1))
-    try:
-        body = json.loads(match.group(2))
-    except (json.JSONDecodeError, TypeError):
-        return None
-    if not isinstance(body, dict):
-        return None
-    error = body.get("error")
-    if isinstance(error, dict):
-        detail = error.get("message")
-        code = error.get("code") or body.get("code")
-    else:
-        detail = error
-        code = body.get("code")
-    if status not in _QUOTA_STATUSES and code not in _QUOTA_CODES:
-        return None
-    text = str(detail or code or "").strip().replace("\n", " ")
-    if len(text) > 200:
-        text = f"{text[:200]}..."
-    return text or f"HTTP {status}"
 
 
 def _prompt_cache_key(message: ChannelMessage) -> str | None:
