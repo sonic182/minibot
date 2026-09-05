@@ -22,5 +22,6 @@ networkx
 sympy
 orjson
 tenacity
+selectolax
 sentence-transformers
 croniter

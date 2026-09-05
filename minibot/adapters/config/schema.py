@@ -398,7 +398,8 @@ class HTTPClientToolConfig(BaseModel):
     enabled: bool = False
     timeout_seconds: PositiveInt = 10
     max_bytes: ByteSizeValue = 16384
-    response_processing_mode: Literal["none", "auto"] = "auto"
+    max_parse_bytes: ByteSizeValue = 2000000
+    response_processing_mode: Literal["none", "auto", "text", "compact"] = "auto"
     max_chars: PositiveInt | None = None
     normalize_whitespace: bool = True
     spill_to_managed_file: bool = False

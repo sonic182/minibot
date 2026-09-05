@@ -111,8 +111,15 @@ enabled = true
 enabled = true
 timeout_seconds = 30
 max_bytes = "16KB"
+# HTML-only parse budget: how much markup is decoded before it is compacted.
+max_parse_bytes = "2MB"
+# "auto" renders HTML as compact semantic text (links, forms, inputs, tables kept;
+# classes/styles/scripts dropped), "text" is the older plain-text extraction,
+# "compact" forces it, "none" returns the body untouched.
 response_processing_mode = "auto"
+# Inline body cap; falls back to max_bytes when unset.
 max_chars = 6000
+# Applies to plain text and "text" mode; compact output uses indentation as structure.
 normalize_whitespace = true
 spill_to_managed_file = true
 spill_after_chars = 16000
