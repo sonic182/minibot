@@ -19,6 +19,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit
 from prompt_toolkit.widgets import CheckboxList, Label
+from pydantic import ValidationError
 
 from minibot.adapters.config.loader import resolve_config_path
 from minibot.adapters.config.schema import LLMMConfig, ProviderConfig, Settings, TelegramChannelConfig
@@ -161,6 +162,7 @@ def _configure_tools(document: Any, settings: Settings) -> None:
     for name, tool_path in _TOOLS.items():
         _set_value(document, (*tool_path, "enabled"), name in selected)
     _set_value(document, ("rabbitmq", "enabled"), "tasks" in selected)
+    # The wizard keeps rerank tied to rag for simplicity; edit config.toml directly to decouple them.
     _set_value(document, ("tools", "rag", "rerank", "enabled"), "rag" in selected)
 
 
@@ -192,6 +194,8 @@ async def _fetch_models(provider: str, base_url: str, api_key: str) -> list[str]
         _logger.debug("Could not list models for provider %s", provider, exc_info=True)
         _write("Could not fetch the model list; enter the model name manually.\n")
         return []
+    finally:
+        await provider_client.client.connector.cleanup()
     entries = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(entries, list):
         return []
@@ -393,5 +397,5 @@ def main(argv: list[str] | None = None) -> None:
         configure(resolve_config_path(args.config).expanduser())
     except KeyboardInterrupt:
         _write("\nCancelled.\n")
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, ValidationError) as exc:
         parser.error(str(exc))
