@@ -186,7 +186,8 @@ lease_timeout_seconds = 120
 batch_size = 10
 # Max attempts before job is marked failed.
 max_attempts = 3
-# Minimum allowed interval for recurring jobs (`recurrence_type = "interval"`).
+# Minimum allowed interval for recurring jobs (`recurrence_type = "interval"` only;
+# `recurrence_type = "cron"` jobs use a cron expression instead and have no floor here).
 min_recurrence_interval_seconds = 60
 pool_size = 5
 echo = false
@@ -236,8 +237,15 @@ max_results = 7
 enabled = false
 timeout_seconds = 30
 max_bytes = "16KB"
+# HTML-only parse budget: how much markup is decoded before it is compacted.
+max_parse_bytes = "2MB"
+# "auto" renders HTML as compact semantic text (links, forms, inputs, tables kept;
+# classes/styles/scripts dropped), "text" is the older plain-text extraction,
+# "compact" forces it, "none" returns the body untouched.
 response_processing_mode = "auto"
+# Inline body cap; falls back to max_bytes when unset.
 max_chars = 6000
+# Applies to plain text and "text" mode; compact output uses indentation as structure.
 normalize_whitespace = true
 # When a response spills, max_bytes/max_chars apply only to inline fallbacks; max_spill_bytes and
 # spill_preview_chars control the saved response cap and LLM-facing preview.
@@ -326,6 +334,16 @@ max_timeout_seconds = 120
 max_output_bytes = "128KB"
 pass_parent_env = true
 env_allowlist = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"]
+
+# Generic offload of oversized tool results to a managed temp file, so the agent
+# can grep/code_read them instead of burning context. Requires [tools.file_storage]
+# and at least one read-back tool (grep, code_read, read_file or bash).
+[tools.tool_output_spill]
+enabled = true
+spill_after_chars = 8000
+preview_chars = 800
+subdir = "tool_output/tmp"
+exclude_tools = ["bash", "http_request", "pre_response"]
 
 # Structured file patch tool (opencode-style apply_patch format).
 [tools.apply_patch]

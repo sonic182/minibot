@@ -21,6 +21,22 @@ def plain_render(text: str) -> RenderableResponse:
     return RenderableResponse(kind="text", text=text)
 
 
+EMPTY_REPLY_FALLBACK_TEXT = "I didn't get a response there. Could you try that again?"
+
+
+def resolve_reply_render(parsed: ParsedAnswer) -> RenderableResponse:
+    """Return the parsed render, or a fallback message if the model produced no visible text.
+
+    Without this, a turn where the model returns an empty completion with no tool calls gets
+    silently dropped (no reply sent, no error), leaving the user unsure whether their message
+    was received at all.
+    """
+    if parsed.has_visible_answer:
+        assert parsed.render is not None
+        return parsed.render
+    return plain_render(EMPTY_REPLY_FALLBACK_TEXT)
+
+
 def extract_answer(payload: Any, *, pre_response_meta: dict[str, Any] | None = None) -> ParsedAnswer:
     text = payload if isinstance(payload, str) else str(payload) if payload is not None else ""
     kind = "markdown"

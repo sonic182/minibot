@@ -8,6 +8,7 @@ from llm_async.models.tool_call import ToolCall
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
+from minibot.llm.errors import wrap_provider_exception
 from minibot.llm.services.client_bootstrap import (
     build_openrouter_provider_payload,
     create_provider,
@@ -240,7 +241,13 @@ class LLMClient:
         return list(self._provider_capability_hints)
 
     async def _complete(self, call_kwargs: dict[str, Any]) -> Any:
-        return await self._provider.acomplete(**call_kwargs)
+        try:
+            return await self._provider.acomplete(**call_kwargs)
+        except Exception as exc:
+            wrapped = wrap_provider_exception(exc)
+            if wrapped is not exc:
+                raise wrapped from exc
+            raise
 
     def _request_context(self, *, include_provider_native_tools: bool = True) -> RequestContext:
         return RequestContext(

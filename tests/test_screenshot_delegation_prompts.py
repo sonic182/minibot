@@ -64,9 +64,9 @@ def test_browser_agent_tool_access():
 
     content = agent_file.read_text(encoding="utf-8")
 
-    # Should have playwright MCP tools configured
-    assert "mcp_servers:" in content
+    # Should drive the browser via the playwright-cli skill through bash
     assert "playwright-cli" in content
+    assert "bash" in content
 
     # Should have filesystem for path confirmation
     assert "tools_allow:" in content

@@ -15,13 +15,14 @@ from minibot.app.handlers.services.recent_file_tracking_service import RecentFil
 from minibot.app.handlers.services.runtime_service import RuntimeOrchestrationService
 from minibot.app.handlers.services.session_state_service import SessionStateService
 from minibot.app.incoming_files_context import build_history_user_entry
-from minibot.app.response_parser import extract_answer, plain_render
+from minibot.app.response_parser import extract_answer, plain_render, resolve_reply_render
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
+from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -181,8 +182,8 @@ class LLMTurnService:
                     getattr(generation, "total_tokens", None),
                 )
                 parsed = extract_answer(generation.payload)
-                render = parsed.render or plain_render("")
-                should_reply = parsed.has_visible_answer
+                render = resolve_reply_render(parsed)
+                should_reply = True
                 if use_previous_response_id and generation.response_id:
                     self._session_state.set_previous_response_id(
                         session_id,
@@ -387,6 +388,9 @@ class LLMTurnService:
         await self._memory.trim_history(session_id, self._max_history_messages)
 
     def _format_runtime_error_message(self, exc: Exception) -> str:
+        quota_detail = exc.quota_detail if isinstance(exc, ProviderHTTPError) else None
+        if quota_detail:
+            return f"\u26a0\ufe0f LLM provider out of credits or over its spending limit: {quota_detail}"
         if not self._logger.isEnabledFor(logging.DEBUG):
             return "Sorry, I couldn't answer right now."
         error_name = type(exc).__name__

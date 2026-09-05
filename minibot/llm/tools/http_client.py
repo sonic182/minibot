@@ -17,6 +17,7 @@ from minibot.adapters.config.schema import HTTPClientToolConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.schema_utils import nullable_string, strict_object
+from minibot.shared.html_compact import html_to_compact
 
 _SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 
@@ -31,16 +32,22 @@ class HTTPClientTool:
 
     Response handling:
 
-    - HTML responses are converted to plain text by default (``response_processing_mode = "auto"``).
-    - Whitespace is normalized when ``normalize_whitespace = true``.
-    - When the decoded body exceeds ``spill_after_chars`` characters and
-      ``[tools.file_storage]`` is enabled, the full body is saved to a managed
-      temp file and a short preview is returned inline.
+    - HTML responses are rendered as compact semantic text by default
+      (``response_processing_mode = "auto"``): links keep their targets, forms keep
+      their action/method, inputs keep type and name, while classes, styles,
+      ``data-*``, scripts and SVG are dropped. ``"text"`` restores the older
+      plain-text extraction.
+    - Whitespace is normalized when ``normalize_whitespace = true`` (plain text and
+      ``"text"`` mode only; compact output uses newlines and indentation as structure).
+    - When the *processed* body exceeds ``spill_after_chars`` characters and
+      ``[tools.file_storage]`` is enabled, the raw body is saved to a managed temp
+      file and a short preview is returned inline.
 
     Key config options:
 
     - ``timeout_seconds``, ``max_bytes`` — request limits.
-    - ``max_chars`` — inline body character cap.
+    - ``max_parse_bytes`` — how much HTML is decoded before compacting.
+    - ``max_chars`` — inline body character cap (falls back to ``max_bytes``).
     - ``spill_to_managed_file``, ``spill_after_chars``, ``spill_preview_chars``, ``max_spill_bytes``.
     """
 
@@ -81,63 +88,54 @@ class HTTPClientTool:
             content = await response.content()
             truncated = len(content) > self._config.max_bytes
             content_type = _extract_content_type(response.headers)
+            processed_body, processor_used = _process_response_text(
+                text=_decode_preview(content[: self._decode_budget(content_type)]),
+                content_type=content_type,
+                mode=self._config.response_processing_mode,
+                normalize_whitespace=self._config.normalize_whitespace,
+            )
+
             body_storage = "inline"
             body_file_path: str | None = None
             body_file_absolute_path: str | None = None
             body_file_bytes_written: int | None = None
             body_notice: str | None = None
 
-            if self._can_spill():
-                raw_decoded_body = self._decode_spill_probe(content)
-            else:
-                raw_decoded_body = None
-
-            if raw_decoded_body is not None and self._should_spill(raw_decoded_body):
-                processed_preview, processor_used = _process_response_text(
-                    text=self._decode_spill_preview(content),
-                    content_type=content_type,
-                    mode=self._config.response_processing_mode,
-                    normalize_whitespace=self._config.normalize_whitespace,
-                )
+            saved = None
+            exceeds_max_spill = False
+            if self._can_spill() and self._should_spill(processed_body):
+                exceeds_max_spill = len(content) > self._config.max_spill_bytes
                 saved = self._save_spilled_body(url=url, content_type=content_type, content=content)
-                if saved is not None:
-                    body_storage = "managed_file"
-                    body_file_path = str(saved["path"])
-                    body_file_absolute_path = str(saved["absolute_path"])
-                    body_file_bytes_written = int(saved["bytes_written"])
-                    final_body, truncated_chars = _apply_char_cap(processed_preview, self._config.spill_preview_chars)
-                    body_notice = (
-                        "HTTP response body exceeded "
-                        f"{self._config.spill_after_chars} characters and was saved to managed temp file "
-                        f"{body_file_path}. The body field contains up to "
-                        f"{self._config.spill_preview_chars} characters of processed preview; use body_file_path "
-                        "with file or grep tools to inspect the full response."
-                    )
-                else:
-                    text_preview = _decode_preview(content[: self._config.max_bytes])
-                    processed_preview, processor_used = _process_response_text(
-                        text=text_preview,
-                        content_type=content_type,
-                        mode=self._config.response_processing_mode,
-                        normalize_whitespace=self._config.normalize_whitespace,
-                    )
-                    final_body, truncated_chars = _apply_char_cap(processed_preview, self._config.max_chars)
-                    if len(content) > self._config.max_spill_bytes:
+
+            if saved is not None:
+                body_storage = "managed_file"
+                body_file_path = str(saved["path"])
+                body_file_absolute_path = str(saved["absolute_path"])
+                body_file_bytes_written = int(saved["bytes_written"])
+                final_body, truncated_chars = _apply_char_cap(processed_body, self._config.spill_preview_chars)
+                body_notice = (
+                    "HTTP response body exceeded "
+                    f"{self._config.spill_after_chars} characters and was saved to managed temp file "
+                    f"{body_file_path}. The body field contains up to "
+                    f"{self._config.spill_preview_chars} characters of processed preview; use body_file_path "
+                    "with file or grep tools to inspect the full response."
+                )
+            else:
+                final_body, truncated_chars = _apply_char_cap(processed_body, self._inline_char_cap())
+                if self._can_spill() and self._should_spill(processed_body):
+                    if exceeds_max_spill:
                         body_notice = (
                             "HTTP response body exceeded "
                             f"{self._config.spill_after_chars} characters but was not saved because it exceeds "
                             f"max_spill_bytes ({self._config.max_spill_bytes} bytes). The body field contains "
                             "the bounded inline preview."
                         )
-            else:
-                text_preview = _decode_preview(content[: self._config.max_bytes])
-                processed_body, processor_used = _process_response_text(
-                    text=text_preview,
-                    content_type=content_type,
-                    mode=self._config.response_processing_mode,
-                    normalize_whitespace=self._config.normalize_whitespace,
-                )
-                final_body, truncated_chars = _apply_char_cap(processed_body, self._config.max_chars)
+                    else:
+                        body_notice = (
+                            "HTTP response body exceeded "
+                            f"{self._config.spill_after_chars} characters but could not be saved to managed "
+                            "storage. The body field contains the bounded inline preview."
+                        )
             headers_subset = dict(list(response.headers.items())[:10])
             return {
                 "status": response.status_code,
@@ -228,13 +226,25 @@ class HTTPClientTool:
             )
             return None
 
-    def _decode_spill_probe(self, content: bytes) -> str:
-        probe_bytes = (self._config.spill_after_chars + 1) * 4
-        return _decode_preview(content[:probe_bytes])
+    def _decode_budget(self, content_type: str) -> int:
+        """Bytes to decode before processing.
 
-    def _decode_spill_preview(self, content: bytes) -> str:
-        preview_bytes = max(self._config.max_bytes, self._config.spill_preview_chars * 4)
-        return _decode_preview(content[:preview_bytes])
+        HTML gets ``max_parse_bytes`` so the compact serializer sees a whole document
+        rather than the first few KB of markup; other types keep ``max_bytes``, widened
+        just enough to still recognise a spill-worthy body.
+        """
+        if _is_html_content_type(content_type):
+            return self._config.max_parse_bytes
+        if not self._can_spill():
+            return self._config.max_bytes
+        return max(
+            self._config.max_bytes,
+            (self._config.spill_after_chars + 1) * 4,
+            self._config.spill_preview_chars * 4,
+        )
+
+    def _inline_char_cap(self) -> int:
+        return self._config.max_chars or self._config.max_bytes
 
 
 def _http_tool_schema() -> Tool:
@@ -293,10 +303,12 @@ def _process_response_text(text: str, content_type: str, mode: str, normalize_wh
         return text, "none"
 
     if _is_html_content_type(content_type):
-        html_text = _html_to_text(text)
-        if normalize_whitespace:
-            html_text = _normalize_whitespace(html_text)
-        return html_text, "html_text"
+        if mode == "text":
+            html_text = _html_to_text(text)
+            if normalize_whitespace:
+                html_text = _normalize_whitespace(html_text)
+            return html_text, "html_text"
+        return _html_to_compact(text), "html_compact"
 
     plain_text = _normalize_whitespace(text) if normalize_whitespace else text
     return plain_text, "plain"
@@ -334,6 +346,13 @@ def _is_json_content_type(content_type: str) -> bool:
 
 def _is_html_content_type(content_type: str) -> bool:
     return content_type in {"text/html", "application/xhtml+xml"}
+
+
+def _html_to_compact(text: str) -> str:
+    try:
+        return html_to_compact(text)
+    except Exception:  # noqa: BLE001
+        return _normalize_whitespace(_html_to_text(text))
 
 
 def _html_to_text(text: str) -> str:

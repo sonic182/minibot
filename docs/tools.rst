@@ -44,6 +44,8 @@ Tool Surface
      - ``http_request``
      - ``[tools.http_client]``
      - Fetch HTTP/HTTPS resources with size limits and optional managed-file spillover.
+       HTML is rendered as compact semantic text (links, forms, inputs and tables kept;
+       classes, styles and scripts dropped).
    * - Host execution
      - ``python_execute``
      - ``[tools.python_exec]``

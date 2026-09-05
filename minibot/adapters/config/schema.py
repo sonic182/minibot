@@ -398,7 +398,8 @@ class HTTPClientToolConfig(BaseModel):
     enabled: bool = False
     timeout_seconds: PositiveInt = 10
     max_bytes: ByteSizeValue = 16384
-    response_processing_mode: Literal["none", "auto"] = "auto"
+    max_parse_bytes: ByteSizeValue = 2000000
+    response_processing_mode: Literal["none", "auto", "text", "compact"] = "auto"
     max_chars: PositiveInt | None = None
     normalize_whitespace: bool = True
     spill_to_managed_file: bool = False
@@ -484,6 +485,21 @@ class BashToolConfig(BaseModel):
     spill_after_chars: PositiveInt = 2000
     spill_preview_chars: PositiveInt = 500
     spill_subdir: str = "bash_output/tmp"
+
+
+class ToolOutputSpillConfig(BaseModel):
+    """Generic offload of oversized tool results to a managed temp file.
+
+    Applies to every tool except those listed in ``exclude_tools``, and only when
+    file storage is enabled and the agent also has a read-back tool available
+    (``grep``, ``code_read``, ``read_file`` or ``bash``).
+    """
+
+    enabled: bool = True
+    spill_after_chars: PositiveInt = 8000
+    preview_chars: PositiveInt = 800
+    subdir: str = "tool_output/tmp"
+    exclude_tools: list[str] = Field(default_factory=lambda: ["bash", "http_request", "pre_response"])
 
 
 class ApplyPatchToolConfig(BaseModel):
@@ -593,6 +609,7 @@ class ToolsConfig(BaseModel):
     calculator: CalculatorToolConfig = CalculatorToolConfig()
     python_exec: PythonExecToolConfig = PythonExecToolConfig()
     bash: BashToolConfig = BashToolConfig()
+    tool_output_spill: ToolOutputSpillConfig = ToolOutputSpillConfig()
     apply_patch: ApplyPatchToolConfig = ApplyPatchToolConfig()
     file_storage: FileStorageToolConfig = FileStorageToolConfig()
     grep: GrepToolConfig = GrepToolConfig()

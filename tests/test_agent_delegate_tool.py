@@ -8,6 +8,7 @@ from llm_async.models import Tool
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.core.agents import AgentSpec
+from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.tools.agent_delegate import AgentDelegateTool
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
@@ -90,3 +91,52 @@ async def test_invoke_agent_returns_timeout_payload_when_runtime_times_out(monke
     assert result["error_code"] == "delegated_timeout"
     assert result["provider"] == "openrouter"
     assert result["model"] == "z-ai/glm-4.7"
+
+
+@pytest.mark.asyncio
+async def test_invoke_agent_reports_quota_error_with_dedicated_error_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = AgentSpec(
+        name="playwright_mcp_agent",
+        description="browser specialist",
+        system_prompt="use tools",
+        source_path=Path("agents/browser_agent.md"),
+        tools_allow=["mcp_playwright-cli__*"],
+        mcp_servers=["playwright-cli"],
+    )
+    registry = AgentRegistry([spec])
+    factory = _StubLLMFactory()
+
+    class _QuotaFailingRuntime:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        async def run(self, **_: Any) -> Any:
+            raise ProviderHTTPError(429, '{"code":"insufficient_quota","error":"out of credits"}')
+
+    monkeypatch.setattr("minibot.llm.tools.agent_delegate.AgentRuntime", _QuotaFailingRuntime)
+
+    tool = AgentDelegateTool(
+        registry=registry,
+        llm_factory=cast(Any, factory),
+        tools=[
+            ToolBinding(
+                tool=Tool(
+                    name="mcp_playwright-cli__browser_navigate",
+                    description="navigate",
+                    parameters={"type": "object"},
+                ),
+                handler=cast(Any, lambda *_: None),
+            )
+        ],
+        default_timeout_seconds=180,
+        delegated_tool_call_policy="auto",
+    )
+
+    result = await tool._invoke_agent(
+        {"agent_name": "playwright_mcp_agent", "task": "check page"},
+        ToolContext(owner_id="primary"),
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "delegated_agent_quota_exceeded"
+    assert result["error"] == "out of credits"

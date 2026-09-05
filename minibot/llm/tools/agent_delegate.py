@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from llm_async.models import Tool
 
+from minibot.adapters.config.schema import ToolOutputSpillConfig
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app.agent_policies import filter_tools_for_agent, strip_reserved_delegation_tools
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
@@ -15,10 +17,12 @@ from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
+from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
+from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.schema_utils import strict_object, string_field
 from minibot.shared.utils import session_identifier
 
@@ -42,10 +46,14 @@ class AgentDelegateTool:
         default_timeout_seconds: int,
         delegated_tool_call_policy: Literal["auto", "always", "never"] = "auto",
         environment_prompt_fragment: str = "",
+        managed_storage: LocalFileStorage | None = None,
+        spill_config: ToolOutputSpillConfig | None = None,
     ) -> None:
         self._registry = registry
         self._llm_factory = llm_factory
         self._tools = list(tools)
+        self._managed_storage = managed_storage
+        self._spill_config = spill_config or ToolOutputSpillConfig()
         self._default_timeout_seconds = default_timeout_seconds
         self._delegated_tool_call_policy = delegated_tool_call_policy
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
@@ -334,17 +342,18 @@ class AgentDelegateTool:
                 "delegated agent invocation failed",
                 extra={"agent": spec.name},
             )
+            quota_detail = exc.quota_detail if isinstance(exc, ProviderHTTPError) else None
             return {
                 "ok": False,
                 "agent": spec.name,
-                "error_code": "delegated_agent_failed",
-                "error": str(exc),
+                "error_code": "delegated_agent_quota_exceeded" if quota_detail else "delegated_agent_failed",
+                "error": quota_detail or str(exc),
                 "delegation_attempts": attempts,
             }
 
     def _scoped_tools(self, spec: AgentSpec) -> list[ToolBinding]:
-        scoped = filter_tools_for_agent(self._tools, spec)
-        return strip_reserved_delegation_tools(scoped)
+        scoped = strip_reserved_delegation_tools(filter_tools_for_agent(self._tools, spec))
+        return apply_tool_output_spill(scoped, storage=self._managed_storage, config=self._spill_config)
 
     def _build_state(
         self,

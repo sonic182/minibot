@@ -21,6 +21,7 @@ from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryEntry
+from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient, LLMGeneration
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import session_id_for
@@ -442,6 +443,35 @@ async def test_turn_service_returns_generic_error_when_not_in_debug_mode() -> No
         logger.setLevel(original_level)
 
     assert response.text == "Sorry, I couldn't answer right now."
+
+
+@pytest.mark.asyncio
+async def test_turn_service_reports_provider_out_of_credits() -> None:
+    class OutOfCreditsLLMClient(StubLLMClient):
+        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+            _ = args, kwargs
+            raise ProviderHTTPError(
+                403,
+                '{"code":"permission-denied","error":"Your team has either used all '
+                'available credits or reached its monthly spending limit."}',
+            )
+
+    memory = StubMemory()
+    service = build_llm_turn_service(
+        memory=cast(Any, memory),
+        llm_client=cast(LLMClient, OutOfCreditsLLMClient(payload=None)),
+        tool_use_guardrail=NoopToolUseGuardrail(),
+    )
+    logger = logging.getLogger("minibot.handler")
+    original_level = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        response = await service.handle(_message_event("ping"))
+    finally:
+        logger.setLevel(original_level)
+
+    assert "out of credits" in response.text
+    assert "monthly spending limit" in response.text
 
 
 @pytest.mark.asyncio

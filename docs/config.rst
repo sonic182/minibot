@@ -78,7 +78,7 @@ Tool Configuration
      - ``enabled``, ``sqlite_url``, ``default_limit``, ``max_limit``, ``default_owner_id``
    * - ``[tools.http_client]``
      - ``HTTPClientToolConfig``
-     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``response_processing_mode``, ``max_chars``, spillover settings
+     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings
    * - ``[tools.time]``
      - ``TimeToolConfig``
      - ``enabled``, ``default_format``

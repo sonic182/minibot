@@ -36,8 +36,9 @@ RUN arch="${TARGETARCH:-amd64}" \
     && npm --version
 
 # npm/playwright — independent of Python; keep before Python layers
-RUN npm install -g playwright @playwright/mcp \
-    && playwright install --with-deps chromium
+RUN npm install -g playwright @playwright/cli@latest \
+    && playwright install --with-deps chromium \
+    && playwright-cli install-browser --with-deps
 
 # Poetry
 RUN if [ -n "$POETRY_VERSION" ]; then pip install --no-cache-dir "poetry==$POETRY_VERSION"; else pip install --no-cache-dir poetry; fi
@@ -61,6 +62,12 @@ RUN groupadd --gid 1000 minibot \
 # App code — invalidates on every source change
 COPY . .
 RUN poetry install --no-ansi --only-root
+
+# playwright-cli agent skill, installed by the CLI itself into ./.agents/skills so its
+# version check matches (a hand-copied SKILL.md makes every command print a nag banner).
+# Chromium-only guidance lives in the agent prompts, not in this file.
+RUN playwright-cli install --skills=agents \
+    && chown -R 1000:1000 /app/.agents
 
 USER 1000:1000
 

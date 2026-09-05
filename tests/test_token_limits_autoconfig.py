@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pytest
 
 import minibot.app.token_limits_autoconfig as token_limits_autoconfig
 from minibot.adapters.config.schema import ProviderConfig, Settings
+from minibot.core.agents import AgentSpec
 
 
 class _FakeResponse:
@@ -191,6 +193,95 @@ async def test_apply_runtime_token_autoconfig_uses_xai_base_url_alias(monkeypatc
 
     assert settings.memory.max_history_tokens == 1_900_000
     assert settings.llm.max_new_tokens == 30_000
+
+
+@pytest.mark.asyncio
+async def test_apply_runtime_token_autoconfig_agent_not_capped_by_main_model_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "openai": {
+            "models": {
+                "gpt-4.1-mini": {"limit": {"context": 1047576, "output": 32768}},
+            }
+        },
+        "anthropic": {
+            "models": {
+                "claude-long": {"limit": {"context": 2000000, "output": 64000}},
+            }
+        },
+    }
+    settings = Settings()
+    settings.llm.provider = "openai"
+    settings.llm.model = "gpt-4.1-mini"
+    settings.llm.max_new_tokens = 1234
+
+    spec = AgentSpec(
+        name="researcher",
+        description="research specialist",
+        system_prompt="research things",
+        source_path=Path("agents/researcher.md"),
+        model_provider="anthropic",
+        model="claude-long",
+    )
+
+    async def _fetch(_logger):
+        return payload
+
+    monkeypatch.setattr(token_limits_autoconfig, "_fetch_models_catalog", _fetch)
+
+    logger = logging.getLogger("test.token_limits.agent_not_capped")
+    adjusted_specs = await token_limits_autoconfig.apply_runtime_token_autoconfig_async(
+        settings=settings,
+        agent_specs=[spec],
+        logger=logger,
+    )
+
+    assert len(adjusted_specs) == 1
+    # The agent's own model output ceiling (64000) wins, unaffected by the main model's
+    # much lower configured max_new_tokens (1234).
+    assert adjusted_specs[0].max_new_tokens == 64000
+
+
+@pytest.mark.asyncio
+async def test_apply_runtime_token_autoconfig_respects_agent_own_max_new_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "anthropic": {
+            "models": {
+                "claude-long": {"limit": {"context": 2000000, "output": 64000}},
+            }
+        },
+    }
+    settings = Settings()
+    settings.llm.provider = "anthropic"
+    settings.llm.model = "claude-long"
+    settings.llm.max_new_tokens = 1234
+
+    spec = AgentSpec(
+        name="researcher",
+        description="research specialist",
+        system_prompt="research things",
+        source_path=Path("agents/researcher.md"),
+        model_provider="anthropic",
+        model="claude-long",
+        max_new_tokens=500,
+    )
+
+    async def _fetch(_logger):
+        return payload
+
+    monkeypatch.setattr(token_limits_autoconfig, "_fetch_models_catalog", _fetch)
+
+    logger = logging.getLogger("test.token_limits.agent_own_cap")
+    adjusted_specs = await token_limits_autoconfig.apply_runtime_token_autoconfig_async(
+        settings=settings,
+        agent_specs=[spec],
+        logger=logger,
+    )
+
+    assert adjusted_specs[0].max_new_tokens == 500
 
 
 @pytest.mark.asyncio

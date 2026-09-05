@@ -27,6 +27,7 @@ from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.mcp_bridge import MCPToolBridge
+from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.scheduler import SchedulePromptTool
 from minibot.llm.tools.time import CurrentTimeTool
@@ -103,7 +104,11 @@ def build_enabled_tools(
             continue
         tools.extend(feature.builder(context, tools))
     _ensure_unique_tool_names(tools)
-    return tools
+    return apply_tool_output_spill(
+        tools,
+        storage=context.managed_storage,
+        config=settings.tools.tool_output_spill,
+    )
 
 
 def _build_kv_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
@@ -257,6 +262,8 @@ def _build_agent_delegate_feature(context: ToolAssemblyContext, tools: list[Tool
         default_timeout_seconds=context.settings.orchestration.default_timeout_seconds,
         delegated_tool_call_policy=context.settings.orchestration.delegated_tool_call_policy,
         environment_prompt_fragment=context.environment_prompt_fragment,
+        managed_storage=context.managed_storage,
+        spill_config=context.settings.tools.tool_output_spill,
     ).bindings()
 
 

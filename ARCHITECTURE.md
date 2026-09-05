@@ -500,7 +500,7 @@ The scheduler currently focuses on scheduled prompts (not a generic task DAG eng
 ## Configuration Surface
 
 `config.example.toml` is the reference config (with production-oriented defaults).
-`config.yolo.toml` is a Docker-oriented full-capability profile (pre-enabled tools + Playwright MCP server).
+`config.yolo.toml` is a Docker-oriented full-capability profile (pre-enabled tools + Playwright CLI skill).
 
 Main sections:
 

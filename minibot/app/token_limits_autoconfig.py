@@ -28,6 +28,7 @@ async def apply_runtime_token_autoconfig_async(
         return agent_specs
 
     ratio = settings.memory.context_ratio_before_compact
+    configured_llm_max = settings.llm.max_new_tokens
     main_provider = settings.llm.provider
     main_model = settings.llm.model
     main_base_url = _effective_base_url(settings, provider_name=main_provider)
@@ -39,9 +40,10 @@ async def apply_runtime_token_autoconfig_async(
     )
     if main_limits is not None:
         derived_budget = max(1, int(main_limits["context"] * ratio))
-        derived_max_new_tokens = max(1, min(main_limits["output"], derived_budget))
         previous_history = settings.memory.max_history_tokens
         previous_llm_max = settings.llm.max_new_tokens
+        ceilings = (main_limits["output"], derived_budget, configured_llm_max)
+        derived_max_new_tokens = max(1, min(value for value in ceilings if value))
         settings.memory.max_history_tokens = derived_budget
         settings.llm.max_new_tokens = derived_max_new_tokens
         logger.info(
@@ -88,7 +90,8 @@ async def apply_runtime_token_autoconfig_async(
             adjusted_specs.append(spec)
             continue
         derived_budget = max(1, int(limits["context"] * ratio))
-        derived_max_new_tokens = max(1, min(limits["output"], derived_budget))
+        ceilings = (limits["output"], derived_budget, spec.max_new_tokens)
+        derived_max_new_tokens = max(1, min(value for value in ceilings if value))
         updated_agent_names.append(spec.name)
         if first_agent_provider is None:
             first_agent_provider = provider_name
