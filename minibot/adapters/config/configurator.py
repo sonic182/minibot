@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import logging
 import os
 import shutil
 import sys
@@ -19,7 +21,12 @@ from prompt_toolkit.layout.containers import HSplit
 from prompt_toolkit.widgets import CheckboxList, Label
 
 from minibot.adapters.config.loader import resolve_config_path
-from minibot.adapters.config.schema import ProviderConfig, Settings, TelegramChannelConfig
+from minibot.adapters.config.schema import LLMMConfig, ProviderConfig, Settings, TelegramChannelConfig
+from minibot.llm.services.client_bootstrap import create_provider
+
+_logger = logging.getLogger(__name__)
+_MANUAL_MODEL = "Type a model name manually…"
+_MODEL_FETCH_TIMEOUT_SECONDS = 10
 
 _LLM_TARGETS = {
     "openai": ("OpenAI API", "openai", ""),
@@ -134,10 +141,11 @@ def _configure_llm(document: Any, settings: Settings) -> None:
     ):
         provider = "openai_responses"
     provider_config = settings.providers.get(provider, ProviderConfig())
+    api_key = _ask_secret("API key", provider_config.api_key)
     _set_value(document, ("llm", "provider"), provider)
-    _set_value(document, ("llm", "model"), _ask_required("Model", settings.llm.model))
-    _set_value(document, ("providers", provider, "api_key"), _ask_secret("API key", provider_config.api_key))
+    _set_value(document, ("providers", provider, "api_key"), api_key)
     _set_value(document, ("providers", provider, "base_url"), base_url)
+    _set_value(document, ("llm", "model"), _ask_model(provider, base_url, api_key, settings.llm.model))
 
 
 def _configure_tools(document: Any, settings: Settings) -> None:
@@ -162,6 +170,32 @@ def _ask_llm_target(default: str) -> str:
         options=[(key, label) for key, (label, _, _) in _LLM_TARGETS.items()],
         default=default,
     )
+
+
+def _ask_model(provider: str, base_url: str, api_key: str, current: str) -> str:
+    models = asyncio.run(_fetch_models(provider, base_url, api_key))
+    if not models:
+        return _ask_required("Model", current)
+    options = [*models, _MANUAL_MODEL]
+    default = current if current in models else models[0]
+    selected = choice("Model", options=[(value, value) for value in options], default=default)
+    return _ask_required("Model", current) if selected == _MANUAL_MODEL else selected
+
+
+async def _fetch_models(provider: str, base_url: str, api_key: str) -> list[str]:
+    provider_client, _ = create_provider(LLMMConfig(provider=provider, api_key=api_key, base_url=base_url or None))
+    try:
+        payload = await asyncio.wait_for(
+            provider_client.request("GET", "/models"), timeout=_MODEL_FETCH_TIMEOUT_SECONDS
+        )
+    except Exception:
+        _logger.debug("Could not list models for provider %s", provider, exc_info=True)
+        _write("Could not fetch the model list; enter the model name manually.\n")
+        return []
+    entries = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return sorted({entry["id"] for entry in entries if isinstance(entry, dict) and entry.get("id")})
 
 
 def _ask_single_select(label: str, values: tuple[str, ...], default: str) -> str:
