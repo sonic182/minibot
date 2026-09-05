@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `minibot configure`: an interactive terminal wizard (`minibot/adapters/config/configurator.py`) that creates or updates `config.toml`, covering runtime (log level/environment), Telegram (bot token, allowed chat/user IDs), LLM provider/model/API key (with `openai`, `openai_responses`, xAI, z.ai GLM Coding Plan, and OpenCode Zen/Go presets), and tool enablement, using arrow-key single- and multi-select prompts. New files start from the `example` or `yolo` config template; secrets are entered hidden and the target file is backed up before being overwritten.
 - The configurator's model prompt fetches the live model list from the chosen provider's `/models` endpoint (working unauthenticated when no API key is set yet) and offers arrow-key selection, falling back to manual entry if the endpoint can't be listed.
 - New `tomlkit` and `prompt-toolkit` dependencies backing the configurator's TOML round-tripping and interactive prompts.
+- Scheduler `recurrence_type="cron"` (via `croniter`) for scheduled prompts, alongside the existing fixed-interval recurrence.
+- `PendingTurnStore` (`minibot/adapters/memory/pending_turns.py`): persists in-flight message turns so a crash or restart mid-turn replays the message instead of silently dropping the reply.
+- Tool output spill generalized: `apply_tool_output_spill` (`minibot/llm/tools/output_spill.py`) now wraps every tool binding (main agent, delegated agents, task workers), swapping oversized results for a managed-file pointer plus preview instead of just `http_client`.
+- Browser automation now drives a `playwright-cli` agent skill through `bash`, replacing the `@playwright/mcp` server.
+- HTML responses from `http_request` can render as compact, accessibility-tree-style text (`minibot/shared/html_compact.py`) via a new `"compact"` `response_processing_mode`.
+- OpenCode Zen/Go and z.ai GLM Coding Plan example provider blocks added to `config.example.toml`/`config.yolo.toml` and the `ProviderConfig` docstring.
 
 ### Changed
 
@@ -20,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No `ALTER TABLE` or schema migration is required: categories remain in the existing `metadata` JSON column. Existing installations only need the one-time data backfill described in the release notes for their stored entries.
 - `poetry run minibot-console` is replaced by the `minibot console` subcommand, dispatched from `minibot/app/daemon.py` alongside the new `minibot configure`; `minibot/adapters/config/loader.py` now exposes a shared `resolve_config_path()` helper used by both the loader and the configurator.
 - Docs (`docs/getting_started.rst`, `ARCHITECTURE.md`) updated for `minibot configure` and the `minibot console` subcommand.
+- `response_processing_mode = "auto"` now renders HTML as compact text by default instead of the older plain-text extractor.
+- Skill frontmatter parsing relaxed: the skill-name pattern now allows any characters except path separators/newlines, and frontmatter is parsed with a dedicated scalar-only parser (`parse_skill_frontmatter`) instead of the general YAML frontmatter parser, avoiding failures on non-scalar frontmatter in `SKILL.md` files.
+
+### Fixed
+
+- A turn where the model returned no visible text and no tool calls no longer gets silently dropped; both the interactive and scheduled-task-worker paths now fall back to a short reply.
+- Provider quota/billing rejections are now classified via a typed `ProviderHTTPError` from the structured HTTP error body instead of generic failure text, including a dedicated `delegated_agent_quota_exceeded` error code from `agent_delegate`.
+- Token-limit autoconfig no longer caps a delegated agent's `max_new_tokens` at the main chat model's configured value when the agent doesn't set its own.
+- `html_compact`'s recursion guard now increments depth correctly through transparent wrapper tags (`div`/`span`), preventing a stack overflow on deeply nested markup; `html_to_compact` also catches `RecursionError` and falls back to the plain-text extractor.
+- The `http_request` spill-failure notice now reflects the actual reason a managed-file write didn't happen instead of always blaming `max_spill_bytes`.
 
 ## [0.4.0] - 2026-04-25
 
