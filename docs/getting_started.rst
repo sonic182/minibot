@@ -25,9 +25,11 @@ Quickstart (Poetry)
 -------------------
 
 1. ``poetry install --all-extras``
-2. ``cp config.example.toml config.toml``
-3. Populate secrets: bot token, allowed chat IDs, provider credentials under ``[providers.<name>]``.
-4. ``poetry run minibot``
+2. Run ``poetry run minibot configure`` to create or update ``config.toml`` interactively.
+   New files start from the ``Example`` profile by default; ``YOLO`` enables broad host execution and integrations.
+3. Configure Telegram, choose an LLM provider/model/API key, then select enabled tools with arrows and Space.
+4. The configurator stores tokens and API keys in plain text; keep ``config.toml`` private.
+5. ``poetry run minibot``
 
 Up & Running with Telegram
 --------------------------
@@ -50,13 +52,13 @@ Use the built-in console channel to test through the same dispatcher pipeline wi
 .. code-block:: bash
 
    # Interactive REPL
-   poetry run minibot-console
+   poetry run minibot console
 
    # One-shot
-   poetry run minibot-console --once "hello"
+   poetry run minibot console --once "hello"
 
    # Read from stdin
-   echo "hello" | poetry run minibot-console --once -
+   echo "hello" | poetry run minibot console --once -
 
 Using Ollama (OpenAI-Compatible API)
 -------------------------------------

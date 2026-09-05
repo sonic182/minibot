@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minibot"
-version = "0.4.0"
+version = "0.5.0"
 description = "Self-hosted Telegram-first AI assistant with async tooling, memory, and scheduling."
 authors = ["sonic182 <johander1822@gmail.com>"]
 license = "MIT"
@@ -49,6 +49,8 @@ aiopipe = {version = ">=0.2.2", optional = true}
 pypdf = {version = "^6.10.2", optional = true}
 croniter = "^6.2.4"
 selectolax = "^0.4.11"
+tomlkit = "^0.15.1"
+prompt-toolkit = "^3.0.53"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"
@@ -64,7 +66,6 @@ shibuya = "^2026.1.9"
 
 [tool.poetry.scripts]
 minibot = "minibot.app.daemon:main"
-minibot-console = "minibot.app.console:main"
 
 [tool.poetry.extras]
 mcp = ["mcp"]

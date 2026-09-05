@@ -1,11 +1,14 @@
+import argparse
 import asyncio
 import logging
 import signal
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
 
 from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.telegram.service import TelegramService
+from minibot.app.console import main as console_main
 from minibot.app.dispatcher import Dispatcher
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage
@@ -122,7 +125,26 @@ async def _graceful_shutdown(services: list, logger: logging.Logger):
             loop.remove_signal_handler(sig)
 
 
-def main() -> None:
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="minibot")
+    commands = parser.add_subparsers(dest="command")
+    commands.add_parser("console", add_help=False, help="Run the console channel.")
+    commands.add_parser("configure", add_help=False, help="Configure Minibot interactively.")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = sys.argv[1:] if argv is None else argv
+    if args[:1] == ["console"]:
+        console_main(args[1:])
+        return
+    if args[:1] == ["configure"]:
+        from minibot.adapters.config.configurator import main as configure_main
+
+        configure_main(args[1:])
+        return
+    if args:
+        build_arg_parser().parse_args(args)
     asyncio.run(run())
 
 

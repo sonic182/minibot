@@ -212,11 +212,11 @@ This design keeps channel I/O, model orchestration, and persistence decoupled wh
 
 ## Console Agent Invocation Flow (Example)
 
-Example request and agent invocation flow when using `minibot-console`.
+Example request and agent invocation flow when using `minibot console`.
 
 ```mermaid
 flowchart TD
-    U[User in terminal] --> C[minibot-console]
+    U[User in terminal] --> C[minibot console]
     C --> CS[ConsoleService.publish_user_message]
     CS --> EB[(EventBus)]
     EB --> D[Dispatcher]
@@ -318,7 +318,7 @@ flowchart TD
 - `app/skill_definitions_loader.py`: discovers and loads skill definitions from Markdown files with frontmatter configuration.
 - `app/skill_registry.py`: in-memory registry of available skills with change detection and metadata generation.
 - `app/token_limits_autoconfig.py`: automatically configures model token limits and context windows by querying provider capabilities.
-- `app/console.py`: interactive `minibot-console` runner on top of `ConsoleService` + dispatcher.
+- `app/console.py`: interactive `minibot console` runner on top of `ConsoleService` + dispatcher.
 
 ## Agent Architecture (Current)
 
@@ -352,6 +352,7 @@ Current notes:
 - Config:
   - `adapters/config/schema.py` holds Pydantic settings models.
   - `adapters/config/loader.py` resolves config discovery and format-aware loading for TOML/Lua files.
+  - `adapters/config/configurator.py` owns the interactive TOML configurator.
 - Container:
   - `adapters/container/app_container.py` wires singleton-style service graph.
 - Shared SQLAlchemy utilities:
