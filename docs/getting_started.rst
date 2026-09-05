@@ -50,13 +50,13 @@ Use the built-in console channel to test through the same dispatcher pipeline wi
 .. code-block:: bash
 
    # Interactive REPL
-   poetry run minibot-console
+   poetry run minibot console
 
    # One-shot
-   poetry run minibot-console --once "hello"
+   poetry run minibot console --once "hello"
 
    # Read from stdin
-   echo "hello" | poetry run minibot-console --once -
+   echo "hello" | poetry run minibot console --once -
 
 Using Ollama (OpenAI-Compatible API)
 -------------------------------------

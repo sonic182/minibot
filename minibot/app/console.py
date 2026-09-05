@@ -9,12 +9,12 @@ from pathlib import Path
 from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.console.service import ConsoleService
 from minibot.app.dispatcher import Dispatcher
-from minibot.shared.utils import summarize_items
 from minibot.shared.console_compat import CompatConsole, prompt_input
+from minibot.shared.utils import summarize_items
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="minibot-console")
+    parser = argparse.ArgumentParser(prog="minibot console")
     parser.add_argument("--once", type=str, default=None, help="Send one message and exit. Use '-' to read stdin.")
     parser.add_argument("--chat-id", type=int, default=1)
     parser.add_argument("--user-id", type=int, default=1)

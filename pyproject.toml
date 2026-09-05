@@ -64,7 +64,6 @@ shibuya = "^2026.1.9"
 
 [tool.poetry.scripts]
 minibot = "minibot.app.daemon:main"
-minibot-console = "minibot.app.console:main"
 
 [tool.poetry.extras]
 mcp = ["mcp"]
