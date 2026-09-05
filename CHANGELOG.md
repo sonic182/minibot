@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-05
+
 ### Added
 
 - `minibot configure`: an interactive terminal wizard (`minibot/adapters/config/configurator.py`) that creates or updates `config.toml`, covering runtime (log level/environment), Telegram (bot token, allowed chat/user IDs), LLM provider/model/API key (with `openai`, `openai_responses`, xAI, z.ai GLM Coding Plan, and OpenCode Zen/Go presets), and tool enablement, using arrow-key single- and multi-select prompts. New files start from the `example` or `yolo` config template; secrets are entered hidden and the target file is backed up before being overwritten.
@@ -383,7 +385,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.4.0..HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.5.0..HEAD
+[0.5.0]: https://github.com/sonic182/minibot/compare/0.4.0..0.5.0
 [0.4.0]: https://github.com/sonic182/minibot/compare/0.3.0..0.4.0
 [0.3.0]: https://github.com/sonic182/minibot/compare/0.2.0..0.3.0
 [0.2.0]: https://github.com/sonic182/minibot/compare/0.1.1..0.2.0
