@@ -352,6 +352,7 @@ Current notes:
 - Config:
   - `adapters/config/schema.py` holds Pydantic settings models.
   - `adapters/config/loader.py` resolves config discovery and format-aware loading for TOML/Lua files.
+  - `adapters/config/configurator.py` owns the interactive TOML configurator.
 - Container:
   - `adapters/container/app_container.py` wires singleton-style service graph.
 - Shared SQLAlchemy utilities:

@@ -20,7 +20,6 @@ allowed_document_mime_types = []
 
 [llm]
 provider = "openai_responses"
-base_url = ""
 model = "gpt-5-mini"
 # reasoning_effort = "medium"
 http2 = true

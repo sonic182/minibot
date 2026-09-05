@@ -127,7 +127,9 @@ async def _graceful_shutdown(services: list, logger: logging.Logger):
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="minibot")
-    parser.add_subparsers(dest="command").add_parser("console", add_help=False, help="Run the console channel.")
+    commands = parser.add_subparsers(dest="command")
+    commands.add_parser("console", add_help=False, help="Run the console channel.")
+    commands.add_parser("configure", add_help=False, help="Configure Minibot interactively.")
     return parser
 
 
@@ -135,6 +137,11 @@ def main(argv: list[str] | None = None) -> None:
     args = sys.argv[1:] if argv is None else argv
     if args[:1] == ["console"]:
         console_main(args[1:])
+        return
+    if args[:1] == ["configure"]:
+        from minibot.adapters.config.configurator import main as configure_main
+
+        configure_main(args[1:])
         return
     if args:
         build_arg_parser().parse_args(args)
