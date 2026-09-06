@@ -43,6 +43,7 @@ Minimal example:
 
 Frontmatter fields: ``name``, ``description``, ``mode`` (always ``"agent"``), ``enabled``
 (default ``true``), ``model_provider``, ``model``, ``temperature``, ``max_new_tokens``,
+``omit_temperature`` (send no temperature at all, for models that reject the parameter),
 ``reasoning_effort``, ``max_tool_iterations``, ``timeout_seconds`` (per-agent wall-clock budget, overrides
 ``orchestration.default_timeout_seconds``), ``tools_allow``, ``tools_deny``, ``mcp_servers``.
 

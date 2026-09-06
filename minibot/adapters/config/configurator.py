@@ -168,6 +168,9 @@ def _configure_tools(document: Any, settings: Settings) -> None:
     for name, tool_path in _TOOLS.items():
         _set_value(document, (*tool_path, "enabled"), name in selected)
     _set_value(document, ("rabbitmq", "enabled"), "tasks" in selected)
+    # Skills the model cannot see are skills it will not use; see SkillsToolConfig.
+    if "skills" in selected:
+        _set_value(document, ("tools", "skills", "preload_catalog"), True)
     # The wizard keeps rerank tied to rag for simplicity; edit config.toml directly to decouple them.
     _set_value(document, ("tools", "rag", "rerank", "enabled"), "rag" in selected)
 

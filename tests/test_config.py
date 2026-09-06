@@ -104,8 +104,10 @@ preload_catalog = true
     assert settings.tools.skills.preload_catalog is True
 
 
-def test_skills_preload_catalog_defaults_false() -> None:
-    assert SkillsToolConfig().preload_catalog is False
+def test_skills_preload_catalog_defaults_true() -> None:
+    # A catalog the model never sees is a set of skills it never uses: without the preload the prompt
+    # only says "call list_skills", while the specialist roster is already in the prompt.
+    assert SkillsToolConfig().preload_catalog is True
 
 
 def test_rag_rerank_defaults() -> None:

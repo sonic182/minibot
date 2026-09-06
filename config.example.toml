@@ -375,7 +375,9 @@ enabled = true
 spill_after_chars = 8000
 preview_chars = 800
 subdir = "tool_output/tmp"
-exclude_tools = ["bash", "http_request", "pre_response"]
+# `bash` is deliberately absent: it has no spill of its own, only an inline truncation, so an
+# oversized result would ride along in every later step of a tool loop.
+exclude_tools = ["http_request", "pre_response"]
 
 # Structured file patch tool (opencode-style apply_patch format).
 [tools.apply_patch]
@@ -467,9 +469,11 @@ timeout_seconds = 30
 # development skills bundled with the MiniBot project directory.
 [tools.skills]
 enabled = false
-# When true, embed skill names/descriptions in the main prompt as a snapshot.
-# list_skills still refreshes live skills from disk.
-preload_catalog = false
+# Embed skill names/descriptions in the main prompt as a snapshot. With this off the model is
+# only told to call list_skills, so it cannot tell whether a relevant skill exists — and delegating
+# to a specialist (whose roster IS in the prompt) wins by default. list_skills still refreshes
+# live skills from disk either way.
+preload_catalog = true
 # Recommended: create a ./skills directory and set paths to load only your own skills.
 # paths = ["./skills"]
 

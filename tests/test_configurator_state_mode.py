@@ -40,3 +40,25 @@ def test_wizard_picks_the_state_mode_the_provider_can_actually_use(
     assert written[("llm", "provider")] == expected_provider
     assert written[("llm", "main_responses_state_mode")] == expected_mode
     assert written[("llm", "agent_responses_state_mode")] == expected_mode
+
+
+def test_wizard_makes_enabled_skills_visible_to_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A skill catalog the model never sees is a skill it never uses."""
+    written: dict[tuple[str, ...], Any] = {}
+
+    monkeypatch.setattr(configurator, "_write", lambda *_, **__: None)
+    monkeypatch.setattr(configurator, "_ask_multiselect", lambda *_, **__: {"skills", "files"})
+    monkeypatch.setattr(configurator, "_set_value", lambda _doc, path, value: written.__setitem__(path, value))
+
+    configurator._configure_tools(object(), configurator.Settings())
+
+    assert written[("tools", "skills", "enabled")] is True
+    assert written[("tools", "skills", "preload_catalog")] is True
+
+
+def test_spill_default_catches_bash_because_it_has_no_spill_of_its_own() -> None:
+    excluded = configurator.Settings().tools.tool_output_spill.exclude_tools
+
+    assert "bash" not in excluded
+    # http_request runs its own spill, pre_response is signalling
+    assert set(excluded) == {"http_request", "pre_response"}
