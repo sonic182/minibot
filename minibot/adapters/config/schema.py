@@ -301,9 +301,11 @@ class AgentDefinitionConfig(BaseModel):
     model_provider: str | None = None
     model: str | None = None
     temperature: float | None = None
+    omit_temperature: bool = False
     max_new_tokens: PositiveInt | None = None
     reasoning_effort: str | None = None
     max_tool_iterations: PositiveInt | None = None
+    timeout_seconds: PositiveInt | None = None
     tools_allow: list[str] = Field(default_factory=list)
     tools_deny: list[str] = Field(default_factory=list)
     mcp_servers: list[str] = Field(default_factory=list)

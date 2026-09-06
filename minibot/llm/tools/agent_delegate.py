@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Sequence
@@ -135,7 +136,7 @@ class AgentDelegateTool:
         scoped_tools = self._scoped_tools(spec)
         runtime_limits = build_runtime_limits(
             llm_client=llm_client,
-            timeout_seconds=self._default_timeout_seconds,
+            timeout_seconds=spec.timeout_seconds or self._default_timeout_seconds,
             min_timeout_seconds=30,
         )
         runtime = AgentRuntime(
@@ -149,6 +150,7 @@ class AgentDelegateTool:
         tool_required = self._delegated_tool_call_required(spec)
         attempts = 1
         state = self._build_state(spec=spec, task=task, details=details)
+        active_state = state
         total_tokens = 0
         previous_response_id: str | None = None
         prompt_cache_key = _agent_prompt_cache_key(llm_client=llm_client, context=context, agent_name=spec.name)
@@ -227,6 +229,7 @@ class AgentDelegateTool:
                         "retry_reason": "missing_tool_calls",
                     },
                 )
+                active_state = retry_state
                 generation = await runtime.run(
                     state=retry_state,
                     tool_context=context,
@@ -310,6 +313,8 @@ class AgentDelegateTool:
                 response["error"] = f"delegated agent returned {outcome.error_code}"
             return response
         except TimeoutError:
+            partial = _partial_transcript(active_state)
+            tool_messages_count = self._count_tool_messages(active_state)
             self._logger.warning(
                 "delegated agent invocation timed out",
                 extra={
@@ -321,15 +326,23 @@ class AgentDelegateTool:
                     "tool_count": len(scoped_tools),
                     "timeout_seconds": runtime_limits.timeout_seconds,
                     "total_tokens": total_tokens,
+                    "tool_messages_count": tool_messages_count,
+                    "partial_result_present": bool(partial),
                 },
+            )
+            result = (
+                f"Delegated agent timed out after {runtime_limits.timeout_seconds}s. "
+                f"Partial work before the cut ({tool_messages_count} tool calls):\n\n{partial}"
+                if partial
+                else "Delegated agent timed out waiting for provider response."
             )
             return {
                 "ok": False,
                 "agent": spec.name,
-                "result": "Delegated agent timed out waiting for provider response.",
+                "result": result,
                 "result_status": "timeout",
                 "tool_count": len(scoped_tools),
-                "tool_messages_count": 0,
+                "tool_messages_count": tool_messages_count,
                 "delegation_attempts": attempts,
                 "total_tokens": total_tokens,
                 "error_code": "delegated_timeout",
@@ -390,6 +403,34 @@ class AgentDelegateTool:
     @staticmethod
     def _count_tool_messages(state: AgentState) -> int:
         return sum(1 for message in state.messages if message.role == "tool" and message.name != "pre_response")
+
+
+_PARTIAL_MESSAGE_LIMIT = 12
+_PARTIAL_CHARS_PER_MESSAGE = 600
+
+
+def _message_text(message: AgentMessage) -> str:
+    chunks: list[str] = []
+    for part in message.content:
+        if part.type == "text" and part.text:
+            chunks.append(part.text.strip())
+        elif part.value is not None:
+            chunks.append(json.dumps(part.value, ensure_ascii=False, default=str))
+    return " ".join(chunk for chunk in chunks if chunk)
+
+
+def _partial_transcript(state: AgentState) -> str:
+    """Salvage what a delegated agent produced before its runtime timed out."""
+    lines: list[str] = []
+    for message in state.messages:
+        if message.role not in ("assistant", "tool") or message.name == "pre_response":
+            continue
+        text = _message_text(message)
+        if not text:
+            continue
+        label = "assistant" if message.role == "assistant" else f"tool:{message.name or 'unknown'}"
+        lines.append(f"[{label}] {text[:_PARTIAL_CHARS_PER_MESSAGE]}")
+    return "\n".join(lines[-_PARTIAL_MESSAGE_LIMIT:])
 
 
 def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:

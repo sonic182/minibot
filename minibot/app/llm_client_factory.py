@@ -32,6 +32,8 @@ class LLMClientFactory:
             config.model = spec.model
         if spec.temperature is not None:
             config.temperature = spec.temperature
+        if spec.omit_temperature:
+            config.temperature = None
         if spec.max_new_tokens is not None:
             config.max_new_tokens = spec.max_new_tokens
         if spec.reasoning_effort is not None:

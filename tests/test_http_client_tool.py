@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
@@ -452,3 +452,28 @@ async def test_http_tool_parses_html_beyond_max_bytes(http_server: dict[str, Any
     assert len(response_body) > 1024
     assert result["truncated"] is True
     assert 'a "Deep link" /deep' in result["body"]
+
+
+@pytest.mark.asyncio
+async def test_request_failure_reports_a_reason_the_model_can_act_on(tmp_path: Any) -> None:
+    """aiosonic raises a bare AssertionError whose str() is empty; the model must still learn why."""
+
+    class _BrokenClient:
+        async def request(self, *_: Any, **__: Any) -> Any:
+            raise AssertionError
+
+    tool = HTTPClientTool(config=HTTPClientToolConfig(enabled=True))
+    tool._client = cast(Any, _BrokenClient())
+
+    result = await tool._handle_request(
+        {"url": "https://example.com/nope", "method": "GET"},
+        ToolContext(owner_id="primary"),
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "http_request_failed"
+    assert "AssertionError" in cast(str, result["error"])
+    assert "https://example.com/nope" in cast(str, result["error"])
+    # marks the call so agent_runtime's repeated-failure guardrail can stop an endless retry loop
+    assert result["is_repeated_failure_candidate"] is True
+    assert result["failure_signature"]

@@ -14,9 +14,11 @@ class AgentSpec:
     model_provider: str | None = None
     model: str | None = None
     temperature: float | None = None
+    omit_temperature: bool = False
     max_new_tokens: int | None = None
     reasoning_effort: str | None = None
     max_tool_iterations: int | None = None
+    timeout_seconds: int | None = None
     tools_allow: list[str] = field(default_factory=list)
     tools_deny: list[str] = field(default_factory=list)
     mcp_servers: list[str] = field(default_factory=list)
