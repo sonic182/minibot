@@ -45,7 +45,8 @@ Frontmatter fields: ``name``, ``description``, ``mode`` (always ``"agent"``), ``
 (default ``true``), ``model_provider``, ``model``, ``temperature``, ``max_new_tokens``,
 ``omit_temperature`` (send no temperature at all, for models that reject the parameter),
 ``reasoning_effort``, ``max_tool_iterations``, ``timeout_seconds`` (per-agent wall-clock budget, overrides
-``orchestration.default_timeout_seconds``), ``tools_allow``, ``tools_deny``, ``mcp_servers``.
+``orchestration.default_timeout_seconds``; values below 30 seconds use the 30-second minimum), ``tools_allow``,
+``tools_deny``, ``mcp_servers``.
 
 Tool Scoping
 ------------

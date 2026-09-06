@@ -359,16 +359,11 @@ class FileStorageTool:
                 "self_insert_artifact rejected input",
                 extra={"path": path, "reason": reason},
             )
-            if reason == "file does not exist":
-                code = "file_not_found"
-            elif reason in {
-                "path is not a file",
-                "path must be relative to managed root",
-                "path escapes managed root",
-            }:
-                code = "invalid_path"
-            else:
-                code = "invalid_path"
+            code = (
+                "file_not_found"
+                if getattr(exc, "error_code", None) == "file_not_found" or reason == "file does not exist"
+                else "invalid_path"
+            )
             return ToolResult(content={"status": "error", "code": code, "message": reason})
 
         relative_path = to_posix_relative(absolute_path, self._storage.root_dir)
