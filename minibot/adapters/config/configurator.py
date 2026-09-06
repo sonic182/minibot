@@ -147,6 +147,12 @@ def _configure_llm(document: Any, settings: Settings) -> None:
     _set_value(document, ("providers", provider, "api_key"), api_key)
     _set_value(document, ("providers", provider, "base_url"), base_url)
     _set_value(document, ("llm", "model"), _ask_model(provider, base_url, api_key, settings.llm.model))
+    # Responses providers keep turn state server-side, so a tool loop can send just the delta instead
+    # of resending the whole history every step. Chat Completions (openai, openrouter) is stateless and
+    # resends regardless, so the setting only means anything for openai_responses.
+    state_mode = "previous_response_id" if provider == "openai_responses" else "full_messages"
+    _set_value(document, ("llm", "main_responses_state_mode"), state_mode)
+    _set_value(document, ("llm", "agent_responses_state_mode"), state_mode)
 
 
 def _configure_tools(document: Any, settings: Settings) -> None:
