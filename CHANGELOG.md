@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-09-06
 
 ### Added
 
@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `[tools.skills].preload_catalog` now defaults to `true`. With it off the prompt only told the model to call `list_skills`, so it could not tell whether a relevant skill existed — while the specialist roster *is* embedded in the prompt with descriptions. Faced with that asymmetry the model delegated to a specialist for work a skill covered.
 - `minibot configure` now derives `main_responses_state_mode` / `agent_responses_state_mode` from the selected provider (`previous_response_id` for `openai_responses`, which keeps turn state server-side; `full_messages` for stateless Chat Completions), and sets `preload_catalog` when skills are enabled.
 - `resolve_existing_file` and `resolve_dir` (`minibot/adapters/files/local_storage.py`) now raise `ToolInputError` naming the offending path and the next step, with `file_not_found` / `path_is_not_a_file` / `folder_not_found` codes, instead of a bare `ValueError("file does not exist")`. Both sit on the path every file tool routes through, so a model that hit one no longer retries the identical call until a guardrail stops it.
-- `aiosonic` bumped from `^0.31.0` to `^1.0.5`, which fixes a bare `AssertionError` raised on a response status line carrying no reason phrase.
+- `aiosonic` is now locked at `1.0.6`, fixing the bare `AssertionError` raised when an HTTP status-line header has no reason phrase.
 - `config.example.toml` and `config.yolo.toml` aligned with the two defaults above; `config.yolo.toml` previously carried neither section.
 - `omit_temperature` and `timeout_seconds` agent frontmatter fields documented in `docs/agents.rst` and `ARCHITECTURE.md`.
 
@@ -406,7 +406,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.5.0..HEAD
+[0.6.0]: https://github.com/sonic182/minibot/compare/0.5.0..0.6.0
 [0.5.0]: https://github.com/sonic182/minibot/compare/0.4.0..0.5.0
 [0.4.0]: https://github.com/sonic182/minibot/compare/0.3.0..0.4.0
 [0.3.0]: https://github.com/sonic182/minibot/compare/0.2.0..0.3.0

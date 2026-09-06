@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minibot"
-version = "0.5.0"
+version = "0.6.0"
 description = "Self-hosted Telegram-first AI assistant with async tooling, memory, and scheduling."
 authors = ["sonic182 <johander1822@gmail.com>"]
 license = "MIT"
@@ -28,7 +28,7 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.15"
-aiosonic = "^1.0.5"
+aiosonic = "^1.0.6"
 llm-async = "0.5.1"
 aiogram = "^3.24.0"
 pydantic = "^2.12.5"
