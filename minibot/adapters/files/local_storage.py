@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from minibot.shared.errors import ToolInputError
 from minibot.shared.path_utils import to_posix_relative
 
 
@@ -303,9 +304,16 @@ class LocalFileStorage:
     def resolve_existing_file(self, path: str) -> Path:
         candidate = self.resolve_file(path)
         if not candidate.exists():
-            raise ValueError("file does not exist")
+            raise ToolInputError(
+                f"file does not exist: {path!r}. Locate it first (filesystem action='list' or 'glob', "
+                "or bash `ls`) or create it; repeating this same path will fail again.",
+                error_code="file_not_found",
+            )
         if not candidate.is_file():
-            raise ValueError("path is not a file")
+            raise ToolInputError(
+                f"path is not a file but a directory: {path!r}. Use filesystem action='list' to inspect it.",
+                error_code="path_is_not_a_file",
+            )
         return candidate
 
     def resolve_dir(self, folder: str | None, create: bool = False) -> Path:
@@ -316,7 +324,11 @@ class LocalFileStorage:
         if create:
             target.mkdir(parents=True, exist_ok=True)
         if not target.exists() or not target.is_dir():
-            raise ValueError("folder does not exist")
+            raise ToolInputError(
+                f"folder does not exist: {folder!r}. List the parent folder first, or pass create=true; "
+                "repeating this same folder will fail again.",
+                error_code="folder_not_found",
+            )
         return target
 
     def resolve_file(self, path: str) -> Path:

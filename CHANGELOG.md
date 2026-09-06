@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-09-06
+
+### Added
+
+- `timeout_seconds` agent frontmatter field: a per-agent wall-clock budget overriding `orchestration.default_timeout_seconds`, so a long-running research agent no longer shares one global timeout with agents that answer in seconds.
+- A delegated agent that times out now reports the work it completed before the cut (its last assistant messages and tool results) instead of a bare "timed out" with `total_tokens=0`. `AgentRuntime.run` mutates its state in place, so the transcript survives the `TimeoutError`; the tool-call retry path is tracked so the salvage covers it too.
+- `ToolInputError` (`minibot/shared/errors.py`): a `ValueError` subclass carrying a structured `error_code`, so the tool executor classifies a failure from a typed field instead of matching on message text.
+
+### Changed
+
+- `[tools.tool_output_spill].exclude_tools` no longer excludes `bash`. `http_request` stays excluded because it runs a spill of its own and `pre_response` because it is signalling; `bash` had neither, only a 128KB inline truncation — and since `bash` is how a browser CLI runs, one oversized snapshot then rode along in the context of every later step of a tool loop. Measured on one prospecting sweep, the same task with the same tool-call count went from 1,448,896 tokens to 572,286, and the per-step peak from 111.7k to 44.8k.
+- `[tools.skills].preload_catalog` now defaults to `true`. With it off the prompt only told the model to call `list_skills`, so it could not tell whether a relevant skill existed — while the specialist roster *is* embedded in the prompt with descriptions. Faced with that asymmetry the model delegated to a specialist for work a skill covered.
+- `minibot configure` now derives `main_responses_state_mode` / `agent_responses_state_mode` from the selected provider (`previous_response_id` for `openai_responses`, which keeps turn state server-side; `full_messages` for stateless Chat Completions), and sets `preload_catalog` when skills are enabled.
+- `resolve_existing_file` and `resolve_dir` (`minibot/adapters/files/local_storage.py`) now raise `ToolInputError` naming the offending path and the next step, with `file_not_found` / `path_is_not_a_file` / `folder_not_found` codes, instead of a bare `ValueError("file does not exist")`. Both sit on the path every file tool routes through, so a model that hit one no longer retries the identical call until a guardrail stops it.
+- `aiosonic` is now locked at `1.0.6`, fixing the bare `AssertionError` raised when an HTTP status-line header has no reason phrase.
+- `config.example.toml` and `config.yolo.toml` aligned with the two defaults above; `config.yolo.toml` previously carried neither section.
+- `omit_temperature` and `timeout_seconds` agent frontmatter fields documented in `docs/agents.rst` and `ARCHITECTURE.md`.
+
+### Fixed
+
+- `http_request` returned `{"error": str(exc)}`, which is the empty string for a bare `AssertionError`, leaving the model with no reason for the failure. It now returns `ok`, `error_code`, the URL and a failure signature — and because the payload previously lacked `ok: False` it did not match the tool contract, so the repeated-failure guardrail never applied to it and an agent could retry a broken URL indefinitely.
+- `test_bash_truncates_output_when_over_limit` shelled out to `python`, which is not a binary on systems shipping only `python3`; there it got exit 127 and failed on an unrelated truncation assertion. It now runs `sys.executable`.
 
 ## [0.5.0] - 2026-09-05
 
@@ -385,7 +406,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.5.0..HEAD
+[0.6.0]: https://github.com/sonic182/minibot/compare/0.5.0..0.6.0
 [0.5.0]: https://github.com/sonic182/minibot/compare/0.4.0..0.5.0
 [0.4.0]: https://github.com/sonic182/minibot/compare/0.3.0..0.4.0
 [0.3.0]: https://github.com/sonic182/minibot/compare/0.2.0..0.3.0

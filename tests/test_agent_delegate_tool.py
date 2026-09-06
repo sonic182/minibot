@@ -7,6 +7,7 @@ import pytest
 from llm_async.models import Tool
 
 from minibot.app.agent_registry import AgentRegistry
+from minibot.core.agent_runtime import AgentMessage, MessagePart
 from minibot.core.agents import AgentSpec
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.tools.agent_delegate import AgentDelegateTool
@@ -140,3 +141,63 @@ async def test_invoke_agent_reports_quota_error_with_dedicated_error_code(monkey
     assert result["ok"] is False
     assert result["error_code"] == "delegated_agent_quota_exceeded"
     assert result["error"] == "out of credits"
+
+
+@pytest.mark.asyncio
+async def test_invoke_agent_timeout_salvages_partial_work_and_honours_agent_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = AgentSpec(
+        name="prospector",
+        description="prospecting specialist",
+        system_prompt="sweep the market",
+        source_path=Path("agents/prospector.md"),
+        timeout_seconds=900,
+        tools_allow=["bash"],
+    )
+    registry = AgentRegistry([spec])
+    seen_limits: list[int] = []
+
+    class _PartialWorkRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            seen_limits.append(kwargs["limits"].timeout_seconds)
+
+        async def run(self, *, state: Any, **_: Any) -> Any:
+            state.messages.append(
+                AgentMessage(role="assistant", content=[MessagePart(type="text", text="creating the leads table")])
+            )
+            state.messages.append(
+                AgentMessage(
+                    role="tool",
+                    name="bash",
+                    tool_call_id="call_1",
+                    content=[MessagePart(type="json", value={"stdout": "3 rows inserted"})],
+                )
+            )
+            raise TimeoutError("provider timed out")
+
+    monkeypatch.setattr("minibot.llm.tools.agent_delegate.AgentRuntime", _PartialWorkRuntime)
+
+    tool = AgentDelegateTool(
+        registry=registry,
+        llm_factory=cast(Any, _StubLLMFactory()),
+        tools=[
+            ToolBinding(
+                tool=Tool(name="bash", description="run", parameters={"type": "object"}),
+                handler=cast(Any, lambda *_: None),
+            )
+        ],
+        default_timeout_seconds=180,
+        delegated_tool_call_policy="auto",
+    )
+
+    result = await tool._invoke_agent(
+        {"agent_name": "prospector", "task": "sweep Doral"},
+        ToolContext(owner_id="primary"),
+    )
+
+    assert seen_limits == [900]
+    assert result["result_status"] == "timeout"
+    assert result["tool_messages_count"] == 1
+    assert "creating the leads table" in cast(str, result["result"])
+    assert "3 rows inserted" in cast(str, result["result"])

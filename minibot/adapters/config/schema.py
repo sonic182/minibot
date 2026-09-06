@@ -301,9 +301,11 @@ class AgentDefinitionConfig(BaseModel):
     model_provider: str | None = None
     model: str | None = None
     temperature: float | None = None
+    omit_temperature: bool = False
     max_new_tokens: PositiveInt | None = None
     reasoning_effort: str | None = None
     max_tool_iterations: PositiveInt | None = None
+    timeout_seconds: PositiveInt | None = None
     tools_allow: list[str] = Field(default_factory=list)
     tools_deny: list[str] = Field(default_factory=list)
     mcp_servers: list[str] = Field(default_factory=list)
@@ -515,7 +517,10 @@ class ToolOutputSpillConfig(BaseModel):
     spill_after_chars: PositiveInt = 8000
     preview_chars: PositiveInt = 800
     subdir: str = "tool_output/tmp"
-    exclude_tools: list[str] = Field(default_factory=lambda: ["bash", "http_request", "pre_response"])
+    # ``http_request`` runs its own spill and ``pre_response`` is signalling, so both stay out.
+    # ``bash`` does not: excluding it let an oversized result (a browser snapshot, say) ride inline
+    # into every later step of a tool loop.
+    exclude_tools: list[str] = Field(default_factory=lambda: ["http_request", "pre_response"])
 
 
 class ApplyPatchToolConfig(BaseModel):
@@ -579,9 +584,17 @@ class AudioTranscriptionToolConfig(BaseModel):
 
 
 class SkillsToolConfig(BaseModel):
+    """Skill discovery for the main agent.
+
+    ``preload_catalog`` embeds skill names and descriptions in the system prompt. Without it the
+    prompt only tells the model to call ``list_skills``, so it cannot tell whether a relevant skill
+    exists — while the specialist roster *is* in the prompt, which makes delegating look like the
+    obvious route even for work a skill covers.
+    """
+
     enabled: bool = True
     paths: list[str] = Field(default_factory=list)
-    preload_catalog: bool = False
+    preload_catalog: bool = True
 
 
 class TaskToolConfig(BaseModel):

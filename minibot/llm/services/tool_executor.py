@@ -238,9 +238,11 @@ def _build_failure_result(
     arguments: Mapping[str, Any],
     exc: Exception,
 ) -> ToolResult:
-    error_code = "tool_execution_failed"
-    if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
-        error_code = "invalid_tool_arguments"
+    error_code = getattr(exc, "error_code", "") or ""
+    if not error_code:
+        error_code = "tool_execution_failed"
+        if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
+            error_code = "invalid_tool_arguments"
     signature = tool_failure_signature(
         tool_name=tool_name,
         arguments=arguments,
@@ -293,7 +295,10 @@ async def execute_tool_calls_for_runtime(
             tool_name, arguments = parse_tool_call(call)
             binding = tool_map.get(tool_name)
             if not binding:
-                raise ValueError(f"tool {tool_name} is not registered")
+                raise ValueError(
+                    f"tool {tool_name} is not registered. If {tool_name!r} is a shell/CLI command rather "
+                    "than a tool, run it via the `bash` tool instead of calling it directly."
+                )
             logger.info(
                 "executing tool",
                 extra={

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shlex
+import sys
 from typing import Any, cast
 
 import pytest
@@ -21,7 +23,11 @@ class _FakeStorage:
 
     def create_managed_temp_bytes_file(self, *, subdir: str, stem: str, suffix: str, content: bytes) -> dict:
         self.calls.append({"subdir": subdir, "stem": stem, "suffix": suffix, "content": content})
-        return {"path": f"{subdir}/{stem}{suffix}", "absolute_path": f"/tmp/{stem}{suffix}", "bytes_written": len(content)}
+        return {
+            "path": f"{subdir}/{stem}{suffix}",
+            "absolute_path": f"/tmp/{stem}{suffix}",
+            "bytes_written": len(content),
+        }
 
 
 @pytest.mark.asyncio
@@ -107,7 +113,12 @@ async def test_bash_truncates_output_when_over_limit() -> None:
     result = cast(
         dict[str, Any],
         await binding.handler(
-            {"command": "python -c \"print('x'*100)\"", "timeout_seconds": None, "cwd": None, "env": None},
+            {
+                "command": f"{shlex.quote(sys.executable)} -c \"print('x'*100)\"",
+                "timeout_seconds": None,
+                "cwd": None,
+                "env": None,
+            },
             ToolContext(),
         ),
     )

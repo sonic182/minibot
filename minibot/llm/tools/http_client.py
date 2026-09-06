@@ -15,6 +15,7 @@ from llm_async.models import Tool
 
 from minibot.adapters.config.schema import HTTPClientToolConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.llm.services.tool_executor import tool_failure_signature
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.schema_utils import nullable_string, strict_object
 from minibot.shared.html_compact import html_to_compact
@@ -153,7 +154,24 @@ class HTTPClientTool:
             }
         except Exception as exc:  # noqa: BLE001
             self._logger.exception("http tool request failed", exc_info=exc)
-            return {"error": str(exc)}
+            # aiosonic raises a bare AssertionError on an unparseable status line, and str() of it is
+            # empty; without the class name the model receives no reason at all for the failure.
+            detail = str(exc).strip() or exc.__class__.__name__
+            error = f"{method} {url} failed: {detail}"
+            error_code = "http_request_failed"
+            return {
+                "ok": False,
+                "error_code": error_code,
+                "error": error,
+                "url": url,
+                "failure_signature": tool_failure_signature(
+                    tool_name="http_request",
+                    arguments={"method": method, "url": url},
+                    error_code=error_code,
+                    error=error,
+                ),
+                "is_repeated_failure_candidate": True,
+            }
 
     def _coerce_method(self, method: str | None) -> str:
         if not method:

@@ -86,10 +86,19 @@ async def test_error_results_stay_inline(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_excluded_tools_are_not_wrapped(tmp_path) -> None:
-    big = {"ok": True, "stdout": "x" * 20_000}
-    bindings = [_binding("bash", big), _readback_binding()]
+    # http_request runs a spill of its own, so the generic one leaves it alone
+    big = {"ok": True, "body": "x" * 20_000}
+    bindings = [_binding("http_request", big), _readback_binding()]
     wrapped = apply_tool_output_spill(bindings, storage=_storage(tmp_path), config=ToolOutputSpillConfig())
     assert wrapped[0].handler is bindings[0].handler
+
+
+@pytest.mark.asyncio
+async def test_bash_is_wrapped_because_it_has_no_spill_of_its_own(tmp_path) -> None:
+    """bash is how browser CLIs run; an unwrapped snapshot rides along in every later step."""
+    bindings = [_binding("bash", {"ok": True, "stdout": "x" * 20_000}), _readback_binding()]
+    wrapped = apply_tool_output_spill(bindings, storage=_storage(tmp_path), config=ToolOutputSpillConfig())
+    assert wrapped[0].handler is not bindings[0].handler
 
 
 @pytest.mark.asyncio
