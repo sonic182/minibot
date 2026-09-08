@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-08
+
+### Added
+
+- README "Quick start" section covering `pip install`, extras, `minibot configure`, and a Docker/
+  `docker-compose` path.
+- `minibot configure` now prompts for the task queue backend (`sqlite`/`rabbitmq`) when the tasks
+  tool is enabled, instead of leaving `[tasks].backend` unset.
+
+### Changed
+
+- `[tasks].backend` now defaults to `sqlite` in `config.example.toml` and `config.yolo.toml`,
+  since it needs no broker; `docker-compose.yml`'s `minibot-rabbitmq` service (and its
+  `depends_on` entry) is commented out and only needed if you switch back to the rabbitmq backend.
+
+### Fixed
+
+- `minibot configure` on a fresh `pip install minibot` failed with `No such file or directory:
+  .../site-packages/config.example.toml`. `config.example.toml` and `config.yolo.toml` were never
+  shipped in the wheel/sdist, only referenced by a repo-root-relative path that happened to also
+  resolve (but dangle) inside an installed package. Both files are now included via
+  `pyproject.toml`'s `include` list, the same mechanism already used for the tool description
+  `.txt` files.
+
 ## [0.7.0] - 2026-09-08
 
 ### Added
@@ -445,6 +469,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
+[0.8.0]: https://github.com/sonic182/minibot/compare/0.7.0..0.8.0
 [0.7.0]: https://github.com/sonic182/minibot/compare/0.6.0..0.7.0
 [0.6.0]: https://github.com/sonic182/minibot/compare/0.5.0..0.6.0
 [0.5.0]: https://github.com/sonic182/minibot/compare/0.4.0..0.5.0
