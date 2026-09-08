@@ -36,6 +36,8 @@ minibot              # start the daemon
 Extras: `mcp` (MCP server tools), `stt` (speech-to-text via faster-whisper), `rabbitmq` (RabbitMQ task
 queue backend — not needed with the default `sqlite` backend).
 
+No Telegram bot yet? Run `minibot console` instead of `minibot` to chat with it in your terminal.
+
 ### Docker
 
 ```bash

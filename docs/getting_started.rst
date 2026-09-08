@@ -26,12 +26,18 @@ is commented out by default: ``[tasks].backend`` defaults to ``"sqlite"``, which
 Uncomment it (and its ``depends_on`` entry on the ``minibot`` service) only if you set
 ``[tasks].backend = "rabbitmq"``.
 
+No Telegram bot yet? Run ``docker compose run --rm minibot minibot console`` instead of
+``up`` to chat with MiniBot in your terminal — see `Console Test Channel`_ below.
+
 Quickstart (pip)
 ----------------
 
 1. ``pip install minibot``, adding extras as needed: ``pip install "minibot[mcp,stt,rabbitmq]"``.
 2. ``minibot configure`` to create ``config.toml`` interactively (see below).
 3. ``minibot``
+
+No Telegram bot yet? Run ``minibot console`` instead to chat with MiniBot in your terminal —
+see `Console Test Channel`_ below.
 
 Quickstart (Poetry)
 -------------------
@@ -44,8 +50,36 @@ Quickstart (Poetry)
 4. The configurator stores tokens and API keys in plain text; keep ``config.toml`` private.
 5. ``poetry run minibot``
 
+No Telegram bot yet? Run ``poetry run minibot console`` instead to chat with MiniBot in your
+terminal — see `Console Test Channel`_ below.
+
+Auto-Created Files & Directories
+---------------------------------
+
+Running ``minibot`` creates what it needs on first use — no manual ``mkdir`` required for:
+
+- ``logs/`` — log output directory.
+- ``data/*.db`` — SQLite storage for memory, KV notes, tasks, and scheduled prompts.
+- ``[tools.file_storage].root_dir`` (default ``./data/files``) — managed file storage.
+
+(The Docker Quickstart's ``mkdir -p logs data`` step above is about host-directory *ownership*
+when Docker bind-mounts a path that doesn't exist yet — it isn't something minibot itself needs.)
+
+One directory is the exception: ``./prompts`` (the system prompt and prompt fragments referenced
+by ``llm.system_prompt_file`` / ``llm.prompts_dir``) is only provisioned by ``minibot configure``,
+which seeds it next to the config file it writes (skipped if a ``prompts/`` directory already
+exists there). If you hand-write ``config.toml`` instead of running the wizard, copy ``prompts/``
+yourself — from the repo, or from wherever ``pip`` installed the package (the same place
+``config.example.toml`` lands).
+
+``orchestration.directory`` (default ``./agents``) and skill directories (``.agents/skills``,
+``.claude/skills``) are optional in the other direction: if missing, minibot just runs with no
+custom agents or skills — no error, nothing to create.
+
 Up & Running with Telegram
 --------------------------
+
+If you'd rather test without Telegram first, skip to `Console Test Channel`_ below.
 
 1. Open `@BotFather <https://t.me/BotFather>`_ on Telegram and create a bot to obtain a token.
 2. Update ``config.toml``:
