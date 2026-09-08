@@ -3,8 +3,8 @@ import asyncio
 import pytest
 
 from minibot.app.event_bus import EventBus
-from minibot.core.channels import ChannelMessage
-from minibot.core.events import MessageEvent
+from minibot.core.channels import ChannelMessage, ChannelResponse
+from minibot.core.events import MessageEvent, OutboundEvent
 
 
 @pytest.mark.asyncio
@@ -37,3 +37,27 @@ async def test_event_bus_dispatches_to_subscribers() -> None:
 
     await sub1.close()
     await sub2.close()
+
+
+@pytest.mark.asyncio
+async def test_event_bus_respects_subscription_type_filter() -> None:
+    bus = EventBus()
+    filtered = bus.subscribe(types=(OutboundEvent,))
+    unfiltered = bus.subscribe()
+
+    await bus.publish(
+        MessageEvent(message=ChannelMessage(channel="console", user_id=1, chat_id=2, message_id=3, text="hi"))
+    )
+    await bus.publish(OutboundEvent(response=ChannelResponse(channel="console", chat_id=2, text="pong")))
+
+    assert filtered._queue.qsize() == 1
+    assert unfiltered._queue.qsize() == 2
+
+    seen = []
+    async for event in filtered:
+        seen.append(event)
+        break
+    assert isinstance(seen[0], OutboundEvent)
+
+    await filtered.close()
+    await unfiltered.close()

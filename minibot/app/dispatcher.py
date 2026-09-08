@@ -17,7 +17,14 @@ from minibot.app.handlers.services import (
 from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.core.channels import ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
+from minibot.core.events import (
+    MessageEvent,
+    OutboundEvent,
+    OutboundFormatRepairEvent,
+    TurnCompletedEvent,
+    TurnFailedEvent,
+    TurnStartedEvent,
+)
 from minibot.llm.tools.factory import build_enabled_tools
 from minibot.shared.utils import humanize_token_count, summarize_items
 
@@ -25,7 +32,7 @@ from minibot.shared.utils import humanize_token_count, summarize_items
 class Dispatcher:
     def __init__(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus
-        self._subscription = event_bus.subscribe()
+        self._subscription = event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
         self._pending_turns = AppContainer.get_pending_turn_store()
         settings = AppContainer.get_settings()
         prompt_service = AppContainer.get_scheduled_prompt_service()
@@ -155,6 +162,14 @@ class Dispatcher:
         await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
         try:
             message = event.message
+            await self._event_bus.publish(
+                TurnStartedEvent(
+                    turn_id=event.event_id,
+                    channel=message.channel,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                )
+            )
             self._logger.debug(
                 "incoming message",
                 extra={
@@ -186,6 +201,20 @@ class Dispatcher:
                     if isinstance(token_trace, dict)
                     else None,
                 },
+            )
+            await self._event_bus.publish(
+                TurnCompletedEvent(
+                    turn_id=event.event_id,
+                    channel=response.channel,
+                    chat_id=response.chat_id,
+                    should_reply=bool(should_reply),
+                    llm_provider=response.metadata.get("llm_provider"),
+                    llm_model=response.metadata.get("llm_model"),
+                    token_trace=token_trace if isinstance(token_trace, dict) else {},
+                    compaction_performed=token_trace.get("compaction_performed")
+                    if isinstance(token_trace, dict)
+                    else None,
+                )
             )
             response_updates = response.metadata.get("response_updates")
             if isinstance(response_updates, list):
@@ -232,6 +261,15 @@ class Dispatcher:
                     )
         except Exception as exc:
             self._logger.exception("failed to handle message", exc_info=exc)
+            with contextlib.suppress(Exception):
+                await self._event_bus.publish(
+                    TurnFailedEvent(
+                        turn_id=event.event_id,
+                        channel=event.message.channel,
+                        chat_id=event.message.chat_id,
+                        error=str(exc),
+                    )
+                )
         finally:
             await self._pending_turns.clear_pending(event.event_id)
 

@@ -32,6 +32,7 @@ from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.scheduler import SchedulePromptTool
 from minibot.llm.tools.time import CurrentTimeTool
+from minibot.llm.tools.tool_events import apply_tool_call_events
 from minibot.llm.tools.user_memory import build_kv_tools
 from minibot.llm.tools.wait import WaitTool
 
@@ -108,10 +109,13 @@ def build_enabled_tools(
             continue
         tools.extend(feature.builder(context, tools))
     _ensure_unique_tool_names(tools)
-    return apply_tool_output_spill(
-        tools,
-        storage=context.managed_storage,
-        config=settings.tools.tool_output_spill,
+    return apply_tool_call_events(
+        apply_tool_output_spill(
+            tools,
+            storage=context.managed_storage,
+            config=settings.tools.tool_output_spill,
+        ),
+        event_bus=event_bus,
     )
 
 

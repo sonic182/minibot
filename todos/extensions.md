@@ -1,6 +1,7 @@
 # Minibot Extensions
 
-Status: **planning** — nothing implemented yet.
+Status: **Phases 1 & 2 done.** Phase 3 (open the config) is next — it is the hard
+blocker for everything after it.
 
 ---
 
@@ -199,38 +200,61 @@ Roughly 150-200 LOC of new core code.
 
 Phases 1 and 2 are worth doing whether or not extensions ever ship.
 
-### Phase 1 — Fix event bus back-pressure
+### Phase 1 — Typed subscriptions ✅ done
 
-Prerequisite for everything else. ~10 lines. Standalone value.
+Prerequisite for everything else. Standalone value.
 
-- [ ] `minibot/app/event_bus.py:31` — allow a subscription to be marked
-      non-blocking (`subscribe(lossy=True)` or equivalent)
-- [ ] `minibot/app/event_bus.py:37` — `publish()` uses `put_nowait` for lossy
-      subscribers; on `QueueFull`, drop and log a warning with the event type
-- [ ] Core subscribers (dispatcher, telegram, console) keep blocking semantics
-- [ ] `minibot/app/event_bus.py:19` — call `task_done()` before `yield` so a
+Scope changed during planning: the doc originally called for the lossy drop
+policy here. The real blocker for Phase 2 turned out to be that *every*
+subscriber received *every* event, so high-volume lifecycle events would flood
+128-slot queues belonging to subscribers that don't want them. Filtering at
+subscription time fixes that at the source. **The lossy drop policy moved to
+Phase 4**, where its first consumer (third-party subscribers) actually lives.
+
+- [x] `minibot/app/event_bus.py` — `subscribe(types=...)`; `None` keeps
+      receive-everything, so no call site was forced to change
+- [x] `_Subscriber` record pairs each queue with its filter; `publish()` skips
+      non-matching queues entirely so the event never occupies a slot
+- [x] `stop()` still sends the `None` sentinel to every queue regardless of filter
+- [x] `minibot/app/event_bus.py` — `task_done()` now runs before `yield`, so a
       consumer that `break`s does not unbalance the count
-- [ ] Test: a full lossy queue does not block `publish()` to other subscribers
+- [x] `minibot/app/dispatcher.py:33` — `types=(MessageEvent, OutboundFormatRepairEvent)`
+- [x] `minibot/adapters/messaging/telegram/service.py:56` — `types=(OutboundEvent, OutboundFileEvent)`
+- [x] `minibot/adapters/messaging/console/service.py:39` — `types=(OutboundEvent,)`
+- [x] Test: `tests/test_event_bus.py::test_event_bus_respects_subscription_type_filter`
 
-### Phase 2 — Lifecycle events
+### Phase 2 — Lifecycle events ✅ done
 
 Useful on its own for observability. No extension machinery needed.
 
-- [ ] `minibot/core/events.py` — add `TurnStartedEvent`, `TurnCompletedEvent`,
-      `TurnFailedEvent`, `ToolCallEvent`
-- [ ] `minibot/app/dispatcher.py:150` — publish `TurnStartedEvent` in
-      `_handle_message`
-- [ ] `minibot/app/dispatcher.py:169` — publish `TurnCompletedEvent` carrying the
-      already-computed `token_trace`, `llm_provider`, `llm_model`,
+- [x] `minibot/core/events.py` — added `TurnStartedEvent`, `TurnCompletedEvent`,
+      `TurnFailedEvent`, and a single `ToolCallEvent` carrying
+      `phase: Literal["started", "completed", "failed"]` rather than three classes
+- [x] `minibot/app/dispatcher.py` — publish `TurnStartedEvent` in `_handle_message`
+- [x] `minibot/app/dispatcher.py` — publish `TurnCompletedEvent` reusing the
+      already-computed `token_trace` / `llm_provider` / `llm_model` /
       `compaction_performed`
-- [ ] `minibot/app/dispatcher.py:230` — publish `TurnFailedEvent` instead of only
-      logging the swallowed exception
-- [ ] `minibot/llm/services/tool_executor.py` — publish `ToolCallEvent` pre/post
-      (needs an optional `event_bus` reference threaded in; keep it optional so
-      the executor stays usable without a bus)
-- [ ] Decide whether agent delegation start/end
-      (`minibot/llm/tools/agent_delegate.py`) is in scope here or deferred
-- [ ] Test: one turn end-to-end emits started → tool calls → completed
+- [x] `minibot/app/dispatcher.py` — publish `TurnFailedEvent` where the exception
+      was previously only logged
+- [x] **`ToolCallEvent` via handler wrapper, not the executor.** New
+      `minibot/llm/tools/tool_events.py` (~75 LOC) mirrors
+      `apply_tool_output_spill`; applied as the outer wrap in
+      `build_enabled_tools` (`minibot/llm/tools/factory.py`). The three
+      tool-execution call sites (`provider_factory.py:192`,
+      `generation_loop.py:182`, `agent_runtime.py:231`) were **not** touched.
+      No-ops when `event_bus is None`, so the task worker path is unaffected.
+- [x] Payloads carry argument *keys* only — never values or results (size + secrets)
+- [x] Every publish in the wrapper is `try`/`except`-guarded: a stopped bus during
+      shutdown must never fail a tool in flight
+- [x] Turn correlation: `turn_id` added to `ToolContext`
+      (`minibot/llm/tools/base.py`), set from `event.event_id` at
+      `minibot/app/handlers/services/turn_service.py:95`
+- [x] Test: `tests/test_dispatcher.py::test_dispatcher_publishes_turn_lifecycle_events`
+      (started ×2, completed, failed)
+- [x] Test: `tests/test_tool_factory.py::test_apply_tool_call_events_emits_started_completed_and_failed`
+- [ ] Agent delegation start/end (`minibot/llm/tools/agent_delegate.py`) — **deferred.**
+      Delegated agents share the same binding list, so their tool calls already emit
+      events; only the delegation span itself is missing.
 
 ### Phase 3 — Open the config
 
@@ -250,6 +274,10 @@ The hard blocker. Nothing below works without it.
 
 Smallest useful extension surface: events + tools.
 
+- [ ] **Lossy subscriptions** (moved here from Phase 1 — this is where the first
+      consumer lives): `subscribe(types=..., lossy=True)` uses `put_nowait` and
+      drops with a warning on `QueueFull`, so a slow third-party subscriber cannot
+      stall the bus. Core subscribers keep blocking semantics.
 - [ ] `minibot/app/extensions.py` (new, ~50 LOC) — `ExtensionContext`,
       `load_extensions(settings, event_bus, ...)`: import each module, call
       `register(ctx)`, collect tools / subscribers / services

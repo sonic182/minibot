@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 
 import pytest
@@ -9,7 +10,14 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.skill_registry import SkillRegistry
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
+from minibot.core.events import (
+    MessageEvent,
+    OutboundEvent,
+    OutboundFormatRepairEvent,
+    TurnCompletedEvent,
+    TurnFailedEvent,
+    TurnStartedEvent,
+)
 
 
 class _FakePendingTurnStore:
@@ -384,5 +392,73 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
         "done compacting",
         "compacted summary",
     ]
+    await subscription.close()
+    await dispatcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app import dispatcher as dispatcher_module
+
+    class _StubHandler:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        async def handle(self, event: MessageEvent) -> ChannelResponse:
+            if event.message.text == "boom":
+                raise RuntimeError("handler exploded")
+            return ChannelResponse(
+                channel="telegram",
+                chat_id=1,
+                text="ok",
+                metadata={"should_reply": True, "llm_provider": "openai", "llm_model": "gpt-4o-mini"},
+            )
+
+    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
+    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
+
+    bus = EventBus()
+    subscription = bus.subscribe(types=(TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent))
+    dispatcher = dispatcher_module.Dispatcher(bus)
+    await dispatcher.start()
+
+    ok_event = _message_event("hello")
+    bad_event = _message_event("boom")
+    await bus.publish(ok_event)
+    await bus.publish(bad_event)
+
+    collected = []
+
+    async def _drain() -> None:
+        async for event in subscription:
+            collected.append(event)
+            if len(collected) == 4:
+                break
+
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(_drain(), timeout=1.0)
+
+    started = [e for e in collected if isinstance(e, TurnStartedEvent)]
+    completed = [e for e in collected if isinstance(e, TurnCompletedEvent)]
+    failed = [e for e in collected if isinstance(e, TurnFailedEvent)]
+
+    assert {e.turn_id for e in started} == {ok_event.event_id, bad_event.event_id}
+    assert len(completed) == 1
+    assert completed[0].turn_id == ok_event.event_id
+    assert completed[0].llm_model == "gpt-4o-mini"
+    assert completed[0].should_reply is True
+    assert len(failed) == 1
+    assert failed[0].turn_id == bad_event.event_id
+    assert "handler exploded" in failed[0].error
+
     await subscription.close()
     await dispatcher.stop()

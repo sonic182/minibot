@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, cast
 
 import pytest
@@ -575,3 +576,58 @@ def test_build_enabled_tools_skips_task_tools_when_tasks_disabled() -> None:
     assert "spawn_task" not in names
     assert "cancel_task" not in names
     assert "list_tasks" not in names
+
+
+@pytest.mark.asyncio
+async def test_apply_tool_call_events_emits_started_completed_and_failed() -> None:
+    from llm_async.models import Tool
+
+    from minibot.app.event_bus import EventBus
+    from minibot.core.events import ToolCallEvent
+    from minibot.llm.tools.base import ToolBinding, ToolContext
+    from minibot.llm.tools.tool_events import apply_tool_call_events
+
+    async def ok_handler(payload: dict[str, Any], context: ToolContext) -> str:
+        del payload, context
+        return "fine"
+
+    async def bad_handler(payload: dict[str, Any], context: ToolContext) -> str:
+        del payload, context
+        raise ValueError("nope")
+
+    bus = EventBus()
+    subscription = bus.subscribe(types=(ToolCallEvent,))
+    bindings = apply_tool_call_events(
+        [
+            ToolBinding(tool=Tool(name="ok_tool", description="d", parameters={}), handler=ok_handler),
+            ToolBinding(tool=Tool(name="bad_tool", description="d", parameters={}), handler=bad_handler),
+        ],
+        event_bus=bus,
+    )
+
+    context = ToolContext(owner_id="primary", channel="telegram", chat_id=1, turn_id="turn-1")
+    assert await bindings[0].handler({"query": "x", "api_key": "secret"}, context) == "fine"
+    with pytest.raises(ValueError):
+        await bindings[1].handler({}, context)
+
+    events: list[ToolCallEvent] = []
+
+    async def _drain() -> None:
+        async for event in subscription:
+            events.append(cast(ToolCallEvent, event))
+            if len(events) == 4:
+                break
+
+    await asyncio.wait_for(_drain(), timeout=1.0)
+
+    assert [(e.tool_name, e.phase) for e in events] == [
+        ("ok_tool", "started"),
+        ("ok_tool", "completed"),
+        ("bad_tool", "started"),
+        ("bad_tool", "failed"),
+    ]
+    assert all(e.turn_id == "turn-1" for e in events)
+    assert events[0].argument_keys == ["api_key", "query"]
+    assert events[3].error is not None and "nope" in events[3].error
+
+    await subscription.close()

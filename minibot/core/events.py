@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -40,3 +41,54 @@ class OutboundFormatRepairEvent(BaseEvent):
 class SystemEvent(BaseEvent):
     event_type: str = "system"
     payload: dict | None = None
+
+
+class TurnStartedEvent(BaseEvent):
+    """Emitted when the dispatcher begins processing an inbound message."""
+
+    event_type: str = "turn_started"
+    turn_id: str
+    channel: str
+    chat_id: int | None = None
+    user_id: int | None = None
+
+
+class TurnCompletedEvent(BaseEvent):
+    """Emitted once a turn produced a response, whether or not it is sent to the user."""
+
+    event_type: str = "turn_completed"
+    turn_id: str
+    channel: str
+    chat_id: int | None = None
+    should_reply: bool = True
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    token_trace: dict[str, Any] = Field(default_factory=dict)
+    compaction_performed: bool | None = None
+
+
+class TurnFailedEvent(BaseEvent):
+    """Emitted when a turn raised before producing a response."""
+
+    event_type: str = "turn_failed"
+    turn_id: str
+    channel: str
+    chat_id: int | None = None
+    error: str
+
+
+class ToolCallEvent(BaseEvent):
+    """Emitted around every tool handler invocation.
+
+    Carries argument *keys* only: values can be large and can hold credentials.
+    """
+
+    event_type: str = "tool_call"
+    phase: Literal["started", "completed", "failed"]
+    tool_name: str
+    turn_id: str | None = None
+    owner_id: str | None = None
+    channel: str | None = None
+    chat_id: int | None = None
+    argument_keys: list[str] = Field(default_factory=list)
+    error: str | None = None
