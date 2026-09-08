@@ -21,6 +21,18 @@ The Docker image includes:
 - ffmpeg
 - additional Python packages from ``docker-requirements.txt``
 
+``docker-compose.yml`` also starts Qdrant (used by the RAG tool). The ``minibot-rabbitmq`` service
+is commented out by default: ``[tasks].backend`` defaults to ``"sqlite"``, which needs no broker.
+Uncomment it (and its ``depends_on`` entry on the ``minibot`` service) only if you set
+``[tasks].backend = "rabbitmq"``.
+
+Quickstart (pip)
+----------------
+
+1. ``pip install minibot``, adding extras as needed: ``pip install "minibot[mcp,stt,rabbitmq]"``.
+2. ``minibot configure`` to create ``config.toml`` interactively (see below).
+3. ``minibot``
+
 Quickstart (Poetry)
 -------------------
 
@@ -28,6 +40,7 @@ Quickstart (Poetry)
 2. Run ``poetry run minibot configure`` to create or update ``config.toml`` interactively.
    New files start from the ``Example`` profile by default; ``YOLO`` enables broad host execution and integrations.
 3. Configure Telegram, choose an LLM provider/model/API key, then select enabled tools with arrows and Space.
+   If ``tasks`` is enabled, you'll also be asked for the task queue backend (``sqlite`` or ``rabbitmq``).
 4. The configurator stores tokens and API keys in plain text; keep ``config.toml`` private.
 5. ``poetry run minibot``
 
