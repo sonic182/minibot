@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-09
+
+### Fixed
+
+- `minibot` on a fresh `pip install minibot` failed with `system_prompt_file configured but file
+  not found: ./prompts/main_agent_system.md`. `[llm].system_prompt_file` and `prompts_dir` default
+  to repo-relative `./prompts/...` paths that only existed in a git checkout. `prompts/**/*.md` is
+  now shipped in the wheel/sdist, and `minibot configure` seeds a `prompts/` directory next to the
+  config file it writes (skipped if one already exists there).
+
 ## [0.8.0] - 2026-09-08
 
 ### Added
@@ -469,6 +479,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
+[0.9.0]: https://github.com/sonic182/minibot/compare/0.8.0..0.9.0
 [0.8.0]: https://github.com/sonic182/minibot/compare/0.7.0..0.8.0
 [0.7.0]: https://github.com/sonic182/minibot/compare/0.6.0..0.7.0
 [0.6.0]: https://github.com/sonic182/minibot/compare/0.5.0..0.6.0

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minibot"
-version = "0.8.0"
+version = "0.9.0"
 description = "Self-hosted Telegram-first AI assistant with async tooling, memory, and scheduling."
 authors = ["sonic182 <johander1822@gmail.com>"]
 license = "MIT"
@@ -26,6 +26,7 @@ include = [
   { path = "minibot/llm/tools/descriptions/*.txt", format = ["sdist", "wheel"] },
   { path = "config.example.toml", format = ["sdist", "wheel"] },
   { path = "config.yolo.toml", format = ["sdist", "wheel"] },
+  { path = "prompts/**/*.md", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.dependencies]

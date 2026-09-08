@@ -100,6 +100,7 @@ def configure(path: Path) -> bool:
         return False
     _write_config(path, text)
     _write(f"Wrote {path}\n")
+    _provision_prompts(path)
     return True
 
 
@@ -337,8 +338,24 @@ def _load_document(path: Path) -> tuple[Any, str | None]:
         _write("YOLO enables broad host execution and infrastructure integrations.\n")
         if not _ask_bool("Use the YOLO profile", False):
             raise KeyboardInterrupt
-    template = Path(__file__).resolve().parents[3] / f"config.{profile}.toml"
+    template = _template_root() / f"config.{profile}.toml"
     return tomlkit.parse(template.read_text(encoding="utf-8")), profile
+
+
+def _template_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _provision_prompts(config_path: Path) -> None:
+    # system_prompt_file / prompts_dir default to "./prompts", resolved relative to the working
+    # directory `minibot` runs from — mirror that here by seeding it next to the written config.
+    prompts_dir = config_path.parent / "prompts"
+    if prompts_dir.exists():
+        return
+    template_prompts = _template_root() / "prompts"
+    if template_prompts.is_dir():
+        shutil.copytree(template_prompts, prompts_dir)
+        _write(f"Wrote {prompts_dir}\n")
 
 
 def _settings_for_document(document: Any) -> Settings:
