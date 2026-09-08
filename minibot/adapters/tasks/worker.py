@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import signal
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ from minibot.llm.tools.mcp_bridge import MCPToolBridge
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.time import CurrentTimeTool
-from minibot.shared.utils import session_identifier
+from minibot.shared.utils import session_identifier, validate_attachments
 
 _LOGGER = logging.getLogger("minibot.task_worker")
 _WORKER_SPEC_PATH = Path("<task_worker>")
@@ -67,6 +68,12 @@ _RATE_LIMIT_RETRY_AFTER_RE = re.compile(r"Please try again in (?P<seconds>\d+(?:
 
 
 def worker_entry(pipe: Any) -> None:
+    # The worker is forked from the daemon, which installs an asyncio no-op SIGTERM/SIGINT
+    # handler for graceful shutdown; forked children inherit that disposition, so
+    # TaskManager.cancel()'s proc.terminate() would otherwise be swallowed instead of
+    # killing this process. Reset to default so terminate() actually stops the worker.
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     asyncio.run(_worker_async(pipe))
 
 
@@ -103,7 +110,7 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             tools=tools,
             limits=build_runtime_limits(
                 llm_client=llm_client,
-                timeout_seconds=settings.rabbitmq.worker_timeout_seconds,
+                timeout_seconds=settings.tasks.worker_timeout_seconds,
                 min_timeout_seconds=30,
             ),
             allowed_append_message_tools=[],
@@ -140,7 +147,7 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             if settings.tools.file_storage.enabled
             else None,
         }
-        attachments = _validate_attachments((generation.pre_response_meta or {}).get("attachments"))
+        attachments = validate_attachments((generation.pre_response_meta or {}).get("attachments"))
         return {"task_id": task_id, "text": text, "attachments": attachments, "metadata": metadata}
     except Exception as exc:  # noqa: BLE001
         _LOGGER.exception("task worker failed", exc_info=exc, extra={"task_id": task_id or "unknown"})
@@ -351,24 +358,3 @@ def _extract_retry_after_seconds(error_text: str) -> int:
     if match is None:
         return 30
     return max(1, int(float(match.group("seconds")) + 0.999))
-
-
-def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw_attachments, list):
-        return []
-    validated: list[dict[str, Any]] = []
-    for item in raw_attachments:
-        if not isinstance(item, dict):
-            continue
-        path = item.get("path")
-        file_type = item.get("type")
-        if not isinstance(path, str) or not path.strip():
-            continue
-        if not isinstance(file_type, str) or not file_type.strip():
-            continue
-        attachment: dict[str, Any] = {"path": path.strip(), "type": file_type.strip()}
-        caption = item.get("caption")
-        if isinstance(caption, str) and caption.strip():
-            attachment["caption"] = caption.strip()
-        validated.append(attachment)
-    return validated

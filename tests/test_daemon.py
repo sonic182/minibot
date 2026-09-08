@@ -69,15 +69,19 @@ class _SchedulerSettings:
 
 
 class _Settings:
-    class _RabbitMQ:
-        def __init__(self, enabled: bool) -> None:
+    class _Tasks:
+        def __init__(self, enabled: bool, backend: str) -> None:
             self.enabled = enabled
+            self.backend = backend
+            self.max_concurrent_workers = 4
+            self.sqlite = object()
 
     tools = _ToolSettings()
     scheduler = _SchedulerSettings()
+    rabbitmq = object()
 
-    def __init__(self, *, rabbitmq_enabled: bool = False) -> None:
-        self.rabbitmq = self._RabbitMQ(enabled=rabbitmq_enabled)
+    def __init__(self, *, tasks_enabled: bool = False, backend: str = "rabbitmq") -> None:
+        self.tasks = self._Tasks(enabled=tasks_enabled, backend=backend)
 
 
 class _TelegramConfig:
@@ -111,7 +115,7 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
 
         @classmethod
         def get_settings(cls) -> _Settings:
-            return _Settings(rabbitmq_enabled=True)
+            return _Settings(tasks_enabled=True)
 
         @classmethod
         def get_event_bus(cls):
@@ -158,8 +162,8 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
             await telegram_probe.stop()
 
     class _FakeRabbitMQ:
-        def __init__(self, config, event_bus, task_manager) -> None:
-            del config, event_bus, task_manager
+        def __init__(self, config, event_bus, task_manager, max_concurrent_workers) -> None:
+            del config, event_bus, task_manager, max_concurrent_workers
 
         async def start(self) -> None:
             await rabbitmq_probe.start()
@@ -213,7 +217,7 @@ async def test_run_skips_telegram_when_disabled(monkeypatch: pytest.MonkeyPatch)
 
         @classmethod
         def get_settings(cls) -> _Settings:
-            return _Settings(rabbitmq_enabled=False)
+            return _Settings(tasks_enabled=False)
 
         @classmethod
         def get_event_bus(cls):
@@ -328,3 +332,36 @@ async def test_replay_pending_turns_noop_when_nothing_pending(monkeypatch: pytes
     await daemon_module._replay_pending_turns(bus, _Logger())
 
     assert bus.published == []
+
+
+def _task_service_for(monkeypatch: pytest.MonkeyPatch, backend: str, *, enabled: bool = True):
+    from minibot.app import daemon as daemon_module
+
+    class _FakeContainer:
+        @classmethod
+        def get_task_manager(cls) -> object:
+            return object()
+
+        @classmethod
+        def get_task_store(cls) -> object:
+            return object()
+
+    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
+    settings = _Settings(tasks_enabled=enabled, backend=backend)
+    return daemon_module.build_task_service(settings, object())
+
+
+def test_build_task_service_picks_sqlite_consumer(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app.task_consumer_service import SQLiteTaskConsumerService
+
+    assert isinstance(_task_service_for(monkeypatch, "sqlite"), SQLiteTaskConsumerService)
+
+
+def test_build_task_service_picks_rabbitmq_consumer(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
+
+    assert isinstance(_task_service_for(monkeypatch, "rabbitmq"), RabbitMQConsumerService)
+
+
+def test_build_task_service_returns_none_when_tasks_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _task_service_for(monkeypatch, "sqlite", enabled=False) is None

@@ -52,7 +52,7 @@ _TOOLS = {
     "grep": ("tools", "grep"),
     "audio": ("tools", "audio_transcription"),
     "skills": ("tools", "skills"),
-    "tasks": ("tools", "tasks"),
+    "tasks": ("tasks",),
     "rag": ("tools", "rag"),
     "mcp": ("tools", "mcp"),
     "spill": ("tools", "tool_output_spill"),
@@ -146,6 +146,12 @@ def _configure_llm(document: Any, settings: Settings) -> None:
     _set_value(document, ("llm", "provider"), provider)
     _set_value(document, ("providers", provider, "api_key"), api_key)
     _set_value(document, ("providers", provider, "base_url"), base_url)
+    # OpenCode Go rejects requests without a session id (MissingSessionID); it only routes on it.
+    session_header = ("providers", provider, "headers", "x-opencode-session")
+    if target == "opencode_go":
+        _set_value(document, session_header, "minibot")
+    else:
+        _unset_value(document, session_header)
     _set_value(document, ("llm", "model"), _ask_model(provider, base_url, api_key, settings.llm.model))
     # Responses providers keep turn state server-side, so a tool loop can send just the delta instead
     # of resending the whole history every step. Chat Completions (openai, openrouter) is stateless and
@@ -167,7 +173,6 @@ def _configure_tools(document: Any, settings: Settings) -> None:
         selected.add("files")
     for name, tool_path in _TOOLS.items():
         _set_value(document, (*tool_path, "enabled"), name in selected)
-    _set_value(document, ("rabbitmq", "enabled"), "tasks" in selected)
     # Skills the model cannot see are skills it will not use; see SkillsToolConfig.
     if "skills" in selected:
         _set_value(document, ("tools", "skills", "preload_catalog"), True)
@@ -338,9 +343,10 @@ def _settings_for_document(document: Any) -> Settings:
 
 
 def _tool_enabled(settings: Settings, path: tuple[str, ...]) -> bool:
-    if path[0] == "scheduler":
-        return settings.scheduler.prompts.enabled
-    return bool(getattr(getattr(settings.tools, path[-1]), "enabled", False))
+    node: Any = settings
+    for key in path:
+        node = getattr(node, key)
+    return bool(getattr(node, "enabled", False))
 
 
 def _set_value(document: Any, path: tuple[str, ...], value: object) -> None:
@@ -350,6 +356,15 @@ def _set_value(document: Any, path: tuple[str, ...], value: object) -> None:
             target[key] = tomlkit.table()
         target = target[key]
     target[path[-1]] = value
+
+
+def _unset_value(document: Any, path: tuple[str, ...]) -> None:
+    target = document
+    for key in path[:-1]:
+        if key not in target:
+            return
+        target = target[key]
+    target.pop(path[-1], None)
 
 
 def _write_summary(path: Path, profile: str | None, settings: Settings) -> None:

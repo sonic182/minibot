@@ -5,11 +5,11 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-import aio_pika
 from llm_async.models import Tool
 
-from minibot.adapters.config.schema import RabbitMQConsumerConfig
 from minibot.adapters.tasks.manager import TaskManager
+from minibot.app.agent_registry import AgentRegistry
+from minibot.core.tasks import TaskProducer, TaskRequest
 from minibot.llm.tools.arg_utils import optional_str, require_channel, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
@@ -17,9 +17,15 @@ from minibot.llm.tools.schema_utils import empty_object_schema, strict_object
 
 
 class TaskTools:
-    def __init__(self, rabbitmq_config: RabbitMQConsumerConfig, task_manager: TaskManager) -> None:
-        self._rabbitmq_config = rabbitmq_config
+    def __init__(
+        self,
+        producer: TaskProducer,
+        task_manager: TaskManager,
+        agent_registry: AgentRegistry | None = None,
+    ) -> None:
+        self._producer = producer
         self._task_manager = task_manager
+        self._agent_registry = agent_registry
 
     def bindings(self) -> list[ToolBinding]:
         return [
@@ -70,33 +76,23 @@ class TaskTools:
         channel = require_channel(context, message="channel context is required for task spawning")
         prompt = require_non_empty_str(payload, "prompt")
         agent_name = optional_str(payload.get("agent_name"), error_message="agent_name must be a string or null")
+        registry = self._agent_registry
+        if agent_name is not None and registry is not None and registry.get(agent_name) is None:
+            available = ", ".join(registry.names()) or "none registered"
+            raise ValueError(f"agent_name '{agent_name}' is not a registered agent. Available: {available}")
         task_context = _coerce_task_context(payload)
 
-        connection = await aio_pika.connect_robust(self._rabbitmq_config.broker_url)
-        async with connection:
-            channel_obj = await connection.channel()
-            exchange = await channel_obj.declare_exchange(
-                self._rabbitmq_config.exchange_name,
-                aio_pika.ExchangeType.FANOUT,
-                durable=True,
+        await self._producer.enqueue(
+            TaskRequest(
+                task_id=task_id,
+                channel=channel,
+                prompt=prompt,
+                agent_name=agent_name,
+                context=task_context,
+                chat_id=context.chat_id,
+                user_id=context.user_id,
             )
-            body = {
-                "task_id": task_id,
-                "channel": channel,
-                "chat_id": context.chat_id,
-                "user_id": context.user_id,
-                "prompt": prompt,
-                "agent_name": agent_name,
-                "context": task_context,
-            }
-            await exchange.publish(
-                aio_pika.Message(
-                    body=_json_dumps(body).encode(),
-                    content_type="application/json",
-                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                ),
-                routing_key="",
-            )
+        )
 
         return {
             "task_id": task_id,
@@ -144,7 +140,3 @@ def _coerce_task_context(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("task context must decode to an object")
     return value
-
-
-def _json_dumps(value: dict[str, Any]) -> str:
-    return json.dumps(value, ensure_ascii=True, sort_keys=True)

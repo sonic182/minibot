@@ -57,8 +57,18 @@ Logging
 .. autoclass:: minibot.adapters.config.schema.LoggingConfig
    :no-members:
 
-RabbitMQ
---------
+Tasks
+-----
+
+``[tasks].backend`` selects the queue: ``"sqlite"`` (no broker, polled, survives a crash via lease
+expiry) or ``"rabbitmq"`` (needs a broker and the ``rabbitmq`` extra, pushed). ``[tasks.sqlite]``
+configures the first, ``[rabbitmq]`` the second.
+
+.. autoclass:: minibot.adapters.config.schema.TasksConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.SqliteTaskQueueConfig
+   :no-members:
 
 .. autoclass:: minibot.adapters.config.schema.RabbitMQConsumerConfig
    :no-members:
@@ -127,9 +137,12 @@ Tool Configuration
    * - ``[tools.skills]``
      - ``SkillsToolConfig``
      - ``enabled``, ``paths``, ``preload_catalog``
-   * - ``[tools.tasks]``
-     - ``TaskToolConfig``
-     - ``enabled``; requires ``[rabbitmq].enabled = true``
+   * - ``[tasks]``
+     - ``TasksConfig``
+     - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``max_concurrent_workers``, ``sqlite``
+   * - ``[tasks.sqlite]``
+     - ``SqliteTaskQueueConfig``
+     - ``sqlite_url``, ``poll_interval_seconds``, ``lease_timeout_seconds``, ``batch_size``, ``max_attempts``, ``done_retention_seconds``
 
 Tool Config Models
 ------------------
@@ -188,5 +201,3 @@ Tool Config Models
 .. autoclass:: minibot.adapters.config.schema.SkillsToolConfig
    :no-members:
 
-.. autoclass:: minibot.adapters.config.schema.TaskToolConfig
-   :no-members:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from minibot.adapters.config.schema import RabbitMQConsumerConfig
+from minibot.app.agent_registry import AgentRegistry
+from minibot.core.agents import AgentSpec
+from minibot.core.tasks import TaskRequest
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.tasks import TaskTools
 
@@ -31,64 +34,27 @@ class _TaskStub:
         self.started_at = started_at
 
 
-class _FakeMessage:
-    def __init__(self, *, body: bytes, content_type: str, delivery_mode: Any) -> None:
-        self.body = body
-        self.content_type = content_type
-        self.delivery_mode = delivery_mode
-
-
-class _FakeExchange:
+class _ProducerStub:
     def __init__(self) -> None:
-        self.published: list[dict[str, Any]] = []
+        self.enqueued: list[TaskRequest] = []
 
-    async def publish(self, message: _FakeMessage, routing_key: str) -> None:
-        self.published.append({"message": message, "routing_key": routing_key})
-
-
-class _FakeChannel:
-    def __init__(self, exchange: _FakeExchange) -> None:
-        self.exchange = exchange
-        self.declarations: list[dict[str, Any]] = []
-
-    async def declare_exchange(self, name: str, exchange_type: Any, durable: bool) -> _FakeExchange:
-        self.declarations.append({"name": name, "exchange_type": exchange_type, "durable": durable})
-        return self.exchange
+    async def enqueue(self, task: TaskRequest) -> None:
+        self.enqueued.append(task)
 
 
-class _FakeConnection:
-    def __init__(self, channel_obj: _FakeChannel) -> None:
-        self.channel_obj = channel_obj
-        self.entered = False
-        self.exited = False
-
-    async def __aenter__(self) -> _FakeConnection:
-        self.entered = True
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        del exc_type, exc, tb
-        self.exited = True
-
-    async def channel(self) -> _FakeChannel:
-        return self.channel_obj
+def _build_tools(
+    producer: _ProducerStub,
+    task_manager: _TaskManagerStub,
+    agent_registry: AgentRegistry | None = None,
+) -> dict[str, Any]:
+    tools = TaskTools(cast(Any, producer), cast(Any, task_manager), agent_registry=agent_registry)
+    return {binding.tool.name: binding for binding in tools.bindings()}
 
 
 @pytest.mark.asyncio
-async def test_spawn_task_publishes_rabbitmq_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    task_manager = _TaskManagerStub()
-    tools = TaskTools(RabbitMQConsumerConfig(enabled=True, broker_url="amqp://broker/"), cast(Any, task_manager))
-    bindings = {binding.tool.name: binding for binding in tools.bindings()}
-    exchange = _FakeExchange()
-    channel_obj = _FakeChannel(exchange)
-    connection = _FakeConnection(channel_obj)
-
-    async def _connect(url: str) -> _FakeConnection:
-        assert url == "amqp://broker/"
-        return connection
-
-    monkeypatch.setattr("minibot.llm.tools.tasks.aio_pika.connect_robust", _connect)
-    monkeypatch.setattr("minibot.llm.tools.tasks.aio_pika.Message", _FakeMessage)
+async def test_spawn_task_enqueues_request_and_reports_queued() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub())
 
     result = await bindings["spawn_task"].handler(
         {"prompt": "Summarize logs", "agent_name": "playwright_mcp_agent", "context_json": '{"trace_id":"abc"}'},
@@ -97,52 +63,86 @@ async def test_spawn_task_publishes_rabbitmq_message(monkeypatch: pytest.MonkeyP
 
     assert result["status"] == "queued"
     assert result["channel"] == "console"
-    assert connection.entered is True
-    assert connection.exited is True
-    assert channel_obj.declarations[0]["name"] == "minibot.tasks"
-    published = exchange.published[0]
-    assert published["routing_key"] == ""
-    assert published["message"].content_type == "application/json"
-    payload = published["message"].body.decode()
-    assert '"channel": "console"' in payload
-    assert '"chat_id": 42' in payload
-    assert '"user_id": 7' in payload
-    assert '"prompt": "Summarize logs"' in payload
-    assert '"agent_name": "playwright_mcp_agent"' in payload
-    assert '"trace_id": "abc"' in payload
+    assert result["chat_id"] == 42
+    assert result["user_id"] == 7
+    assert result["agent_name"] == "playwright_mcp_agent"
+
+    enqueued = producer.enqueued[0]
+    assert enqueued.task_id == result["task_id"]
+    assert enqueued.channel == "console"
+    assert enqueued.prompt == "Summarize logs"
+    assert enqueued.agent_name == "playwright_mcp_agent"
+    assert enqueued.context == {"trace_id": "abc"}
+    assert enqueued.chat_id == 42
+    assert enqueued.user_id == 7
 
 
 @pytest.mark.asyncio
-async def test_spawn_task_accepts_legacy_context_object(monkeypatch: pytest.MonkeyPatch) -> None:
-    task_manager = _TaskManagerStub()
-    tools = TaskTools(RabbitMQConsumerConfig(enabled=True, broker_url="amqp://broker/"), cast(Any, task_manager))
-    bindings = {binding.tool.name: binding for binding in tools.bindings()}
-    exchange = _FakeExchange()
-    channel_obj = _FakeChannel(exchange)
-    connection = _FakeConnection(channel_obj)
-
-    async def _connect(url: str) -> _FakeConnection:
-        assert url == "amqp://broker/"
-        return connection
-
-    monkeypatch.setattr("minibot.llm.tools.tasks.aio_pika.connect_robust", _connect)
-    monkeypatch.setattr("minibot.llm.tools.tasks.aio_pika.Message", _FakeMessage)
+async def test_spawn_task_accepts_legacy_context_object() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub())
 
     await bindings["spawn_task"].handler(
         {"prompt": "Summarize logs", "context": {"trace_id": "abc"}},
         ToolContext(channel="console", chat_id=42, user_id=7),
     )
 
-    payload = exchange.published[0]["message"].body.decode()
-    assert '"trace_id": "abc"' in payload
+    assert producer.enqueued[0].context == {"trace_id": "abc"}
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_rejects_invalid_context_json() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub())
+
+    with pytest.raises(ValueError, match="context_json must be valid JSON"):
+        await bindings["spawn_task"].handler(
+            {"prompt": "Summarize logs", "context_json": "not json"},
+            ToolContext(channel="console"),
+        )
+
+    assert producer.enqueued == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_rejects_unregistered_agent_name() -> None:
+    producer = _ProducerStub()
+    registry = AgentRegistry(
+        [AgentSpec(name="general_agent", description="", system_prompt="", source_path=Path("agents/general.md"))]
+    )
+    bindings = _build_tools(producer, _TaskManagerStub(), agent_registry=registry)
+
+    with pytest.raises(ValueError, match="agent_name 'general' is not a registered agent"):
+        await bindings["spawn_task"].handler(
+            {"prompt": "Summarize logs", "agent_name": "general"},
+            ToolContext(channel="console"),
+        )
+
+    assert producer.enqueued == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_accepts_registered_agent_name() -> None:
+    producer = _ProducerStub()
+    registry = AgentRegistry(
+        [AgentSpec(name="general_agent", description="", system_prompt="", source_path=Path("agents/general.md"))]
+    )
+    bindings = _build_tools(producer, _TaskManagerStub(), agent_registry=registry)
+
+    result = await bindings["spawn_task"].handler(
+        {"prompt": "Summarize logs", "agent_name": "general_agent"},
+        ToolContext(channel="console"),
+    )
+
+    assert result["agent_name"] == "general_agent"
+    assert producer.enqueued[0].agent_name == "general_agent"
 
 
 @pytest.mark.asyncio
 async def test_cancel_task_returns_cancelled_flag() -> None:
     task_manager = _TaskManagerStub()
     task_manager.cancel_result = True
-    tools = TaskTools(RabbitMQConsumerConfig(enabled=True), cast(Any, task_manager))
-    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+    bindings = _build_tools(_ProducerStub(), task_manager)
 
     result = await bindings["cancel_task"].handler({"task_id": "task-1"}, ToolContext())
 
@@ -154,8 +154,7 @@ async def test_cancel_task_returns_cancelled_flag() -> None:
 async def test_list_tasks_returns_active_tasks() -> None:
     task_manager = _TaskManagerStub()
     task_manager.active_tasks = [_TaskStub("task-1", "telegram", datetime.now(UTC))]
-    tools = TaskTools(RabbitMQConsumerConfig(enabled=True), cast(Any, task_manager))
-    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+    bindings = _build_tools(_ProducerStub(), task_manager)
 
     result = await bindings["list_tasks"].handler({}, ToolContext())
 

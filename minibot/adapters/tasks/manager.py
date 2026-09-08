@@ -17,6 +17,7 @@ from minibot.adapters.tasks.worker import worker_entry
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelFileResponse, ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
+from minibot.shared.utils import validate_attachments
 
 _MAX_RETRYABLE_ATTEMPTS = 2
 
@@ -190,7 +191,7 @@ class TaskManager:
                     return
 
                 await ack_cb()
-                attachments = _validated_attachments(result.get("attachments"))
+                attachments = validate_attachments(result.get("attachments"))
                 metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
                 managed_files_root = metadata.get("managed_files_root")
                 await self._publish_attachments(
@@ -312,27 +313,6 @@ def _failure_text_from_result(result: dict[str, Any]) -> str:
     if metadata.get("error_code") == "rate_limit_exceeded":
         return "La tarea asíncrona falló tras reintentar por rate limit del proveedor."
     return "La tarea asíncrona falló y fue cancelada."
-
-
-def _validated_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw_attachments, list):
-        return []
-    validated: list[dict[str, Any]] = []
-    for item in raw_attachments:
-        if not isinstance(item, dict):
-            continue
-        path = item.get("path")
-        file_type = item.get("type")
-        if not isinstance(path, str) or not path.strip():
-            continue
-        if not isinstance(file_type, str) or not file_type.strip():
-            continue
-        attachment: dict[str, Any] = {"path": path.strip(), "type": file_type.strip()}
-        caption = item.get("caption")
-        if isinstance(caption, str) and caption.strip():
-            attachment["caption"] = caption.strip()
-        validated.append(attachment)
-    return validated
 
 
 def _resolve_managed_attachment_path(*, base_dir: Path, relative_path: str, logger: logging.Logger) -> Path | None:

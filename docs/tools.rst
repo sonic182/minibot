@@ -128,15 +128,15 @@ Tool Surface
      - Load full instructions for a discovered skill.
    * - Async tasks
      - ``spawn_task``
-     - ``[tools.tasks]`` and ``[rabbitmq]``
+     - ``[tasks]``
      - Queue a background worker task.
    * - Async tasks
      - ``cancel_task``
-     - ``[tools.tasks]`` and ``[rabbitmq]``
+     - ``[tasks]``
      - Cancel an active background task by ID.
    * - Async tasks
      - ``list_tasks``
-     - ``[tools.tasks]`` and ``[rabbitmq]``
+     - ``[tasks]``
      - List active background tasks.
    * - MCP
      - ``mcp_<server>__<remote_tool>``
@@ -159,7 +159,9 @@ Runtime Notes
   skipped since they already manage their own output size.
 - ``[tools.audio_transcription]`` requires the ``stt`` extra: ``poetry install --extras stt``.
 - ``[tools.mcp]`` requires the ``mcp`` extra: ``poetry install --extras mcp``.
-- ``[tools.tasks]`` requires the ``rabbitmq`` extra and ``[rabbitmq].enabled = true``.
+- ``[tasks]`` gates the task tools and the consumer. ``backend = "sqlite"`` (the recommended default)
+  needs no broker and no extra; ``backend = "rabbitmq"`` requires the ``rabbitmq`` extra and a broker
+  configured in ``[rabbitmq]``. See :doc:`architecture` for the trade-off.
 - ``[tools.rag]`` requires torch and sentence-transformers installed manually and a running Qdrant instance; see :doc:`rag`.
 - Hidden compatibility aliases are normalized at execution time; prefer the public names in the table.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha1
+from typing import Any
 
 from minibot.core.channels import ChannelMessage
 
@@ -23,6 +24,27 @@ def humanize_token_count(value: int) -> str:
         return str(value)
     short = f"{value / 1000:.1f}".rstrip("0").rstrip(".")
     return f"{short}k"
+
+
+def validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_attachments, list):
+        return []
+    validated: list[dict[str, Any]] = []
+    for item in raw_attachments:
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path")
+        file_type = item.get("type")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if not isinstance(file_type, str) or not file_type.strip():
+            continue
+        attachment: dict[str, Any] = {"path": path.strip(), "type": file_type.strip()}
+        caption = item.get("caption")
+        if isinstance(caption, str) and caption.strip():
+            attachment["caption"] = caption.strip()
+        validated.append(attachment)
+    return validated
 
 
 def summarize_items(items: list[str], *, preview_limit: int = 3) -> dict[str, object]:

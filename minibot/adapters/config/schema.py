@@ -232,6 +232,8 @@ class LLMMConfig(BaseModel):
       (``"full_messages"`` or ``"previous_response_id"``).
     - ``prompt_cache_enabled`` — enable provider-side prompt caching (default: ``true``).
     - ``strip_logs`` — shorten selected fields in the provider raw-response debug log (default: ``false``).
+    - ``extra_headers`` — extra HTTP headers sent on every provider request (usually inherited from
+      ``[providers.<name>.headers]``).
     - ``openrouter`` — OpenRouter-specific routing overrides (``[llm.openrouter]``).
     - ``xai`` — xAI web/X search integration (``[llm.xai]``).
     """
@@ -259,6 +261,7 @@ class LLMMConfig(BaseModel):
     prompt_cache_enabled: bool = True
     prompt_cache_retention: Literal["in-memory", "24h"] | None = None
     strip_logs: bool = False
+    extra_headers: dict[str, str] = Field(default_factory=dict)
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
     xai: XAILLMConfig = XAILLMConfig()
 
@@ -271,6 +274,8 @@ class ProviderConfig(BaseModel):
 
     - ``api_key`` — provider API key.
     - ``base_url`` — optional base URL override (e.g. for proxies or local endpoints).
+    - ``headers`` — extra HTTP headers sent on every request to this provider. OpenCode Go
+      requires ``x-opencode-session`` and rejects requests without it (``MissingSessionID``).
 
     OpenAI-compatible third-party endpoints (set under ``[providers.openai]`` with
     ``[llm].provider = "openai"``, or ``[providers.openai_responses]`` with
@@ -291,6 +296,7 @@ class ProviderConfig(BaseModel):
 
     api_key: str = ""
     base_url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
 
 
 class AgentDefinitionConfig(BaseModel):
@@ -597,10 +603,6 @@ class SkillsToolConfig(BaseModel):
     preload_catalog: bool = True
 
 
-class TaskToolConfig(BaseModel):
-    enabled: bool = False
-
-
 class RagEmbeddingConfig(BaseModel):
     model: str = "sentence-transformers/all-MiniLM-L12-v2"
     dim: int = 384
@@ -646,31 +648,25 @@ class ToolsConfig(BaseModel):
     audio_transcription: AudioTranscriptionToolConfig = AudioTranscriptionToolConfig()
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
-    tasks: TaskToolConfig = Field(default_factory=TaskToolConfig)
     rag: RagToolConfig = RagToolConfig()
 
 
 class RabbitMQConsumerConfig(BaseModel):
-    """RabbitMQ task consumer settings. TOML section: ``[rabbitmq]``
+    """Broker connection settings for ``tasks.backend = "rabbitmq"``. TOML section: ``[rabbitmq]``
 
     Requires the ``rabbitmq`` extra: ``poetry install --extras rabbitmq``.
+    Enabling the task system itself lives in ``[tasks]``.
 
-    - ``enabled`` — enable the RabbitMQ consumer (default: ``false``).
     - ``broker_url`` — AMQP connection URL (default: ``"amqp://guest:guest@localhost:5672/"``).
     - ``queue_name`` — queue to consume from (default: ``"minibot"``).
     - ``exchange_name`` — fanout exchange name (default: ``"minibot.tasks"``).
     - ``prefetch_count`` — max unacknowledged messages per worker (default: ``1``).
-    - ``worker_timeout_seconds`` — per-task processing timeout (default: ``60``).
-    - ``max_concurrent_workers`` — maximum parallel task handlers (default: ``4``).
     """
 
-    enabled: bool = False
     broker_url: str = "amqp://guest:guest@localhost:5672/"
     queue_name: str = "minibot"
     exchange_name: str = "minibot.tasks"
     prefetch_count: PositiveInt = 1
-    worker_timeout_seconds: PositiveInt = 60
-    max_concurrent_workers: PositiveInt = 4
 
 
 class ScheduledPromptsConfig(BaseModel):
@@ -698,6 +694,58 @@ class ScheduledPromptsConfig(BaseModel):
 
 class SchedulerConfig(BaseModel):
     prompts: ScheduledPromptsConfig = ScheduledPromptsConfig()
+
+
+class SqliteTaskQueueConfig(BaseModel):
+    """Queue storage settings for ``tasks.backend = "sqlite"``. TOML section: ``[tasks.sqlite]``
+
+    - ``sqlite_url`` — SQLite database URL for the task queue.
+    - ``poll_interval_seconds`` — how often the consumer checks for queued tasks (default: ``5``).
+    - ``lease_timeout_seconds`` — lease duration before a stalled task is claimable again (default: ``300``).
+    - ``batch_size`` — max tasks leased per poll cycle (default: ``4``).
+    - ``max_attempts`` — redeliveries before a task is marked failed (default: ``3``). This is queue-level
+      redelivery, distinct from the in-process provider rate-limit retry in ``adapters/tasks/manager.py``.
+    - ``done_retention_seconds`` — how long completed rows are kept before purging (default: ``86400``).
+    """
+
+    sqlite_url: str = "sqlite+aiosqlite:///./data/tasks.db"
+    poll_interval_seconds: PositiveInt = 5
+    lease_timeout_seconds: PositiveInt = 300
+    batch_size: PositiveInt = 4
+    max_attempts: PositiveInt = 3
+    done_retention_seconds: PositiveInt = 86400
+    pool_size: PositiveInt = 5
+    echo: bool = False
+
+
+class TasksConfig(BaseModel):
+    """Async task system settings. TOML section: ``[tasks]``
+
+    Gates both the task consumer service and the ``spawn_task``/``cancel_task``/``list_tasks`` tools.
+
+    - ``enabled`` — enable the async task system (default: ``false``).
+    - ``backend`` — queue backend: ``"rabbitmq"`` (see ``[rabbitmq]``) or ``"sqlite"`` (default: ``"rabbitmq"``).
+    - ``worker_timeout_seconds`` — per-task processing timeout (default: ``60``).
+    - ``max_concurrent_workers`` — maximum parallel task handlers (default: ``4``).
+    - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
+    """
+
+    enabled: bool = False
+    backend: Literal["rabbitmq", "sqlite"] = "rabbitmq"
+    worker_timeout_seconds: PositiveInt = 60
+    max_concurrent_workers: PositiveInt = 4
+    sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
+
+    @model_validator(mode="after")
+    def _validate_lease_outlives_worker(self) -> TasksConfig:
+        # A lease shorter than the worst-case task duration expires while the worker is still
+        # running, so the next poll hands the same row to a second worker and the task runs twice.
+        if self.backend == "sqlite" and self.sqlite.lease_timeout_seconds <= self.worker_timeout_seconds:
+            raise ValueError(
+                "tasks.sqlite.lease_timeout_seconds must be greater than tasks.worker_timeout_seconds "
+                "or a running task can be leased twice"
+            )
+        return self
 
 
 class LoggingConfig(BaseModel):
@@ -729,6 +777,7 @@ class Settings(BaseModel):
     tools: ToolsConfig = ToolsConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
     logging: LoggingConfig = LoggingConfig()
+    tasks: TasksConfig = TasksConfig()
     rabbitmq: RabbitMQConsumerConfig = RabbitMQConsumerConfig()
 
     model_config = ConfigDict(extra="forbid")

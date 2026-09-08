@@ -18,18 +18,22 @@ from minibot.adapters.config.schema import (
     MCPServerConfig,
     MCPToolConfig,
     PythonExecToolConfig,
-    RabbitMQConsumerConfig,
     RagToolConfig,
     ScheduledPromptsConfig,
     SchedulerConfig,
     Settings,
     SkillsToolConfig,
-    TaskToolConfig,
+    TasksConfig,
     TimeToolConfig,
     ToolsConfig,
 )
 from minibot.app.skill_registry import SkillRegistry
 from minibot.llm.tools.factory import build_enabled_tools
+
+
+class _TaskProducerStub:
+    async def enqueue(self, task: Any) -> None:
+        del task
 
 
 class _MemoryStub:
@@ -116,7 +120,6 @@ def _settings(
     grep_enabled: bool,
     skills_enabled: bool = True,
     tasks_enabled: bool = False,
-    rabbitmq_enabled: bool = False,
 ) -> Settings:
     return Settings(
         llm=LLMMConfig(api_key="secret"),
@@ -133,11 +136,10 @@ def _settings(
             browser=BrowserToolConfig(output_dir="./data/files/browser"),
             audio_transcription=AudioTranscriptionToolConfig(enabled=audio_transcription_enabled),
             skills=SkillsToolConfig(enabled=skills_enabled),
-            tasks=TaskToolConfig(enabled=tasks_enabled),
             rag=RagToolConfig(enabled=False),
         ),
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=prompts_enabled)),
-        rabbitmq=RabbitMQConsumerConfig(enabled=rabbitmq_enabled),
+        tasks=TasksConfig(enabled=tasks_enabled),
     )
 
 
@@ -460,7 +462,7 @@ def test_build_enabled_tools_rejects_rag_without_file_storage() -> None:
         _ = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
 
 
-def test_build_enabled_tools_includes_task_tools_when_rabbitmq_enabled() -> None:
+def test_build_enabled_tools_includes_task_tools_when_tasks_enabled() -> None:
     settings = _settings(
         kv_enabled=False,
         http_enabled=False,
@@ -474,7 +476,6 @@ def test_build_enabled_tools_includes_task_tools_when_rabbitmq_enabled() -> None
         audio_transcription_enabled=False,
         grep_enabled=False,
         tasks_enabled=True,
-        rabbitmq_enabled=True,
     )
 
     class _TaskManagerStub:
@@ -492,13 +493,14 @@ def test_build_enabled_tools_includes_task_tools_when_rabbitmq_enabled() -> None
         prompt_scheduler=None,
         event_bus=None,
         task_manager=cast(Any, _TaskManagerStub()),
+        task_producer=cast(Any, _TaskProducerStub()),
     )
     names = {binding.tool.name for binding in tools}
 
     assert {"spawn_task", "cancel_task", "list_tasks"}.issubset(names)
 
 
-def test_build_enabled_tools_skips_task_tools_when_rabbitmq_disabled() -> None:
+def test_build_enabled_tools_skips_task_tools_without_a_producer() -> None:
     settings = _settings(
         kv_enabled=False,
         http_enabled=False,
@@ -512,7 +514,44 @@ def test_build_enabled_tools_skips_task_tools_when_rabbitmq_disabled() -> None:
         audio_transcription_enabled=False,
         grep_enabled=False,
         tasks_enabled=True,
-        rabbitmq_enabled=False,
+    )
+
+    class _TaskManagerStub:
+        async def cancel(self, task_id: str) -> bool:
+            del task_id
+            return False
+
+        def active(self) -> list[object]:
+            return []
+
+    tools = build_enabled_tools(
+        settings,
+        memory=_MemoryStub(),
+        kv_memory=None,
+        prompt_scheduler=None,
+        event_bus=None,
+        task_manager=cast(Any, _TaskManagerStub()),
+        task_producer=None,
+    )
+    names = {binding.tool.name for binding in tools}
+
+    assert names.isdisjoint({"spawn_task", "cancel_task", "list_tasks"})
+
+
+def test_build_enabled_tools_skips_task_tools_when_tasks_disabled() -> None:
+    settings = _settings(
+        kv_enabled=False,
+        http_enabled=False,
+        time_enabled=False,
+        calculator_enabled=False,
+        python_exec_enabled=False,
+        bash_enabled=False,
+        apply_patch_enabled=False,
+        prompts_enabled=False,
+        file_storage_enabled=False,
+        audio_transcription_enabled=False,
+        grep_enabled=False,
+        tasks_enabled=False,
     )
 
     class _TaskManagerStub:

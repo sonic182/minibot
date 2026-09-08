@@ -22,6 +22,7 @@ class RabbitMQConsumerService:
         config: RabbitMQConsumerConfig,
         event_bus: EventBus,
         task_manager: TaskManager | None = None,
+        max_concurrent_workers: int = 4,
     ) -> None:
         self._config = config
         self._event_bus = event_bus
@@ -29,7 +30,7 @@ class RabbitMQConsumerService:
         self._logger = logging.getLogger("minibot.rabbitmq")
         self._consume_task: asyncio.Task[None] | None = None
         self._exchange: aio_pika.abc.AbstractExchange | None = None
-        self._semaphore: asyncio.Semaphore = asyncio.Semaphore(config.max_concurrent_workers)
+        self._semaphore: asyncio.Semaphore = asyncio.Semaphore(max_concurrent_workers)
 
     async def start(self) -> None:
         self._consume_task = asyncio.create_task(self._consume())

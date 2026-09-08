@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from minibot.llm.tools.agent_delegate import _extract_outcome, _validate_attachments
+from minibot.llm.tools.agent_delegate import _extract_outcome
+from minibot.shared.utils import validate_attachments
 
 
 def test_validate_attachments_with_valid_single_attachment():
@@ -11,7 +12,7 @@ def test_validate_attachments_with_valid_single_attachment():
             "caption": "Example screenshot",
         }
     ]
-    result = _validate_attachments(raw)
+    result = validate_attachments(raw)
     assert len(result) == 1
     assert result[0]["path"] == "browser/screenshot.png"
     assert result[0]["type"] == "image/png"
@@ -23,7 +24,7 @@ def test_validate_attachments_with_multiple_valid():
         {"path": "browser/shot1.png", "type": "image/png", "caption": "First"},
         {"path": "browser/shot2.png", "type": "image/png"},
     ]
-    result = _validate_attachments(raw)
+    result = validate_attachments(raw)
     assert len(result) == 2
     assert result[0]["caption"] == "First"
     assert "caption" not in result[1]
@@ -33,7 +34,7 @@ def test_validate_attachments_with_missing_path():
     raw = [
         {"type": "image/png", "caption": "Missing path"},
     ]
-    result = _validate_attachments(raw)
+    result = validate_attachments(raw)
     assert len(result) == 0
 
 
@@ -41,7 +42,7 @@ def test_validate_attachments_with_missing_type():
     raw = [
         {"path": "browser/shot.png", "caption": "Missing type"},
     ]
-    result = _validate_attachments(raw)
+    result = validate_attachments(raw)
     assert len(result) == 0
 
 
@@ -51,7 +52,7 @@ def test_validate_attachments_with_empty_strings():
         {"path": "browser/shot.png", "type": ""},
         {"path": "  ", "type": "image/png"},
     ]
-    result = _validate_attachments(raw)
+    result = validate_attachments(raw)
     assert len(result) == 0
 
 
@@ -63,30 +64,30 @@ def test_validate_attachments_filters_invalid_items():
         None,
         {"path": "valid2.png", "type": "image/png"},
     ]
-    result = _validate_attachments(raw)
+    result = validate_attachments(raw)
     assert len(result) == 2
     assert result[0]["path"] == "valid.png"
     assert result[1]["path"] == "valid2.png"
 
 
 def test_validate_attachments_with_null_input():
-    assert _validate_attachments(None) == []
+    assert validate_attachments(None) == []
 
 
 def test_validate_attachments_with_empty_array():
-    assert _validate_attachments([]) == []
+    assert validate_attachments([]) == []
 
 
 def test_validate_attachments_with_non_list():
-    assert _validate_attachments("not a list") == []
-    assert _validate_attachments({"path": "test.png"}) == []
+    assert validate_attachments("not a list") == []
+    assert validate_attachments({"path": "test.png"}) == []
 
 
 def test_validate_attachments_strips_whitespace():
     raw = [
         {"path": "  browser/shot.png  ", "type": "  image/png  ", "caption": "  Test  "},
     ]
-    result = _validate_attachments(raw)
+    result = validate_attachments(raw)
     assert len(result) == 1
     assert result[0]["path"] == "browser/shot.png"
     assert result[0]["type"] == "image/png"

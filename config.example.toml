@@ -80,6 +80,9 @@ base_url = ""
 #   model = "kimi-k2.7-code"
 # api_key = "YOUR_OPENCODE_GO_API_KEY"
 # base_url = "https://opencode.ai/zen/go/v1"
+# Go rejects requests without a session id (HTTP 400 MissingSessionID):
+# [providers.openai.headers]
+# x-opencode-session = "minibot"
 #
 # z.ai GLM Coding Plan (https://docs.z.ai/devpack) — Chat Completions, recommended
 # (documented function calling + streaming; the Responses variant below isn't
@@ -101,6 +104,9 @@ base_url = ""
 # either "https://opencode.ai/zen/v1" (PAYG) or "https://opencode.ai/zen/go/v1" (subscription).
 # api_key = "YOUR_OPENCODE_API_KEY"
 # base_url = "https://opencode.ai/zen/go/v1"
+# Go rejects requests without a session id (HTTP 400 MissingSessionID):
+# [providers.openai_responses.headers]
+# x-opencode-session = "minibot"
 #
 # z.ai GLM Coding Plan Responses endpoint (unconfirmed feature parity — see note above):
 # api_key = "YOUR_ZAI_API_KEY"
@@ -234,9 +240,6 @@ default_limit = 20
 max_limit = 100
 default_owner_id = "primary"
 
-# Optional async task tools.
-[tools.tasks]
-enabled = false
 
 # Optional RAG (Retrieval-Augmented Generation) via Qdrant.
 # Requires `tools.file_storage.enabled = true`, a running Qdrant instance,
@@ -477,18 +480,40 @@ preload_catalog = true
 # Recommended: create a ./skills directory and set paths to load only your own skills.
 # paths = ["./skills"]
 
-# Optional RabbitMQ consumer (requires extras: rabbitmq).
+# Optional async task system. Gates both the task consumer and the
+# spawn_task / cancel_task / list_tasks tools.
+[tasks]
+enabled = false
+# Queue backend: "rabbitmq" (see [rabbitmq] below) or "sqlite".
+backend = "rabbitmq"
+# Seconds to wait for a spawned worker process to return a result before it is terminated.
+worker_timeout_seconds = 60
+# Max subprocesses running simultaneously; excess tasks wait in the queue.
+max_concurrent_workers = 4
+
+# Queue storage used when tasks.backend = "sqlite". No external broker required.
+[tasks.sqlite]
+sqlite_url = "sqlite+aiosqlite:///./data/tasks.db"
+# How often the consumer checks for queued tasks.
+poll_interval_seconds = 5
+# A task whose lease expires without finishing becomes claimable again. Must exceed
+# tasks.worker_timeout_seconds, or a still-running task can be leased and run twice.
+lease_timeout_seconds = 300
+# Max tasks leased per poll cycle.
+batch_size = 4
+# Queue-level redeliveries before a task is marked failed. Distinct from the in-process
+# provider rate-limit retry handled by the task manager.
+max_attempts = 3
+# How long completed rows are kept before being purged.
+done_retention_seconds = 86400
+
+# Broker connection for tasks.backend = "rabbitmq" (requires extras: rabbitmq).
 # Each message body must be a JSON object with at least a "text" field.
 # Optional fields: "user_id" (int), "chat_id" (int).
 # Example body: {"text": "summarise this report", "user_id": 1, "chat_id": 1}
 [rabbitmq]
-enabled = false
 broker_url = "amqp://guest:guest@minibot-rabbitmq:5672/"
 queue_name = "minibot.tasks.worker"
 exchange_name = "minibot.tasks"
 # Max messages delivered to the consumer before acknowledgement.
 prefetch_count = 1
-# Seconds to wait for a spawned worker process to return a result before it is terminated.
-worker_timeout_seconds = 60
-# Max subprocesses running simultaneously; excess messages wait in the queue.
-max_concurrent_workers = 4

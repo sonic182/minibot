@@ -14,6 +14,7 @@ from minibot.app.event_bus import EventBus
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_registry import SkillRegistry
 from minibot.core.memory import KeyValueMemory, MemoryBackend
+from minibot.core.tasks import TaskProducer
 from minibot.llm.services.tool_executor import canonical_tool_name
 from minibot.llm.tools.agent_delegate import AgentDelegateTool
 from minibot.llm.tools.apply_patch import ApplyPatchTool
@@ -54,6 +55,7 @@ class ToolAssemblyContext:
     skill_registry: SkillRegistry | None
     llm_factory: LLMClientFactory | None
     task_manager: TaskManager | None
+    task_producer: TaskProducer | None
     managed_storage: LocalFileStorage | None
     environment_prompt_fragment: str
 
@@ -84,6 +86,7 @@ def build_enabled_tools(
     llm_factory: LLMClientFactory | None = None,
     skill_registry: SkillRegistry | None = None,
     task_manager: TaskManager | None = None,
+    task_producer: TaskProducer | None = None,
 ) -> list[ToolBinding]:
     context = ToolAssemblyContext(
         settings=settings,
@@ -95,6 +98,7 @@ def build_enabled_tools(
         skill_registry=skill_registry,
         llm_factory=llm_factory,
         task_manager=task_manager,
+        task_producer=task_producer,
         managed_storage=_build_managed_storage(settings) if settings.tools.file_storage.enabled else None,
         environment_prompt_fragment=build_environment_prompt_fragment(settings),
     )
@@ -229,13 +233,14 @@ def _build_skill_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> 
 
 
 def _build_task_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
-    if context.task_manager is None:
+    if context.task_manager is None or context.task_producer is None:
         return []
     from minibot.llm.tools.tasks import TaskTools
 
     return TaskTools(
-        rabbitmq_config=context.settings.rabbitmq,
+        producer=context.task_producer,
         task_manager=context.task_manager,
+        agent_registry=context.agent_registry,
     ).bindings()
 
 
@@ -278,7 +283,7 @@ def _scheduler_enabled(settings: Settings) -> bool:
 
 
 def _tasks_enabled(settings: Settings) -> bool:
-    return _tool_enabled(settings, "tasks") and settings.rabbitmq.enabled
+    return settings.tasks.enabled
 
 
 _OPTIONAL_FEATURES: tuple[ToolFeature, ...] = (

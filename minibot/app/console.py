@@ -57,8 +57,15 @@ async def run(
         extra=log_extra,
     )
     console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
+    # Without this the console offers spawn_task but nothing ever consumes the queued rows.
+    from minibot.app.daemon import build_task_service
+
+    task_service = build_task_service(settings, event_bus) if settings is not None else None
     await dispatcher.start()
     await console_service.start()
+    if task_service is not None:
+        _log_info(logger, "starting task consumer", extra={"component": f"tasks.{settings.tasks.backend}"})
+        await task_service.start()
 
     try:
         if once is not None:
@@ -103,6 +110,8 @@ async def run(
                 console=console,
             )
     finally:
+        if task_service is not None:
+            await task_service.stop()
         await console_service.stop()
         await dispatcher.stop()
 

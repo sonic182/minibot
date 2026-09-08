@@ -27,6 +27,7 @@ def test_wizard_picks_the_state_mode_the_provider_can_actually_use(
     expected_mode: str,
 ) -> None:
     written: dict[tuple[str, ...], Any] = {}
+    removed: set[tuple[str, ...]] = set()
 
     monkeypatch.setattr(configurator, "_current_llm_target", lambda _: target)
     monkeypatch.setattr(configurator, "_ask_llm_target", lambda _: target)
@@ -34,12 +35,21 @@ def test_wizard_picks_the_state_mode_the_provider_can_actually_use(
     monkeypatch.setattr(configurator, "_ask_secret", lambda *_, **__: "key")
     monkeypatch.setattr(configurator, "_ask_model", lambda *_, **__: "some-model")
     monkeypatch.setattr(configurator, "_set_value", lambda _doc, path, value: written.__setitem__(path, value))
+    monkeypatch.setattr(configurator, "_unset_value", lambda _doc, path: removed.add(path))
 
     configurator._configure_llm(object(), configurator.Settings())
 
     assert written[("llm", "provider")] == expected_provider
     assert written[("llm", "main_responses_state_mode")] == expected_mode
     assert written[("llm", "agent_responses_state_mode")] == expected_mode
+
+    # OpenCode Go rejects requests without a session id; every other target must not carry a stale one.
+    session_header = ("providers", expected_provider, "headers", "x-opencode-session")
+    if target == "opencode_go":
+        assert written[session_header] == "minibot"
+    else:
+        assert session_header not in written
+        assert session_header in removed
 
 
 def test_wizard_makes_enabled_skills_visible_to_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
