@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-08
+
 ### Added
 
 - SQLite task backend, selected with `[tasks].backend = "sqlite"`: a durable local queue with leasing,
@@ -443,6 +445,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
+[0.7.0]: https://github.com/sonic182/minibot/compare/0.6.0..0.7.0
 [0.6.0]: https://github.com/sonic182/minibot/compare/0.5.0..0.6.0
 [0.5.0]: https://github.com/sonic182/minibot/compare/0.4.0..0.5.0
 [0.4.0]: https://github.com/sonic182/minibot/compare/0.3.0..0.4.0
