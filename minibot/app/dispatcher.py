@@ -29,6 +29,21 @@ from minibot.llm.tools.factory import build_enabled_tools
 from minibot.shared.utils import humanize_token_count, summarize_items
 
 
+def _token_trace_log_fields(token_trace: object) -> dict[str, object]:
+    """Log-friendly view of a response's token trace, shared by both handler paths."""
+    if not isinstance(token_trace, dict):
+        return {"turn_total_tokens": None, "session_total_tokens": None, "compaction_performed": None}
+    return {
+        "turn_total_tokens": humanize_token_count(token_trace["turn_total_tokens"])
+        if isinstance(token_trace.get("turn_total_tokens"), int)
+        else None,
+        "session_total_tokens": humanize_token_count(token_trace["session_total_tokens"])
+        if isinstance(token_trace.get("session_total_tokens"), int)
+        else None,
+        "compaction_performed": token_trace.get("compaction_performed"),
+    }
+
+
 class Dispatcher:
     def __init__(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus
@@ -192,15 +207,7 @@ class Dispatcher:
                     "should_reply": should_reply,
                     "llm_provider": response.metadata.get("llm_provider"),
                     "llm_model": response.metadata.get("llm_model"),
-                    "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
-                    if isinstance(token_trace, dict) and isinstance(token_trace.get("turn_total_tokens"), int)
-                    else None,
-                    "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
-                    if isinstance(token_trace, dict) and isinstance(token_trace.get("session_total_tokens"), int)
-                    else None,
-                    "compaction_performed": token_trace.get("compaction_performed")
-                    if isinstance(token_trace, dict)
-                    else None,
+                    **_token_trace_log_fields(token_trace),
                 },
             )
             response_updates = response.metadata.get("response_updates")
@@ -294,15 +301,7 @@ class Dispatcher:
                     "text": repaired.text,
                     "should_reply": should_reply,
                     "attempt": event.attempt,
-                    "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
-                    if isinstance(token_trace, dict) and isinstance(token_trace.get("turn_total_tokens"), int)
-                    else None,
-                    "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
-                    if isinstance(token_trace, dict) and isinstance(token_trace.get("session_total_tokens"), int)
-                    else None,
-                    "compaction_performed": token_trace.get("compaction_performed")
-                    if isinstance(token_trace, dict)
-                    else None,
+                    **_token_trace_log_fields(token_trace),
                 },
             )
             if not should_reply:

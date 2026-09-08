@@ -26,6 +26,30 @@ def _empty_extension_registry() -> ExtensionRegistry:
     return ExtensionRegistry([], logging.getLogger("test.extensions"))
 
 
+def _patch_container(
+    monkeypatch: pytest.MonkeyPatch,
+    dispatcher_module,
+    handler_cls: type,
+    *,
+    pending_store: object | None = None,
+) -> None:
+    """Stub every AppContainer getter Dispatcher.__init__ reaches for."""
+    store = pending_store if pending_store is not None else _FakePendingTurnStore()
+    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", handler_cls)
+    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
+    container = dispatcher_module.AppContainer
+    monkeypatch.setattr(container, "get_settings", lambda: _FakeSettings())
+    monkeypatch.setattr(container, "get_scheduled_prompt_service", lambda: None)
+    monkeypatch.setattr(container, "get_memory_backend", lambda: object())
+    monkeypatch.setattr(container, "get_kv_memory_backend", lambda: None)
+    monkeypatch.setattr(container, "get_llm_client", lambda: object())
+    monkeypatch.setattr(container, "get_agent_registry", lambda: AgentRegistry([]))
+    monkeypatch.setattr(container, "get_skill_registry", lambda: SkillRegistry([]))
+    monkeypatch.setattr(container, "get_llm_factory", lambda: object())
+    monkeypatch.setattr(container, "get_pending_turn_store", lambda: store)
+    monkeypatch.setattr(container, "get_extensions", _empty_extension_registry)
+
+
 class _FakePendingTurnStore:
     def __init__(self) -> None:
         self.marked: list[str] = []
@@ -141,18 +165,7 @@ async def test_dispatcher_publishes_outbound_reply(monkeypatch: pytest.MonkeyPat
                 channel="telegram", chat_id=1, text=f"ok:{event.message.text}", metadata={"should_reply": True}
             )
 
-    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
-    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
+    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -184,18 +197,7 @@ async def test_dispatcher_skips_outbound_when_handler_marks_silent(monkeypatch: 
                 metadata={"should_reply": False},
             )
 
-    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
-    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
+    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -227,18 +229,7 @@ async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
             del kwargs
             raise RuntimeError("provider timeout")
 
-    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
-    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
+    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -287,18 +278,7 @@ async def test_dispatcher_marks_and_clears_pending_turn_on_success(monkeypatch: 
             )
 
     pending_store = _FakePendingTurnStore()
-    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
-    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: pending_store)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
+    _patch_container(monkeypatch, dispatcher_module, _StubHandler, pending_store=pending_store)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -329,18 +309,7 @@ async def test_dispatcher_clears_pending_turn_after_handler_exception(monkeypatc
             raise RuntimeError("provider exploded")
 
     pending_store = _FakePendingTurnStore()
-    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
-    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: pending_store)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
+    _patch_container(monkeypatch, dispatcher_module, _StubHandler, pending_store=pending_store)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -377,18 +346,7 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
                 },
             )
 
-    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
-    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
+    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -427,18 +385,7 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
                 metadata={"should_reply": True, "llm_provider": "openai", "llm_model": "gpt-4o-mini"},
             )
 
-    monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", _StubHandler)
-    monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_scheduled_prompt_service", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_memory_backend", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_kv_memory_backend", lambda: None)
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_client", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_agent_registry", lambda: AgentRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
-    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
+    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
 
     bus = EventBus()
     subscription = bus.subscribe(types=(TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent, OutboundEvent))
