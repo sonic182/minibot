@@ -1,16 +1,17 @@
 services:
-  minibot-rabbitmq:
-    image: rabbitmq:4.2-management
-    container_name: minibot-rabbit
-    restart: unless-stopped
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+  # Only needed with [tasks].backend = "rabbitmq" in config.toml; sqlite is the default and needs no broker.
+  # minibot-rabbitmq:
+  #   image: rabbitmq:4.2-management
+  #   container_name: minibot-rabbit
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5672:5672"
+  #     - "15672:15672"
+  #   healthcheck:
+  #     test: ["CMD", "rabbitmq-diagnostics", "ping"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
 
   minibot-qdrant:
     image: qdrant/qdrant:latest
@@ -27,8 +28,8 @@ services:
     container_name: minibot
     restart: unless-stopped
     depends_on:
-      minibot-rabbitmq:
-        condition: service_healthy
+      # minibot-rabbitmq:
+      #   condition: service_healthy
       minibot-qdrant:
         condition: service_started
     init: true

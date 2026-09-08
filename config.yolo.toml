@@ -285,7 +285,7 @@ max_results = 7
 
 [tasks]
 enabled = true
-backend = "rabbitmq"
+backend = "sqlite"
 worker_timeout_seconds = 300
 max_concurrent_workers = 4
 

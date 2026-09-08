@@ -173,6 +173,9 @@ def _configure_tools(document: Any, settings: Settings) -> None:
         selected.add("files")
     for name, tool_path in _TOOLS.items():
         _set_value(document, (*tool_path, "enabled"), name in selected)
+    if "tasks" in selected:
+        backend = _ask_single_select("Task queue backend", ("sqlite", "rabbitmq"), settings.tasks.backend)
+        _set_value(document, ("tasks", "backend"), backend)
     # Skills the model cannot see are skills it will not use; see SkillsToolConfig.
     if "skills" in selected:
         _set_value(document, ("tools", "skills", "preload_catalog"), True)
