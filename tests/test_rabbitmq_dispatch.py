@@ -12,18 +12,15 @@ from minibot.app.event_bus import EventBus
 
 def _make_config() -> RabbitMQConsumerConfig:
     return RabbitMQConsumerConfig(
-        enabled=True,
         broker_url="amqp://guest:guest@localhost/",
         queue_name="test.worker",
         exchange_name="test.exchange",
         prefetch_count=1,
-        worker_timeout_seconds=5,
-        max_concurrent_workers=4,
     )
 
 
 def _make_service(task_manager=None) -> RabbitMQConsumerService:
-    return RabbitMQConsumerService(_make_config(), EventBus(), task_manager)
+    return RabbitMQConsumerService(_make_config(), EventBus(), task_manager, 4)
 
 
 def _make_message(body: bytes) -> MagicMock:

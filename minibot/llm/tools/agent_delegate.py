@@ -13,7 +13,7 @@ from minibot.adapters.config.schema import ToolOutputSpillConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app.agent_policies import filter_tools_for_agent, strip_reserved_delegation_tools
 from minibot.app.agent_registry import AgentRegistry
-from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.agent_runtime import AgentRuntime, RuntimeResult
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
@@ -25,7 +25,7 @@ from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.schema_utils import strict_object, string_field
-from minibot.shared.utils import session_identifier
+from minibot.shared.utils import session_identifier, validate_attachments
 
 
 @dataclass(frozen=True)
@@ -159,37 +159,19 @@ class AgentDelegateTool:
         provider_name = llm_client.provider_name()
         model_name = llm_client.model_name()
         try:
-            started_at = time.monotonic()
-            self._logger.debug(
-                "delegated agent runtime attempt started",
-                extra={
-                    "agent": spec.name,
-                    "attempt": attempts,
-                    "provider": provider_name,
-                    "model": model_name,
-                    "tool_required": tool_required,
-                    "tool_count": len(scoped_tools),
-                    "timeout_seconds": runtime_limits.timeout_seconds,
-                    "prompt_cache_key_present": bool(prompt_cache_key),
-                },
-            )
-            generation = await runtime.run(
+            generation = await self._run_attempt(
+                runtime=runtime,
                 state=state,
-                tool_context=context,
+                context=context,
                 prompt_cache_key=prompt_cache_key,
-                initial_previous_response_id=previous_response_id,
-            )
-            self._logger.debug(
-                "delegated agent runtime attempt completed",
-                extra={
-                    "agent": spec.name,
-                    "attempt": attempts,
-                    "provider": provider_name,
-                    "model": model_name,
-                    "duration_ms": round((time.monotonic() - started_at) * 1000),
-                    "response_id": generation.response_id,
-                    "total_tokens": int(generation.total_tokens or 0),
-                },
+                previous_response_id=previous_response_id,
+                attempt=attempts,
+                spec=spec,
+                tool_required=tool_required,
+                scoped_tools=scoped_tools,
+                timeout_seconds=runtime_limits.timeout_seconds,
+                provider_name=provider_name,
+                model_name=model_name,
             )
             if use_previous_response_id:
                 previous_response_id = generation.response_id
@@ -214,39 +196,21 @@ class AgentDelegateTool:
                         "your final answer. Execute the necessary tool now, then return the result."
                     ),
                 )
-                started_at = time.monotonic()
-                self._logger.debug(
-                    "delegated agent runtime attempt started",
-                    extra={
-                        "agent": spec.name,
-                        "attempt": attempts,
-                        "provider": provider_name,
-                        "model": model_name,
-                        "tool_required": tool_required,
-                        "tool_count": len(scoped_tools),
-                        "timeout_seconds": runtime_limits.timeout_seconds,
-                        "prompt_cache_key_present": bool(prompt_cache_key),
-                        "retry_reason": "missing_tool_calls",
-                    },
-                )
                 active_state = retry_state
-                generation = await runtime.run(
+                generation = await self._run_attempt(
+                    runtime=runtime,
                     state=retry_state,
-                    tool_context=context,
+                    context=context,
                     prompt_cache_key=prompt_cache_key,
-                    initial_previous_response_id=previous_response_id,
-                )
-                self._logger.debug(
-                    "delegated agent runtime attempt completed",
-                    extra={
-                        "agent": spec.name,
-                        "attempt": attempts,
-                        "provider": provider_name,
-                        "model": model_name,
-                        "duration_ms": round((time.monotonic() - started_at) * 1000),
-                        "response_id": generation.response_id,
-                        "total_tokens": int(generation.total_tokens or 0),
-                    },
+                    previous_response_id=previous_response_id,
+                    attempt=attempts,
+                    spec=spec,
+                    tool_required=tool_required,
+                    scoped_tools=scoped_tools,
+                    timeout_seconds=runtime_limits.timeout_seconds,
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    retry_reason="missing_tool_calls",
                 )
                 if use_previous_response_id:
                     previous_response_id = generation.response_id
@@ -364,6 +328,57 @@ class AgentDelegateTool:
                 "delegation_attempts": attempts,
             }
 
+    async def _run_attempt(
+        self,
+        *,
+        runtime: AgentRuntime,
+        state: AgentState,
+        context: ToolContext,
+        prompt_cache_key: str | None,
+        previous_response_id: str | None,
+        attempt: int,
+        spec: AgentSpec,
+        tool_required: bool,
+        scoped_tools: list[ToolBinding],
+        timeout_seconds: int,
+        provider_name: str,
+        model_name: str,
+        retry_reason: str | None = None,
+    ) -> RuntimeResult:
+        started_at = time.monotonic()
+        start_extra = {
+            "agent": spec.name,
+            "attempt": attempt,
+            "provider": provider_name,
+            "model": model_name,
+            "tool_required": tool_required,
+            "tool_count": len(scoped_tools),
+            "timeout_seconds": timeout_seconds,
+            "prompt_cache_key_present": bool(prompt_cache_key),
+        }
+        if retry_reason is not None:
+            start_extra["retry_reason"] = retry_reason
+        self._logger.debug("delegated agent runtime attempt started", extra=start_extra)
+        generation = await runtime.run(
+            state=state,
+            tool_context=context,
+            prompt_cache_key=prompt_cache_key,
+            initial_previous_response_id=previous_response_id,
+        )
+        self._logger.debug(
+            "delegated agent runtime attempt completed",
+            extra={
+                "agent": spec.name,
+                "attempt": attempt,
+                "provider": provider_name,
+                "model": model_name,
+                "duration_ms": round((time.monotonic() - started_at) * 1000),
+                "response_id": generation.response_id,
+                "total_tokens": int(generation.total_tokens or 0),
+            },
+        )
+        return generation
+
     def _scoped_tools(self, spec: AgentSpec) -> list[ToolBinding]:
         scoped = strip_reserved_delegation_tools(filter_tools_for_agent(self._tools, spec))
         return apply_tool_output_spill(scoped, storage=self._managed_storage, config=self._spill_config)
@@ -433,30 +448,9 @@ def _partial_transcript(state: AgentState) -> str:
     return "\n".join(lines[-_PARTIAL_MESSAGE_LIMIT:])
 
 
-def _validate_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw_attachments, list):
-        return []
-    validated: list[dict[str, Any]] = []
-    for item in raw_attachments:
-        if not isinstance(item, dict):
-            continue
-        path = item.get("path")
-        file_type = item.get("type")
-        if not isinstance(path, str) or not path.strip():
-            continue
-        if not isinstance(file_type, str) or not file_type.strip():
-            continue
-        attachment: dict[str, Any] = {"path": path.strip(), "type": file_type.strip()}
-        caption = item.get("caption")
-        if isinstance(caption, str) and caption.strip():
-            attachment["caption"] = caption.strip()
-        validated.append(attachment)
-    return validated
-
-
 def _extract_outcome(payload: Any, pre_response_meta: dict[str, Any] | None) -> _DelegationOutcome:
     text = payload if isinstance(payload, str) else str(payload) if payload is not None else ""
-    attachments = _validate_attachments((pre_response_meta or {}).get("attachments"))
+    attachments = validate_attachments((pre_response_meta or {}).get("attachments"))
     valid = bool(text.strip()) if isinstance(payload, str) else payload is not None
     return _DelegationOutcome(
         text=text,

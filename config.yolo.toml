@@ -48,9 +48,16 @@ api_key = ""
 base_url = ""
 # OpenCode Zen/Go setup: see config.example.toml [providers.openai] / [providers.openai_responses]
 
+# OpenCode Go returns HTTP 400 MissingSessionID without this header; other endpoints ignore it.
+[providers.openai.headers]
+x-opencode-session = "minibot"
+
 [providers.openai_responses]
 api_key = ""
 base_url = ""
+
+[providers.openai_responses.headers]
+x-opencode-session = "minibot"
 
 [providers.openrouter]
 api_key = ""
@@ -103,9 +110,6 @@ default_limit = 20
 max_limit = 100
 default_owner_id = "primary"
 
-# Optional async task tools.
-[tools.tasks]
-enabled = true
 
 [tools.http_client]
 enabled = true
@@ -279,11 +283,23 @@ model = "cross-encoder/ms-marco-MiniLM-L2-v2"
 candidate_limit = 50
 max_results = 7
 
-[rabbitmq]
+[tasks]
 enabled = true
+backend = "rabbitmq"
+worker_timeout_seconds = 300
+max_concurrent_workers = 4
+
+[tasks.sqlite]
+sqlite_url = "sqlite+aiosqlite:///./data/tasks.db"
+poll_interval_seconds = 5
+# Must exceed tasks.worker_timeout_seconds or a running task can be leased twice.
+lease_timeout_seconds = 600
+batch_size = 4
+max_attempts = 3
+done_retention_seconds = 86400
+
+[rabbitmq]
 broker_url = "amqp://guest:guest@minibot-rabbitmq:5672/"
 queue_name = "minibot.tasks.worker"
 exchange_name = "minibot.tasks"
 prefetch_count = 1
-worker_timeout_seconds = 300
-max_concurrent_workers = 4

@@ -4,7 +4,9 @@ Use this when work can run asynchronously and the main agent should not block on
 
 Provide:
 - prompt: clear worker instruction.
-- agent_name: optional exact specialist agent name for asynchronous specialist execution.
+- agent_name: optional exact specialist agent name for asynchronous specialist execution. Must match a
+  registered agent's `name` exactly (check the specialist roster or fetch_agent_info first) — an unknown
+  name is rejected before the task is queued.
 - context_json: optional JSON object string the worker should receive as structured context.
 
 Each spawned task keeps the current channel/chat routing so its result returns to the same conversation as a later task_worker message.

@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- SQLite task backend, selected with `[tasks].backend = "sqlite"`: a durable local queue with leasing,
+  redelivery and retention, so async tasks no longer require running RabbitMQ. A task interrupted by a
+  crash resumes on its own once the lease expires — the broker path could not do that. Configured
+  under `[tasks.sqlite]`; `docker-compose.yml`'s RabbitMQ service is now optional.
+- `core/tasks.py` defines a `TaskProducer` seam with two implementations, so `llm/tools/tasks.py` no
+  longer imports `aio_pika`. The task tools now work without the `rabbitmq` extra installed.
+- `lease_rows()` in `adapters/sqlalchemy_utils.py`, shared by the scheduler store and the new task
+  store instead of duplicating the claim loop. Its conditional-`UPDATE` rowcount check is what makes a
+  lease exclusive between concurrent leasers.
+- `[tasks]` validator: on the sqlite backend `sqlite.lease_timeout_seconds` must exceed
+  `worker_timeout_seconds`, otherwise a still-running task's lease expires and a second worker picks
+  up the same row, running it twice and replying twice.
+
+### Changed
+
+- **Breaking, and silent.** Task settings moved from `[tools.tasks]` + `[rabbitmq]` into a single
+  top-level `[tasks]` section (`enabled`, `backend`, `worker_timeout_seconds`,
+  `max_concurrent_workers`), mirroring how `[scheduler.prompts]` already gates both its service and
+  its tools. `[rabbitmq]` keeps only broker fields. Because only `Settings` sets `extra="forbid"`, a
+  stale `[tools.tasks]` / `[rabbitmq].enabled` is **ignored rather than rejected** — and with no
+  `[tasks]` section `enabled` defaults to `false`, so an unmigrated config boots clean with the task
+  system silently switched off. Add `[tasks]` when upgrading.
+- `adapters/tasks/worker.py` reads `settings.tasks.worker_timeout_seconds` instead of reaching into
+  `settings.rabbitmq` — the worker is backend-agnostic and would otherwise have read the wrong field
+  under the sqlite backend.
+- `aiopipe` moved out of the `rabbitmq` extra into the core dependencies; it is the generic worker's
+  IPC, used by both backends.
+
+### Fixed
+
+- `minibot console` never started a task consumer, so `spawn_task` there enqueued rows that nothing
+  would ever run. It now builds the same consumer the daemon does.
+
 ## [0.6.0] - 2026-09-06
 
 ### Added

@@ -5,13 +5,13 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, and_, delete, func, or_, select, text, update
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, delete, func, select, text, update
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from minibot.adapters.config.schema import ScheduledPromptsConfig
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, lease_rows, resolve_sqlite_storage_path
 from minibot.core.jobs import (
     PromptRecurrence,
     PromptRole,
@@ -137,58 +137,17 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
         limit: int,
         lease_timeout_seconds: int,
     ) -> Sequence[ScheduledPrompt]:
-        lease_deadline = now + timedelta(seconds=lease_timeout_seconds)
         async with self._session_factory() as session:
-            stmt = (
-                select(ScheduledPromptModel)
-                .where(ScheduledPromptModel.run_at <= now)
-                .where(
-                    or_(
-                        ScheduledPromptModel.status == ScheduledPromptStatus.PENDING.value,
-                        and_(
-                            ScheduledPromptModel.status == ScheduledPromptStatus.LEASED.value,
-                            or_(
-                                ScheduledPromptModel.lease_expires_at.is_(None),
-                                ScheduledPromptModel.lease_expires_at <= now,
-                            ),
-                        ),
-                    )
-                )
-                .order_by(ScheduledPromptModel.run_at)
-                .limit(limit * 4)
+            records = await lease_rows(
+                session,
+                ScheduledPromptModel,
+                now=now,
+                limit=limit,
+                lease_deadline=now + timedelta(seconds=lease_timeout_seconds),
+                order_by=ScheduledPromptModel.run_at,
+                extra_where=ScheduledPromptModel.run_at <= now,
             )
-            result = await session.execute(stmt)
-            candidates = list(result.scalars().all())
-            leased: list[ScheduledPrompt] = []
-            for record in candidates:
-                if len(leased) >= limit:
-                    break
-                update_stmt = (
-                    update(ScheduledPromptModel)
-                    .where(ScheduledPromptModel.id == record.id)
-                    .where(
-                        or_(
-                            ScheduledPromptModel.status == ScheduledPromptStatus.PENDING.value,
-                            and_(
-                                ScheduledPromptModel.status == ScheduledPromptStatus.LEASED.value,
-                                or_(
-                                    ScheduledPromptModel.lease_expires_at.is_(None),
-                                    ScheduledPromptModel.lease_expires_at <= now,
-                                ),
-                            ),
-                        )
-                    )
-                    .values(
-                        status=ScheduledPromptStatus.LEASED.value,
-                        lease_expires_at=lease_deadline,
-                        updated_at=now,
-                    )
-                )
-                result = await session.execute(update_stmt.execution_options(synchronize_session=False))
-                rowcount = getattr(result, "rowcount", 0)
-                if rowcount:
-                    await session.refresh(record)
-                    leased.append(self._to_domain(record))
+            leased = [self._to_domain(record) for record in records]
             await session.commit()
             return leased
 

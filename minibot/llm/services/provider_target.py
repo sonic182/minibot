@@ -19,6 +19,10 @@ def infer_provider_from_base_url(base_url: str | None) -> str | None:
     host = (parsed.hostname or "").lower().strip(".")
     if not host:
         return None
+    if host == "opencode.ai" or host.endswith(".opencode.ai"):
+        # models.dev catalogs the Go subscription and Zen pay-as-you-go tiers
+        # separately even though they share a host; only the path tells them apart.
+        return "opencode-go" if "/zen/go" in parsed.path.lower() else "opencode"
     for suffix, provider_key in _BASE_URL_PROVIDER_ALIAS.items():
         if host == suffix or host.endswith(f".{suffix}"):
             return provider_key

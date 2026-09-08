@@ -12,6 +12,7 @@ from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.adapters.memory.pending_turns import PendingTurnStore
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
+from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
@@ -20,6 +21,7 @@ from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_async
 from minibot.core.memory import KeyValueMemory, MemoryBackend
+from minibot.core.tasks import TaskProducer
 from minibot.llm.provider_factory import LLMClient
 
 if TYPE_CHECKING:
@@ -40,6 +42,8 @@ class AppContainer:
     _prompt_store: SQLAlchemyScheduledPromptStore | None = None
     _prompt_service: ScheduledPromptService | None = None
     _task_manager: TaskManager | None = None
+    _task_store: SQLiteTaskStore | None = None
+    _task_producer: TaskProducer | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -50,15 +54,28 @@ class AppContainer:
         cls._validate_rag_token_config(cls._settings, cls._logger)
         agent_specs = load_agent_specs(cls._settings.orchestration.directory)
         cls._event_bus = EventBus()
-        if cls._settings.rabbitmq.enabled:
+        if cls._settings.tasks.enabled:
             from minibot.adapters.tasks.manager import TaskManager
 
             cls._task_manager = TaskManager(
                 event_bus=cls._event_bus,
-                worker_timeout_seconds=cls._settings.rabbitmq.worker_timeout_seconds,
+                worker_timeout_seconds=cls._settings.tasks.worker_timeout_seconds,
             )
         else:
             cls._task_manager = None
+        cls._task_store = None
+        cls._task_producer = None
+        if cls._settings.tasks.enabled:
+            if cls._settings.tasks.backend == "sqlite":
+                from minibot.adapters.tasks.sqlite_store import SQLiteTaskProducer
+
+                cls._task_store = SQLiteTaskStore(cls._settings.tasks.sqlite)
+                cls._task_producer = SQLiteTaskProducer(cls._task_store)
+            else:
+                # Deferred so a sqlite-only install never needs the rabbitmq extra.
+                from minibot.adapters.messaging.rabbitmq.producer import RabbitMQTaskProducer
+
+                cls._task_producer = RabbitMQTaskProducer(cls._settings.rabbitmq)
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
         cls._pending_turn_store = PendingTurnStore(cls._settings.memory)
         if cls._settings.tools.kv_memory.enabled:
@@ -153,6 +170,14 @@ class AppContainer:
         return cls._task_manager
 
     @classmethod
+    def get_task_store(cls) -> SQLiteTaskStore | None:
+        return cls._task_store
+
+    @classmethod
+    def get_task_producer(cls) -> TaskProducer | None:
+        return cls._task_producer
+
+    @classmethod
     def get_telegram_config(cls) -> TelegramChannelConfig:
         return cls.get_settings().channels.get("telegram")  # type: ignore[return-value]
 
@@ -165,6 +190,8 @@ class AppContainer:
             await cls._initialize_backend(cls._kv_memory_backend)
         if cls._prompt_store is not None:
             await cls._initialize_backend(cls._prompt_store)
+        if cls._task_store is not None:
+            await cls._initialize_backend(cls._task_store)
         await cls._initialize_qdrant_if_enabled()
 
     @classmethod

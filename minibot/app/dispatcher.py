@@ -43,6 +43,7 @@ class Dispatcher:
             llm_factory,
             skill_registry=skill_registry,
             task_manager=AppContainer.get_task_manager(),
+            task_producer=AppContainer.get_task_producer(),
         )
         main_agent_tools_view = main_agent_tool_view(
             tools=tools,

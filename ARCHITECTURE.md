@@ -104,7 +104,8 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── messaging/
 │   │   │   ├── console/
 │   │   │   │   └── service.py
-│   │   │   ├── rabbitmq/          (optional RabbitMQ channel adapter)
+│   │   │   ├── rabbitmq/          (optional RabbitMQ task backend)
+│   │   │   │   ├── producer.py
 │   │   │   │   └── service.py
 │   │   │   └── telegram/
 │   │   │       ├── authorization.py
@@ -118,6 +119,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   │   └── sqlalchemy_prompt_store.py
 │   │   └── tasks/
 │   │       ├── manager.py
+│   │       ├── sqlite_store.py   (SQLite queue store + producer)
 │   │       └── worker.py
 │   ├── llm/
 │   │   ├── provider_factory.py
@@ -361,7 +363,8 @@ Current notes:
   - `adapters/logging/setup.py` configures structured logfmt-friendly logging.
 - Messaging:
   - `adapters/messaging/console/service.py` handles local console I/O with EventBus publish/subscribe semantics.
-  - `adapters/messaging/rabbitmq/service.py` (optional) consumes messages from RabbitMQ exchanges and dispatches them to the event bus; also required by the tasks subsystem.
+  - `adapters/messaging/rabbitmq/service.py` (optional) consumes queued tasks from a RabbitMQ exchange and hands them to the task manager; used only when `tasks.backend = "rabbitmq"`.
+  - `adapters/messaging/rabbitmq/producer.py` (optional) publishes tasks to that exchange.
   - `adapters/messaging/telegram/service.py` handles Telegram inbound text/media extraction, coordinates authorization, media collection, and outbound sending.
   - `adapters/messaging/telegram/authorization.py` validates senders against configured chat/user allow-lists.
   - `adapters/messaging/telegram/incoming_media_collector.py` downloads and stores media attachments from Telegram messages.
@@ -372,6 +375,7 @@ Current notes:
 - Tasks:
   - `adapters/tasks/manager.py` manages subprocess-based task workers with lifecycle management and IPC.
   - `adapters/tasks/worker.py` initializes and runs a worker agent in a subprocess with filtered tools.
+  - `adapters/tasks/sqlite_store.py` durable SQLite queue (leasing, retries, retention) plus the matching producer.
 - Files:
   - `adapters/files/local_storage.py` handles managed workspace path-safe list/write/read operations.
 - MCP:
@@ -444,11 +448,50 @@ Skill definitions live in a configurable directory (analogous to `agents/` for a
 
 ## Tasks (Subprocess Workers)
 
-The tasks subsystem runs agent work in isolated subprocesses. It depends on RabbitMQ (optional) for task dispatch and result delivery.
+The tasks subsystem runs agent work in isolated subprocesses. `spawn_task` enqueues a task; a consumer
+leases it and hands it to `TaskManager`, which forks a worker process and streams the result back over
+an `aiopipe` duplex. Everything except the queue itself is backend-agnostic.
 
+- `core/tasks.py`: `TaskRequest`/`TaskRecord`/`TaskStatus` and the `TaskProducer` protocol — the seam
+  the two backends implement.
 - `adapters/tasks/manager.py`: manages worker subprocess lifecycle and IPC.
 - `adapters/tasks/worker.py`: initializes a worker agent with filtered tools inside a subprocess.
-- `llm/tools/tasks.py`: LLM-facing `spawn_task`, `cancel_task`, `list_tasks` tools.
+- `llm/tools/tasks.py`: LLM-facing `spawn_task`, `cancel_task`, `list_tasks` tools. Broker-free — it
+  talks only to a `TaskProducer`, so the tools work without the `rabbitmq` extra installed.
+
+### Choosing a backend
+
+`[tasks].backend` selects one; only one consumer ever runs. `AppContainer` builds the matching
+store/producer pair, and `daemon.build_task_service()` builds the matching consumer.
+
+| | `sqlite` | `rabbitmq` |
+|---|---|---|
+| Infrastructure | none — a local DB file | a broker to run and operate |
+| Extra required | none | `poetry install --extras rabbitmq` |
+| Dispatch | poll (`poll_interval_seconds`, default 5s) | push, near-instant |
+| Crash recovery | lease expires, the row is re-leased and re-run | redelivery of the unacked message |
+| Scope | one host | shareable across processes/hosts |
+| Config | `[tasks.sqlite]` | `[rabbitmq]` |
+
+Default to `sqlite`: no broker, and a task interrupted by a crash actually resumes. Choose `rabbitmq`
+when a broker already exists or work must be spread across hosts.
+
+### SQLite backend
+
+- `adapters/tasks/sqlite_store.py`: the `tasks` table plus `SQLiteTaskProducer`. Rows move
+  `pending → leased → done`, or `→ failed` once `max_attempts` redeliveries are exhausted (a
+  dead-letter row keeping `last_error`).
+- `app/task_consumer_service.py`: the poll loop. It leases only
+  `min(batch_size, max_concurrent_workers - len(task_manager.active()))` rows, so nothing sits queued
+  behind a full semaphore while its lease ticks toward expiry — that would re-lease and run a task
+  twice. It also purges completed rows older than `done_retention_seconds`, at most hourly.
+- Leasing is shared with the scheduler through `lease_rows()` in `adapters/sqlalchemy_utils.py`: it
+  over-fetches candidates, then claims each with a conditional `UPDATE` and keeps it only when the
+  rowcount is non-zero. That check is what makes a claim exclusive between concurrent leasers.
+
+`tasks.sqlite.lease_timeout_seconds` must exceed `tasks.worker_timeout_seconds` — a validator enforces
+it. A shorter lease expires while the worker is still running, and the next poll hands the same row to
+a second worker.
 
 ## MCP Tool Bridge Flow
 

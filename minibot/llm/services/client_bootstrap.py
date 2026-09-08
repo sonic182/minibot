@@ -43,7 +43,14 @@ def create_provider(config: LLMMConfig) -> tuple[Any, str]:
     if normalized_base_url:
         provider_kwargs["base_url"] = normalized_base_url
 
-    return provider_cls(**provider_kwargs), provider_name
+    provider = provider_cls(**provider_kwargs)
+    extra_headers = dict(getattr(config, "extra_headers", None) or {})
+    if extra_headers:
+        # llm_async has no constructor hook for extra headers; overriding the accessor covers
+        # every call path (acomplete, streaming and provider.request) in one place.
+        default_headers = provider._default_headers
+        provider._default_headers = lambda: {**default_headers(), **extra_headers}
+    return provider, provider_name
 
 
 def load_system_prompt(config: LLMMConfig) -> str:

@@ -72,6 +72,7 @@ class LLMClientFactory:
         if provider_cfg is not None:
             config.api_key = provider_cfg.api_key
             config.base_url = provider_cfg.base_url
+            config.extra_headers = {**config.extra_headers, **provider_cfg.headers}
         return config
 
     @staticmethod
@@ -106,6 +107,7 @@ class LLMClientFactory:
             config.retry_delay_seconds,
             config.api_key,
             config.base_url,
+            json.dumps(config.extra_headers, sort_keys=True, separators=(",", ":")),
             openrouter_provider_payload,
             xai_payload,
         )

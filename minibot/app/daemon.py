@@ -49,22 +49,15 @@ async def run() -> None:
     if telegram_config.enabled and telegram_config.bot_token:
         telegram_service = TelegramService(telegram_config, event_bus, settings.tools.file_storage)
 
-    rabbitmq_config = settings.rabbitmq
-    rabbitmq_service = None
-    if rabbitmq_config.enabled:
-        rabbitmq_service_cls = RabbitMQConsumerService
-        if rabbitmq_service_cls is None:
-            from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService as rabbitmq_service_cls
-        task_manager = AppContainer.get_task_manager()
-        rabbitmq_service = rabbitmq_service_cls(rabbitmq_config, event_bus, task_manager)
+    task_service = build_task_service(settings, event_bus)
 
     services: list[Any] = [dispatcher]
     if telegram_service is not None:
         services.append(telegram_service)
     if scheduler_service is not None:
         services.append(scheduler_service)
-    if rabbitmq_service is not None:
-        services.append(rabbitmq_service)
+    if task_service is not None:
+        services.append(task_service)
 
     async with _graceful_shutdown(services, logger) as stop_event:
         logger.info("starting dispatcher", extra={"component": "dispatcher"})
@@ -76,11 +69,32 @@ async def run() -> None:
         if telegram_service is not None:
             logger.info("starting telegram service", extra={"component": "telegram"})
             await telegram_service.start()
-        if rabbitmq_service is not None:
-            logger.info("starting rabbitmq consumer", extra={"component": "rabbitmq"})
-            await rabbitmq_service.start()
+        if task_service is not None:
+            logger.info("starting task consumer", extra={"component": f"tasks.{settings.tasks.backend}"})
+            await task_service.start()
         logger.info("daemon running in foreground", extra={"component": "daemon"})
         await stop_event.wait()
+
+
+def build_task_service(settings: Any, event_bus: EventBus) -> Any:
+    """Pick the task consumer matching ``tasks.backend``; only one ever runs."""
+    if not settings.tasks.enabled:
+        return None
+    task_manager = AppContainer.get_task_manager()
+    if settings.tasks.backend == "sqlite":
+        from minibot.app.task_consumer_service import SQLiteTaskConsumerService
+
+        return SQLiteTaskConsumerService(
+            store=AppContainer.get_task_store(),
+            task_manager=task_manager,
+            config=settings.tasks.sqlite,
+            max_concurrent_workers=settings.tasks.max_concurrent_workers,
+        )
+    rabbitmq_service_cls = RabbitMQConsumerService
+    if rabbitmq_service_cls is None:
+        from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService as rabbitmq_service_cls
+
+    return rabbitmq_service_cls(settings.rabbitmq, event_bus, task_manager, settings.tasks.max_concurrent_workers)
 
 
 async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:
