@@ -32,7 +32,8 @@ Reference `ARCHITECTURE.md` for full design context; each stage below narrows th
 - [x] Add MCP tool bridge and expanded tool ecosystem (filesystem, python execution, browser-related MCP integration).
 
 ## Stage 3 – Advanced Persistence & Additional Channels
-- [ ] Generalize scheduled-prompt persistence into broader task execution storage and optional Redis/queue integrations; support migrations/alembic.
+- [x] Generalize scheduled-prompt persistence into broader task execution storage with SQLite (default) and RabbitMQ dispatch backends.
+- [ ] Support schema migrations/alembic (still plain `create_all` on SQLAlchemy models).
 - [ ] Implement additional messaging ports (e.g., Slack) reusing the channel abstraction and event bus.
 - [ ] Provide HTTP/WebSocket control plane + optional dashboard for monitoring tasks, jobs, and channel metrics.
 - [ ] Broaden test matrix with integration tests (e.g., using testcontainers) and contract tests per channel adapter.
@@ -40,4 +41,5 @@ Reference `ARCHITECTURE.md` for full design context; each stage below narrows th
 ## Stage 4 – Tooling Ecosystem & Observability
 - [ ] Expand task strategies to include external tools (web fetch, code exec, workflow orchestration) with permissioning.
 - [ ] Add metrics/tracing pipeline (OpenTelemetry/Prometheus) and alerting hooks.
-- [ ] Release automation + deployment manifests (Docker/systemd/k8s) and soak tests for multi-instance topologies.
+- [x] Docker image + `docker-compose.yml` + `minibot.service` systemd unit.
+- [ ] k8s manifests, release automation, and soak tests for multi-instance topologies.
