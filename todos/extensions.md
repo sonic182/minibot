@@ -1,7 +1,13 @@
 # Minibot Extensions
 
-Status: **Phases 1 & 2 done.** Phase 3 (open the config) is next — it is the hard
-blocker for everything after it.
+Status: **Phases 1-5 done.** Extensions work end-to-end: config-declared modules
+contribute tools and subscribe to events, proven by `examples/minibot_ext_demo.py`.
+Phase 6 (services and channels) is next; Phase 7 migrates bundled extensions.
+
+Note on §2 below: it is the original analysis, kept as the record of why this was
+done. Some of it now describes fixed problems — §2.4's back-pressure blocker and
+§2.6's `${ENV_VAR}` example in particular. See the phase notes for what actually
+shipped.
 
 ---
 
@@ -256,55 +262,72 @@ Useful on its own for observability. No extension machinery needed.
       Delegated agents share the same binding list, so their tool calls already emit
       events; only the delegation span itself is missing.
 
-### Phase 3 — Open the config
+### Phase 3 — Open the config ✅ done
 
 The hard blocker. Nothing below works without it.
 
-- [ ] `minibot/adapters/config/schema.py` — add `ExtensionsConfig` with
+- [x] `minibot/adapters/config/schema.py` — `ExtensionsConfig` with
       `modules: list[str]` and `config: dict[str, dict[str, Any]]`
-- [ ] `minibot/adapters/config/schema.py:768` — add `extensions: ExtensionsConfig`
-      to `Settings`; keep top-level `extra="forbid"`
-- [ ] Verify `${ENV_VAR}` placeholder substitution reaches inside
-      `[extensions.config.*]` (`minibot/adapters/config/loader.py`)
-- [ ] `config.example.toml` — document an `[extensions]` section
-- [ ] Test: an unknown top-level section still errors; an unknown key under
-      `[extensions.config.foo]` is accepted
+- [x] `extensions: ExtensionsConfig` added to `Settings`; top-level
+      `extra="forbid"` kept. Arbitrary keys are allowed only *inside*
+      `[extensions.config.<name>]`, because that field's value type is
+      `dict[str, Any]` — no normalizer change was needed.
+- [x] `config.example.toml` — documented `[extensions]`
+- [x] Test: unknown top-level section still raises; arbitrary keys under
+      `[extensions.config.foo]` accepted
+- [ ] ~~Verify `${ENV_VAR}` substitution reaches `[extensions.config.*]`~~ —
+      **dropped, false premise.** No such substitution exists anywhere:
+      `_load_file_data` (`schema.py:39`) is a bare `tomllib.load`, and `${` appears
+      zero times in `config.toml`, `config.example.toml`, `config.yolo.toml`.
+      `CLAUDE.md` claims this feature; correcting that doc is separate work.
 
-### Phase 4 — Extension loading + tools
+### Phase 4 — Extension loading + tools ✅ done
 
-Smallest useful extension surface: events + tools.
+- [x] **Lossy subscriptions** (moved here from Phase 1): `subscribe(types=..., lossy=True)`
+      uses `put_nowait` and drops with a warning on `QueueFull`. Core subscribers keep
+      blocking semantics; only extensions are lossy.
+- [x] **Shutdown deadlock fixed while doing it.** `EventSubscription.close()` and
+      `EventBus.stop()` both used a blocking `put` for the stop sentinel, which
+      deadlocks whenever the queue is full — exactly the state a stalled subscriber
+      leaves it in. Now `_put_sentinel()` evicts to make room; pending events no
+      longer matter at shutdown. Caught by `pytest-timeout`, added this phase.
+- [x] `minibot/app/extensions.py` (new) — `ExtensionContext`, `ExtensionRegistry`,
+      `load_extensions()`
+- [x] Loader error handling — **decided: fail loudly.** A missing module, a module
+      with no `register`, or a `register()` that raises stops startup with the module
+      named. A handler that raises at runtime is logged and its subscription survives.
+- [x] `ExtensionContext` surface — **decided: curated, not the raw container.**
+      `name`, `config`, `settings`, `event_bus`, `logger`, `on()`, `add_tool()`,
+      `add_service()`.
+- [x] `app_container.py` — extensions load at the **end** of `configure()`, after
+      every backend exists; `get_extensions()` added
+- [x] `factory.py` — `build_enabled_tools(extension_tools=...)`, merged before
+      `_ensure_unique_tool_names` so collisions with built-ins raise. Extension tools
+      inherit `ToolCallEvent` emission and output spill for free.
+- [x] `dispatcher.py` — passes `AppContainer.get_extensions().tools`
+- [x] **Both** entrypoints start/stop the registry — `daemon.py` and `console.py`
+- [x] Tests: `tests/test_extensions.py` (load + event delivery + all three failure
+      modes), plus `pytest-timeout` added as a dev dep and applied to the bus/
+      dispatcher/extension tests that can hang
 
-- [ ] **Lossy subscriptions** (moved here from Phase 1 — this is where the first
-      consumer lives): `subscribe(types=..., lossy=True)` uses `put_nowait` and
-      drops with a warning on `QueueFull`, so a slow third-party subscriber cannot
-      stall the bus. Core subscribers keep blocking semantics.
-- [ ] `minibot/app/extensions.py` (new, ~50 LOC) — `ExtensionContext`,
-      `load_extensions(settings, event_bus, ...)`: import each module, call
-      `register(ctx)`, collect tools / subscribers / services
-- [ ] Loader error handling — a broken extension logs and is skipped, or fails
-      startup loudly. **Decide which** (recommend: fail loudly at startup, since a
-      silently-missing tool is worse than a crash on boot)
-- [ ] `minibot/adapters/container/app_container.py:52` — load extensions after
-      settings and event bus exist; add `get_extensions()`
-- [ ] `minibot/llm/tools/factory.py:79` — accept extension bindings; extend
-      `tools` before `_ensure_unique_tool_names` (`factory.py:107`) so name
-      collisions raise, which is already the right behavior
-- [ ] `minibot/app/dispatcher.py:37` — pass extension bindings into
-      `build_enabled_tools`
-- [ ] `minibot/app/daemon.py:52` — start extension event subscribers as tasks;
-      stop them in `_graceful_shutdown` (`daemon.py:122`)
-- [ ] Test: a fixture extension contributing one tool and one event handler is
-      loaded, its tool reaches the LLM, its handler receives a `TurnCompletedEvent`
+### Phase 5 — Prove the API ✅ done
 
-### Phase 5 — Prove the API
-
-If this is awkward, the API is wrong. Do this before moving anything else.
-
-- [ ] Move `calculator` (190 LOC, zero deps) to load through the extension path
-- [ ] Keep it enabled by default — bundled extensions must not require config
-      changes from existing users
-- [ ] Confirm no regression in `tests/test_tool_factory.py`
-- [ ] Revise `ExtensionContext` based on what hurt
+- [x] **Decided: a real example extension, not the `calculator` migration.**
+      Moving a bundled tool would have forced a `_BUNDLED_MODULES` auto-load list
+      this phase *and* kept `[tools.calculator]` in `ToolsConfig` anyway (or every
+      existing `config.toml` breaks on `extra="forbid"`). That decision belongs in
+      Phase 7, once, for all bundled tools.
+- [x] `examples/minibot_ext_demo.py` — contributes a `demo_greet` tool, subscribes to
+      `TurnCompletedEvent`, and reads its own config slice
+- [x] `examples/README.md` — how to write one, and the sharp edges
+- [x] Proven end-to-end with `console --once`:
+      `PYTHONPATH=examples minibot console --once "...greet Ana..."` →
+      `extension loaded ... tools=['demo_greet'] subscriptions=1`, assistant replied
+      `hola, Ana!` (config slice reached the tool), and the subscriber logged
+      `demo extension saw a completed turn`. Failure mode confirmed separately: a
+      non-existent module aborts startup naming it.
+- [ ] Revise `ExtensionContext` based on what hurt — nothing did; revisit after a
+      second real extension exists.
 
 ### Phase 6 — Services and channels
 
@@ -340,11 +363,15 @@ return stops justifying the churn.
 
 ## 4. Open questions
 
-- [ ] Extension load failure: fail startup vs. skip and log? (leaning: fail loudly)
+- [x] Extension load failure — **fail startup loudly**, with the module named. A
+      silently absent tool leaves the agent quietly unable to do something, which is
+      much harder to diagnose than a boot crash. A handler that raises at *runtime*
+      is logged and its subscription survives.
+- [x] `ExtensionContext` surface — **curated**, not the raw `AppContainer`: `name`,
+      `config`, `settings`, `event_bus`, `logger`, `on()`, `add_tool()`,
+      `add_service()`. The container is a class-level singleton; handing it over
+      would make every field public API.
 - [ ] Do extension event handlers get to *modify* anything, or observe only?
-      (leaning: observe only for v1 — mutation means ordering and conflict rules)
-- [ ] Should `ExtensionContext` expose `AppContainer` directly, or only a curated
-      set of getters? (leaning: curated — the container is a class-level singleton
-      and handing it over makes every field public API)
+      (still observe-only, as shipped — mutation means ordering and conflict rules)
 - [ ] Do bundled extensions ship in the `minibot` package or as
       `minibot_contrib.*`? (defer until Phase 7 actually starts)

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from dataclasses import dataclass
 
 import pytest
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.extensions import ExtensionRegistry
 from minibot.app.skill_registry import SkillRegistry
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import (
@@ -18,6 +20,10 @@ from minibot.core.events import (
     TurnFailedEvent,
     TurnStartedEvent,
 )
+
+
+def _empty_extension_registry() -> ExtensionRegistry:
+    return ExtensionRegistry([], logging.getLogger("test.extensions"))
 
 
 class _FakePendingTurnStore:
@@ -146,6 +152,7 @@ async def test_dispatcher_publishes_outbound_reply(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -188,6 +195,7 @@ async def test_dispatcher_skips_outbound_when_handler_marks_silent(monkeypatch: 
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -230,6 +238,7 @@ async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -289,6 +298,7 @@ async def test_dispatcher_marks_and_clears_pending_turn_on_success(monkeypatch: 
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: pending_store)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -330,6 +340,7 @@ async def test_dispatcher_clears_pending_turn_after_handler_exception(monkeypatc
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: pending_store)
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -377,6 +388,7 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
 
     bus = EventBus()
     subscription = bus.subscribe()
@@ -396,6 +408,7 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
     await dispatcher.stop()
 
 
+@pytest.mark.timeout(15)
 @pytest.mark.asyncio
 async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.app import dispatcher as dispatcher_module
@@ -425,9 +438,10 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_skill_registry", lambda: SkillRegistry([]))
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_llm_factory", lambda: object())
     monkeypatch.setattr(dispatcher_module.AppContainer, "get_pending_turn_store", lambda: _FakePendingTurnStore())
+    monkeypatch.setattr(dispatcher_module.AppContainer, "get_extensions", _empty_extension_registry)
 
     bus = EventBus()
-    subscription = bus.subscribe(types=(TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent))
+    subscription = bus.subscribe(types=(TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent, OutboundEvent))
     dispatcher = dispatcher_module.Dispatcher(bus)
     await dispatcher.start()
 
@@ -441,7 +455,7 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
     async def _drain() -> None:
         async for event in subscription:
             collected.append(event)
-            if len(collected) == 4:
+            if len(collected) == 5:
                 break
 
     with contextlib.suppress(TimeoutError):
@@ -459,6 +473,10 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
     assert len(failed) == 1
     assert failed[0].turn_id == bad_event.event_id
     assert "handler exploded" in failed[0].error
+
+    # "completed" must mean delivered: the reply goes out before the turn is reported done.
+    kinds = [type(e).__name__ for e in collected]
+    assert kinds.index("OutboundEvent") < kinds.index("TurnCompletedEvent")
 
     await subscription.close()
     await dispatcher.stop()

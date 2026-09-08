@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from minibot.app.extensions import ExtensionRegistry
+
 
 @pytest.mark.asyncio
 async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -14,6 +16,10 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
     calls: dict[str, object] = {}
 
     class _FakeContainer:
+        @classmethod
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+
         @classmethod
         def configure(cls, config_path=None) -> None:
             calls["config_path"] = config_path
@@ -100,6 +106,10 @@ async def test_console_run_once_reads_stdin_when_dash(monkeypatch: pytest.Monkey
 
     class _FakeContainer:
         @classmethod
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+
+        @classmethod
         def configure(cls, config_path=None) -> None:
             del config_path
 
@@ -180,6 +190,10 @@ async def test_console_repl_requires_double_ctrl_c_to_exit(monkeypatch: pytest.M
             printed.append(str(value))
 
     class _FakeContainer:
+        @classmethod
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+
         @classmethod
         def configure(cls, config_path=None) -> None:
             del config_path
@@ -271,6 +285,10 @@ async def test_console_run_once_timeout_shows_warning_without_crash(monkeypatch:
             printed.append(str(value))
 
     class _FakeContainer:
+        @classmethod
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+
         @classmethod
         def configure(cls, config_path=None) -> None:
             del config_path

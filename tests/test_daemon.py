@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 import pytest
+
+from minibot.app.extensions import ExtensionRegistry
 
 
 class _Probe:
@@ -110,6 +113,10 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
             return None
 
         @classmethod
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+
+        @classmethod
         def get_logger(cls) -> _Logger:
             return _Logger()
 
@@ -210,6 +217,10 @@ async def test_run_skips_telegram_when_disabled(monkeypatch: pytest.MonkeyPatch)
         @classmethod
         def configure(cls) -> None:
             return None
+
+        @classmethod
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
 
         @classmethod
         def get_logger(cls) -> _Logger:

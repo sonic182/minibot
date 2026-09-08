@@ -54,7 +54,11 @@ class TurnStartedEvent(BaseEvent):
 
 
 class TurnCompletedEvent(BaseEvent):
-    """Emitted once a turn produced a response, whether or not it is sent to the user."""
+    """Emitted once a turn is fully done.
+
+    Fires after the response has been dispatched to the channel, or deliberately
+    suppressed when ``should_reply`` is false — never before.
+    """
 
     event_type: str = "turn_completed"
     turn_id: str

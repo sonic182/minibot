@@ -16,6 +16,7 @@ from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.extensions import ExtensionRegistry, load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.app.skill_registry import SkillRegistry
@@ -44,6 +45,7 @@ class AppContainer:
     _task_manager: TaskManager | None = None
     _task_store: SQLiteTaskStore | None = None
     _task_producer: TaskProducer | None = None
+    _extensions: ExtensionRegistry | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -102,6 +104,8 @@ class AppContainer:
         else:
             cls._prompt_store = None
             cls._prompt_service = None
+        # Last: extensions may reach for any backend above via the context they receive.
+        cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger)
 
     @classmethod
     def get_settings(cls) -> Settings:
@@ -176,6 +180,12 @@ class AppContainer:
     @classmethod
     def get_task_producer(cls) -> TaskProducer | None:
         return cls._task_producer
+
+    @classmethod
+    def get_extensions(cls) -> ExtensionRegistry:
+        if cls._extensions is None:
+            raise RuntimeError("container not configured")
+        return cls._extensions
 
     @classmethod
     def get_telegram_config(cls) -> TelegramChannelConfig:

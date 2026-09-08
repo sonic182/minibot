@@ -51,7 +51,11 @@ async def run() -> None:
 
     task_service = build_task_service(settings, event_bus)
 
+    extensions = AppContainer.get_extensions()
+
     services: list[Any] = [dispatcher]
+    if not extensions.is_empty():
+        services.append(extensions)
     if telegram_service is not None:
         services.append(telegram_service)
     if scheduler_service is not None:
@@ -62,6 +66,9 @@ async def run() -> None:
     async with _graceful_shutdown(services, logger) as stop_event:
         logger.info("starting dispatcher", extra={"component": "dispatcher"})
         await dispatcher.start()
+        if not extensions.is_empty():
+            logger.info("starting extensions", extra={"component": "extensions", "extensions": extensions.names()})
+            await extensions.start()
         await _replay_pending_turns(event_bus, logger)
         if scheduler_service is not None:
             logger.info("starting scheduler service", extra={"component": "scheduler"})

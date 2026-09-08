@@ -61,7 +61,11 @@ async def run(
     from minibot.app.daemon import build_task_service
 
     task_service = build_task_service(settings, event_bus) if settings is not None else None
+    extensions = AppContainer.get_extensions()
     await dispatcher.start()
+    if not extensions.is_empty():
+        _log_info(logger, "starting extensions", extra={"extensions": extensions.names()})
+        await extensions.start()
     await console_service.start()
     if task_service is not None:
         _log_info(logger, "starting task consumer", extra={"component": f"tasks.{settings.tasks.backend}"})
@@ -113,6 +117,8 @@ async def run(
         if task_service is not None:
             await task_service.stop()
         await console_service.stop()
+        if not extensions.is_empty():
+            await extensions.stop()
         await dispatcher.stop()
 
 

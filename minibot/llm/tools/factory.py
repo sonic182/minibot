@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -88,6 +88,7 @@ def build_enabled_tools(
     skill_registry: SkillRegistry | None = None,
     task_manager: TaskManager | None = None,
     task_producer: TaskProducer | None = None,
+    extension_tools: Sequence[ToolBinding] | None = None,
 ) -> list[ToolBinding]:
     context = ToolAssemblyContext(
         settings=settings,
@@ -108,6 +109,9 @@ def build_enabled_tools(
         if not feature.enabled_in_config(settings):
             continue
         tools.extend(feature.builder(context, tools))
+    if extension_tools:
+        # Before the uniqueness check on purpose: colliding with a built-in must raise.
+        tools.extend(extension_tools)
     _ensure_unique_tool_names(tools)
     return apply_tool_call_events(
         apply_tool_output_spill(

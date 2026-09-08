@@ -51,6 +51,7 @@ class Dispatcher:
             skill_registry=skill_registry,
             task_manager=AppContainer.get_task_manager(),
             task_producer=AppContainer.get_task_producer(),
+            extension_tools=AppContainer.get_extensions().tools,
         )
         main_agent_tools_view = main_agent_tool_view(
             tools=tools,
@@ -202,20 +203,6 @@ class Dispatcher:
                     else None,
                 },
             )
-            await self._event_bus.publish(
-                TurnCompletedEvent(
-                    turn_id=event.event_id,
-                    channel=response.channel,
-                    chat_id=response.chat_id,
-                    should_reply=bool(should_reply),
-                    llm_provider=response.metadata.get("llm_provider"),
-                    llm_model=response.metadata.get("llm_model"),
-                    token_trace=token_trace if isinstance(token_trace, dict) else {},
-                    compaction_performed=token_trace.get("compaction_performed")
-                    if isinstance(token_trace, dict)
-                    else None,
-                )
-            )
             response_updates = response.metadata.get("response_updates")
             if isinstance(response_updates, list):
                 for update in response_updates:
@@ -239,26 +226,40 @@ class Dispatcher:
                             )
                         )
                     )
-            if not should_reply:
-                self._logger.info("skipping user reply as instructed", extra={"event_id": event.event_id})
-                return
-            await self._event_bus.publish(OutboundEvent(response=response))
-            compaction_updates = response.metadata.get("compaction_updates")
-            if isinstance(compaction_updates, list):
-                for update in compaction_updates:
-                    if not isinstance(update, str) or not update.strip():
-                        continue
-                    await self._event_bus.publish(
-                        OutboundEvent(
-                            response=ChannelResponse(
-                                channel=response.channel,
-                                chat_id=response.chat_id,
-                                text=update,
-                                render=RenderableResponse(kind="text", text=update),
-                                metadata={"should_reply": True, "compaction_update": True},
+            if should_reply:
+                await self._event_bus.publish(OutboundEvent(response=response))
+                compaction_updates = response.metadata.get("compaction_updates")
+                if isinstance(compaction_updates, list):
+                    for update in compaction_updates:
+                        if not isinstance(update, str) or not update.strip():
+                            continue
+                        await self._event_bus.publish(
+                            OutboundEvent(
+                                response=ChannelResponse(
+                                    channel=response.channel,
+                                    chat_id=response.chat_id,
+                                    text=update,
+                                    render=RenderableResponse(kind="text", text=update),
+                                    metadata={"should_reply": True, "compaction_update": True},
+                                )
                             )
                         )
-                    )
+            else:
+                self._logger.info("skipping user reply as instructed", extra={"event_id": event.event_id})
+            await self._event_bus.publish(
+                TurnCompletedEvent(
+                    turn_id=event.event_id,
+                    channel=response.channel,
+                    chat_id=response.chat_id,
+                    should_reply=bool(should_reply),
+                    llm_provider=response.metadata.get("llm_provider"),
+                    llm_model=response.metadata.get("llm_model"),
+                    token_trace=token_trace if isinstance(token_trace, dict) else {},
+                    compaction_performed=token_trace.get("compaction_performed")
+                    if isinstance(token_trace, dict)
+                    else None,
+                )
+            )
         except Exception as exc:
             self._logger.exception("failed to handle message", exc_info=exc)
             with contextlib.suppress(Exception):

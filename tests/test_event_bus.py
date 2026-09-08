@@ -39,6 +39,7 @@ async def test_event_bus_dispatches_to_subscribers() -> None:
     await sub2.close()
 
 
+@pytest.mark.timeout(5)
 @pytest.mark.asyncio
 async def test_event_bus_respects_subscription_type_filter() -> None:
     bus = EventBus()
@@ -61,3 +62,21 @@ async def test_event_bus_respects_subscription_type_filter() -> None:
 
     await filtered.close()
     await unfiltered.close()
+
+
+@pytest.mark.timeout(5)
+@pytest.mark.asyncio
+async def test_lossy_subscriber_drops_instead_of_blocking_when_queue_is_full() -> None:
+    bus = EventBus(maxsize=1)
+    lossy = bus.subscribe(lossy=True)
+
+    def _event(text: str) -> OutboundEvent:
+        return OutboundEvent(response=ChannelResponse(channel="console", chat_id=1, text=text))
+
+    await bus.publish(_event("one"))
+    # Queue is now full. A blocking subscriber would hang here; a lossy one drops.
+    await asyncio.wait_for(bus.publish(_event("two")), timeout=0.5)
+
+    assert lossy._queue.qsize() == 1
+
+    await lossy.close()
