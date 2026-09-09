@@ -27,17 +27,14 @@ from minibot.llm.services.models import (
 )
 from minibot.llm.services.provider_capabilities import build_provider_capability_hints, build_provider_native_tools
 from minibot.llm.services.provider_registry import is_responses_provider_instance
+from minibot.llm.services.provider_target import resolve_target_provider
 from minibot.llm.services.request_builder import (
     RequestContext,
     build_complete_once_call_kwargs,
 )
 from minibot.llm.services.schema_policy import prepare_tool_specs
 from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
-from minibot.llm.services.usage_parser import (
-    extract_response_id,
-    extract_total_tokens,
-    extract_usage_from_response,
-)
+from minibot.llm.services.usage_parser import extract_response_id, extract_usage_from_response
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.retries import AsyncRetriesService
 from minibot.shared.utils import humanize_token_count
@@ -68,6 +65,10 @@ class LLMClient:
         self._provider_native_tools = build_provider_native_tools(config)
         self._provider_capability_hints = build_provider_capability_hints(config)
         self._is_responses_provider = is_responses_provider_instance(self._provider)
+        self._supports_responses_compaction = (
+            self._is_responses_provider
+            and resolve_target_provider(provider_name=config.provider, base_url=config.base_url) != "opencode-go"
+        )
         self._logger = logging.getLogger("minibot.llm")
 
     async def generate(
@@ -108,6 +109,9 @@ class LLMClient:
 
     def is_responses_provider(self) -> bool:
         return self._is_responses_provider
+
+    def supports_responses_compaction(self) -> bool:
+        return self._supports_responses_compaction
 
     def responses_state_mode(self) -> str:
         if self._responses_state_mode in {"full_messages", "previous_response_id"}:
@@ -166,7 +170,8 @@ class LLMClient:
         message = response.main_response
         if not message:
             raise RuntimeError("LLM did not return a completion")
-        usage_tokens = extract_total_tokens(response)
+        usage = extract_usage_from_response(response)
+        usage_tokens = usage.total_tokens
         self._logger.debug(
             "llm runtime completion step received",
             extra={
@@ -179,7 +184,8 @@ class LLMClient:
             message=message,
             response_id=extract_response_id(response),
             total_tokens=usage_tokens,
-            provider_tool_calls=extract_usage_from_response(response).provider_tool_calls,
+            input_tokens=usage.input_tokens,
+            provider_tool_calls=usage.provider_tool_calls,
         )
 
     async def execute_tool_calls_for_runtime(

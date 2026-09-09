@@ -166,6 +166,7 @@ async def test_complete_once_captures_total_tokens_from_usage(monkeypatch: pytes
 
     assert result.response_id == "resp-step"
     assert result.total_tokens == 8
+    assert result.input_tokens == 5
 
 
 @pytest.mark.asyncio
@@ -841,6 +842,20 @@ def test_media_support_modes() -> None:
     assert responses_client.media_input_mode() == "responses"
     assert claude_client.supports_media_inputs() is False
     assert claude_client.media_input_mode() == "none"
+
+
+def test_opencode_go_skips_responses_compaction() -> None:
+    client = LLMClient(
+        LLMMConfig(
+            provider="openai_responses",
+            api_key="secret",
+            base_url="https://opencode.ai/zen/go/v1",
+            model="gpt-5.6-luna",
+        )
+    )
+
+    assert client.is_responses_provider() is True
+    assert client.supports_responses_compaction() is False
 
 
 def test_provider_uses_configured_transport_timeouts_and_retry(monkeypatch: pytest.MonkeyPatch) -> None:

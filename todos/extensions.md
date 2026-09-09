@@ -1,6 +1,6 @@
 # Minibot Extensions
 
-Status: **Phases 1-6 done.** Extensions contribute tools, subscribe to events, and now
+Status: **Phases 1-6b done.** Extensions contribute tools, subscribe to events, and now
 carry a channel: Telegram runs as a bundled extension and `daemon.py` no longer knows it
 exists. Phase 7 migrates the rest.
 
@@ -381,20 +381,14 @@ added to the `build_enabled_tools` path only, and the worker's copy never saw th
 
 Documented as a known limit in `examples/README.md` for now.
 
-- [ ] `entrypoint="worker"` — the flag from Phase 6 already generalizes. The worker loads
-      extensions, takes `registry.tools`, and ignores subscriptions and services: it has no
-      bus to drive them and no lifecycle to hang them on
-- [ ] `ExtensionContext.event_bus` is typed `EventBus` and the worker has none
-      (`worker.py:184` already passes `event_bus=None` to `FileStorageTool`). Either hand it
-      a throwaway `EventBus()` — safe, `publish` with no subscribers is a no-op — or widen the
-      field to `EventBus | None`. Decide once; the field is public API
-- [ ] Document that an observe-only extension contributes nothing inside a worker, since
-      `registry.start()` is never called there
-- [ ] **Import cost:** loading extensions in the worker imports `_BUNDLED_MODULES`, which
-      imports aiogram into every forked worker even though Telegram's `register()` returns
-      early for a non-daemon entrypoint. Either make `_BUNDLED_MODULES` entrypoint-aware or
-      measure and accept it
-- [ ] Test: a tool contributed by an extension is callable from inside a spawned task
+- [x] `entrypoint="worker"` — the worker loads extensions, takes `registry.tools`, and
+      never starts the registry, so subscriptions and services do not run
+- [x] `ExtensionContext.event_bus` remains typed `EventBus`; the worker gives it a throwaway
+      instance, so publishing is safe and subscriptions remain undriven
+- [x] Documented the worker contract: tools work; observe-only extensions contribute nothing
+- [x] **Import cost:** bundled modules are entrypoint-aware, so Telegram/aiogram is imported
+      only by the daemon
+- [x] Test: a tool contributed by an extension is callable from the worker path
 - [ ] **Root cause, optional:** `_build_worker_tools` duplicating `build_enabled_tools` is
       why this drifted. Collapsing them is a bigger change than this phase and wants its own
       decision — the worker deliberately builds a narrower set (no delegation, no chat memory)

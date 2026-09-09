@@ -6,6 +6,7 @@ import pytest
 from llm_async.models import Tool
 
 from minibot.app.handlers.services.tool_audio_executor import ToolBindingAudioTranscriptionExecutor
+from minibot.core.agent_runtime import ToolResult
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
@@ -28,6 +29,26 @@ async def test_tool_audio_executor_returns_dict_payload() -> None:
 
     assert result["ok"] is True
     assert result["path"] == "uploads/temp/voice.ogg"
+
+
+@pytest.mark.asyncio
+async def test_tool_audio_executor_unwraps_tool_result() -> None:
+    async def _handler(payload: dict[str, Any], _context: ToolContext) -> ToolResult:
+        return ToolResult(content={"ok": True, "path": payload["path"], "text": "ok"})
+
+    binding = ToolBinding(
+        tool=Tool(name="transcribe_audio", description="", parameters={"type": "object"}),
+        handler=_handler,
+    )
+    executor = ToolBindingAudioTranscriptionExecutor(binding)
+
+    result = await executor.transcribe(
+        path="uploads/temp/voice.ogg",
+        context=ToolContext(owner_id="1"),
+        task="transcribe",
+    )
+
+    assert result == {"ok": True, "path": "uploads/temp/voice.ogg", "text": "ok"}
 
 
 @pytest.mark.asyncio

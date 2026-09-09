@@ -37,6 +37,16 @@ After:
 - Keep persistence or transport code in `minibot.adapters`.
 - Keep provider/tool-specific request handling in `minibot.llm`.
 
+## Thin bundled extension
+
+Before:
+- A bundled extension contains the channel/service implementation, starts it itself, or reaches into `AppContainer` for dependencies.
+
+After:
+- Keep the implementation in its adapter package.
+- Let `minibot.extensions.<name>.register(mb)` select config and add the existing service, tool, or subscription.
+- Gate channel-service construction on `mb.entrypoint == "daemon"`; `ExtensionRegistry` owns its lifecycle.
+
 ## Protect `shared`
 
 Before:

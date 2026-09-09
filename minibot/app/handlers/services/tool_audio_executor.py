@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from minibot.core.agent_runtime import ToolResult
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
@@ -32,6 +33,8 @@ class ToolBindingAudioTranscriptionExecutor:
         if language:
             payload["language"] = language
         result = await self._binding.handler(payload, context)
+        if isinstance(result, ToolResult):
+            result = result.content
         if isinstance(result, dict):
             return result
         return {"ok": False, "path": path, "error": "invalid transcription result type"}

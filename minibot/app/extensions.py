@@ -7,7 +7,7 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol, get_type_hints
+from typing import Any, Literal, Protocol, get_type_hints
 
 from llm_async.models import Tool
 from pydantic import BaseModel, ValidationError
@@ -20,10 +20,30 @@ from minibot.shared.errors import ToolInputError
 
 EventHandler = Callable[[Any], Awaitable[None]]
 ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
+type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
 
-# Bundled extensions load ahead of user modules. They cannot live in ``[extensions] modules``:
-# every existing config.toml would silently lose the channel it never had to opt into.
-_BUNDLED_MODULES = ("minibot.extensions.telegram",)
+
+def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
+    common = (
+        "minibot.extensions.integrations.rag",
+        "minibot.extensions.integrations.mcp",
+        "minibot.extensions.integrations.rabbitmq",
+        "minibot.extensions.services.scheduler",
+        "minibot.extensions.services.tasks",
+        "minibot.extensions.tools.execution",
+        "minibot.extensions.tools.media",
+        "minibot.extensions.tools.memory",
+        "minibot.extensions.tools.network",
+        "minibot.extensions.tools.utility",
+        "minibot.extensions.tools.workspace",
+    )
+    if entrypoint == "daemon":
+        return ("minibot.extensions.channels.telegram", *common)
+    if entrypoint == "console":
+        return common
+    # Workers retain their deliberately narrower assembly in adapters.tasks.worker.
+    # Only user-configured extensions are loaded there.
+    return ()
 
 
 class ExtensionService(Protocol):
@@ -39,8 +59,8 @@ class ExtensionContext:
     Deliberately narrow: the container is a class-level singleton, and passing it
     whole would make every one of its fields public API.
 
-    ``entrypoint`` is ``"daemon"`` or ``"console"``. Channel extensions must check it and
-    contribute nothing under ``"console"``: that entrypoint owns the only channel it runs.
+    ``entrypoint`` is ``"daemon"``, ``"console"``, or ``"worker"``. Channel extensions must
+    contribute nothing outside the daemon: those entrypoints do not drive channel services.
     """
 
     name: str
@@ -48,7 +68,7 @@ class ExtensionContext:
     settings: Settings
     event_bus: EventBus
     logger: logging.Logger
-    entrypoint: str = "daemon"
+    entrypoint: ExtensionEntrypoint = "daemon"
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
@@ -178,7 +198,7 @@ def load_extensions(
     settings: Settings,
     event_bus: EventBus,
     logger: logging.Logger | None = None,
-    entrypoint: str = "daemon",
+    entrypoint: ExtensionEntrypoint = "daemon",
 ) -> ExtensionRegistry:
     """Import and register the bundled extensions, then every ``[extensions] modules`` entry.
 
@@ -187,7 +207,7 @@ def load_extensions(
     """
     log = logger or logging.getLogger("minibot.extensions")
     contexts: list[ExtensionContext] = []
-    for name in (*_BUNDLED_MODULES, *settings.extensions.modules):
+    for name in (*_bundled_modules(entrypoint), *settings.extensions.modules):
         try:
             module = importlib.import_module(name)
         except Exception as exc:

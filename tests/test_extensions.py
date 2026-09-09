@@ -62,9 +62,10 @@ async def test_load_extensions_collects_tools_and_delivers_events(
     registry = load_extensions(settings, bus, logging.getLogger("test.extensions"))
 
     # Bundled extensions load first, so the user module is last rather than alone.
-    assert registry.names() == ["minibot.extensions.telegram", "ext_ok"]
-    assert [binding.tool.name for binding in registry.tools] == ["demo_tool"]
-    assert await registry.tools[0].handler({}, None) == {"ok": True, "greeting": "hola"}
+    assert registry.names()[0] == "minibot.extensions.channels.telegram"
+    assert registry.names()[-1] == "ext_ok"
+    binding = next(binding for binding in registry.tools if binding.tool.name == "demo_tool")
+    assert await binding.handler({}, None) == {"ok": True, "greeting": "hola"}
 
     await registry.start()
     # An event the extension did not subscribe to must not reach it.
@@ -77,6 +78,15 @@ async def test_load_extensions_collects_tools_and_delivers_events(
     await registry.stop()
 
     assert sys.modules["ext_ok"].seen_turns == ["turn-7"]
+
+
+def test_load_extensions_for_worker_skips_bundled_extensions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_module(tmp_path, monkeypatch, "ext_worker", "def register(mb):\n    pass\n")
+    settings = Settings.from_dict({"extensions": {"modules": ["ext_worker"]}})
+
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+
+    assert registry.names() == ["ext_worker"]
 
 
 def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -296,12 +306,13 @@ _VALID_BOT_TOKEN = "123456:AAHfakefakefakefakefakefakefakefake"
         ("daemon", {"enabled": True, "bot_token": ""}, 0),
         # Console owns the only channel it runs; a built-but-unstarted service stalls the bus.
         ("console", {"enabled": True, "bot_token": _VALID_BOT_TOKEN}, 0),
+        ("worker", {"enabled": True, "bot_token": _VALID_BOT_TOKEN}, 0),
     ],
 )
 def test_bundled_telegram_extension_registers_only_for_an_enabled_daemon(
     entrypoint: str, channel: dict[str, object], expected_services: int
 ) -> None:
-    from minibot.extensions.telegram import register
+    from minibot.extensions.channels.telegram import register
 
     settings = Settings.from_dict({"channels": {"telegram": channel}})
     context = ExtensionContext(

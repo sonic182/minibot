@@ -12,13 +12,7 @@ from minibot.app.dispatcher import Dispatcher
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage
 from minibot.core.events import MessageEvent
-from minibot.llm.tools.factory import configured_tool_labels
 from minibot.shared.utils import summarize_items
-
-try:
-    from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
-except ModuleNotFoundError:
-    RabbitMQConsumerService = None
 
 
 async def run() -> None:
@@ -26,34 +20,26 @@ async def run() -> None:
     await AppContainer.initialize_storage()
     logger = AppContainer.get_logger()
     settings = AppContainer.get_settings()
-    strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
-    enabled_tools = configured_tool_labels(settings)
-    tool_log_extra: dict[str, Any] = {"tools_enabled": enabled_tools or ["none"]}
-    if strip_logs:
-        tool_summary = summarize_items(enabled_tools)
-        tool_log_extra = {
-            "tools_enabled_count": tool_summary["count"],
-            "tools_enabled_preview": tool_summary["preview"],
-        }
-    logger.info(
-        "tool configuration loaded",
-        extra=tool_log_extra,
-    )
-    logger.info("booting minibot", extra={"component": "daemon"})
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
-    scheduler_service = AppContainer.get_scheduled_prompt_service()
-    task_service = build_task_service(settings, event_bus)
-
+    strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
+    enabled_tools = dispatcher.main_agent_tool_names or ["none"]
+    tool_summary = summarize_items(enabled_tools)
+    logger.info(
+        "tool configuration loaded",
+        extra={
+            "tools_enabled_count": tool_summary["count"],
+            "tools_enabled_preview": tool_summary["preview"],
+        },
+    )
+    if not strip_logs:
+        logger.debug("tools enabled", extra={"tools_enabled": enabled_tools})
+    logger.info("booting minibot", extra={"component": "daemon"})
     extensions = AppContainer.get_extensions()
 
     services: list[Any] = [dispatcher]
     if not extensions.is_empty():
         services.append(extensions)
-    if scheduler_service is not None:
-        services.append(scheduler_service)
-    if task_service is not None:
-        services.append(task_service)
 
     async with _graceful_shutdown(services, logger) as stop_event:
         logger.info("starting dispatcher", extra={"component": "dispatcher"})
@@ -62,35 +48,8 @@ async def run() -> None:
             logger.info("starting extensions", extra={"component": "extensions", "extensions": extensions.names()})
             await extensions.start()
         await _replay_pending_turns(event_bus, logger)
-        if scheduler_service is not None:
-            logger.info("starting scheduler service", extra={"component": "scheduler"})
-            await scheduler_service.start()
-        if task_service is not None:
-            logger.info("starting task consumer", extra={"component": f"tasks.{settings.tasks.backend}"})
-            await task_service.start()
         logger.info("daemon running in foreground", extra={"component": "daemon"})
         await stop_event.wait()
-
-
-def build_task_service(settings: Any, event_bus: EventBus) -> Any:
-    """Pick the task consumer matching ``tasks.backend``; only one ever runs."""
-    if not settings.tasks.enabled:
-        return None
-    task_manager = AppContainer.get_task_manager()
-    if settings.tasks.backend == "sqlite":
-        from minibot.app.task_consumer_service import SQLiteTaskConsumerService
-
-        return SQLiteTaskConsumerService(
-            store=AppContainer.get_task_store(),
-            task_manager=task_manager,
-            config=settings.tasks.sqlite,
-            max_concurrent_workers=settings.tasks.max_concurrent_workers,
-        )
-    rabbitmq_service_cls = RabbitMQConsumerService
-    if rabbitmq_service_cls is None:
-        from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService as rabbitmq_service_cls
-
-    return rabbitmq_service_cls(settings.rabbitmq, event_bus, task_manager, settings.tasks.max_concurrent_workers)
 
 
 async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:

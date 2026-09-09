@@ -3,30 +3,21 @@ from __future__ import annotations
 import inspect
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.logging.setup import configure_logging
-from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.adapters.memory.pending_turns import PendingTurnStore
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
-from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
-from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionRegistry, load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
-from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_async
-from minibot.core.memory import KeyValueMemory, MemoryBackend
-from minibot.core.tasks import TaskProducer
+from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
-
-if TYPE_CHECKING:
-    from minibot.adapters.tasks.manager import TaskManager
 
 
 class AppContainer:
@@ -35,16 +26,10 @@ class AppContainer:
     _event_bus: EventBus | None = None
     _memory_backend: MemoryBackend | None = None
     _pending_turn_store: PendingTurnStore | None = None
-    _kv_memory_backend: KeyValueMemory | None = None
     _llm_client: LLMClient | None = None
     _llm_factory: LLMClientFactory | None = None
     _agent_registry: AgentRegistry | None = None
     _skill_registry: SkillRegistry | None = None
-    _prompt_store: SQLAlchemyScheduledPromptStore | None = None
-    _prompt_service: ScheduledPromptService | None = None
-    _task_manager: TaskManager | None = None
-    _task_store: SQLiteTaskStore | None = None
-    _task_producer: TaskProducer | None = None
     _extensions: ExtensionRegistry | None = None
     _token_autoconfig_applied: bool = False
 
@@ -53,37 +38,10 @@ class AppContainer:
         cls._settings = load_settings(config_path)
         cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
-        cls._validate_rag_token_config(cls._settings, cls._logger)
         agent_specs = load_agent_specs(cls._settings.orchestration.directory)
         cls._event_bus = EventBus()
-        if cls._settings.tasks.enabled:
-            from minibot.adapters.tasks.manager import TaskManager
-
-            cls._task_manager = TaskManager(
-                event_bus=cls._event_bus,
-                worker_timeout_seconds=cls._settings.tasks.worker_timeout_seconds,
-            )
-        else:
-            cls._task_manager = None
-        cls._task_store = None
-        cls._task_producer = None
-        if cls._settings.tasks.enabled:
-            if cls._settings.tasks.backend == "sqlite":
-                from minibot.adapters.tasks.sqlite_store import SQLiteTaskProducer
-
-                cls._task_store = SQLiteTaskStore(cls._settings.tasks.sqlite)
-                cls._task_producer = SQLiteTaskProducer(cls._task_store)
-            else:
-                # Deferred so a sqlite-only install never needs the rabbitmq extra.
-                from minibot.adapters.messaging.rabbitmq.producer import RabbitMQTaskProducer
-
-                cls._task_producer = RabbitMQTaskProducer(cls._settings.rabbitmq)
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
         cls._pending_turn_store = PendingTurnStore(cls._settings.memory)
-        if cls._settings.tools.kv_memory.enabled:
-            cls._kv_memory_backend = SQLAlchemyKeyValueMemory(cls._settings.tools.kv_memory)
-        else:
-            cls._kv_memory_backend = None
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
         cls._agent_registry = AgentRegistry(agent_specs)
@@ -93,17 +51,6 @@ class AppContainer:
         else:
             cls._skill_registry = SkillRegistry([])
         cls._token_autoconfig_applied = False
-        prompts_config = cls._settings.scheduler.prompts
-        if prompts_config.enabled:
-            cls._prompt_store = SQLAlchemyScheduledPromptStore(prompts_config)
-            cls._prompt_service = ScheduledPromptService(
-                repository=cls._prompt_store,
-                event_bus=cls._event_bus,
-                config=prompts_config,
-            )
-        else:
-            cls._prompt_store = None
-            cls._prompt_service = None
         # Last, so an extension's register() sees a fully built container even though the
         # context handed to it exposes only settings, the bus and a logger.
         cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger, entrypoint)
@@ -139,10 +86,6 @@ class AppContainer:
         return cls._pending_turn_store
 
     @classmethod
-    def get_kv_memory_backend(cls) -> KeyValueMemory | None:
-        return cls._kv_memory_backend
-
-    @classmethod
     def get_llm_client(cls) -> LLMClient:
         if cls._llm_client is None:
             raise RuntimeError("LLM client not configured")
@@ -167,20 +110,29 @@ class AppContainer:
         return cls._skill_registry
 
     @classmethod
-    def get_scheduled_prompt_service(cls) -> ScheduledPromptService | None:
-        return cls._prompt_service
+    def get_scheduled_prompt_service(cls) -> None:
+        """Compatibility placeholder; scheduled prompts are a bundled extension."""
+        return None
 
     @classmethod
-    def get_task_manager(cls) -> TaskManager | None:
-        return cls._task_manager
+    def get_task_manager(cls) -> None:
+        """Compatibility placeholder; task backends are bundled extensions."""
+        return None
 
     @classmethod
-    def get_task_store(cls) -> SQLiteTaskStore | None:
-        return cls._task_store
+    def get_task_store(cls) -> None:
+        """Compatibility placeholder; task backends are bundled extensions."""
+        return None
 
     @classmethod
-    def get_task_producer(cls) -> TaskProducer | None:
-        return cls._task_producer
+    def get_task_producer(cls) -> None:
+        """Compatibility placeholder; task backends are bundled extensions."""
+        return None
+
+    @classmethod
+    def get_kv_memory_backend(cls) -> None:
+        """Compatibility placeholder; KV memory is a bundled extension."""
+        return None
 
     @classmethod
     def get_extensions(cls) -> ExtensionRegistry:
@@ -193,62 +145,18 @@ class AppContainer:
         await cls._apply_runtime_token_autoconfig_if_needed()
         await cls._initialize_backend(cls.get_memory_backend())
         await cls._initialize_backend(cls.get_pending_turn_store())
-        if cls._kv_memory_backend is not None:
-            await cls._initialize_backend(cls._kv_memory_backend)
-        if cls._prompt_store is not None:
-            await cls._initialize_backend(cls._prompt_store)
-        if cls._task_store is not None:
-            await cls._initialize_backend(cls._task_store)
-        await cls._initialize_qdrant_if_enabled()
-
-    @classmethod
-    async def _initialize_qdrant_if_enabled(cls) -> None:
-        settings = cls.get_settings()
-        if not settings.tools.rag.enabled:
-            return
-        if not settings.tools.file_storage.enabled:
-            raise ValueError("tools.rag.enabled requires tools.file_storage.enabled")
-        from minibot.adapters.qdrant.client import AsyncQdrantClient
-
-        cfg = settings.tools.rag
-        client = AsyncQdrantClient(url=cfg.qdrant_url)
-        vector_size = cfg.embedding.truncate_dim if cfg.embedding.truncate_dim is not None else cfg.embedding.dim
-        await client.ensure_collection(cfg.collection_name, vector_size)
-        await client.create_payload_index(cfg.collection_name, "document_id", field_schema="keyword")
-        await client.create_payload_index(cfg.collection_name, "user_id", field_schema="keyword")
-        await client.create_payload_index(cfg.collection_name, "agent_id", field_schema="keyword")
-        await client.create_payload_index(cfg.collection_name, "chat_id", field_schema="keyword")
-        await client.create_payload_index(cfg.collection_name, "filename", field_schema="keyword")
-        await client.create_payload_index(cfg.collection_name, "tags", field_schema="keyword")
-        await client.create_payload_index(cfg.collection_name, "categories", field_schema="keyword")
 
     @staticmethod
     def _validate_rag_token_config(settings: Settings, logger: logging.Logger) -> None:
-        cfg = settings.tools.rag
-        if not cfg.enabled:
+        """Validate RAG settings; runtime setup now belongs to the RAG extension."""
+        config = settings.tools.rag
+        if not config.enabled:
             return
-
-        if cfg.chunk_overlap_tokens >= cfg.chunk_size_tokens:
-            logger.error(
-                "invalid rag token chunk config",
-                extra={
-                    "chunk_size_tokens": cfg.chunk_size_tokens,
-                    "chunk_overlap_tokens": cfg.chunk_overlap_tokens,
-                    "embedding_model": cfg.embedding.model,
-                },
-            )
+        if config.chunk_overlap_tokens >= config.chunk_size_tokens:
+            logger.error("invalid rag token chunk config")
             raise ValueError("tools.rag.chunk_overlap_tokens must be less than tools.rag.chunk_size_tokens")
-
-        if cfg.chunk_size_tokens > cfg.embedding.max_sequence_tokens:
-            logger.error(
-                "invalid rag token chunk config",
-                extra={
-                    "chunk_size_tokens": cfg.chunk_size_tokens,
-                    "chunk_overlap_tokens": cfg.chunk_overlap_tokens,
-                    "embedding_max_sequence_tokens": cfg.embedding.max_sequence_tokens,
-                    "embedding_model": cfg.embedding.model,
-                },
-            )
+        if config.chunk_size_tokens > config.embedding.max_sequence_tokens:
+            logger.error("invalid rag token chunk config")
             raise ValueError("tools.rag.chunk_size_tokens must not exceed tools.rag.embedding.max_sequence_tokens")
 
     @classmethod

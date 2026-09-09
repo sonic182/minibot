@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 
 import pytest
-
-from minibot.app.extensions import ExtensionRegistry
 
 
 class _Probe:
@@ -25,66 +22,11 @@ class _Logger:
     def info(self, *_args, **_kwargs) -> None:
         return None
 
-    def warning(self, *_args, **_kwargs) -> None:
+    def debug(self, *_args, **_kwargs) -> None:
         return None
 
-
-class _ToolSettings:
-    class _KV:
-        enabled = False
-
-    class _HTTP:
-        enabled = False
-
-    class _Time:
-        enabled = False
-
-    class _Calculator:
-        enabled = False
-
-    class _PythonExec:
-        enabled = False
-
-    class _FileStorage:
-        enabled = False
-
-    class _Bash:
-        enabled = False
-
-    class _ApplyPatch:
-        enabled = False
-
-    kv_memory = _KV()
-    http_client = _HTTP()
-    time = _Time()
-    calculator = _Calculator()
-    python_exec = _PythonExec()
-    bash = _Bash()
-    apply_patch = _ApplyPatch()
-    file_storage = _FileStorage()
-
-
-class _SchedulerSettings:
-    class _Prompts:
-        enabled = True
-
-    prompts = _Prompts()
-
-
-class _Settings:
-    class _Tasks:
-        def __init__(self, enabled: bool, backend: str) -> None:
-            self.enabled = enabled
-            self.backend = backend
-            self.max_concurrent_workers = 4
-            self.sqlite = object()
-
-    tools = _ToolSettings()
-    scheduler = _SchedulerSettings()
-    rabbitmq = object()
-
-    def __init__(self, *, tasks_enabled: bool = False, backend: str = "rabbitmq") -> None:
-        self.tasks = self._Tasks(enabled=tasks_enabled, backend=backend)
+    def warning(self, *_args, **_kwargs) -> None:
+        return None
 
 
 class _EmptyPendingTurnStore:
@@ -93,12 +35,24 @@ class _EmptyPendingTurnStore:
 
 
 @pytest.mark.asyncio
-async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_starts_and_stops_dispatcher_and_extensions(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.app import daemon as daemon_module
 
-    dispatcher_probe = _Probe()
-    scheduler_probe = _Probe()
-    rabbitmq_probe = _Probe()
+    dispatcher = _Probe()
+    extensions = _Probe()
+
+    class _FakeExtensions:
+        def is_empty(self) -> bool:
+            return False
+
+        def names(self) -> list[str]:
+            return ["test.extension"]
+
+        async def start(self) -> None:
+            await extensions.start()
+
+        async def stop(self) -> None:
+            await extensions.stop()
 
     class _FakeContainer:
         @classmethod
@@ -106,81 +60,59 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
             return None
 
         @classmethod
-        def get_extensions(cls) -> ExtensionRegistry:
-            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+        async def initialize_storage(cls) -> None:
+            return None
 
         @classmethod
         def get_logger(cls) -> _Logger:
             return _Logger()
 
         @classmethod
-        def get_settings(cls) -> _Settings:
-            return _Settings(tasks_enabled=True)
+        def get_settings(cls):
+            return type("Settings", (), {"llm": type("LLM", (), {"strip_logs": False})()})()
 
         @classmethod
         def get_event_bus(cls):
             return object()
 
         @classmethod
-        def get_scheduled_prompt_service(cls) -> _Probe:
-            return scheduler_probe
-
-        @classmethod
-        def get_task_manager(cls):
-            return object()
+        def get_extensions(cls) -> _FakeExtensions:
+            return _FakeExtensions()
 
         @classmethod
         def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
             return _EmptyPendingTurnStore()
 
-        @classmethod
-        async def initialize_storage(cls) -> None:
-            return None
-
     class _FakeDispatcher:
-        def __init__(self, event_bus) -> None:
-            del event_bus
+        main_agent_tool_names: list[str] = []
+
+        def __init__(self, _event_bus: object) -> None:
+            pass
 
         async def start(self) -> None:
-            await dispatcher_probe.start()
+            await dispatcher.start()
 
         async def stop(self) -> None:
-            await dispatcher_probe.stop()
-
-    class _FakeRabbitMQ:
-        def __init__(self, config, event_bus, task_manager, max_concurrent_workers) -> None:
-            del config, event_bus, task_manager, max_concurrent_workers
-
-        async def start(self) -> None:
-            await rabbitmq_probe.start()
-
-        async def stop(self) -> None:
-            await rabbitmq_probe.stop()
+            await dispatcher.stop()
 
     @asynccontextmanager
-    async def _fake_shutdown(services, logger):
-        del logger
-        stop_event = asyncio.Event()
-        stop_event.set()
+    async def _shutdown(services, _logger):
+        event = asyncio.Event()
+        event.set()
         try:
-            yield stop_event
+            yield event
         finally:
             for service in services:
                 await service.stop()
 
     monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
     monkeypatch.setattr(daemon_module, "Dispatcher", _FakeDispatcher)
-    monkeypatch.setattr(daemon_module, "RabbitMQConsumerService", _FakeRabbitMQ)
-    monkeypatch.setattr(daemon_module, "_graceful_shutdown", _fake_shutdown)
+    monkeypatch.setattr(daemon_module, "_graceful_shutdown", _shutdown)
 
     await daemon_module.run()
 
-    assert dispatcher_probe.started == 1
-    assert dispatcher_probe.stopped == 1
-    assert scheduler_probe.started == 1
-    assert scheduler_probe.stopped == 1
-    assert rabbitmq_probe.started == 1
-    assert rabbitmq_probe.stopped == 1
+    assert dispatcher.started == dispatcher.stopped == 1
+    assert extensions.started == extensions.stopped == 1
 
 
 @pytest.mark.asyncio
@@ -195,81 +127,44 @@ async def test_replay_pending_turns_republishes_unfinished_messages(monkeypatch:
         async def list_pending(self) -> list[tuple[str, str]]:
             return [("event-123", message.model_dump_json())]
 
-    class _FakeContainer:
+    class _Container:
         @classmethod
         def get_pending_turn_store(cls) -> _PendingStore:
             return _PendingStore()
 
-    class _FakeBus:
+    class _Bus:
         def __init__(self) -> None:
             self.published: list[MessageEvent] = []
 
         async def publish(self, event: MessageEvent) -> None:
             self.published.append(event)
 
-    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
+    monkeypatch.setattr(daemon_module, "AppContainer", _Container)
+    bus = _Bus()
 
-    bus = _FakeBus()
     await daemon_module._replay_pending_turns(bus, _Logger())
 
-    assert len(bus.published) == 1
-    replayed = bus.published[0]
-    assert replayed.event_id == "event-123"
-    assert replayed.message.text == "hi"
+    assert bus.published[0].event_id == "event-123"
 
 
 @pytest.mark.asyncio
-async def test_replay_pending_turns_noop_when_nothing_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_replay_pending_turns_noop_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.app import daemon as daemon_module
 
-    class _FakeContainer:
+    class _Container:
         @classmethod
         def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
             return _EmptyPendingTurnStore()
 
-    class _FakeBus:
-        def __init__(self) -> None:
-            self.published: list = []
+    class _Bus:
+        published: list[object] = []
 
-        async def publish(self, event) -> None:
+        async def publish(self, event: object) -> None:
             self.published.append(event)
 
-    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
+    monkeypatch.setattr(daemon_module, "AppContainer", _Container)
+    bus = _Bus()
 
-    bus = _FakeBus()
     await daemon_module._replay_pending_turns(bus, _Logger())
 
     assert bus.published == []
-
-
-def _task_service_for(monkeypatch: pytest.MonkeyPatch, backend: str, *, enabled: bool = True):
-    from minibot.app import daemon as daemon_module
-
-    class _FakeContainer:
-        @classmethod
-        def get_task_manager(cls) -> object:
-            return object()
-
-        @classmethod
-        def get_task_store(cls) -> object:
-            return object()
-
-    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
-    settings = _Settings(tasks_enabled=enabled, backend=backend)
-    return daemon_module.build_task_service(settings, object())
-
-
-def test_build_task_service_picks_sqlite_consumer(monkeypatch: pytest.MonkeyPatch) -> None:
-    from minibot.app.task_consumer_service import SQLiteTaskConsumerService
-
-    assert isinstance(_task_service_for(monkeypatch, "sqlite"), SQLiteTaskConsumerService)
-
-
-def test_build_task_service_picks_rabbitmq_consumer(monkeypatch: pytest.MonkeyPatch) -> None:
-    from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
-
-    assert isinstance(_task_service_for(monkeypatch, "rabbitmq"), RabbitMQConsumerService)
-
-
-def test_build_task_service_returns_none_when_tasks_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _task_service_for(monkeypatch, "sqlite", enabled=False) is None

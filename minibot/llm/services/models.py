@@ -25,6 +25,7 @@ class LLMCompletionStep:
     message: Any
     response_id: str | None
     total_tokens: int | None = None
+    input_tokens: int | None = None
     provider_tool_calls: int | None = None
 
 

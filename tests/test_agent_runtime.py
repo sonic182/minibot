@@ -62,7 +62,11 @@ class _StubRuntimeLLMClient:
 @pytest.mark.asyncio
 async def test_runtime_returns_final_message_without_tool_calls() -> None:
     llm_client = _StubRuntimeLLMClient(
-        steps=[LLMCompletionStep(message=_FakeMessage(content="hello"), response_id="resp-1", total_tokens=7)],
+        steps=[
+            LLMCompletionStep(
+                message=_FakeMessage(content="hello"), response_id="resp-1", total_tokens=7, input_tokens=5
+            )
+        ],
         executions=[],
     )
     runtime = AgentRuntime(llm_client=cast(LLMClient, llm_client), tools=[])
@@ -73,6 +77,7 @@ async def test_runtime_returns_final_message_without_tool_calls() -> None:
     assert result.payload == "hello"
     assert result.response_id == "resp-1"
     assert result.total_tokens == 7
+    assert result.input_tokens == 5
     assert result.state.messages[-1].role == "assistant"
 
 

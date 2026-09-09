@@ -171,8 +171,11 @@ and emit outbound responses back to the active channel adapter.
 │   │       ├── time.py
 │   │       ├── user_memory.py
 │   │       └── wait.py
-│   ├── extensions/            (bundled extensions: thin register(mb) entry points)
-│   │   └── telegram.py
+│   ├── extensions/            (bundled extensions: thin register(mb) composition)
+│   │   ├── channels/telegram.py
+│   │   ├── integrations/{mcp,rag,rabbitmq}.py
+│   │   ├── services/{scheduler,tasks}.py
+│   │   └── tools/{execution,media,memory,network,utility,workspace}.py
 │   ├── rag/
 │   │   ├── chunking.py
 │   │   ├── document_ingestion.py

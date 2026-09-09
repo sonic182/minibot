@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import socket
 import subprocess
@@ -30,8 +31,9 @@ from minibot.adapters.config.schema import (
     ToolsConfig,
 )
 from minibot.adapters.mcp.client import MCPClient
+from minibot.app.event_bus import EventBus
+from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.base import ToolContext
-from minibot.llm.tools.factory import build_enabled_tools
 from minibot.llm.tools.mcp_bridge import MCPToolBridge
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "mcp"
@@ -150,7 +152,7 @@ def test_mcp_bridge_http_discovery_and_call(http_server_url: str) -> None:
     assert parsed["value"] == 4
 
 
-def test_build_enabled_tools_includes_mcp_dynamic_tools(stdio_server_args: list[str]) -> None:
+def test_mcp_extension_includes_dynamic_tools(stdio_server_args: list[str]) -> None:
     settings = Settings(
         llm=LLMMConfig(api_key="secret"),
         tools=ToolsConfig(
@@ -176,8 +178,17 @@ def test_build_enabled_tools_includes_mcp_dynamic_tools(stdio_server_args: list[
         scheduler=SchedulerConfig(prompts=ScheduledPromptsConfig(enabled=False)),
     )
 
-    tools = build_enabled_tools(settings, memory=_MemoryStub(), kv_memory=None, prompt_scheduler=None, event_bus=None)
-    names = {binding.tool.name for binding in tools}
+    from minibot.extensions.integrations.mcp import register
+
+    context = ExtensionContext(
+        name="minibot.extensions.integrations.mcp",
+        config={},
+        settings=settings,
+        event_bus=EventBus(),
+        logger=logging.getLogger("test.mcp"),
+    )
+    register(context)
+    names = {binding.tool.name for binding in context.tools}
 
     assert "mcp_dice_cli__roll_dice" in names
 

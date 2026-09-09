@@ -1,6 +1,6 @@
 ---
 name: minibot-create-tool
-description: Guided wizard for adding a new LLM tool to Minibot. Asks targeted questions then generates all required files: tool class, description .txt, config schema entry, and factory registration. Use when the user wants to add a new tool to minibot/llm/tools/.
+description: "Guided wizard for adding a new LLM tool to Minibot. Asks targeted questions then generates all required files: tool class, description .txt, config schema entry, and factory registration. Use when the user wants to add a new tool to minibot/llm/tools/."
 ---
 
 # Minibot Create Tool

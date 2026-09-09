@@ -43,33 +43,26 @@ async def run(
     _configure_console_file_only_logging(logger, verbose=verbose)
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
+    strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     main_agent_tools_enabled = getattr(dispatcher, "main_agent_tool_names", None) or ["none"]
-    log_extra: dict[str, object] = {"main_agent_tools_enabled": main_agent_tools_enabled}
-    if bool(getattr(getattr(settings, "llm", None), "strip_logs", False)):
-        tool_summary = summarize_items(main_agent_tools_enabled)
-        log_extra = {
-            "main_agent_tools_count": tool_summary["count"],
-            "main_agent_tools_preview": tool_summary["preview"],
-        }
+    tool_summary = summarize_items(main_agent_tools_enabled)
     _log_info(
         logger,
         "console tool configuration loaded",
-        extra=log_extra,
+        extra={
+            "main_agent_tools_count": tool_summary["count"],
+            "main_agent_tools_preview": tool_summary["preview"],
+        },
     )
+    if not strip_logs:
+        _log_debug(logger, "console tools enabled", extra={"main_agent_tools_enabled": main_agent_tools_enabled})
     console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
-    # Without this the console offers spawn_task but nothing ever consumes the queued rows.
-    from minibot.app.daemon import build_task_service
-
-    task_service = build_task_service(settings, event_bus) if settings is not None else None
     extensions = AppContainer.get_extensions()
     await dispatcher.start()
     if not extensions.is_empty():
         _log_info(logger, "starting extensions", extra={"extensions": extensions.names()})
         await extensions.start()
     await console_service.start()
-    if task_service is not None:
-        _log_info(logger, "starting task consumer", extra={"component": f"tasks.{settings.tasks.backend}"})
-        await task_service.start()
 
     try:
         if once is not None:
@@ -114,8 +107,6 @@ async def run(
                 console=console,
             )
     finally:
-        if task_service is not None:
-            await task_service.stop()
         await console_service.stop()
         if not extensions.is_empty():
             await extensions.stop()
@@ -183,6 +174,12 @@ def _log_info(logger: object, message: str, **kwargs: object) -> None:
     info_method = getattr(logger, "info", None)
     if callable(info_method):
         info_method(message, **kwargs)
+
+
+def _log_debug(logger: object, message: str, **kwargs: object) -> None:
+    debug_method = getattr(logger, "debug", None)
+    if callable(debug_method):
+        debug_method(message, **kwargs)
 
 
 if __name__ == "__main__":

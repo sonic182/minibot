@@ -29,7 +29,7 @@ Expose a module-level `register(mb)`. The `mb` object (`ExtensionContext`) gives
 | --- | --- |
 | `mb.config` | your `[extensions.config.<module>]` slice, as a dict |
 | `mb.settings` | the full validated `Settings`, read-only |
-| `mb.entrypoint` | `"daemon"` or `"console"` — see the channel note below |
+| `mb.entrypoint` | `"daemon"`, `"console"`, or `"worker"` — see the channel and worker notes below |
 | `mb.event_bus` | the event bus, if you need to publish |
 | `mb.logger` | a logger namespaced to your extension |
 | `@mb.tool` | contribute a tool from a function — see below |
@@ -83,9 +83,10 @@ Notes:
 - A handler that raises is logged; it does not kill the subscription.
 - Your tools automatically get `ToolCallEvent` emission and large-output spill, the
   same as built-in tools.
-- **Tools reach the main agent and delegated agents, but not task workers.** A task spawned
-  with `spawn_task` runs in a separate process that builds its own tool list and does not
-  load extensions, so an extension tool is not callable from inside a task.
+- **Tools also reach task workers.** A task spawned with `spawn_task` loads extensions in
+  its separate process and applies the task agent's normal tool allow/deny policy.
+- **Workers are registration-only.** Their extension registry never starts, so event
+  subscriptions and services do not run; `mb.event_bus` is a throwaway bus with no subscribers.
 - **Bundled extensions load first.** `minibot.extensions.*` (Telegram today) registers
   ahead of anything in `[extensions] modules`, through this exact API.
 
@@ -106,10 +107,10 @@ def register(mb):
 
 Two rules, both load-bearing:
 
-- **Check `mb.entrypoint`.** `minibot console` runs a single channel; a second one there
-  would answer real users from an interactive session.
+- **Check `mb.entrypoint`.** Only `"daemon"` runs channels; console and task workers must
+  not construct them.
 - **Decide in `register()`, not `start()`.** A service that subscribes to the bus in
   `__init__` but only drains in `start()` will fill its 128-slot queue and stall every
   publish. Don't construct what you won't start.
 
-`minibot/extensions/telegram.py` is the worked example.
+`minibot/extensions/channels/telegram.py` is the worked example.

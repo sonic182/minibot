@@ -51,7 +51,6 @@ class Dispatcher:
         self._subscription = event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
         self._pending_turns = AppContainer.get_pending_turn_store()
         settings = AppContainer.get_settings()
-        prompt_service = AppContainer.get_scheduled_prompt_service()
         memory_backend = AppContainer.get_memory_backend()
         agent_registry = AppContainer.get_agent_registry()
         llm_factory = AppContainer.get_llm_factory()
@@ -59,14 +58,10 @@ class Dispatcher:
         tools = build_enabled_tools(
             settings,
             memory_backend,
-            AppContainer.get_kv_memory_backend(),
-            prompt_service,
-            event_bus,
-            agent_registry,
-            llm_factory,
+            event_bus=event_bus,
+            agent_registry=agent_registry,
+            llm_factory=llm_factory,
             skill_registry=skill_registry,
-            task_manager=AppContainer.get_task_manager(),
-            task_producer=AppContainer.get_task_producer(),
             extension_tools=AppContainer.get_extensions().tools,
         )
         main_agent_tools_view = main_agent_tool_view(
@@ -114,17 +109,19 @@ class Dispatcher:
         self._logger = logging.getLogger("minibot.dispatcher")
         strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
         self._main_agent_tool_names = sorted(binding.tool.name for binding in main_agent_tools_view.tools)
-        main_tools_log_extra: dict[str, object] = {"main_agent_tools_enabled": self._main_agent_tool_names or ["none"]}
-        if strip_logs:
-            tool_summary = summarize_items(self._main_agent_tool_names)
-            main_tools_log_extra = {
-                "main_agent_tools_count": tool_summary["count"],
-                "main_agent_tools_preview": tool_summary["preview"],
-            }
+        tool_summary = summarize_items(self._main_agent_tool_names)
         self._logger.info(
             "main agent tool configuration loaded",
-            extra=main_tools_log_extra,
+            extra={
+                "main_agent_tools_count": tool_summary["count"],
+                "main_agent_tools_preview": tool_summary["preview"],
+            },
         )
+        if not strip_logs:
+            self._logger.debug(
+                "main agent tools enabled",
+                extra={"main_agent_tools_enabled": self._main_agent_tool_names or ["none"]},
+            )
         if not skill_registry.is_empty():
             self._logger.info(
                 "skills loaded",
@@ -137,21 +134,17 @@ class Dispatcher:
                 for binding in tools
                 if binding.tool.name.startswith(mcp_prefix) and "__" in binding.tool.name
             )
-            mcp_log_extra: dict[str, object] = {
-                "mcp_servers_configured": len(settings.tools.mcp.servers),
-                "mcp_tools_enabled": mcp_tool_names or ["none"],
-            }
-            if strip_logs:
-                tool_summary = summarize_items(mcp_tool_names)
-                mcp_log_extra = {
+            tool_summary = summarize_items(mcp_tool_names)
+            self._logger.info(
+                "mcp tool configuration loaded",
+                extra={
                     "mcp_servers_configured": len(settings.tools.mcp.servers),
                     "mcp_tools_count": tool_summary["count"],
                     "mcp_tools_preview": tool_summary["preview"],
-                }
-            self._logger.info(
-                "mcp tool configuration loaded",
-                extra=mcp_log_extra,
+                },
             )
+            if not strip_logs:
+                self._logger.debug("mcp tools enabled", extra={"mcp_tools_enabled": mcp_tool_names or ["none"]})
         if main_agent_tools_view.hidden_tool_names:
             self._logger.info(
                 "main agent tools hidden due to exclusive ownership",
