@@ -27,6 +27,7 @@ Why self-host
    architecture
    config
    tools
+   extensions
    scheduler
    audio
    rag
