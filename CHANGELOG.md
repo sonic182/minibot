@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-10
+
 ### Added
 
 - **Python extension system.** `[extensions] modules` names importable modules, each exposing a
@@ -537,6 +539,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
+[0.10.0]: https://github.com/sonic182/minibot/compare/0.9.0..0.10.0
 [0.9.0]: https://github.com/sonic182/minibot/compare/0.8.0..0.9.0
 [0.8.0]: https://github.com/sonic182/minibot/compare/0.7.0..0.8.0
 [0.7.0]: https://github.com/sonic182/minibot/compare/0.6.0..0.7.0
