@@ -146,6 +146,19 @@ class AppContainer:
         await cls._initialize_backend(cls.get_memory_backend())
         await cls._initialize_backend(cls.get_pending_turn_store())
 
+    @staticmethod
+    def _validate_rag_token_config(settings: Settings, logger: logging.Logger) -> None:
+        """Validate RAG settings; runtime setup now belongs to the RAG extension."""
+        config = settings.tools.rag
+        if not config.enabled:
+            return
+        if config.chunk_overlap_tokens >= config.chunk_size_tokens:
+            logger.error("invalid rag token chunk config")
+            raise ValueError("tools.rag.chunk_overlap_tokens must be less than tools.rag.chunk_size_tokens")
+        if config.chunk_size_tokens > config.embedding.max_sequence_tokens:
+            logger.error("invalid rag token chunk config")
+            raise ValueError("tools.rag.chunk_size_tokens must not exceed tools.rag.embedding.max_sequence_tokens")
+
     @classmethod
     async def _apply_runtime_token_autoconfig_if_needed(cls) -> None:
         if cls._token_autoconfig_applied:
