@@ -87,7 +87,7 @@ def configure(path: Path) -> bool:
     _write("\nMinibot configuration\n\n")
     _configure_runtime(document, settings)
     settings = _settings_for_document(document)
-    _configure_telegram(document, settings.channels["telegram"])
+    _configure_telegram(document, settings.channels.telegram)
     settings = _settings_for_document(document)
     _configure_llm(document, settings)
     settings = _settings_for_document(document)
@@ -397,7 +397,7 @@ def _write_summary(path: Path, profile: str | None, settings: Settings) -> None:
         f"  Provider: {settings.llm.provider}\n"
         f"  Model: {settings.llm.model}\n"
         f"  API key: {'configured' if provider and provider.api_key else 'empty'}\n"
-        f"  Telegram: {'enabled' if settings.channels['telegram'].enabled else 'disabled'}\n"
+        f"  Telegram: {'enabled' if settings.channels.telegram.enabled else 'disabled'}\n"
         f"  Tools: {', '.join(tools) or 'none'}\n"
         "  Secrets are stored in plain text.\n\n"
     )

@@ -3,8 +3,8 @@ import asyncio
 import pytest
 
 from minibot.app.event_bus import EventBus
-from minibot.core.channels import ChannelMessage
-from minibot.core.events import MessageEvent
+from minibot.core.channels import ChannelMessage, ChannelResponse
+from minibot.core.events import MessageEvent, OutboundEvent
 
 
 @pytest.mark.asyncio
@@ -37,3 +37,48 @@ async def test_event_bus_dispatches_to_subscribers() -> None:
 
     await sub1.close()
     await sub2.close()
+
+
+@pytest.mark.timeout(5)
+@pytest.mark.asyncio
+async def test_event_bus_respects_subscription_type_filter() -> None:
+    bus = EventBus()
+    filtered = bus.subscribe(types=(OutboundEvent,))
+    unfiltered = bus.subscribe()
+
+    await bus.publish(
+        MessageEvent(message=ChannelMessage(channel="console", user_id=1, chat_id=2, message_id=3, text="hi"))
+    )
+    await bus.publish(OutboundEvent(response=ChannelResponse(channel="console", chat_id=2, text="pong")))
+
+    assert filtered._queue.qsize() == 1
+    assert unfiltered._queue.qsize() == 2
+
+    seen = []
+    async for event in filtered:
+        seen.append(event)
+        break
+    assert isinstance(seen[0], OutboundEvent)
+
+    await filtered.close()
+    await unfiltered.close()
+
+
+@pytest.mark.timeout(5)
+@pytest.mark.asyncio
+async def test_lossy_subscriber_drops_instead_of_blocking_when_queue_is_full() -> None:
+    bus = EventBus(maxsize=1)
+    lossy = bus.subscribe(lossy=True)
+
+    def _event(text: str) -> OutboundEvent:
+        return OutboundEvent(response=ChannelResponse(channel="console", chat_id=1, text=text))
+
+    await bus.publish(_event("one"))
+    # Queue is now full. A blocking subscriber would hang here; a lossy one drops.
+    await asyncio.wait_for(bus.publish(_event("two")), timeout=0.5)
+
+    assert lossy._queue.qsize() == 1
+
+    # Load-bearing, not cleanup: closing over a *full* queue is what the stop sentinel has
+    # to survive. A blocking put here deadlocks, and only pytest-timeout catches it.
+    await lossy.close()

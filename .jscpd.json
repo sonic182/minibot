@@ -1,0 +1,9 @@
+{
+  "threshold": 1,
+  "reporters": ["consoleFull"],
+  "path": ["minibot", "tests"],
+  "ignore": ["**/node_modules/**", "**/dist/**", "**/htmlcov/**", "**/data/**", "**/logs/**"],
+  "format": ["python"],
+  "absolute": true,
+  "gitignore": true
+}

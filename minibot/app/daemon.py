@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from minibot.adapters.container import AppContainer
-from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.console import main as console_main
 from minibot.app.dispatcher import Dispatcher
 from minibot.app.event_bus import EventBus
@@ -44,16 +43,13 @@ async def run() -> None:
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
     scheduler_service = AppContainer.get_scheduled_prompt_service()
-    telegram_config = AppContainer.get_telegram_config()
-    telegram_service = None
-    if telegram_config.enabled and telegram_config.bot_token:
-        telegram_service = TelegramService(telegram_config, event_bus, settings.tools.file_storage)
-
     task_service = build_task_service(settings, event_bus)
 
+    extensions = AppContainer.get_extensions()
+
     services: list[Any] = [dispatcher]
-    if telegram_service is not None:
-        services.append(telegram_service)
+    if not extensions.is_empty():
+        services.append(extensions)
     if scheduler_service is not None:
         services.append(scheduler_service)
     if task_service is not None:
@@ -62,13 +58,13 @@ async def run() -> None:
     async with _graceful_shutdown(services, logger) as stop_event:
         logger.info("starting dispatcher", extra={"component": "dispatcher"})
         await dispatcher.start()
+        if not extensions.is_empty():
+            logger.info("starting extensions", extra={"component": "extensions", "extensions": extensions.names()})
+            await extensions.start()
         await _replay_pending_turns(event_bus, logger)
         if scheduler_service is not None:
             logger.info("starting scheduler service", extra={"component": "scheduler"})
             await scheduler_service.start()
-        if telegram_service is not None:
-            logger.info("starting telegram service", extra={"component": "telegram"})
-            await telegram_service.start()
         if task_service is not None:
             logger.info("starting task consumer", extra={"component": f"tasks.{settings.tasks.backend}"})
             await task_service.start()

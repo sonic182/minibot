@@ -53,7 +53,7 @@ class TelegramService:
         )
         self._poll_task: asyncio.Task[None] | None = None
         self._outgoing_task: asyncio.Task[None] | None = None
-        self._outgoing_subscription = event_bus.subscribe()
+        self._outgoing_subscription = event_bus.subscribe(types=(OutboundEvent, OutboundFileEvent))
 
         self._dp.message.register(self._handle_message)
 

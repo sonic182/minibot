@@ -98,7 +98,7 @@ preload_catalog = true
     assert settings.llm.xai.x_search.to_date == "2026-03-10T00:00:00+00:00"
     assert settings.llm.xai.x_search.enable_image_understanding is True
     assert settings.llm.xai.x_search.enable_video_understanding is True
-    assert settings.channels["telegram"].bot_token == "token"
+    assert settings.channels.telegram.bot_token == "token"
     assert settings.memory.context_ratio_before_compact == 0.9
     assert settings.tools.browser.output_dir == "./data/files/browser"
     assert settings.tools.skills.preload_catalog is True
@@ -178,9 +178,9 @@ max_file_size_bytes = "2MB"
     )
 
     settings = load_settings(config_file)
-    assert settings.channels["telegram"].max_photo_bytes == 5_000_000
-    assert settings.channels["telegram"].max_document_bytes == 10_000_000
-    assert settings.channels["telegram"].max_total_media_bytes == 12_000_000
+    assert settings.channels.telegram.max_photo_bytes == 5_000_000
+    assert settings.channels.telegram.max_document_bytes == 10_000_000
+    assert settings.channels.telegram.max_total_media_bytes == 12_000_000
     assert settings.tools.http_client.max_bytes == 16_000
     assert settings.tools.http_client.spill_to_managed_file is True
     assert settings.tools.http_client.spill_after_chars == 17_000
@@ -362,6 +362,27 @@ bot_token = "token"
 
     with pytest.raises(ValueError):
         load_settings(config_file)
+
+
+def test_unknown_channel_sections_reach_the_owning_extension_verbatim(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[channels.telegram]
+bot_token = "token"
+
+[channels.slack]
+app_token = "xapp-1"
+allowed_workspaces = ["acme"]
+""",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_file)
+
+    assert settings.channels.telegram.bot_token == "token"
+    assert settings.channels.section("slack") == {"app_token": "xapp-1", "allowed_workspaces": ["acme"]}
+    assert settings.channels.section("nope") == {}
 
 
 def test_load_settings_rejects_directory_for_explicit_path(tmp_path: Path) -> None:

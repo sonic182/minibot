@@ -171,6 +171,8 @@ and emit outbound responses back to the active channel adapter.
 │   │       ├── time.py
 │   │       ├── user_memory.py
 │   │       └── wait.py
+│   ├── extensions/            (bundled extensions: thin register(mb) entry points)
+│   │   └── telegram.py
 │   ├── rag/
 │   │   ├── chunking.py
 │   │   ├── document_ingestion.py
@@ -194,7 +196,7 @@ and emit outbound responses back to the active channel adapter.
 ## Runtime Flow
 
 1. Entry point (`minibot.app.daemon` or `minibot.app.console`) boots settings, logging, memory, tools, and dispatcher.
-2. Channel adapter (`TelegramService` or `ConsoleService`) maps input into `ChannelMessage` and publishes `MessageEvent`.
+2. Channel adapter (`ConsoleService`, or `TelegramService` via the bundled extension) maps input into `ChannelMessage` and publishes `MessageEvent`.
 3. `MessageEvent` is published into `app.event_bus.EventBus`.
 4. `app.dispatcher.Dispatcher` consumes `MessageEvent` and invokes `LLMMessageHandler`.
 5. `Dispatcher` builds main-agent tool visibility first (`app.tool_capabilities.main_agent_tool_view`):
@@ -365,7 +367,7 @@ Current notes:
   - `adapters/messaging/console/service.py` handles local console I/O with EventBus publish/subscribe semantics.
   - `adapters/messaging/rabbitmq/service.py` (optional) consumes queued tasks from a RabbitMQ exchange and hands them to the task manager; used only when `tasks.backend = "rabbitmq"`.
   - `adapters/messaging/rabbitmq/producer.py` (optional) publishes tasks to that exchange.
-  - `adapters/messaging/telegram/service.py` handles Telegram inbound text/media extraction, coordinates authorization, media collection, and outbound sending.
+  - `adapters/messaging/telegram/service.py` handles Telegram inbound text/media extraction, coordinates authorization, media collection, and outbound sending. It is wired in by `extensions/telegram.py`, not by the daemon.
   - `adapters/messaging/telegram/authorization.py` validates senders against configured chat/user allow-lists.
   - `adapters/messaging/telegram/incoming_media_collector.py` downloads and stores media attachments from Telegram messages.
   - `adapters/messaging/telegram/incoming_media_mapper.py` normalizes media-target paths and `IncomingFileRef` mapping for photo/document/audio/voice uploads.
@@ -549,7 +551,8 @@ The scheduler currently focuses on scheduled prompts (not a generic task DAG eng
 Main sections:
 
 - `[runtime]`
-- `[channels.telegram]` (auth allowlists, mode, media limits)
+- `[channels.telegram]` (auth allowlists, mode, media limits); any other `[channels.<name>]` section is passed through verbatim to the extension that owns it
+- `[extensions]` (`modules`, plus a free-form `[extensions.config.<module>]` slice per module)
 - `[llm]`
   - `llm.prompts_dir` points to channel prompt packs (default `./prompts`)
 - `[orchestration]` (definitions directory, delegated runtime timeout defaults, main-agent policy, `main_tool_use_guardrail`: `"disabled"` | `"llm_classifier"`)

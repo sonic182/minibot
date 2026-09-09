@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 import pytest
+
+from minibot.app.extensions import ExtensionRegistry
 
 
 class _Probe:
@@ -84,12 +87,6 @@ class _Settings:
         self.tasks = self._Tasks(enabled=tasks_enabled, backend=backend)
 
 
-class _TelegramConfig:
-    def __init__(self, enabled: bool, bot_token: str) -> None:
-        self.enabled = enabled
-        self.bot_token = bot_token
-
-
 class _EmptyPendingTurnStore:
     async def list_pending(self) -> list[tuple[str, str]]:
         return []
@@ -101,13 +98,16 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
 
     dispatcher_probe = _Probe()
     scheduler_probe = _Probe()
-    telegram_probe = _Probe()
     rabbitmq_probe = _Probe()
 
     class _FakeContainer:
         @classmethod
         def configure(cls) -> None:
             return None
+
+        @classmethod
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
 
         @classmethod
         def get_logger(cls) -> _Logger:
@@ -124,10 +124,6 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
         @classmethod
         def get_scheduled_prompt_service(cls) -> _Probe:
             return scheduler_probe
-
-        @classmethod
-        def get_telegram_config(cls) -> _TelegramConfig:
-            return _TelegramConfig(enabled=True, bot_token="token")
 
         @classmethod
         def get_task_manager(cls):
@@ -150,16 +146,6 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
 
         async def stop(self) -> None:
             await dispatcher_probe.stop()
-
-    class _FakeTelegram:
-        def __init__(self, config, event_bus, file_storage_config) -> None:
-            del config, event_bus, file_storage_config
-
-        async def start(self) -> None:
-            await telegram_probe.start()
-
-        async def stop(self) -> None:
-            await telegram_probe.stop()
 
     class _FakeRabbitMQ:
         def __init__(self, config, event_bus, task_manager, max_concurrent_workers) -> None:
@@ -184,7 +170,6 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
     monkeypatch.setattr(daemon_module, "Dispatcher", _FakeDispatcher)
-    monkeypatch.setattr(daemon_module, "TelegramService", _FakeTelegram)
     monkeypatch.setattr(daemon_module, "RabbitMQConsumerService", _FakeRabbitMQ)
     monkeypatch.setattr(daemon_module, "_graceful_shutdown", _fake_shutdown)
 
@@ -194,85 +179,8 @@ async def test_run_starts_and_stops_all_services(monkeypatch: pytest.MonkeyPatch
     assert dispatcher_probe.stopped == 1
     assert scheduler_probe.started == 1
     assert scheduler_probe.stopped == 1
-    assert telegram_probe.started == 1
-    assert telegram_probe.stopped == 1
     assert rabbitmq_probe.started == 1
     assert rabbitmq_probe.stopped == 1
-
-
-@pytest.mark.asyncio
-async def test_run_skips_telegram_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    from minibot.app import daemon as daemon_module
-
-    dispatcher_probe = _Probe()
-
-    class _FakeContainer:
-        @classmethod
-        def configure(cls) -> None:
-            return None
-
-        @classmethod
-        def get_logger(cls) -> _Logger:
-            return _Logger()
-
-        @classmethod
-        def get_settings(cls) -> _Settings:
-            return _Settings(tasks_enabled=False)
-
-        @classmethod
-        def get_event_bus(cls):
-            return object()
-
-        @classmethod
-        def get_scheduled_prompt_service(cls):
-            return None
-
-        @classmethod
-        def get_telegram_config(cls) -> _TelegramConfig:
-            return _TelegramConfig(enabled=False, bot_token="")
-
-        @classmethod
-        def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
-            return _EmptyPendingTurnStore()
-
-        @classmethod
-        async def initialize_storage(cls) -> None:
-            return None
-
-    class _FakeDispatcher:
-        def __init__(self, event_bus) -> None:
-            del event_bus
-
-        async def start(self) -> None:
-            await dispatcher_probe.start()
-
-        async def stop(self) -> None:
-            await dispatcher_probe.stop()
-
-    class _NeverTelegram:
-        def __init__(self, *_args, **_kwargs) -> None:
-            raise AssertionError("telegram service should not be created")
-
-    @asynccontextmanager
-    async def _fake_shutdown(services, logger):
-        del logger
-        stop_event = asyncio.Event()
-        stop_event.set()
-        try:
-            yield stop_event
-        finally:
-            for service in services:
-                await service.stop()
-
-    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
-    monkeypatch.setattr(daemon_module, "Dispatcher", _FakeDispatcher)
-    monkeypatch.setattr(daemon_module, "TelegramService", _NeverTelegram)
-    monkeypatch.setattr(daemon_module, "_graceful_shutdown", _fake_shutdown)
-
-    await daemon_module.run()
-
-    assert dispatcher_probe.started == 1
-    assert dispatcher_probe.stopped == 1
 
 
 @pytest.mark.asyncio

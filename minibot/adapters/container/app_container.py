@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from minibot.adapters.config.loader import load_settings
-from minibot.adapters.config.schema import Settings, TelegramChannelConfig
+from minibot.adapters.config.schema import Settings
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.adapters.memory.pending_turns import PendingTurnStore
@@ -16,6 +16,7 @@ from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.extensions import ExtensionRegistry, load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.scheduler_service import ScheduledPromptService
 from minibot.app.skill_registry import SkillRegistry
@@ -44,10 +45,11 @@ class AppContainer:
     _task_manager: TaskManager | None = None
     _task_store: SQLiteTaskStore | None = None
     _task_producer: TaskProducer | None = None
+    _extensions: ExtensionRegistry | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
-    def configure(cls, config_path: Path | None = None) -> None:
+    def configure(cls, config_path: Path | None = None, *, entrypoint: str = "daemon") -> None:
         cls._settings = load_settings(config_path)
         cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
@@ -102,6 +104,9 @@ class AppContainer:
         else:
             cls._prompt_store = None
             cls._prompt_service = None
+        # Last, so an extension's register() sees a fully built container even though the
+        # context handed to it exposes only settings, the bus and a logger.
+        cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger, entrypoint)
 
     @classmethod
     def get_settings(cls) -> Settings:
@@ -178,8 +183,10 @@ class AppContainer:
         return cls._task_producer
 
     @classmethod
-    def get_telegram_config(cls) -> TelegramChannelConfig:
-        return cls.get_settings().channels.get("telegram")  # type: ignore[return-value]
+    def get_extensions(cls) -> ExtensionRegistry:
+        if cls._extensions is None:
+            raise RuntimeError("container not configured")
+        return cls._extensions
 
     @classmethod
     async def initialize_storage(cls) -> None:

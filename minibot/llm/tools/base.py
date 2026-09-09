@@ -17,6 +17,7 @@ class ToolContext:
     channel: str | None = None
     chat_id: int | None = None
     user_id: int | None = None
+    turn_id: str | None = None
 
 
 ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[ToolResult | Any]]

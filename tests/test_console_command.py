@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from minibot.app.extensions import ExtensionRegistry
+
 
 @pytest.mark.asyncio
 async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -15,8 +17,13 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
 
     class _FakeContainer:
         @classmethod
-        def configure(cls, config_path=None) -> None:
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+
+        @classmethod
+        def configure(cls, config_path=None, *, entrypoint="daemon") -> None:
             calls["config_path"] = config_path
+            calls["entrypoint"] = entrypoint
 
         @classmethod
         def get_logger(cls):
@@ -82,6 +89,8 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
         config_path=None,
     )
 
+    # Channel extensions key off this to stay out of the console's single-channel process.
+    assert calls["entrypoint"] == "console"
     assert calls["published_text"] == "hello"
     assert calls["chat_id"] == 42
     assert calls["user_id"] == 7
@@ -100,8 +109,12 @@ async def test_console_run_once_reads_stdin_when_dash(monkeypatch: pytest.Monkey
 
     class _FakeContainer:
         @classmethod
-        def configure(cls, config_path=None) -> None:
-            del config_path
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+
+        @classmethod
+        def configure(cls, config_path=None, *, entrypoint="daemon") -> None:
+            del config_path, entrypoint
 
         @classmethod
         def get_logger(cls):
@@ -181,8 +194,12 @@ async def test_console_repl_requires_double_ctrl_c_to_exit(monkeypatch: pytest.M
 
     class _FakeContainer:
         @classmethod
-        def configure(cls, config_path=None) -> None:
-            del config_path
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+
+        @classmethod
+        def configure(cls, config_path=None, *, entrypoint="daemon") -> None:
+            del config_path, entrypoint
 
         @classmethod
         def get_logger(cls):
@@ -272,8 +289,12 @@ async def test_console_run_once_timeout_shows_warning_without_crash(monkeypatch:
 
     class _FakeContainer:
         @classmethod
-        def configure(cls, config_path=None) -> None:
-            del config_path
+        def get_extensions(cls) -> ExtensionRegistry:
+            return ExtensionRegistry([], logging.getLogger("test.extensions"))
+
+        @classmethod
+        def configure(cls, config_path=None, *, entrypoint="daemon") -> None:
+            del config_path, entrypoint
 
         @classmethod
         def get_logger(cls):

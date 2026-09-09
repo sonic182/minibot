@@ -132,6 +132,21 @@ class TelegramChannelConfig(BaseModel):
     format_repair_max_attempts: PositiveInt = 1
 
 
+class ChannelsConfig(BaseModel):
+    """Per-channel settings. TOML section: ``[channels.*]``
+
+    ``telegram`` is validated here. Any other ``[channels.<name>]`` section is kept as a
+    raw dict for the channel extension that owns it — reach it with ``section(name)``.
+    """
+
+    telegram: TelegramChannelConfig = Field(default_factory=lambda: TelegramChannelConfig(bot_token=""))
+
+    model_config = ConfigDict(extra="allow")
+
+    def section(self, name: str) -> dict[str, Any]:
+        return dict((self.model_extra or {}).get(name) or {})
+
+
 class OpenRouterProviderRoutingConfig(BaseModel):
     order: list[str] | None = None
     allow_fallbacks: bool | None = None
@@ -765,11 +780,26 @@ class LoggingConfig(BaseModel):
     record_separator: str = " "
 
 
+class ExtensionsConfig(BaseModel):
+    """Python extensions loaded at startup. TOML section: ``[extensions]``
+
+    - ``modules`` — importable module names, each exposing a ``register(mb)`` function.
+      Resolved via normal Python import, so both pip-installed packages and local
+      modules on ``PYTHONPATH`` work.
+    - ``config`` — per-extension settings, keyed by extension name. The extension
+      receives its own slice as ``mb.config``; keys inside are arbitrary.
+
+    A module that cannot be imported, has no ``register``, or whose ``register``
+    raises fails startup: a silently missing tool is worse than a crash on boot.
+    """
+
+    modules: list[str] = Field(default_factory=list)
+    config: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 class Settings(BaseModel):
     runtime: RuntimeConfig = RuntimeConfig()
-    channels: dict[str, TelegramChannelConfig] = Field(
-        default_factory=lambda: {"telegram": TelegramChannelConfig(bot_token="")}
-    )
+    channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     llm: LLMMConfig = LLMMConfig()
     orchestration: OrchestrationConfig = OrchestrationConfig()
@@ -779,6 +809,7 @@ class Settings(BaseModel):
     logging: LoggingConfig = LoggingConfig()
     tasks: TasksConfig = TasksConfig()
     rabbitmq: RabbitMQConsumerConfig = RabbitMQConsumerConfig()
+    extensions: ExtensionsConfig = ExtensionsConfig()
 
     model_config = ConfigDict(extra="forbid")
 

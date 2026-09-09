@@ -17,15 +17,38 @@ from minibot.app.handlers.services import (
 from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.core.channels import ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent, OutboundFormatRepairEvent
+from minibot.core.events import (
+    BaseEvent,
+    MessageEvent,
+    OutboundEvent,
+    OutboundFormatRepairEvent,
+    TurnCompletedEvent,
+    TurnFailedEvent,
+    TurnStartedEvent,
+)
 from minibot.llm.tools.factory import build_enabled_tools
 from minibot.shared.utils import humanize_token_count, summarize_items
+
+
+def _token_trace_log_fields(token_trace: object) -> dict[str, object]:
+    """Log-friendly view of a response's token trace, shared by both handler paths."""
+    if not isinstance(token_trace, dict):
+        return {"turn_total_tokens": None, "session_total_tokens": None, "compaction_performed": None}
+    return {
+        "turn_total_tokens": humanize_token_count(token_trace["turn_total_tokens"])
+        if isinstance(token_trace.get("turn_total_tokens"), int)
+        else None,
+        "session_total_tokens": humanize_token_count(token_trace["session_total_tokens"])
+        if isinstance(token_trace.get("session_total_tokens"), int)
+        else None,
+        "compaction_performed": token_trace.get("compaction_performed"),
+    }
 
 
 class Dispatcher:
     def __init__(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus
-        self._subscription = event_bus.subscribe()
+        self._subscription = event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
         self._pending_turns = AppContainer.get_pending_turn_store()
         settings = AppContainer.get_settings()
         prompt_service = AppContainer.get_scheduled_prompt_service()
@@ -44,6 +67,7 @@ class Dispatcher:
             skill_registry=skill_registry,
             task_manager=AppContainer.get_task_manager(),
             task_producer=AppContainer.get_task_producer(),
+            extension_tools=AppContainer.get_extensions().tools,
         )
         main_agent_tools_view = main_agent_tool_view(
             tools=tools,
@@ -151,10 +175,28 @@ class Dispatcher:
                 self._logger.info("processing outbound format repair event", extra={"event_id": event.event_id})
                 await self._handle_format_repair(event)
 
+    async def _publish_lifecycle(self, event: BaseEvent) -> None:
+        """Publish turn telemetry without ever failing the turn.
+
+        A stopped bus raises, and shutdown races are normal. Letting that escape would
+        abort a live turn *and* run the ``finally`` below, clearing the pending-turn row
+        that exists so an interrupted turn is replayed on the next boot.
+        """
+        with contextlib.suppress(Exception):
+            await self._event_bus.publish(event)
+
     async def _handle_message(self, event: MessageEvent) -> None:
         await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
         try:
             message = event.message
+            await self._publish_lifecycle(
+                TurnStartedEvent(
+                    turn_id=event.event_id,
+                    channel=message.channel,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                )
+            )
             self._logger.debug(
                 "incoming message",
                 extra={
@@ -176,15 +218,7 @@ class Dispatcher:
                     "should_reply": should_reply,
                     "llm_provider": response.metadata.get("llm_provider"),
                     "llm_model": response.metadata.get("llm_model"),
-                    "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
-                    if isinstance(token_trace, dict) and isinstance(token_trace.get("turn_total_tokens"), int)
-                    else None,
-                    "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
-                    if isinstance(token_trace, dict) and isinstance(token_trace.get("session_total_tokens"), int)
-                    else None,
-                    "compaction_performed": token_trace.get("compaction_performed")
-                    if isinstance(token_trace, dict)
-                    else None,
+                    **_token_trace_log_fields(token_trace),
                 },
             )
             response_updates = response.metadata.get("response_updates")
@@ -210,28 +244,50 @@ class Dispatcher:
                             )
                         )
                     )
-            if not should_reply:
-                self._logger.info("skipping user reply as instructed", extra={"event_id": event.event_id})
-                return
-            await self._event_bus.publish(OutboundEvent(response=response))
-            compaction_updates = response.metadata.get("compaction_updates")
-            if isinstance(compaction_updates, list):
-                for update in compaction_updates:
-                    if not isinstance(update, str) or not update.strip():
-                        continue
-                    await self._event_bus.publish(
-                        OutboundEvent(
-                            response=ChannelResponse(
-                                channel=response.channel,
-                                chat_id=response.chat_id,
-                                text=update,
-                                render=RenderableResponse(kind="text", text=update),
-                                metadata={"should_reply": True, "compaction_update": True},
+            if should_reply:
+                await self._event_bus.publish(OutboundEvent(response=response))
+                compaction_updates = response.metadata.get("compaction_updates")
+                if isinstance(compaction_updates, list):
+                    for update in compaction_updates:
+                        if not isinstance(update, str) or not update.strip():
+                            continue
+                        await self._event_bus.publish(
+                            OutboundEvent(
+                                response=ChannelResponse(
+                                    channel=response.channel,
+                                    chat_id=response.chat_id,
+                                    text=update,
+                                    render=RenderableResponse(kind="text", text=update),
+                                    metadata={"should_reply": True, "compaction_update": True},
+                                )
                             )
                         )
-                    )
+            else:
+                self._logger.info("skipping user reply as instructed", extra={"event_id": event.event_id})
+            await self._publish_lifecycle(
+                TurnCompletedEvent(
+                    turn_id=event.event_id,
+                    channel=response.channel,
+                    chat_id=response.chat_id,
+                    should_reply=bool(should_reply),
+                    llm_provider=response.metadata.get("llm_provider"),
+                    llm_model=response.metadata.get("llm_model"),
+                    token_trace=token_trace if isinstance(token_trace, dict) else {},
+                    compaction_performed=token_trace.get("compaction_performed")
+                    if isinstance(token_trace, dict)
+                    else None,
+                )
+            )
         except Exception as exc:
             self._logger.exception("failed to handle message", exc_info=exc)
+            await self._publish_lifecycle(
+                TurnFailedEvent(
+                    turn_id=event.event_id,
+                    channel=event.message.channel,
+                    chat_id=event.message.chat_id,
+                    error=str(exc),
+                )
+            )
         finally:
             await self._pending_turns.clear_pending(event.event_id)
 
@@ -255,15 +311,7 @@ class Dispatcher:
                     "text": repaired.text,
                     "should_reply": should_reply,
                     "attempt": event.attempt,
-                    "turn_total_tokens": humanize_token_count(token_trace.get("turn_total_tokens"))
-                    if isinstance(token_trace, dict) and isinstance(token_trace.get("turn_total_tokens"), int)
-                    else None,
-                    "session_total_tokens": humanize_token_count(token_trace.get("session_total_tokens"))
-                    if isinstance(token_trace, dict) and isinstance(token_trace.get("session_total_tokens"), int)
-                    else None,
-                    "compaction_performed": token_trace.get("compaction_performed")
-                    if isinstance(token_trace, dict)
-                    else None,
+                    **_token_trace_log_fields(token_trace),
                 },
             )
             if not should_reply:

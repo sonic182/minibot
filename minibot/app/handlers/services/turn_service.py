@@ -97,6 +97,7 @@ class LLMTurnService:
             channel=message.channel,
             chat_id=message.chat_id,
             user_id=message.user_id,
+            turn_id=event.event_id,
         )
         if model_user_content is None and self._audio_auto_transcription_service is not None:
             auto_result = await self._audio_auto_transcription_service.transcribe_incoming_audio(

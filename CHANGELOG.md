@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Python extension system.** `[extensions] modules` names importable modules, each exposing a
+  `register(mb)` that contributes LLM tools, subscribes to internal events, and registers
+  long-running services. Resolved by normal Python import, so pip-installed packages and local
+  one-file modules on `PYTHONPATH` both work. `[extensions.config.<module>]` carries a free-form
+  settings slice per module, reaching the extension as `mb.config`; `Settings` keeps
+  `extra="forbid"` everywhere else. See `examples/minibot_ext_demo.py` and `examples/README.md`.
+- Extension load failures are fatal by design: a module that cannot be imported, defines no
+  `register`, or whose `register` raises stops startup naming the module. A handler that raises at
+  runtime is logged and its subscription survives.
+- **Turn and tool lifecycle events**, useful on their own for observability: `TurnStartedEvent`,
+  `TurnCompletedEvent`, `TurnFailedEvent`, and a single `ToolCallEvent` carrying
+  `phase = "started" | "completed" | "failed"`. Tool events are emitted by a wrapper
+  (`minibot/llm/tools/tool_events.py`) applied in `build_enabled_tools`, so the three tool-execution
+  call sites are untouched and extension tools get emission for free. Payloads carry argument *keys*
+  only, never values or results. `ToolContext.turn_id` correlates a tool call to its turn.
+- `EventBus.subscribe(types=...)` filters at subscription time, so an event never occupies a slot in
+  a queue that does not want it; `None` still means receive-everything. `lossy=True` drops with a
+  warning on a full queue instead of applying back-pressure — core subscribers stay blocking, only
+  extensions are lossy, so a slow third-party handler can no longer stall the bus.
+- **Telegram now runs as a bundled extension** (`minibot/extensions/telegram.py`). Bundled modules
+  load ahead of user ones and go through the same `register(mb)` API third parties use; the adapter
+  code in `adapters/messaging/telegram/` did not move. `ExtensionContext.entrypoint` (`"daemon"` or
+  `"console"`) lets a channel extension stay out of the console's single-channel process.
+- `@mb.tool` and `@mb.on(EventType)` decorator forms for extensions. `@mb.tool` derives the tool
+  name from the function, the description from its docstring, and the JSON schema from the first
+  argument's pydantic model, and hands the handler a validated model instead of a raw payload — a
+  bad call reaches the model as `error_code: "invalid_tool_arguments"` so it can correct and retry.
+  The explicit `mb.add_tool(ToolBinding(...))` and `mb.on(EventType, handler)` forms are unchanged
+  and remain the escape hatch for hand-written schemas or non-identifier tool names.
+- `pytest-timeout` as a dev dependency, applied to the event-bus, dispatcher and extension tests
+  that can hang.
+
+### Changed
+
+- `[channels.<name>]` sections other than `telegram` are no longer silently validated *as* a
+  Telegram config with every key dropped. `Settings.channels` is now a `ChannelsConfig` model:
+  `telegram` stays validated, anything else is kept verbatim for the channel extension that owns it
+  (`settings.channels.section("slack")`). Config files are unaffected — the TOML shape is identical,
+  only the Python accessor changes from `settings.channels["telegram"]` to
+  `settings.channels.telegram`.
+- `minibot/app/daemon.py` no longer imports or instantiates `TelegramService` by name; channels and
+  other extension services start and stop through the extension registry, which is already wired
+  into graceful shutdown. `AppContainer.get_telegram_config()` is removed.
+
+### Fixed
+
+- Shutdown could deadlock: `EventSubscription.close()` and `EventBus.stop()` both used a blocking
+  `put` for the stop sentinel, which never completes on a full queue — exactly the state a stalled
+  subscriber leaves behind. The sentinel now evicts to make room.
+- `EventSubscription.__aiter__` called `task_done()` only after the consumer resumed, so a
+  subscriber that `break`s left the count unbalanced.
+
 ## [0.9.0] - 2026-09-09
 
 ### Fixed

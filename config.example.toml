@@ -6,7 +6,9 @@ environment = "development"
 # E2E/research-heavy profile: increase agent timeout to reduce long-run failures.
 agent_timeout_seconds = 420
 
-# Telegram adapter settings.
+# Telegram adapter settings. Telegram is a bundled extension: it runs under the daemon,
+# never under `minibot console`. Any other `[channels.<name>]` section is passed through
+# verbatim to the extension that owns it (see examples/README.md).
 [channels.telegram]
 enabled = true
 bot_token = ""
@@ -517,3 +519,16 @@ queue_name = "minibot.tasks.worker"
 exchange_name = "minibot.tasks"
 # Max messages delivered to the consumer before acknowledgement.
 prefetch_count = 1
+
+# Python extensions loaded at startup. Each module must expose a register(mb) function.
+# Modules are resolved by normal Python import, so a pip-installed package or a local
+# file on PYTHONPATH both work. See examples/ for a working extension.
+# A module that fails to import, lacks register(), or whose register() raises will stop
+# startup: a silently missing tool is harder to debug than a crash on boot.
+[extensions]
+modules = []
+
+# Per-extension settings, keyed by module name. Keys inside are arbitrary; the extension
+# receives its own slice as mb.config.
+# [extensions.config.minibot_ext_demo]
+# greeting = "hola"

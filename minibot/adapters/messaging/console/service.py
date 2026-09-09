@@ -36,7 +36,7 @@ class ConsoleService:
         self._console = console or CompatConsole()
         self._logger = logging.getLogger("minibot.console")
         self._message_id = 0
-        self._subscription = event_bus.subscribe()
+        self._subscription = event_bus.subscribe(types=(OutboundEvent,))
         self._outgoing_task: asyncio.Task[None] | None = None
         self._responses: asyncio.Queue[ConsoleResponse] = asyncio.Queue()
 
