@@ -11,6 +11,7 @@ Use this skill when the task involves:
 - reviewing Python changes for architectural regressions
 - moving logic between `core`, `app`, `adapters`, `llm`, or `shared`
 - validating import direction and boundary ownership
+- reviewing bundled or third-party Python extensions, their tools, event handlers, and services
 - checking async correctness on I/O-heavy paths
 - tightening a handler, service, adapter, or provider integration
 
@@ -25,8 +26,8 @@ Use this skill when the task involves:
 ## Workflow
 
 1. Identify the touched files and classify each one by layer.
-2. Read [references/HEX_RULES.md](references/HEX_RULES.md) for layer ownership and import rules.
-3. Read [references/REVIEW_CHECKLIST.md](references/REVIEW_CHECKLIST.md) while reviewing behavior, async flow, and dependency direction.
+2. Read [references/HEX_RULES.md](references/HEX_RULES.md) for layer ownership, import rules, and extension boundaries.
+3. Read [references/REVIEW_CHECKLIST.md](references/REVIEW_CHECKLIST.md) while reviewing behavior, lifecycle, async flow, and dependency direction.
 4. If proposing code movement, use [references/REFACTOR_PATTERNS.md](references/REFACTOR_PATTERNS.md) to keep the refactor incremental.
 5. Report findings ordered by severity: architecture violation, correctness risk, maintainability issue, style issue.
 
@@ -57,6 +58,8 @@ Only include refactored code when the user asked for code changes or an example.
 - `minibot.app` orchestrates runtime flow and policy, but should not absorb adapter or provider specifics.
 - `minibot.adapters` owns concrete integrations for config, messaging, memory, files, scheduler, logging, and MCP clients.
 - `minibot.llm` owns provider wiring, request shaping, schema policy, and tool integration details.
+- `minibot.app.extensions` owns the extension API and registry lifecycle; `minibot.extensions` contains bundled, thin `register(mb)` composition modules.
+- Extension modules use the curated `ExtensionContext`, not `AppContainer`; adapter implementations remain under `minibot.adapters`.
 - Channel handlers stay thin and should not become a second application layer.
 - `minibot.shared` should stay small and generic; do not turn it into a dumping ground for mixed-layer logic.
 
