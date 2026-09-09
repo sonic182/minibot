@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from minibot.adapters.config.schema import Settings
 from minibot.adapters.tasks import worker
 from minibot.app.response_parser import EMPTY_REPLY_FALLBACK_TEXT
 from minibot.core.agents import AgentSpec
+from minibot.llm.tools.base import ToolContext
 
 
 class _PipeCapture:
@@ -68,6 +70,13 @@ class _FakeRuntime:
         )
 
 
+class _ToolCapturingRuntime(_FakeRuntime):
+    tools: list[object] = []
+
+    def __init__(self, *, tools: list[object], **_: object) -> None:
+        type(self).tools = tools
+
+
 @pytest.mark.asyncio
 async def test_worker_async_writes_error_for_invalid_payload() -> None:
     pipe = _PipeCapture(b"not-json\n")
@@ -97,6 +106,47 @@ async def test_run_agent_loop_returns_structured_success() -> None:
     assert result["text"] == "worker result"
     assert result["metadata"]["model"] == "fake-model"
     assert result["metadata"]["provider"] == "fake-provider"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_loads_extension_tools_for_workers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    extension_name = "worker_extension"
+    (tmp_path / f"{extension_name}.py").write_text(
+        """
+from llm_async.models import Tool
+
+from minibot.llm.tools.base import ToolBinding
+
+
+def register(mb):
+    async def worker_greet(payload, context):
+        return {"ok": True, "channel": context.channel}
+
+    mb.add_tool(
+        ToolBinding(
+            tool=Tool(name="worker_greet", description="greet", parameters={}),
+            handler=worker_greet,
+        )
+    )
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    settings = Settings.from_dict({"extensions": {"modules": [extension_name]}})
+
+    with (
+        patch("minibot.adapters.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.adapters.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.adapters.tasks.worker.AgentRuntime", _ToolCapturingRuntime),
+    ):
+        await worker.run_agent_loop(
+            {"task_id": "t1", "channel": "console", "prompt": "Greet Ana", "chat_id": 1, "user_id": 2}
+        )
+
+    binding = next(binding for binding in _ToolCapturingRuntime.tools if binding.tool.name == "worker_greet")
+    assert await binding.handler({}, ToolContext(channel="console")) == {"ok": True, "channel": "console"}
 
 
 class _EmptyCompletionRuntime:

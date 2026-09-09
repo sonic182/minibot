@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import signal
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ from minibot.app.agent_policies import filter_tools_for_agent, strip_reserved_de
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.environment_context import build_environment_prompt_fragment
+from minibot.app.event_bus import EventBus
+from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.runtime_limits import build_runtime_limits
@@ -95,6 +98,7 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
         channel = _require_string(task.get("channel"), "channel")
         prompt = _require_string(task.get("prompt"), "prompt")
         settings = load_settings()
+        extensions = load_extensions(settings, EventBus(), _LOGGER, entrypoint="worker")
         llm_factory = LLMClientFactory(settings)
         environment_prompt_fragment = build_environment_prompt_fragment(settings)
         spec = _resolve_task_spec(
@@ -102,9 +106,10 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             llm_factory=llm_factory,
             environment_prompt_fragment=environment_prompt_fragment,
             task=task,
+            extension_tool_names=[binding.tool.name for binding in extensions.tools],
         )
         llm_client = llm_factory.create_for_agent(spec)
-        tools = _build_worker_tools(settings=settings, spec=spec)
+        tools = _build_worker_tools(settings=settings, spec=spec, extension_tools=extensions.tools)
         runtime = AgentRuntime(
             llm_client=llm_client,
             tools=tools,
@@ -158,7 +163,9 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-def _build_worker_tools(*, settings: Settings, spec: AgentSpec) -> list[ToolBinding]:
+def _build_worker_tools(
+    *, settings: Settings, spec: AgentSpec, extension_tools: Sequence[ToolBinding] = ()
+) -> list[ToolBinding]:
     bindings: list[ToolBinding] = []
     managed_storage = _build_managed_storage(settings)
 
@@ -216,6 +223,7 @@ def _build_worker_tools(*, settings: Settings, spec: AgentSpec) -> list[ToolBind
             )
             bindings.extend(bridge.build_bindings())
 
+    bindings.extend(extension_tools)
     scoped = strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))
     return apply_tool_output_spill(
         scoped,
@@ -224,7 +232,9 @@ def _build_worker_tools(*, settings: Settings, spec: AgentSpec) -> list[ToolBind
     )
 
 
-def _build_worker_spec(*, system_prompt: str, environment_prompt_fragment: str) -> AgentSpec:
+def _build_worker_spec(
+    *, system_prompt: str, environment_prompt_fragment: str, extension_tool_names: Sequence[str] = ()
+) -> AgentSpec:
     prompt = f"{system_prompt.strip()}\n\n{_WORKER_SYSTEM_PROMPT_SUFFIX}"
     if environment_prompt_fragment.strip():
         prompt = f"{prompt}\n\n{environment_prompt_fragment.strip()}"
@@ -234,7 +244,7 @@ def _build_worker_spec(*, system_prompt: str, environment_prompt_fragment: str) 
         system_prompt=prompt,
         source_path=_WORKER_SPEC_PATH,
         max_tool_iterations=_WORKER_MAX_TOOL_ITERATIONS,
-        tools_allow=list(_WORKER_TOOL_ALLOWLIST),
+        tools_allow=[*_WORKER_TOOL_ALLOWLIST, *extension_tool_names],
     )
 
 
@@ -244,6 +254,7 @@ def _resolve_task_spec(
     llm_factory: LLMClientFactory,
     environment_prompt_fragment: str,
     task: dict[str, Any],
+    extension_tool_names: Sequence[str] = (),
 ) -> AgentSpec:
     agent_name = task.get("agent_name")
     if isinstance(agent_name, str) and agent_name.strip():
@@ -273,6 +284,7 @@ def _resolve_task_spec(
     return _build_worker_spec(
         system_prompt=llm_factory.create_default().system_prompt(),
         environment_prompt_fragment=environment_prompt_fragment,
+        extension_tool_names=extension_tool_names,
     )
 
 
