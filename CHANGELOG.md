@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   load ahead of user ones and go through the same `register(mb)` API third parties use; the adapter
   code in `adapters/messaging/telegram/` did not move. `ExtensionContext.entrypoint` (`"daemon"` or
   `"console"`) lets a channel extension stay out of the console's single-channel process.
+- `@mb.tool` and `@mb.on(EventType)` decorator forms for extensions. `@mb.tool` derives the tool
+  name from the function, the description from its docstring, and the JSON schema from the first
+  argument's pydantic model, and hands the handler a validated model instead of a raw payload — a
+  bad call reaches the model as `error_code: "invalid_tool_arguments"` so it can correct and retry.
+  The explicit `mb.add_tool(ToolBinding(...))` and `mb.on(EventType, handler)` forms are unchanged
+  and remain the escape hatch for hand-written schemas or non-identifier tool names.
 - `pytest-timeout` as a dev dependency, applied to the event-bus, dispatcher and extension tests
   that can hang.
 

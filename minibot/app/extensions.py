@@ -3,17 +3,23 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, get_type_hints
+
+from llm_async.models import Tool
+from pydantic import BaseModel, ValidationError
 
 from minibot.adapters.config.schema import Settings
 from minibot.app.event_bus import EventBus, EventSubscription
 from minibot.core.events import BaseEvent
-from minibot.llm.tools.base import ToolBinding
+from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
+from minibot.shared.errors import ToolInputError
 
 EventHandler = Callable[[Any], Awaitable[None]]
+ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
 
 # Bundled extensions load ahead of user modules. They cannot live in ``[extensions] modules``:
 # every existing config.toml would silently lose the channel it never had to opt into.
@@ -47,8 +53,50 @@ class ExtensionContext:
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
 
-    def on(self, event_type: type[BaseEvent], handler: EventHandler) -> None:
-        self.subscriptions.append((event_type, handler))
+    def on(self, event_type: type[BaseEvent], handler: EventHandler | None = None) -> Any:
+        """Subscribe to ``event_type``. Usable as ``on(EventType, handler)`` or as a decorator."""
+        if handler is not None:
+            self.subscriptions.append((event_type, handler))
+            return None
+
+        def decorator(func: EventHandler) -> EventHandler:
+            self.subscriptions.append((event_type, func))
+            return func
+
+        return decorator
+
+    def tool(self, func: ToolFunc) -> ToolFunc:
+        """Register ``func`` as a tool: name from ``__name__``, description from its docstring,
+        parameters from its first argument's pydantic model.
+
+        For anything this does not cover — a name that is not a Python identifier, a
+        hand-written schema, a description loaded from a file — build the ``ToolBinding``
+        yourself and pass it to ``add_tool``.
+        """
+        first = next(iter(inspect.signature(func).parameters), None)
+        model = get_type_hints(func).get(first) if first else None
+        if not (isinstance(model, type) and issubclass(model, BaseModel)):
+            raise ValueError(f"tool {func.__name__!r}: first argument must be annotated with a pydantic model")
+        description = inspect.getdoc(func)
+        if not description:
+            raise ValueError(f"tool {func.__name__!r}: needs a docstring, it becomes the tool description")
+
+        async def handler(payload: ToolPayload, context: ToolContext) -> Any:
+            try:
+                args = model.model_validate(payload)
+            except ValidationError as exc:
+                # Typed code, so the model is told to fix its arguments rather than
+                # getting an opaque tool_execution_failed.
+                raise ToolInputError(str(exc), error_code="invalid_tool_arguments") from exc
+            return await func(args, context)
+
+        self.add_tool(
+            ToolBinding(
+                tool=Tool(name=func.__name__, description=description, parameters=model.model_json_schema()),
+                handler=handler,
+            )
+        )
+        return func
 
     def add_tool(self, bindings: ToolBinding | Sequence[ToolBinding]) -> None:
         if isinstance(bindings, ToolBinding):

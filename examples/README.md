@@ -32,9 +32,37 @@ Expose a module-level `register(mb)`. The `mb` object (`ExtensionContext`) gives
 | `mb.entrypoint` | `"daemon"` or `"console"` — see the channel note below |
 | `mb.event_bus` | the event bus, if you need to publish |
 | `mb.logger` | a logger namespaced to your extension |
-| `mb.add_tool(binding)` | contribute one or more `ToolBinding`s |
-| `mb.on(EventType, handler)` | subscribe an `async def handler(event)` |
+| `@mb.tool` | contribute a tool from a function — see below |
+| `@mb.on(EventType)` | subscribe the decorated `async def handler(event)` |
+| `mb.add_tool(binding)` | contribute one or more `ToolBinding`s explicitly |
+| `mb.on(EventType, handler)` | subscribe a handler explicitly |
 | `mb.add_service(service)` | register something with `start()` / `stop()` |
+
+### Tools
+
+`@mb.tool` takes the name from the function, the description from its docstring, and the
+JSON schema from the first argument's pydantic model:
+
+```python
+class GreetArgs(BaseModel):
+    name: str = Field(description="Who to greet.")
+
+@mb.tool
+async def demo_greet(args: GreetArgs, context: ToolContext) -> dict[str, Any]:
+    """Greet someone. Report the returned message verbatim."""
+    return {"ok": True, "message": f"hello, {args.name}!"}
+```
+
+The docstring is what the model reads to decide whether to call the tool, so write it for
+the model, not for a maintainer. Arguments arrive validated: a bad call comes back to the
+model as `error_code: "invalid_tool_arguments"` with pydantic's message, so it can fix the
+call and retry rather than seeing an opaque failure. A tool with no docstring, or whose
+first argument isn't a pydantic model, fails the load.
+
+**Use `mb.add_tool(ToolBinding(...))` instead** when the decorator doesn't fit: a tool name
+that isn't a Python identifier, a hand-written JSON schema, a description loaded from a
+file, or a binding some other code hands you. Same for `mb.on(EventType, handler)` when the
+handler isn't defined where you subscribe it. Both forms are equally supported.
 
 Notes:
 

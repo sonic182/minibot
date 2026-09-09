@@ -7,6 +7,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from llm_async.models import ToolCall
 from pydantic import ValidationError
 
 from minibot.adapters.config.schema import Settings
@@ -14,6 +15,8 @@ from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext, load_extensions
 from minibot.core.channels import ChannelResponse
 from minibot.core.events import OutboundEvent, TurnCompletedEvent
+from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
+from minibot.llm.tools.base import ToolContext
 
 _EXTENSION_SOURCE = """
 from llm_async.models import Tool
@@ -97,6 +100,140 @@ def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.Monkey
     boom = Settings.from_dict({"extensions": {"modules": ["ext_boom"]}})
     with pytest.raises(ValueError, match="failed during register"):
         load_extensions(boom, bus)
+
+
+_DECORATED_SOURCE = """
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from minibot.core.events import TurnCompletedEvent
+from minibot.llm.tools.base import ToolContext
+
+seen_turns = []
+
+
+class GreetArgs(BaseModel):
+    name: str = Field(description="Who to greet.")
+
+
+def register(mb):
+    @mb.tool
+    async def sugar_greet(args: GreetArgs, context: ToolContext) -> dict[str, Any]:
+        \"\"\"Greet someone by name.\"\"\"
+        return {"ok": True, "message": f"hi, {args.name}!", "channel": context.channel}
+
+    @mb.on(TurnCompletedEvent)
+    async def _(event):
+        seen_turns.append(event.turn_id)
+"""
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.asyncio
+async def test_tool_decorator_derives_name_description_and_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_module(tmp_path, monkeypatch, "ext_sugar", _DECORATED_SOURCE)
+    settings = Settings.from_dict({"extensions": {"modules": ["ext_sugar"]}})
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"))
+
+    binding = next(b for b in registry.tools if b.tool.name == "sugar_greet")
+    assert binding.tool.description == "Greet someone by name."
+    assert binding.tool.parameters["properties"]["name"]["description"] == "Who to greet."
+    assert binding.tool.parameters["required"] == ["name"]
+
+    # The handler receives a validated model, not the raw payload.
+    assert await binding.handler({"name": "Ana"}, ToolContext(channel="console")) == {
+        "ok": True,
+        "message": "hi, Ana!",
+        "channel": "console",
+    }
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.asyncio
+async def test_decorated_subscription_receives_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_module(tmp_path, monkeypatch, "ext_sugar_sub", _DECORATED_SOURCE)
+    settings = Settings.from_dict({"extensions": {"modules": ["ext_sugar_sub"]}})
+    bus = EventBus()
+    registry = load_extensions(settings, bus, logging.getLogger("test.extensions"))
+
+    await registry.start()
+    await bus.publish(TurnCompletedEvent(turn_id="turn-9", channel="console", chat_id=1))
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+        if sys.modules["ext_sugar_sub"].seen_turns:
+            break
+    await registry.stop()
+
+    assert sys.modules["ext_sugar_sub"].seen_turns == ["turn-9"]
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.asyncio
+async def test_tool_decorator_reports_bad_arguments_as_invalid_tool_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The model must be told to fix its call, not handed an opaque tool_execution_failed."""
+    _write_module(tmp_path, monkeypatch, "ext_sugar_bad_args", _DECORATED_SOURCE)
+    settings = Settings.from_dict({"extensions": {"modules": ["ext_sugar_bad_args"]}})
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"))
+
+    call = ToolCall(id="c1", type="function", function={"name": "sugar_greet", "arguments": "{}"})
+    records = await execute_tool_calls_for_runtime(
+        [call],
+        registry.tools,
+        ToolContext(channel="console"),
+        responses_mode=False,
+        logger=logging.getLogger("test.tool_executor"),
+    )
+
+    content = records[0].result.content
+    assert content["ok"] is False
+    assert content["error_code"] == "invalid_tool_arguments"
+
+
+_NO_MODEL_SOURCE = """
+def register(mb):
+    @mb.tool
+    async def no_model(args: dict, context) -> dict:
+        \"\"\"A tool whose arguments are not a pydantic model.\"\"\"
+        return {}
+"""
+
+_NO_DOC_SOURCE = """
+from pydantic import BaseModel
+
+
+class Args(BaseModel):
+    x: int = 1
+
+
+def register(mb):
+    @mb.tool
+    async def no_doc(args: Args, context) -> dict:
+        return {}
+"""
+
+
+@pytest.mark.parametrize(
+    ("module_name", "source", "match"),
+    [
+        ("ext_no_model", _NO_MODEL_SOURCE, "must be annotated with a pydantic model"),
+        ("ext_no_doc", _NO_DOC_SOURCE, "needs a docstring"),
+    ],
+)
+def test_tool_decorator_rejects_unusable_functions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module_name: str, source: str, match: str
+) -> None:
+    """A tool with no schema or no description is worse than a boot crash: the agent just
+    quietly cannot do something. Both fail the load, naming the module."""
+    _write_module(tmp_path, monkeypatch, module_name, source)
+    settings = Settings.from_dict({"extensions": {"modules": [module_name]}})
+
+    with pytest.raises(ValueError, match=match):
+        load_extensions(settings, EventBus(), logging.getLogger("test.extensions"))
 
 
 @pytest.mark.timeout(10)

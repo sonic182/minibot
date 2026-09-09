@@ -9,49 +9,41 @@ Load it by putting this directory on ``PYTHONPATH`` and adding to ``config.toml`
     greeting = "hola"
 
 It contributes one tool and one event subscriber, which together cover everything
-the extension API currently offers.
+the extension API currently offers. Both use the decorator form; ``mb.add_tool`` and
+``mb.on(EventType, handler)`` remain available for anything it does not cover —
+see ``README.md``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from llm_async.models import Tool
+from pydantic import BaseModel, Field
 
 from minibot.app.extensions import ExtensionContext
 from minibot.core.events import TurnCompletedEvent
-from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.llm.tools.schema_utils import strict_object
+from minibot.llm.tools.base import ToolContext
+
+
+class GreetArgs(BaseModel):
+    name: str = Field(description="Who to greet.")
 
 
 def register(mb: ExtensionContext) -> None:
     greeting = str(mb.config.get("greeting", "hello"))
 
-    async def handler(payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        name = str(payload.get("name") or "world").strip() or "world"
+    @mb.tool
+    async def demo_greet(args: GreetArgs, context: ToolContext) -> dict[str, Any]:
+        """Greet someone using the demo extension. Call this whenever the user asks for a
+        demo greeting, and report the returned message verbatim.
+        """
         return {
             "ok": True,
-            "message": f"{greeting}, {name}!",
+            "message": f"{greeting}, {args.name}!",
             "channel": context.channel,
         }
 
-    mb.add_tool(
-        ToolBinding(
-            tool=Tool(
-                name="demo_greet",
-                description=(
-                    "Greet someone using the demo extension. Call this whenever the user asks "
-                    "for a demo greeting, and report the returned message verbatim."
-                ),
-                parameters=strict_object(
-                    properties={"name": {"type": "string", "description": "Who to greet."}},
-                    required=["name"],
-                ),
-            ),
-            handler=handler,
-        )
-    )
-
+    @mb.on(TurnCompletedEvent)
     async def on_turn_completed(event: TurnCompletedEvent) -> None:
         mb.logger.info(
             "demo extension saw a completed turn",
@@ -62,5 +54,3 @@ def register(mb: ExtensionContext) -> None:
                 "turn_total_tokens": event.token_trace.get("turn_total_tokens"),
             },
         )
-
-    mb.on(TurnCompletedEvent, on_turn_completed)
