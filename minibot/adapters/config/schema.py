@@ -132,6 +132,21 @@ class TelegramChannelConfig(BaseModel):
     format_repair_max_attempts: PositiveInt = 1
 
 
+class ChannelsConfig(BaseModel):
+    """Per-channel settings. TOML section: ``[channels.*]``
+
+    ``telegram`` is validated here. Any other ``[channels.<name>]`` section is kept as a
+    raw dict for the channel extension that owns it — reach it with ``section(name)``.
+    """
+
+    telegram: TelegramChannelConfig = Field(default_factory=lambda: TelegramChannelConfig(bot_token=""))
+
+    model_config = ConfigDict(extra="allow")
+
+    def section(self, name: str) -> dict[str, Any]:
+        return dict((self.model_extra or {}).get(name) or {})
+
+
 class OpenRouterProviderRoutingConfig(BaseModel):
     order: list[str] | None = None
     allow_fallbacks: bool | None = None
@@ -784,9 +799,7 @@ class ExtensionsConfig(BaseModel):
 
 class Settings(BaseModel):
     runtime: RuntimeConfig = RuntimeConfig()
-    channels: dict[str, TelegramChannelConfig] = Field(
-        default_factory=lambda: {"telegram": TelegramChannelConfig(bot_token="")}
-    )
+    channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     llm: LLMMConfig = LLMMConfig()
     orchestration: OrchestrationConfig = OrchestrationConfig()

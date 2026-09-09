@@ -36,7 +36,7 @@ async def run(
     console = CompatConsole()
     effective_timeout_seconds = max(120.0, float(timeout_seconds))
     resolved_config_path = Path(config_path).expanduser() if config_path else None
-    AppContainer.configure(resolved_config_path)
+    AppContainer.configure(resolved_config_path, entrypoint="console")
     await AppContainer.initialize_storage()
     logger = AppContainer.get_logger()
     settings = AppContainer.get_settings()

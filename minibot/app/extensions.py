@@ -15,6 +15,10 @@ from minibot.llm.tools.base import ToolBinding
 
 EventHandler = Callable[[Any], Awaitable[None]]
 
+# Bundled extensions load ahead of user modules. They cannot live in ``[extensions] modules``:
+# every existing config.toml would silently lose the channel it never had to opt into.
+_BUNDLED_MODULES = ("minibot.extensions.telegram",)
+
 
 class ExtensionService(Protocol):
     async def start(self) -> None: ...
@@ -28,6 +32,9 @@ class ExtensionContext:
 
     Deliberately narrow: the container is a class-level singleton, and passing it
     whole would make every one of its fields public API.
+
+    ``entrypoint`` is ``"daemon"`` or ``"console"``. Channel extensions must check it and
+    contribute nothing under ``"console"``: that entrypoint owns the only channel it runs.
     """
 
     name: str
@@ -35,6 +42,7 @@ class ExtensionContext:
     settings: Settings
     event_bus: EventBus
     logger: logging.Logger
+    entrypoint: str = "daemon"
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
@@ -113,15 +121,16 @@ def load_extensions(
     settings: Settings,
     event_bus: EventBus,
     logger: logging.Logger | None = None,
+    entrypoint: str = "daemon",
 ) -> ExtensionRegistry:
-    """Import and register every module named in ``[extensions] modules``.
+    """Import and register the bundled extensions, then every ``[extensions] modules`` entry.
 
     Failures are fatal by design: a tool that silently fails to load leaves the agent
     quietly unable to do something, which is far harder to diagnose than a boot crash.
     """
     log = logger or logging.getLogger("minibot.extensions")
     contexts: list[ExtensionContext] = []
-    for name in settings.extensions.modules:
+    for name in (*_BUNDLED_MODULES, *settings.extensions.modules):
         try:
             module = importlib.import_module(name)
         except Exception as exc:
@@ -135,6 +144,7 @@ def load_extensions(
             settings=settings,
             event_bus=event_bus,
             logger=logging.getLogger(f"minibot.extensions.{name}"),
+            entrypoint=entrypoint,
         )
         try:
             register(context)

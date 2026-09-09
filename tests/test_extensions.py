@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from minibot.adapters.config.schema import Settings
 from minibot.app.event_bus import EventBus
-from minibot.app.extensions import load_extensions
+from minibot.app.extensions import ExtensionContext, load_extensions
 from minibot.core.channels import ChannelResponse
 from minibot.core.events import OutboundEvent, TurnCompletedEvent
 
@@ -58,7 +58,8 @@ async def test_load_extensions_collects_tools_and_delivers_events(
     bus = EventBus()
     registry = load_extensions(settings, bus, logging.getLogger("test.extensions"))
 
-    assert registry.names() == ["ext_ok"]
+    # Bundled extensions load first, so the user module is last rather than alone.
+    assert registry.names() == ["minibot.extensions.telegram", "ext_ok"]
     assert [binding.tool.name for binding in registry.tools] == ["demo_tool"]
     assert await registry.tools[0].handler({}, None) == {"ok": True, "greeting": "hola"}
 
@@ -96,6 +97,66 @@ def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.Monkey
     boom = Settings.from_dict({"extensions": {"modules": ["ext_boom"]}})
     with pytest.raises(ValueError, match="failed during register"):
         load_extensions(boom, bus)
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.asyncio
+async def test_registry_starts_and_stops_contributed_services(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = """
+    calls = []
+
+
+    class _Service:
+        async def start(self):
+            calls.append("start")
+
+        async def stop(self):
+            calls.append("stop")
+
+
+    def register(mb):
+        mb.add_service(_Service())
+    """
+    _write_module(tmp_path, monkeypatch, "ext_service", source)
+    settings = Settings.from_dict({"extensions": {"modules": ["ext_service"]}})
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"))
+
+    await registry.start()
+    assert sys.modules["ext_service"].calls == ["start"]
+    await registry.stop()
+    assert sys.modules["ext_service"].calls == ["start", "stop"]
+
+
+_VALID_BOT_TOKEN = "123456:AAHfakefakefakefakefakefakefakefake"
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "channel", "expected_services"),
+    [
+        ("daemon", {"enabled": True, "bot_token": _VALID_BOT_TOKEN}, 1),
+        ("daemon", {"enabled": False, "bot_token": _VALID_BOT_TOKEN}, 0),
+        ("daemon", {"enabled": True, "bot_token": ""}, 0),
+        # Console owns the only channel it runs; a built-but-unstarted service stalls the bus.
+        ("console", {"enabled": True, "bot_token": _VALID_BOT_TOKEN}, 0),
+    ],
+)
+def test_bundled_telegram_extension_registers_only_for_an_enabled_daemon(
+    entrypoint: str, channel: dict[str, object], expected_services: int
+) -> None:
+    from minibot.extensions.telegram import register
+
+    settings = Settings.from_dict({"channels": {"telegram": channel}})
+    context = ExtensionContext(
+        name="minibot.extensions.telegram",
+        config={},
+        settings=settings,
+        event_bus=EventBus(),
+        logger=logging.getLogger("test.extensions.telegram"),
+        entrypoint=entrypoint,
+    )
+    register(context)
+
+    assert len(context.services) == expected_services
 
 
 def test_settings_allows_arbitrary_extension_config_but_still_forbids_unknown_sections() -> None:

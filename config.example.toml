@@ -6,7 +6,9 @@ environment = "development"
 # E2E/research-heavy profile: increase agent timeout to reduce long-run failures.
 agent_timeout_seconds = 420
 
-# Telegram adapter settings.
+# Telegram adapter settings. Telegram is a bundled extension: it runs under the daemon,
+# never under `minibot console`. Any other `[channels.<name>]` section is passed through
+# verbatim to the extension that owns it (see examples/README.md).
 [channels.telegram]
 enabled = true
 bot_token = ""

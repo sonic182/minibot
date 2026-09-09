@@ -1,8 +1,8 @@
 # Minibot Extensions
 
-Status: **Phases 1-5 done.** Extensions work end-to-end: config-declared modules
-contribute tools and subscribe to events, proven by `examples/minibot_ext_demo.py`.
-Phase 6 (services and channels) is next; Phase 7 migrates bundled extensions.
+Status: **Phases 1-6 done.** Extensions contribute tools, subscribe to events, and now
+carry a channel: Telegram runs as a bundled extension and `daemon.py` no longer knows it
+exists. Phase 7 migrates the rest.
 
 Note on §2 below: it is the original analysis, kept as the record of why this was
 done. Some of it now describes fixed problems — §2.4's back-pressure blocker and
@@ -329,19 +329,42 @@ The hard blocker. Nothing below works without it.
 - [ ] Revise `ExtensionContext` based on what hurt — nothing did; revisit after a
       second real extension exists.
 
-### Phase 6 — Services and channels
+### Phase 6 — Services and channels ✅ done
 
-Largest change; leave for last.
-
-- [ ] `minibot/adapters/config/schema.py:770` — `Settings.channels` typed
-      `dict[str, TelegramChannelConfig]`; needs a base channel config + per-channel
-      typing so a second channel can be configured
-- [ ] `minibot/app/daemon.py:47` — stop instantiating `TelegramService` by name;
-      resolve channels through the extension/service registry
-- [ ] `mb.add_service()` contract: `start()` / `stop()`, wired into
-      `_graceful_shutdown` (`minibot/app/daemon.py:122`)
-- [ ] Move Telegram (863 LOC) to a bundled extension
-- [ ] Console channel stays core (only always-available channel)
+- [x] `minibot/adapters/config/schema.py` — `ChannelsConfig` replaces
+      `dict[str, TelegramChannelConfig]`. `telegram` stays validated; `extra="allow"`
+      keeps any other `[channels.<name>]` section as a raw dict, reachable via
+      `settings.channels.section(name)`. This also closed a silent trap: `[channels.slack]`
+      used to validate *as a Telegram config* and drop every key.
+      `settings.channels["telegram"]` → `settings.channels.telegram` (2 prod call sites).
+- [x] `minibot/adapters/container/app_container.py` — `get_telegram_config()` deleted;
+      `daemon.py` was its only caller.
+- [x] `minibot/app/daemon.py` — no longer imports or instantiates `TelegramService`.
+      It starts via `extensions.start()`, now *before* `_replay_pending_turns` — harmless,
+      the outbound subscription is created in `__init__` during `configure()` either way.
+- [x] **Bundled extensions**, the question deferred from Phase 5:
+      `_BUNDLED_MODULES = ("minibot.extensions.telegram",)` in `minibot/app/extensions.py`,
+      loaded ahead of user modules. They cannot go in `[extensions] modules` — every
+      existing `config.toml` would silently lose Telegram.
+- [x] `minibot/extensions/` (new) — thin `register(mb)` entry points only. The 863 LOC of
+      `adapters/messaging/telegram/` did **not** move; "bundled extension" means loaded
+      through the extension API, not relocated. This is where Phase 7's modules go.
+- [x] `mb.add_service()` contract — **already shipped in Phase 4.** `ExtensionRegistry`
+      (`minibot/app/extensions.py`) drives `start()`/`stop()` and the registry is already in
+      the daemon's `_graceful_shutdown` service list. Nothing to do; now covered by
+      `tests/test_extensions.py::test_registry_starts_and_stops_contributed_services`.
+- [x] Console channel stays core.
+- [x] **`ExtensionContext.entrypoint`** (`"daemon"` | `"console"`) — not in the original
+      plan, and the phase does not work without it. `console.py` calls `extensions.start()`,
+      so a bundled Telegram would have booted a poller under `minibot console --once`.
+      Not fixable at `start()` time: `TelegramService.__init__` takes a *blocking*
+      subscription and only drains it in `start()`, so a built-but-unstarted service fills
+      its 128-slot queue and stalls every `publish`. The service must not be *constructed*
+      ⇒ the check belongs in `register()`. Threaded through
+      `AppContainer.configure(..., entrypoint=...)`.
+- [x] Verified: `minibot console --once` logs the extension with `services=0` and never
+      starts polling; the daemon logs `services=1`. (The daemon's own polling line needs
+      network; the start path itself is the unchanged Phase 4 registry code.)
 
 ### Phase 7 — Migrate remaining bundled extensions
 
@@ -373,5 +396,7 @@ return stops justifying the churn.
       would make every field public API.
 - [ ] Do extension event handlers get to *modify* anything, or observe only?
       (still observe-only, as shipped — mutation means ordering and conflict rules)
-- [ ] Do bundled extensions ship in the `minibot` package or as
-      `minibot_contrib.*`? (defer until Phase 7 actually starts)
+- [x] Do bundled extensions ship in the `minibot` package or as `minibot_contrib.*`? —
+      **`minibot/extensions/`**, in-package, answered in Phase 6. Thin `register(mb)`
+      modules over adapter code that stays where it is. A separate distribution is still
+      the non-goal from §1.
