@@ -66,16 +66,26 @@ handler isn't defined where you subscribe it. Both forms are equally supported.
 
 Notes:
 
+- **An extension is ordinary in-process code with no sandbox.** It is imported by name from
+  `config.toml` and runs with everything the bot has — filesystem, network, credentials in
+  `mb.settings`. Install extensions the way you'd install a dependency, and treat write
+  access to `config.toml` as equivalent to code execution.
 - **Load failures are fatal.** A module that can't be imported, has no `register`, or
   whose `register` raises will stop the process at boot. A silently missing tool is
   much harder to debug than a crash.
 - **Tool names must be unique.** Colliding with a built-in tool raises at startup.
+- **Define argument models at module level**, not inside `register()`. Every file here uses
+  `from __future__ import annotations`, so annotations are resolved against module globals
+  and a class defined inside the function cannot be found.
 - **Event handlers are lossy subscribers.** If your handler is slow enough to fill its
   queue, events are dropped with a warning rather than stalling the bot. Don't do
   slow work inline — hand it to a task.
 - A handler that raises is logged; it does not kill the subscription.
 - Your tools automatically get `ToolCallEvent` emission and large-output spill, the
   same as built-in tools.
+- **Tools reach the main agent and delegated agents, but not task workers.** A task spawned
+  with `spawn_task` runs in a separate process that builds its own tool list and does not
+  load extensions, so an extension tool is not callable from inside a task.
 - **Bundled extensions load first.** `minibot.extensions.*` (Telegram today) registers
   ahead of anything in `[extensions] modules`, through this exact API.
 

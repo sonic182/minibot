@@ -18,6 +18,7 @@ from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import (
+    BaseEvent,
     MessageEvent,
     OutboundEvent,
     OutboundFormatRepairEvent,
@@ -174,11 +175,21 @@ class Dispatcher:
                 self._logger.info("processing outbound format repair event", extra={"event_id": event.event_id})
                 await self._handle_format_repair(event)
 
+    async def _publish_lifecycle(self, event: BaseEvent) -> None:
+        """Publish turn telemetry without ever failing the turn.
+
+        A stopped bus raises, and shutdown races are normal. Letting that escape would
+        abort a live turn *and* run the ``finally`` below, clearing the pending-turn row
+        that exists so an interrupted turn is replayed on the next boot.
+        """
+        with contextlib.suppress(Exception):
+            await self._event_bus.publish(event)
+
     async def _handle_message(self, event: MessageEvent) -> None:
         await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
         try:
             message = event.message
-            await self._event_bus.publish(
+            await self._publish_lifecycle(
                 TurnStartedEvent(
                     turn_id=event.event_id,
                     channel=message.channel,
@@ -253,7 +264,7 @@ class Dispatcher:
                         )
             else:
                 self._logger.info("skipping user reply as instructed", extra={"event_id": event.event_id})
-            await self._event_bus.publish(
+            await self._publish_lifecycle(
                 TurnCompletedEvent(
                     turn_id=event.event_id,
                     channel=response.channel,
@@ -269,15 +280,14 @@ class Dispatcher:
             )
         except Exception as exc:
             self._logger.exception("failed to handle message", exc_info=exc)
-            with contextlib.suppress(Exception):
-                await self._event_bus.publish(
-                    TurnFailedEvent(
-                        turn_id=event.event_id,
-                        channel=event.message.channel,
-                        chat_id=event.message.chat_id,
-                        error=str(exc),
-                    )
+            await self._publish_lifecycle(
+                TurnFailedEvent(
+                    turn_id=event.event_id,
+                    channel=event.message.channel,
+                    chat_id=event.message.chat_id,
+                    error=str(exc),
                 )
+            )
         finally:
             await self._pending_turns.clear_pending(event.event_id)
 

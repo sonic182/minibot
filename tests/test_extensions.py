@@ -194,6 +194,24 @@ async def test_tool_decorator_reports_bad_arguments_as_invalid_tool_arguments(
     assert content["error_code"] == "invalid_tool_arguments"
 
 
+_LOCAL_MODEL_SOURCE = """
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+from minibot.llm.tools.base import ToolContext
+
+
+def register(mb):
+    class Args(BaseModel):
+        x: int
+
+    @mb.tool
+    async def local_model(args: Args, context: ToolContext) -> dict:
+        \"\"\"A tool whose argument model is defined inside register().\"\"\"
+        return {"ok": True}
+"""
+
 _NO_MODEL_SOURCE = """
 def register(mb):
     @mb.tool
@@ -222,6 +240,9 @@ def register(mb):
     [
         ("ext_no_model", _NO_MODEL_SOURCE, "must be annotated with a pydantic model"),
         ("ext_no_doc", _NO_DOC_SOURCE, "needs a docstring"),
+        # `from __future__ import annotations` resolves against module globals, so a model
+        # defined inside register() is unreachable. Say so, don't leak "name X is not defined".
+        ("ext_local_model", _LOCAL_MODEL_SOURCE, "Define the pydantic model at module level"),
     ],
 )
 def test_tool_decorator_rejects_unusable_functions(

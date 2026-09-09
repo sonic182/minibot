@@ -104,7 +104,8 @@ class AppContainer:
         else:
             cls._prompt_store = None
             cls._prompt_service = None
-        # Last: extensions may reach for any backend above via the context they receive.
+        # Last, so an extension's register() sees a fully built container even though the
+        # context handed to it exposes only settings, the bus and a logger.
         cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger, entrypoint)
 
     @classmethod

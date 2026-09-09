@@ -79,4 +79,6 @@ async def test_lossy_subscriber_drops_instead_of_blocking_when_queue_is_full() -
 
     assert lossy._queue.qsize() == 1
 
+    # Load-bearing, not cleanup: closing over a *full* queue is what the stop sentinel has
+    # to survive. A blocking put here deadlocks, and only pytest-timeout catches it.
     await lossy.close()

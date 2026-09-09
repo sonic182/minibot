@@ -74,7 +74,16 @@ class ExtensionContext:
         yourself and pass it to ``add_tool``.
         """
         first = next(iter(inspect.signature(func).parameters), None)
-        model = get_type_hints(func).get(first) if first else None
+        try:
+            model = get_type_hints(func).get(first) if first else None
+        except NameError as exc:
+            # ``from __future__ import annotations`` makes every annotation a string that
+            # get_type_hints resolves against module globals, so a model defined inside
+            # register() cannot be found. Say that, instead of a bare "name X is not defined".
+            raise ValueError(
+                f"tool {func.__name__!r}: could not resolve its argument annotation ({exc}). "
+                "Define the pydantic model at module level, not inside register()."
+            ) from exc
         if not (isinstance(model, type) and issubclass(model, BaseModel)):
             raise ValueError(f"tool {func.__name__!r}: first argument must be annotated with a pydantic model")
         description = inspect.getdoc(func)
