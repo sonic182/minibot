@@ -93,6 +93,12 @@ class SessionStateService:
         if provider_tool_calls is not None and provider_tool_calls >= 0:
             self.session_latest_provider_tool_calls[session_id] = provider_tool_calls
 
+    def set_latest_input_tokens(self, session_id: str, input_tokens: int | None) -> None:
+        if input_tokens is None:
+            self.session_latest_input_tokens.pop(session_id, None)
+        elif input_tokens >= 0:
+            self.session_latest_input_tokens[session_id] = input_tokens
+
     def latest_input_tokens(self, session_id: str) -> int | None:
         return self.session_latest_input_tokens.get(session_id)
 

@@ -35,4 +35,3 @@ def register(mb: ExtensionContext) -> None:
         except Exception as exc:  # noqa: BLE001
             mb.logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
     mb.add_tool(bindings)
-

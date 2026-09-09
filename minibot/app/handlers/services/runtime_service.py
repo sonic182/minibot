@@ -76,14 +76,7 @@ class RuntimeOrchestrationService:
             initial_previous_response_id=previous_response_id,
         )
         tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
-        self._session_state.track_usage(
-            session_id,
-            input_tokens=generation.input_tokens,
-            output_tokens=None,
-            total_tokens=None,
-            cached_input_tokens=None,
-            reasoning_output_tokens=None,
-        )
+        self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
         tool_messages_count = count_tool_messages(generation.state)
         provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
         trace_result = extract_delegation_trace(generation.state)
@@ -140,14 +133,7 @@ class RuntimeOrchestrationService:
                 initial_previous_response_id=None,
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
-            self._session_state.track_usage(
-                session_id,
-                input_tokens=generation.input_tokens,
-                output_tokens=None,
-                total_tokens=None,
-                cached_input_tokens=None,
-                reasoning_output_tokens=None,
-            )
+            self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
             trace_result = extract_delegation_trace(generation.state)
             provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
             if count_tool_messages(generation.state) == 0 and provider_tool_calls == 0:

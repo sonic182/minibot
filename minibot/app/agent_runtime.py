@@ -142,8 +142,7 @@ class AgentRuntime:
                     raise
                 if isinstance(completion.total_tokens, int) and completion.total_tokens > 0:
                     total_tokens += completion.total_tokens
-                if completion.input_tokens is not None:
-                    input_tokens = completion.input_tokens
+                input_tokens = completion.input_tokens
                 if isinstance(completion.provider_tool_calls, int) and completion.provider_tool_calls > 0:
                     provider_tool_calls += completion.provider_tool_calls
                 responses_followup_messages = None

@@ -108,13 +108,16 @@ class _StubMemory:
 
 
 class _StubRuntime:
+    def __init__(self, input_tokens: int | None = 12) -> None:
+        self._input_tokens = input_tokens
+
     async def run(self, **_: Any) -> RuntimeResult:
         return RuntimeResult(
             payload="ignored",
             response_id="resp-1",
             state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
             total_tokens=4,
-            input_tokens=12,
+            input_tokens=self._input_tokens,
         )
 
 
@@ -601,6 +604,34 @@ async def test_runtime_service_returns_guardrail_resolved_text() -> None:
     assert result.tokens_used == 7
     assert session_state.current_tokens("s1") == 7
     assert session_state.latest_input_tokens("s1") == 12
+
+
+@pytest.mark.asyncio
+async def test_runtime_service_clears_stale_input_tokens_when_runtime_omits_usage() -> None:
+    session_state = SessionStateService()
+    session_state.set_latest_input_tokens("s1", 120)
+    service = RuntimeOrchestrationService(
+        runtime=cast(AgentRuntime, _StubRuntime(input_tokens=None)),
+        llm_client=cast(LLMClient, _StubClient()),
+        guardrail=_ResolvedGuardrail(),
+        session_state=session_state,
+        logger=logging.getLogger("test"),
+    )
+
+    await service.run_with_agent_runtime(
+        session_id="s1",
+        history=[],
+        model_text="hi",
+        model_user_content=None,
+        system_prompt="system",
+        tool_context=ToolContext(),
+        prompt_cache_key=None,
+        previous_response_id=None,
+        chat_id=1,
+        channel="telegram",
+    )
+
+    assert session_state.latest_input_tokens("s1") is None
 
 
 @pytest.mark.asyncio
