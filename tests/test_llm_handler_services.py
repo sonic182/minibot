@@ -56,6 +56,9 @@ class _StubClient:
     def is_responses_provider(self) -> bool:
         return True
 
+    def supports_responses_compaction(self) -> bool:
+        return True
+
     async def compact_response(self, *, previous_response_id: str, prompt_cache_key: str | None) -> LLMCompaction:
         self.compact_calls.append(
             {
@@ -111,6 +114,7 @@ class _StubRuntime:
             response_id="resp-1",
             state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
             total_tokens=4,
+            input_tokens=12,
         )
 
 
@@ -380,6 +384,51 @@ async def test_compaction_service_uses_responses_endpoint_when_available() -> No
 
 
 @pytest.mark.asyncio
+async def test_compaction_service_skips_unsupported_responses_compaction() -> None:
+    class _UnsupportedCompactionClient(_StubClient):
+        def supports_responses_compaction(self) -> bool:
+            return False
+
+        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+            _ = args, kwargs
+            return LLMGeneration("summary via fallback", response_id="cmp-fallback", total_tokens=7)
+
+    client = _UnsupportedCompactionClient()
+    memory = _StubMemory()
+    state = SessionStateService()
+    state.track_tokens("s1", 20)
+    state.set_previous_response_id("s1", "resp-previous")
+    await memory.append_history("s1", "user", "hi")
+    prompt_service = PromptService(
+        llm_client=cast(LLMClient, client),
+        tools=[],
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+    )
+    service = HistoryCompactionService(
+        memory=cast(MemoryBackend, memory),
+        llm_client=cast(LLMClient, client),
+        session_state=state,
+        prompt_service=prompt_service,
+        logger=logging.getLogger("test"),
+        max_history_tokens=10,
+        compaction_user_request="Please compact the current conversation memory.",
+    )
+
+    result = await service.compact_history_if_needed(
+        "s1",
+        prompt_cache_key="telegram:1",
+        system_prompt="system",
+        notify=True,
+        responses_state_mode="previous_response_id",
+    )
+
+    assert result.performed is True
+    assert client.compact_calls == []
+    assert state.get_previous_response_id("s1") == "cmp-fallback"
+
+
+@pytest.mark.asyncio
 async def test_compaction_service_uses_latest_input_tokens_for_responses_threshold() -> None:
     client = _StubClient()
     memory = _StubMemory()
@@ -551,6 +600,7 @@ async def test_runtime_service_returns_guardrail_resolved_text() -> None:
     assert result.render.text == "resolved"
     assert result.tokens_used == 7
     assert session_state.current_tokens("s1") == 7
+    assert session_state.latest_input_tokens("s1") == 12
 
 
 @pytest.mark.asyncio

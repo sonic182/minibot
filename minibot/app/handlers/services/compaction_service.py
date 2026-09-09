@@ -177,7 +177,7 @@ class HistoryCompactionService:
             )
 
     def _should_use_responses_compaction_endpoint(self, session_id: str, responses_state_mode: str) -> bool:
-        if not self._llm_client.is_responses_provider():
+        if not self._llm_client.supports_responses_compaction():
             return False
         if responses_state_mode != "previous_response_id":
             return False

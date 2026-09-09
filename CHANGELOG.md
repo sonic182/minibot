@@ -57,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OpenCode Go endpoints are detected from their base URL and skip the unsupported `/responses/compact` request, falling back directly to summary compaction.
+- Agent-runtime `input_tokens` now reach session compaction, so repeated tool-loop calls count toward cost telemetry without triggering premature history compaction.
 - Shutdown could deadlock: `EventSubscription.close()` and `EventBus.stop()` both used a blocking
   `put` for the stop sentinel, which never completes on a full queue — exactly the state a stalled
   subscriber leaves behind. The sentinel now evicts to make room.
