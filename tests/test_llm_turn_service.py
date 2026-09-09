@@ -134,6 +134,9 @@ class StubLLMClient:
     def is_responses_provider(self) -> bool:
         return self._is_responses
 
+    def supports_responses_compaction(self) -> bool:
+        return self._is_responses
+
     def supports_media_inputs(self) -> bool:
         return self._provider in {"openai_responses", "openai", "openrouter"}
 
