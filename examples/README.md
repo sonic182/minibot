@@ -113,4 +113,4 @@ Two rules, both load-bearing:
   `__init__` but only drains in `start()` will fill its 128-slot queue and stall every
   publish. Don't construct what you won't start.
 
-`minibot/extensions/telegram.py` is the worked example.
+`minibot/extensions/channels/telegram.py` is the worked example.

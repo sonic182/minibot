@@ -28,10 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a queue that does not want it; `None` still means receive-everything. `lossy=True` drops with a
   warning on a full queue instead of applying back-pressure — core subscribers stay blocking, only
   extensions are lossy, so a slow third-party handler can no longer stall the bus.
-- **Telegram now runs as a bundled extension** (`minibot/extensions/telegram.py`). Bundled modules
-  load ahead of user ones and go through the same `register(mb)` API third parties use; the adapter
-  code in `adapters/messaging/telegram/` did not move. `ExtensionContext.entrypoint` (`"daemon"` or
-  `"console"`) lets a channel extension stay out of the console's single-channel process.
+- **Bundled extensions are grouped by role** under `minibot/extensions/{channels,integrations,
+  services,tools}`. Telegram, RAG, MCP, RabbitMQ, scheduler, SQLite tasks, and optional tool groups
+  now use the same `register(mb)` API as third parties; their adapter and LLM-tool implementations
+  remain in their existing layers.
+- Task workers now load extension tools with `entrypoint="worker"`. Bundled registrations preserve
+  the worker's restricted tool set; services and subscriptions do not start in worker processes.
 - `@mb.tool` and `@mb.on(EventType)` decorator forms for extensions. `@mb.tool` derives the tool
   name from the function, the description from its docstring, and the JSON schema from the first
   argument's pydantic model, and hands the handler a validated model instead of a raw payload — a
@@ -49,9 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`settings.channels.section("slack")`). Config files are unaffected — the TOML shape is identical,
   only the Python accessor changes from `settings.channels["telegram"]` to
   `settings.channels.telegram`.
-- `minibot/app/daemon.py` no longer imports or instantiates `TelegramService` by name; channels and
-  other extension services start and stop through the extension registry, which is already wired
-  into graceful shutdown. `AppContainer.get_telegram_config()` is removed.
+- `minibot/app/daemon.py` and `minibot.app.console` no longer wire scheduler or task consumers by
+  name. Bundled services own their startup/shutdown through the extension registry; the core tool
+  factory now assembles only chat memory, calculator, skills, delegation, and extension bindings.
 
 ### Fixed
 

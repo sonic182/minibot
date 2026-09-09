@@ -51,7 +51,6 @@ class Dispatcher:
         self._subscription = event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
         self._pending_turns = AppContainer.get_pending_turn_store()
         settings = AppContainer.get_settings()
-        prompt_service = AppContainer.get_scheduled_prompt_service()
         memory_backend = AppContainer.get_memory_backend()
         agent_registry = AppContainer.get_agent_registry()
         llm_factory = AppContainer.get_llm_factory()
@@ -59,14 +58,10 @@ class Dispatcher:
         tools = build_enabled_tools(
             settings,
             memory_backend,
-            AppContainer.get_kv_memory_backend(),
-            prompt_service,
-            event_bus,
-            agent_registry,
-            llm_factory,
+            event_bus=event_bus,
+            agent_registry=agent_registry,
+            llm_factory=llm_factory,
             skill_registry=skill_registry,
-            task_manager=AppContainer.get_task_manager(),
-            task_producer=AppContainer.get_task_producer(),
             extension_tools=AppContainer.get_extensions().tools,
         )
         main_agent_tools_view = main_agent_tool_view(

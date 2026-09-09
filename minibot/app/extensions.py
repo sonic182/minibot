@@ -24,9 +24,30 @@ type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
 
 
 def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
-    # Telegram is meaningful only in the daemon and importing aiogram in console or worker
-    # processes is needless startup cost.
-    return ("minibot.extensions.telegram",) if entrypoint == "daemon" else ()
+    common = (
+        "minibot.extensions.integrations.rag",
+        "minibot.extensions.integrations.mcp",
+        "minibot.extensions.integrations.rabbitmq",
+        "minibot.extensions.services.scheduler",
+        "minibot.extensions.services.tasks",
+        "minibot.extensions.tools.execution",
+        "minibot.extensions.tools.media",
+        "minibot.extensions.tools.memory",
+        "minibot.extensions.tools.network",
+        "minibot.extensions.tools.utility",
+        "minibot.extensions.tools.workspace",
+    )
+    if entrypoint == "daemon":
+        return ("minibot.extensions.channels.telegram", *common)
+    if entrypoint == "console":
+        return common
+    return (
+        "minibot.extensions.tools.execution",
+        "minibot.extensions.tools.media",
+        "minibot.extensions.tools.network",
+        "minibot.extensions.tools.utility",
+        "minibot.extensions.tools.workspace",
+    )
 
 
 class ExtensionService(Protocol):
