@@ -24,17 +24,16 @@ async def run() -> None:
     dispatcher = Dispatcher(event_bus)
     strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     enabled_tools = dispatcher.main_agent_tool_names or ["none"]
-    tool_log_extra: dict[str, Any] = {"tools_enabled": enabled_tools}
-    if strip_logs:
-        tool_summary = summarize_items(enabled_tools)
-        tool_log_extra = {
-            "tools_enabled_count": tool_summary["count"],
-            "tools_enabled_preview": tool_summary["preview"],
-        }
+    tool_summary = summarize_items(enabled_tools)
     logger.info(
         "tool configuration loaded",
-        extra=tool_log_extra,
+        extra={
+            "tools_enabled_count": tool_summary["count"],
+            "tools_enabled_preview": tool_summary["preview"],
+        },
     )
+    if not strip_logs:
+        logger.debug("tools enabled", extra={"tools_enabled": enabled_tools})
     logger.info("booting minibot", extra={"component": "daemon"})
     extensions = AppContainer.get_extensions()
 

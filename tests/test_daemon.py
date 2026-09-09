@@ -22,6 +22,9 @@ class _Logger:
     def info(self, *_args, **_kwargs) -> None:
         return None
 
+    def debug(self, *_args, **_kwargs) -> None:
+        return None
+
     def warning(self, *_args, **_kwargs) -> None:
         return None
 

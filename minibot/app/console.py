@@ -43,19 +43,19 @@ async def run(
     _configure_console_file_only_logging(logger, verbose=verbose)
     event_bus = AppContainer.get_event_bus()
     dispatcher = Dispatcher(event_bus)
+    strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     main_agent_tools_enabled = getattr(dispatcher, "main_agent_tool_names", None) or ["none"]
-    log_extra: dict[str, object] = {"main_agent_tools_enabled": main_agent_tools_enabled}
-    if bool(getattr(getattr(settings, "llm", None), "strip_logs", False)):
-        tool_summary = summarize_items(main_agent_tools_enabled)
-        log_extra = {
-            "main_agent_tools_count": tool_summary["count"],
-            "main_agent_tools_preview": tool_summary["preview"],
-        }
+    tool_summary = summarize_items(main_agent_tools_enabled)
     _log_info(
         logger,
         "console tool configuration loaded",
-        extra=log_extra,
+        extra={
+            "main_agent_tools_count": tool_summary["count"],
+            "main_agent_tools_preview": tool_summary["preview"],
+        },
     )
+    if not strip_logs:
+        _log_debug(logger, "console tools enabled", extra={"main_agent_tools_enabled": main_agent_tools_enabled})
     console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
     extensions = AppContainer.get_extensions()
     await dispatcher.start()
@@ -174,6 +174,12 @@ def _log_info(logger: object, message: str, **kwargs: object) -> None:
     info_method = getattr(logger, "info", None)
     if callable(info_method):
         info_method(message, **kwargs)
+
+
+def _log_debug(logger: object, message: str, **kwargs: object) -> None:
+    debug_method = getattr(logger, "debug", None)
+    if callable(debug_method):
+        debug_method(message, **kwargs)
 
 
 if __name__ == "__main__":
