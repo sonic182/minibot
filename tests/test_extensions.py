@@ -86,8 +86,7 @@ def test_load_extensions_for_worker_skips_bundled_extensions(tmp_path: Path, mon
 
     registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
 
-    assert registry.names()[-1] == "ext_worker"
-    assert "minibot.extensions.channels.telegram" not in registry.names()
+    assert registry.names() == ["ext_worker"]
 
 
 def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

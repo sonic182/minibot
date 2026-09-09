@@ -41,13 +41,9 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
         return ("minibot.extensions.channels.telegram", *common)
     if entrypoint == "console":
         return common
-    return (
-        "minibot.extensions.tools.execution",
-        "minibot.extensions.tools.media",
-        "minibot.extensions.tools.network",
-        "minibot.extensions.tools.utility",
-        "minibot.extensions.tools.workspace",
-    )
+    # Workers retain their deliberately narrower assembly in adapters.tasks.worker.
+    # Only user-configured extensions are loaded there.
+    return ()
 
 
 class ExtensionService(Protocol):

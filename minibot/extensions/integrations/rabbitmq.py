@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.extensions import ExtensionContext
 
 
@@ -20,5 +22,11 @@ def register(mb: ExtensionContext) -> None:
         manager,
         settings.tasks.max_concurrent_workers,
     )
-    mb.add_tool(TaskTools(producer=producer, task_manager=manager).bindings())
+    mb.add_tool(
+        TaskTools(
+            producer=producer,
+            task_manager=manager,
+            agent_registry=AgentRegistry(load_agent_specs(settings.orchestration.directory)),
+        ).bindings()
+    )
     mb.add_service(consumer)

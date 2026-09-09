@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from minibot.adapters.tasks.manager import TaskManager
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskProducer, SQLiteTaskStore
+from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.extensions import ExtensionContext
 from minibot.app.task_consumer_service import SQLiteTaskConsumerService
 from minibot.llm.tools.tasks import TaskTools
@@ -33,5 +35,11 @@ def register(mb: ExtensionContext) -> None:
         config=settings.tasks.sqlite,
         max_concurrent_workers=settings.tasks.max_concurrent_workers,
     )
-    mb.add_tool(TaskTools(producer=producer, task_manager=manager).bindings())
+    mb.add_tool(
+        TaskTools(
+            producer=producer,
+            task_manager=manager,
+            agent_registry=AgentRegistry(load_agent_specs(settings.orchestration.directory)),
+        ).bindings()
+    )
     mb.add_service(_SQLiteTasksService(store, consumer))
