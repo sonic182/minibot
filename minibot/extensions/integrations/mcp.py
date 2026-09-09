@@ -12,13 +12,12 @@ def register(mb: ExtensionContext) -> None:
     settings = mb.settings
     bindings = []
     for server in settings.tools.mcp.servers:
-        args = _playwright_output_dir(server.name, server.args, settings.tools.browser.output_dir)
         client = MCPClient(
             server_name=server.name,
             transport=server.transport,
             timeout_seconds=settings.tools.mcp.timeout_seconds,
             command=server.command,
-            args=args,
+            args=server.args,
             env=server.env or None,
             cwd=server.cwd,
             url=server.url,
@@ -37,27 +36,3 @@ def register(mb: ExtensionContext) -> None:
             mb.logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
     mb.add_tool(bindings)
 
-
-def _playwright_output_dir(server_name: str, args: list[str], browser_output_dir: str) -> list[str]:
-    if server_name != "playwright-cli" or not browser_output_dir.strip():
-        return list(args)
-    output_dir = browser_output_dir.strip()
-    updated: list[str] = []
-    replaced = False
-    skip_next = False
-    for index, arg in enumerate(args):
-        if skip_next:
-            skip_next = False
-            continue
-        if arg == "--output-dir":
-            updated.append(f"--output-dir={output_dir}")
-            replaced = True
-            skip_next = index + 1 < len(args)
-        elif arg.startswith("--output-dir="):
-            updated.append(f"--output-dir={output_dir}")
-            replaced = True
-        else:
-            updated.append(arg)
-    if not replaced:
-        updated.append(f"--output-dir={output_dir}")
-    return updated
