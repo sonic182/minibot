@@ -336,3 +336,45 @@ def test_settings_allows_arbitrary_extension_config_but_still_forbids_unknown_se
 
     with pytest.raises(ValidationError):
         Settings.from_dict({"totally_unknown_section": {"x": 1}})
+
+
+def _rag_warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Collect `minibot.rag` warnings without depending on global logging config.
+
+    `caplog` needs propagation to the root logger, which other tests reconfigure through
+    `adapters/logging/setup.py`, so this asserts on the call instead of on the handler chain.
+    """
+    from minibot.extensions.integrations import rag as rag_extension
+
+    emitted: list[str] = []
+    monkeypatch.setattr(rag_extension._logger, "warning", lambda message, **_: emitted.append(message))
+    return emitted
+
+
+def test_rag_warns_when_a_customized_qdrant_url_meets_the_sqlite_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The silent half of the backend default flip: RAG still works, it just reads an empty store."""
+    from minibot.adapters.config.schema import RagToolConfig
+    from minibot.extensions.integrations.rag import _warn_on_probable_qdrant_deployment
+
+    emitted = _rag_warnings(monkeypatch)
+
+    _warn_on_probable_qdrant_deployment(RagToolConfig(enabled=True, qdrant_url="http://minibot-qdrant:6333"))
+
+    assert len(emitted) == 1
+    assert "empty local store" in emitted[0]
+
+
+def test_rag_stays_quiet_when_the_backend_choice_is_unambiguous(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.adapters.config.schema import RagToolConfig
+    from minibot.extensions.integrations.rag import _warn_on_probable_qdrant_deployment
+
+    emitted = _rag_warnings(monkeypatch)
+
+    # Default qdrant_url: nothing suggests this deployment ever indexed into Qdrant.
+    _warn_on_probable_qdrant_deployment(RagToolConfig(enabled=True))
+    # Explicitly on Qdrant: the customized URL is the one actually being read.
+    _warn_on_probable_qdrant_deployment(
+        RagToolConfig(enabled=True, backend="qdrant", qdrant_url="http://minibot-qdrant:6333")
+    )
+
+    assert emitted == []

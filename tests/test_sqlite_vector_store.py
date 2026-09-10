@@ -165,7 +165,8 @@ async def test_unknown_exact_match_key_is_rejected(tmp_path):
 @pytest.mark.asyncio
 async def test_retrieval_round_trip_over_the_sqlite_store(tmp_path, monkeypatch, numeric_tokenizer):
     """`retrieval.py` drives the store through the real point/payload shapes it builds."""
-    config = RagToolConfig(enabled=True, sqlite_url=f"sqlite+aiosqlite:///{tmp_path}/rag.db")
+    # `embedding.dim` sizes the collection, so it has to match the stubbed vectors below.
+    config = RagToolConfig(enabled=True, sqlite_url=f"sqlite+aiosqlite:///{tmp_path}/rag.db", embedding={"dim": 2})
     store = SqliteVectorStore(config)
     await rag_extension._RagService(config, store).start()
 
@@ -210,3 +211,83 @@ async def test_retrieval_round_trip_over_the_sqlite_store(tmp_path, monkeypatch,
 
 async def _resolved(value: Any) -> Any:
     return value
+
+
+@pytest.mark.asyncio
+async def test_search_requires_every_condition_when_sql_and_python_filters_combine(tmp_path):
+    """The SQL half and the Python half must AND together, not each widen the other's result."""
+    store = await _store(tmp_path)
+    await store.upsert_points(
+        COLLECTION,
+        [
+            _point("both", [1.0, 0.0], user_id="u1", tags=["food"]),
+            _point("only-scope", [1.0, 0.0], user_id="u1", tags=["work"]),
+            _point("only-tag", [1.0, 0.0], user_id="u2", tags=["food"]),
+            _point("neither", [1.0, 0.0], user_id="u2", tags=["work"]),
+        ],
+    )
+
+    results = await store.search(
+        COLLECTION,
+        [1.0, 0.0],
+        limit=10,
+        filters={"must": [_match("user_id", "u1"), _match_any("tags", ["food"])]},
+    )
+
+    assert [r["payload"]["text"] for r in results] == ["both"]
+
+
+@pytest.mark.asyncio
+async def test_delete_by_filter_honours_list_valued_conditions(tmp_path):
+    store = await _store(tmp_path)
+    await store.upsert_points(
+        COLLECTION,
+        [
+            _point("keep", [1.0, 0.0], user_id="u1", tags=["work"]),
+            _point("drop", [1.0, 0.0], user_id="u1", tags=["food"]),
+            _point("other-scope", [1.0, 0.0], user_id="u2", tags=["food"]),
+        ],
+    )
+
+    await store.delete_by_filter(COLLECTION, {"must": [_match("user_id", "u1"), _match_any("tags", ["food"])]})
+    remaining = await store.search(COLLECTION, [1.0, 0.0], limit=10)
+
+    assert sorted(r["payload"]["text"] for r in remaining) == ["keep", "other-scope"]
+
+
+@pytest.mark.asyncio
+async def test_facet_counts_only_rows_passing_the_filter(tmp_path):
+    store = await _store(tmp_path)
+    await store.upsert_points(
+        COLLECTION,
+        [
+            _point("mine", [1.0, 0.0], user_id="u1", filename="a.md", tags=["food"]),
+            _point("theirs", [1.0, 0.0], user_id="u2", filename="b.md", tags=["food"]),
+        ],
+    )
+
+    scoped = await store.facet(COLLECTION, key="filename", limit=10, filters={"must": [_match("user_id", "u1")]})
+    by_tag = await store.facet(COLLECTION, key="filename", limit=10, filters={"must": [_match_any("tags", ["food"])]})
+
+    assert scoped == [{"value": "a.md", "count": 1}]
+    assert sorted(hit["value"] for hit in by_tag) == ["a.md", "b.md"]
+
+
+@pytest.mark.asyncio
+async def test_upsert_rejects_a_vector_of_the_wrong_size(tmp_path):
+    """Qdrant refuses these at write time; accepting one here would break every later search."""
+    store = await _store(tmp_path, vector_size=2)
+
+    with pytest.raises(ValueError, match="vector size 3, expected 2"):
+        await store.upsert_points(COLLECTION, [_point("wrong", [1.0, 0.0, 0.0])])
+
+    await store.upsert_points(COLLECTION, [_point("right", [1.0, 0.0])])
+    assert len(await store.search(COLLECTION, [1.0, 0.0], limit=10)) == 1
+
+
+@pytest.mark.asyncio
+async def test_upsert_into_an_uninitialized_collection_is_rejected(tmp_path):
+    store = await _store(tmp_path)
+
+    with pytest.raises(ValueError, match="does not exist"):
+        await store.upsert_points("never_created", [_point("orphan", [1.0, 0.0])])

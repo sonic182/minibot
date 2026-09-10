@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from minibot.adapters.config.schema import RagToolConfig
 from minibot.app.extensions import ExtensionContext
 from minibot.core.vectors import VectorStore
 
 from ..tools._storage import managed_storage
+
+_logger = logging.getLogger("minibot.rag")
 
 
 class _RagService:
@@ -39,6 +43,8 @@ def register(mb: ExtensionContext) -> None:
 
     storage = managed_storage(mb.settings, error_message="tools.rag.enabled requires tools.file_storage.enabled")
 
+    _warn_on_probable_qdrant_deployment(config)
+
     store: VectorStore
     if config.backend == "qdrant":
         from minibot.adapters.qdrant.client import AsyncQdrantClient
@@ -51,3 +57,24 @@ def register(mb: ExtensionContext) -> None:
 
     mb.add_tool(RagTools(config=config, store=store, storage=storage).bindings())
     mb.add_service(_RagService(config, store))
+
+
+def _warn_on_probable_qdrant_deployment(config: RagToolConfig) -> None:
+    """Catch the silent half of the backend default flip.
+
+    A config written before ``backend`` existed carries a customized ``qdrant_url`` and no
+    ``backend`` key, so it now resolves to the SQLite default and starts against an empty local
+    store. Nothing fails -- the tools register and ``rag_search`` just returns no results -- which is
+    the worst way to find out an indexed corpus went missing.
+    """
+    if config.backend != "sqlite":
+        return
+    default_qdrant_url = RagToolConfig.model_fields["qdrant_url"].default
+    if config.qdrant_url == default_qdrant_url:
+        return
+    _logger.warning(
+        "tools.rag.backend is 'sqlite' (the default) but tools.rag.qdrant_url is customized; "
+        'if this deployment indexed documents into Qdrant, set tools.rag.backend = "qdrant" -- '
+        "RAG is otherwise reading an empty local store",
+        extra={"qdrant_url": config.qdrant_url, "sqlite_url": config.sqlite_url},
+    )

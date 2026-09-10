@@ -6,7 +6,6 @@ from typing import Any
 
 import numpy as np
 from sqlalchemy import JSON, Index, Integer, LargeBinary, String, delete, select
-from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
@@ -23,6 +22,9 @@ _SCALAR_KEYS = ("document_id", "user_id", "agent_id", "chat_id", "filename")
 class RagChunk(RagBase):
     __tablename__ = "rag_chunks"
 
+    # `id` comes from `retrieval.py:_build_chunk_id`, which does not hash the collection name. One
+    # collection per daemon makes that safe today; sharing a database across two would need the
+    # primary key scoped by `collection` as well.
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     collection: Mapped[str] = mapped_column(String(128), nullable=False)
     document_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -56,7 +58,6 @@ class SqliteVectorStore:
     """
 
     def __init__(self, config: RagToolConfig) -> None:
-        self._database_url = make_url(config.sqlite_url)
         storage_path = resolve_sqlite_storage_path(config.sqlite_url)
         if storage_path:
             ensure_parent_dir(storage_path)
@@ -88,22 +89,39 @@ class SqliteVectorStore:
     async def upsert_points(self, collection_name: str, points: list[dict[str, Any]]) -> None:
         if not points:
             return
-        rows = [
-            RagChunk(
-                id=str(point["id"]),
-                collection=collection_name,
-                vector=_pack_vector(point["vector"]),
-                payload=point["payload"],
-                **{key: _as_text(point["payload"].get(key)) for key in _SCALAR_KEYS},
-            )
-            for point in points
-        ]
         async with self._session_factory() as session:
+            # Reject a mismatched vector at write time, the way Qdrant's collection schema does.
+            # Accepting one would leave a row of a different width in the table, and `_top_k` reads
+            # the whole filtered set as a single rectangular matrix -- so one bad row would break
+            # every later search on the collection, not just the row itself.
+            expected_size = await self._vector_size(session, collection_name)
+            rows = []
+            for point in points:
+                vector = point["vector"]
+                if len(vector) != expected_size:
+                    raise ValueError(
+                        f"rag chunk {point['id']!r} has vector size {len(vector)}, expected {expected_size}"
+                    )
+                rows.append(
+                    RagChunk(
+                        id=str(point["id"]),
+                        collection=collection_name,
+                        vector=_pack_vector(vector),
+                        payload=point["payload"],
+                        **{key: _as_text(point["payload"].get(key)) for key in _SCALAR_KEYS},
+                    )
+                )
             await session.execute(
                 delete(RagChunk).where(RagChunk.collection == collection_name, RagChunk.id.in_([r.id for r in rows]))
             )
             session.add_all(rows)
             await session.commit()
+
+    async def _vector_size(self, session: AsyncSession, collection_name: str) -> int:
+        record = await session.get(RagCollection, collection_name)
+        if record is None:
+            raise ValueError(f"rag collection '{collection_name}' does not exist; call ensure_collection first")
+        return record.vector_size
 
     async def delete_by_filter(self, collection_name: str, filters: dict[str, Any]) -> None:
         conditions, payload_any = _split_filters(filters)

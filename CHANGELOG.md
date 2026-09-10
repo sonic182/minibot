@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for corpora large enough to need an approximate index. Both live behind the new
   `core/vectors.py::VectorStore` protocol. `minibot configure` asks which backend to use when RAG is
   enabled, then prompts only for that backend's location (`sqlite_url` or `qdrant_url`).
+- Startup warns when `tools.rag.backend` resolves to the `"sqlite"` default while `qdrant_url` is
+  customized — the shape of a config written before `backend` existed, which would otherwise start
+  against an empty local store without failing.
 
 ### Changed
 
