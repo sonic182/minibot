@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-10
+
 ### Changed
 
 - **Optional dependencies are now actually optional.** `aiogram` + `telegramify-markdown` and
@@ -556,6 +558,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
+[0.11.0]: https://github.com/sonic182/minibot/compare/0.10.0..0.11.0
 [0.10.0]: https://github.com/sonic182/minibot/compare/0.9.0..0.10.0
 [0.9.0]: https://github.com/sonic182/minibot/compare/0.8.0..0.9.0
 [0.8.0]: https://github.com/sonic182/minibot/compare/0.7.0..0.8.0
