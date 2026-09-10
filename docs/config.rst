@@ -64,6 +64,9 @@ Tasks
 expiry) or ``"rabbitmq"`` (needs a broker and the ``rabbitmq`` extra, pushed). ``[tasks.sqlite]``
 configures the first, ``[rabbitmq]`` the second.
 
+The default is ``"sqlite"``. A config written before that default changed and left ``backend``
+unset now uses the SQLite queue; set ``backend = "rabbitmq"`` explicitly to keep using the broker.
+
 .. autoclass:: minibot.adapters.config.schema.TasksConfig
    :no-members:
 

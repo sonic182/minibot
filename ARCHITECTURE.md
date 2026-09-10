@@ -473,8 +473,10 @@ an `aiopipe` duplex. Everything except the queue itself is backend-agnostic.
 
 ### Choosing a backend
 
-`[tasks].backend` selects one; only one consumer ever runs. `AppContainer` builds the matching
-store/producer pair, and `daemon.build_task_service()` builds the matching consumer.
+`[tasks].backend` selects one; only one consumer ever runs. The bundled task extensions build
+matching store/producer/consumer triples from that selection — `extensions/services/tasks.py` for
+`sqlite`, `extensions/integrations/rabbitmq.py` for `rabbitmq`, each returning early when the
+configured backend is not its own.
 
 | | `sqlite` | `rabbitmq` |
 | --- | --- | --- |
