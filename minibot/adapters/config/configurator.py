@@ -177,6 +177,14 @@ def _configure_tools(document: Any, settings: Settings) -> None:
     if "tasks" in selected:
         backend = _ask_single_select("Task queue backend", ("sqlite", "rabbitmq"), settings.tasks.backend)
         _set_value(document, ("tasks", "backend"), backend)
+    if "rag" in selected:
+        rag = settings.tools.rag
+        backend = _ask_single_select("RAG vector backend", ("sqlite", "qdrant"), rag.backend)
+        _set_value(document, ("tools", "rag", "backend"), backend)
+        if backend == "qdrant":
+            _set_value(document, ("tools", "rag", "qdrant_url"), _ask_required("Qdrant URL", rag.qdrant_url))
+        else:
+            _set_value(document, ("tools", "rag", "sqlite_url"), _ask_required("RAG SQLite URL", rag.sqlite_url))
     # Skills the model cannot see are skills it will not use; see SkillsToolConfig.
     if "skills" in selected:
         _set_value(document, ("tools", "skills", "preload_catalog"), True)

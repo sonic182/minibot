@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`user_id`/`agent_id`/`chat_id`/`document_id`/`filename`) run in SQL before scoring and the
   similarity scan is exact, which suits filtered single-tenant corpora; Qdrant remains the option
   for corpora large enough to need an approximate index. Both live behind the new
-  `core/vectors.py::VectorStore` protocol.
+  `core/vectors.py::VectorStore` protocol. `minibot configure` asks which backend to use when RAG is
+  enabled, then prompts only for that backend's location (`sqlite_url` or `qdrant_url`).
 
 ### Changed
 

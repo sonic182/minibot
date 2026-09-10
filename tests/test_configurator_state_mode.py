@@ -72,3 +72,46 @@ def test_spill_default_catches_bash_because_it_has_no_spill_of_its_own() -> None
     assert "bash" not in excluded
     # http_request runs its own spill, pre_response is signalling
     assert set(excluded) == {"http_request", "pre_response"}
+
+
+@pytest.mark.parametrize(
+    ("backend", "prompted_key", "expected_default", "skipped_key"),
+    [
+        (
+            "sqlite",
+            ("tools", "rag", "sqlite_url"),
+            "sqlite+aiosqlite:///./data/rag.db",
+            ("tools", "rag", "qdrant_url"),
+        ),
+        ("qdrant", ("tools", "rag", "qdrant_url"), "http://localhost:6333", ("tools", "rag", "sqlite_url")),
+    ],
+)
+def test_wizard_asks_only_the_location_the_chosen_rag_backend_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+    prompted_key: tuple[str, ...],
+    expected_default: str,
+    skipped_key: tuple[str, ...],
+) -> None:
+    """Prompting for the other backend's location would write a value nothing reads."""
+    written: dict[tuple[str, ...], Any] = {}
+    offered: dict[str, str] = {}
+
+    def _ask_required(label: str, value: str) -> str:
+        offered[label] = value
+        return value
+
+    monkeypatch.setattr(configurator, "_write", lambda *_, **__: None)
+    monkeypatch.setattr(configurator, "_ask_multiselect", lambda *_, **__: {"rag"})
+    monkeypatch.setattr(configurator, "_ask_single_select", lambda *_, **__: backend)
+    monkeypatch.setattr(configurator, "_ask_required", _ask_required)
+    monkeypatch.setattr(configurator, "_set_value", lambda _doc, path, value: written.__setitem__(path, value))
+
+    configurator._configure_tools(object(), configurator.Settings())
+
+    assert written[("tools", "rag", "enabled")] is True
+    assert written[("tools", "rag", "backend")] == backend
+    assert written[prompted_key] == expected_default
+    assert skipped_key not in written
+    # The prompt offers the current value, so pressing enter keeps a working config.
+    assert expected_default in offered.values()
