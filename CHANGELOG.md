@@ -16,9 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `http_request`/RAG work without selectolax/pypdf (HTML falls back to plain-text extraction,
   PDF ingestion reports the missing extra). `pip install "minibot[telegram,http,rag]"` restores the
   previous install surface.
-- The `mcp` extra is gone: nothing at runtime imports the `mcp` package — the MCP client is a
-  self-contained JSON-RPC implementation. Only the test fixtures use it, so `mcp` is now a dev
-  dependency. `pip install "minibot[mcp]"` still works (pip warns about the unknown extra).
+- **Breaking:** the `mcp` extra is gone: nothing at runtime imports the `mcp` package — the MCP
+  client is a self-contained JSON-RPC implementation. Only the test fixtures use it, so `mcp` is
+  now a dev dependency. `pip install "minibot[mcp]"` still works (pip warns about the unknown
+  extra), but `poetry install --extras mcp` now fails.
+- Two internal behavior changes ride along: `html_compact` skips tagless nodes instead of raising
+  `TypeError`, and the RAG reranker wraps non-numeric model scores in a `RuntimeError` instead of
+  leaking `TypeError`/`ValueError`.
 
 ## [0.10.0] - 2026-09-10
 
