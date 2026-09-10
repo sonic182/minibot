@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `numpy` joins the `rag` extra (the SQLite backend's similarity scan). It was already installed in
   practice as a sentence-transformers dependency, but was undeclared.
 
+## [0.11.0] - 2026-09-10
+
+### Changed
+
 - **Optional dependencies are now actually optional.** `aiogram` + `telegramify-markdown` and
   `pypdf` moved out of the core dependency set into the new `telegram` and `rag` extras; the bundled
   extensions that need them now import them lazily, after their config gate. A daemon that never
@@ -575,6 +579,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
+[0.11.0]: https://github.com/sonic182/minibot/compare/0.10.0..0.11.0
 [0.10.0]: https://github.com/sonic182/minibot/compare/0.9.0..0.10.0
 [0.9.0]: https://github.com/sonic182/minibot/compare/0.8.0..0.9.0
 [0.8.0]: https://github.com/sonic182/minibot/compare/0.7.0..0.8.0
