@@ -56,6 +56,11 @@ main_responses_state_mode = "full_messages"
 agent_responses_state_mode = "previous_response_id"
 prompt_cache_enabled = true
 strip_logs = false
+# Request a plaintext reasoning summary from Responses models (auto/concise/detailed).
+# OpenCode Go (gpt-5.6-luna, grok-4.x) only exposes thinking this way — otherwise the
+# reasoning item carries encrypted_content that minibot cannot read. Send it together
+# with reasoning_effort.
+# reasoning_summary = "detailed"
 # Optional retention hint for OpenAI Responses prompt cache.
 # prompt_cache_retention = "24h"
 # Base system prompt (used when system_prompt_file is not configured or set to null)

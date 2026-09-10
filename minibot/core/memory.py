@@ -11,10 +11,13 @@ class MemoryEntry:
     role: str
     content: str
     created_at: datetime
+    reasoning: str | None = None
 
 
 class MemoryBackend(Protocol):
-    async def append_history(self, session_id: str, role: str, content: str) -> None: ...
+    async def append_history(
+        self, session_id: str, role: str, content: str, *, reasoning: str | None = None
+    ) -> None: ...
 
     async def get_history(self, session_id: str, limit: int | None = None) -> Iterable[MemoryEntry]: ...
 

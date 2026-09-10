@@ -95,11 +95,16 @@ Console Test Channel
 --------------------
 
 Use the built-in console channel to test through the same dispatcher pipeline without Telegram.
+Interactive mode opens a minimal Textual TUI (markdown transcript on top, input pinned to
+the bottom; Enter sends, Ctrl+J inserts a newline, Ctrl+T toggles model thinking); pass ``--plain`` for the original prompt loop.
 
 .. code-block:: bash
 
-   # Interactive REPL
+   # Interactive TUI
    poetry run minibot console
+
+   # Plain prompt loop
+   poetry run minibot console --plain
 
    # One-shot
    poetry run minibot console --once "hello"

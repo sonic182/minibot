@@ -9,8 +9,9 @@ from pathlib import Path
 from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.console.service import ConsoleService
 from minibot.app.dispatcher import Dispatcher
+from minibot.core.memory import MemoryEntry
 from minibot.shared.console_compat import CompatConsole, prompt_input
-from minibot.shared.utils import summarize_items
+from minibot.shared.utils import session_id_from_parts, summarize_items
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -21,6 +22,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
     parser.add_argument("--config", type=str, default=None, help="Optional config.toml path.")
     parser.add_argument("--verbose", action="store_true", default=False, help="Also log to stdout.")
+    parser.add_argument(
+        "--plain",
+        action="store_true",
+        default=False,
+        help="Use the plain prompt loop instead of the Textual TUI.",
+    )
     return parser
 
 
@@ -32,6 +39,7 @@ async def run(
     timeout_seconds: float,
     config_path: str | None,
     verbose: bool = False,
+    tui: bool = True,
 ) -> None:
     console = CompatConsole()
     effective_timeout_seconds = max(120.0, float(timeout_seconds))
@@ -56,7 +64,13 @@ async def run(
     )
     if not strip_logs:
         _log_debug(logger, "console tools enabled", extra={"main_agent_tools_enabled": main_agent_tools_enabled})
-    console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
+    use_tui = tui and once is None
+    if use_tui:
+        from minibot.adapters.messaging.console.tui import NoopConsole
+
+        console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=NoopConsole())
+    else:
+        console_service = ConsoleService(event_bus, chat_id=chat_id, user_id=user_id, console=console)
     extensions = AppContainer.get_extensions()
     await dispatcher.start()
     if not extensions.is_empty():
@@ -81,6 +95,17 @@ async def run(
             )
             if not responded:
                 return
+            return
+
+        if use_tui:
+            from minibot.adapters.messaging.console.tui import ConsoleTui
+
+            history = await _load_console_history(chat_id=chat_id, user_id=user_id)
+            await ConsoleTui(
+                console_service,
+                timeout_seconds=effective_timeout_seconds,
+                history=history,
+            ).run_async()
             return
 
         confirm_exit = False
@@ -124,10 +149,17 @@ def main(argv: list[str] | None = None) -> None:
                 timeout_seconds=args.timeout_seconds,
                 config_path=args.config,
                 verbose=args.verbose,
+                tui=not args.plain,
             )
         )
     except KeyboardInterrupt:
         return
+
+
+async def _load_console_history(*, chat_id: int, user_id: int) -> list[MemoryEntry]:
+    memory = AppContainer.get_memory_backend()
+    session_id = session_id_from_parts("console", chat_id, user_id)
+    return list(await memory.get_history(session_id, limit=10))
 
 
 async def _wait_for_response_or_warn(

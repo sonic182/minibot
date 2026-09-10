@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Interactive console TUI.** `minibot console` now opens a Textual app: a markdown transcript with a
+  multiline prompt pinned to the bottom. Enter sends, `Ctrl+J` inserts a newline, `Ctrl+T` toggles
+  model thinking, `Ctrl+C`/`Ctrl+Q` quit. The previous prompt loop is still available behind
+  `--plain`, and `--once` is unchanged. Recent history for the console session is loaded into the
+  transcript at startup, and turns go through the same dispatcher pipeline as before.
+- **Reasoning capture for Responses providers.** `[llm].reasoning_summary` (`"auto"`/`"concise"`/
+  `"detailed"`) asks the model for a plaintext reasoning summary alongside `reasoning_effort`, and
+  the reasoning returned on a raw Responses payload is extracted per assistant message and exposed
+  to channels as response metadata (`reasoning`). This is the only way to see thinking from
+  providers that return reasoning as an encrypted item plus summary, and it is what the console TUI
+  renders behind `Ctrl+T`.
+- Reasoning is persisted with the message it belongs to: a nullable `messages.reasoning` column, a
+  `MemoryEntry.reasoning` field, and an optional `reasoning=` argument on
+  `MemoryBackend.append_history`. Existing SQLite databases are migrated in place on startup
+  (`ALTER TABLE messages ADD COLUMN reasoning TEXT` when the column is missing).
+
+### Changed
+
+- `textual` is now a runtime dependency.
+- `LLMClient.provider_capability_hints()` returns a tuple instead of a list.
+
 ## [0.10.0] - 2026-09-10
 
 ### Added

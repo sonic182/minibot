@@ -54,6 +54,7 @@ croniter = "^6.2.4"
 selectolax = "^0.4.11"
 tomlkit = "^0.15.1"
 prompt-toolkit = "^3.0.53"
+textual = "^8.2.8"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"

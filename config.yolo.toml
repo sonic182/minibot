@@ -21,7 +21,7 @@ allowed_document_mime_types = []
 [llm]
 provider = "openai_responses"
 model = "gpt-5-mini"
-# reasoning_effort = "medium"
+reasoning_effort = "high"
 http2 = true
 max_tool_iterations = 60
 max_new_tokens = 50000
@@ -33,6 +33,7 @@ retry_delay_seconds = 2.0
 main_responses_state_mode = "full_messages"
 agent_responses_state_mode = "previous_response_id"
 prompt_cache_enabled = true
+reasoning_summary = "detailed"
 system_prompt = "You are Minibot, a helpful assistant."
 system_prompt_file = "./prompts/main_agent_system.md"
 prompts_dir = "./prompts"

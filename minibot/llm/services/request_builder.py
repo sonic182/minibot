@@ -20,6 +20,7 @@ class RequestContext:
     openrouter_provider: dict[str, Any]
     openrouter_reasoning_enabled: bool | None
     openrouter_plugins: tuple[dict[str, Any], ...]
+    reasoning_summary: str | None = None
     provider_native_tools: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
 
@@ -55,8 +56,9 @@ def build_generate_extra_kwargs(
         extra_kwargs["previous_response_id"] = previous_response_id
     if ctx.is_responses_provider and ctx.prompt_cache_enabled and ctx.prompt_cache_retention:
         extra_kwargs["prompt_cache_retention"] = ctx.prompt_cache_retention
-    if ctx.is_responses_provider and ctx.reasoning_effort:
-        extra_kwargs.setdefault("reasoning", {"effort": ctx.reasoning_effort})
+    reasoning = responses_reasoning_kwargs(ctx)
+    if reasoning:
+        extra_kwargs.setdefault("reasoning", reasoning)
     if ctx.is_responses_provider and not previous_response_id:
         extra_kwargs["instructions"] = system_prompt
     return extra_kwargs
@@ -122,8 +124,9 @@ def build_complete_once_call_kwargs(
         call_kwargs["previous_response_id"] = previous_response_id
     if ctx.is_responses_provider and ctx.prompt_cache_enabled and ctx.prompt_cache_retention:
         call_kwargs["prompt_cache_retention"] = ctx.prompt_cache_retention
-    if ctx.is_responses_provider and ctx.reasoning_effort:
-        call_kwargs.setdefault("reasoning", {"effort": ctx.reasoning_effort})
+    reasoning = responses_reasoning_kwargs(ctx)
+    if reasoning:
+        call_kwargs.setdefault("reasoning", reasoning)
     return call_kwargs
 
 
@@ -148,8 +151,9 @@ def build_continue_call_kwargs(
         call_kwargs["prompt_cache_key"] = prompt_cache_key
     if ctx.prompt_cache_enabled and ctx.prompt_cache_retention:
         call_kwargs["prompt_cache_retention"] = ctx.prompt_cache_retention
-    if ctx.reasoning_effort:
-        call_kwargs.setdefault("reasoning", {"effort": ctx.reasoning_effort})
+    reasoning = responses_reasoning_kwargs(ctx)
+    if reasoning:
+        call_kwargs.setdefault("reasoning", reasoning)
     return call_kwargs
 
 
@@ -163,6 +167,15 @@ def extract_system_instructions(messages: Sequence[dict[str, Any]]) -> str | Non
         if isinstance(content, str) and content.strip():
             return content
     return None
+
+
+def responses_reasoning_kwargs(ctx: RequestContext) -> dict[str, Any] | None:
+    reasoning: dict[str, Any] = {}
+    if ctx.reasoning_effort:
+        reasoning["effort"] = ctx.reasoning_effort
+    if ctx.reasoning_summary:
+        reasoning["summary"] = ctx.reasoning_summary
+    return reasoning or None
 
 
 def openrouter_kwargs(ctx: RequestContext) -> dict[str, Any]:

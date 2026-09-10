@@ -6,6 +6,7 @@ import logging
 import re
 from dataclasses import dataclass
 from html import unescape
+from typing import Protocol
 
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
@@ -13,6 +14,11 @@ from minibot.core.events import MessageEvent, OutboundEvent
 from minibot.shared.console_compat import CompatConsole, format_assistant_output
 
 _TAG_RE = re.compile(r"<[^>]+>")
+
+
+class ConsoleSink(Protocol):
+    def print(self, value: object) -> None:
+        """Render a value; TUI sinks may discard it."""
 
 
 @dataclass(frozen=True)
@@ -28,7 +34,7 @@ class ConsoleService:
         *,
         chat_id: int = 1,
         user_id: int = 1,
-        console: CompatConsole | None = None,
+        console: ConsoleSink | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._chat_id = chat_id

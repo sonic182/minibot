@@ -103,3 +103,54 @@ def _message_like_has_reasoning(value: Any) -> bool:
     if _coerce_reasoning_details(value.get("reasoning_details")):
         return True
     return _coerce_reasoning(value.get("reasoning")) is not None
+
+
+def extract_reasoning_text_from_responses(payload: Mapping[str, Any]) -> str | None:
+    """Extract model reasoning from a raw OpenAI Responses API payload.
+
+    Reasoning arrives as ``output`` items of type ``reasoning``. Prefer their
+    concise ``summary``, fall back to full ``content``, then to a raw scan of
+    any ``text``/``content``/``summary_text`` strings.
+    """
+    parts: list[str] = []
+
+    top = _coerce_reasoning(payload.get("reasoning"))
+    if top:
+        parts.append(top)
+
+    output = payload.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, Mapping) or item.get("type") != "reasoning":
+                continue
+            texts = _collect_reasoning_texts(item.get("summary"))
+            if not texts:
+                texts = _collect_reasoning_texts(item.get("content"))
+            if not texts:
+                texts = _collect_reasoning_texts(item)
+            parts.extend(texts)
+
+    return "\n\n".join(parts) or None
+
+
+_TEXT_KEYS = {"text", "content", "summary", "summary_text"}
+
+
+def _collect_reasoning_texts(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, Mapping):
+        texts: list[str] = []
+        for key, child in value.items():
+            if key in _TEXT_KEYS and isinstance(child, str):
+                if child.strip():
+                    texts.append(child.strip())
+            elif isinstance(child, (Mapping, list, tuple)):
+                texts.extend(_collect_reasoning_texts(child))
+        return texts
+    if isinstance(value, (list, tuple)):
+        texts: list[str] = []
+        for child in value:
+            texts.extend(_collect_reasoning_texts(child))
+        return texts
+    return []

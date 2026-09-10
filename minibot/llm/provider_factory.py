@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from llm_async.models.tool_call import ToolCall
@@ -28,6 +28,7 @@ from minibot.llm.services.models import (
 from minibot.llm.services.provider_capabilities import build_provider_capability_hints, build_provider_native_tools
 from minibot.llm.services.provider_registry import is_responses_provider_instance
 from minibot.llm.services.provider_target import resolve_target_provider
+from minibot.llm.services.reasoning_replay import extract_reasoning_text_from_responses
 from minibot.llm.services.request_builder import (
     RequestContext,
     build_complete_once_call_kwargs,
@@ -50,6 +51,7 @@ class LLMClient:
         self._system_prompt = load_system_prompt(config)
         self._prompts_dir = getattr(config, "prompts_dir", "./prompts")
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
+        self._reasoning_summary = getattr(config, "reasoning_summary", None)
         self._responses_state_mode = getattr(config, "responses_state_mode", "full_messages")
         self._prompt_cache_enabled = bool(getattr(config, "prompt_cache_enabled", True))
         self._prompt_cache_retention = getattr(config, "prompt_cache_retention", None)
@@ -158,6 +160,10 @@ class LLMClient:
             prompt_cache_key=prompt_cache_key,
             previous_response_id=previous_response_id,
         )
+        self._logger.debug(
+            "responses request reasoning kwargs",
+            extra={"reasoning": call_kwargs.get("reasoning")},
+        )
 
         response = await self._complete(call_kwargs)
         log_provider_response(
@@ -170,6 +176,34 @@ class LLMClient:
         message = response.main_response
         if not message:
             raise RuntimeError("LLM did not return a completion")
+        if self._is_responses_provider and isinstance(response.original, Mapping):
+            reasoning = extract_reasoning_text_from_responses(response.original)
+            if reasoning:
+                message.reasoning = reasoning
+                self._logger.info(
+                    "responses reasoning captured",
+                    extra={"reasoning_length": len(reasoning)},
+                )
+            else:
+                output = response.original.get("output")
+                output_types = (
+                    [item.get("type") for item in output if isinstance(item, Mapping)]
+                    if isinstance(output, list)
+                    else None
+                )
+                reasoning_items = (
+                    [
+                        str(item)[:600]
+                        for item in output
+                        if isinstance(item, Mapping) and item.get("type") == "reasoning"
+                    ]
+                    if isinstance(output, list)
+                    else []
+                )
+                self._logger.debug(
+                    "no reasoning in responses output",
+                    extra={"output_types": output_types, "reasoning_items": reasoning_items},
+                )
         usage = extract_usage_from_response(response)
         usage_tokens = usage.total_tokens
         self._logger.debug(
@@ -243,8 +277,8 @@ class LLMClient:
             provider_capability_hints=self.provider_capability_hints(),
         )
 
-    def provider_capability_hints(self) -> list[str]:
-        return list(self._provider_capability_hints)
+    def provider_capability_hints(self) -> tuple[str, ...]:
+        return self._provider_capability_hints
 
     async def _complete(self, call_kwargs: dict[str, Any]) -> Any:
         try:
@@ -266,6 +300,7 @@ class LLMClient:
             prompt_cache_retention=self._prompt_cache_retention,
             strip_logs=self._strip_logs,
             reasoning_effort=self._reasoning_effort,
+            reasoning_summary=self._reasoning_summary,
             openrouter_models=self._openrouter_models,
             openrouter_provider=self._openrouter_provider,
             openrouter_reasoning_enabled=self._openrouter_reasoning_enabled,
