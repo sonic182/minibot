@@ -121,6 +121,8 @@ and emit outbound responses back to the active channel adapter.
 │   │   │   └── client.py
 │   │   ├── scheduler/
 │   │   │   └── sqlalchemy_prompt_store.py
+│   │   ├── vectors/
+│   │   │   └── sqlite.py
 │   │   └── tasks/
 │   │       ├── manager.py
 │   │       ├── sqlite_store.py   (SQLite queue store + producer)
@@ -382,7 +384,8 @@ Current notes:
   - `adapters/messaging/telegram/incoming_media_collector.py` downloads and stores media attachments from Telegram messages.
   - `adapters/messaging/telegram/incoming_media_mapper.py` normalizes media-target paths and `IncomingFileRef` mapping for photo/document/audio/voice uploads.
   - `adapters/messaging/telegram/outbound_sender.py` sends text and file responses with formatting, link previews, and message splitting.
-- Qdrant:
+- Vector stores (both implement `core/vectors.py::VectorStore`, selected by `tools.rag.backend`):
+  - `adapters/vectors/sqlite.py` local SQLite store used by default; scope filters run in SQL and the similarity scan is exact.
   - `adapters/qdrant/client.py` async HTTP client for Qdrant vector database collections and operations.
 - Tasks:
   - `adapters/tasks/manager.py` manages subprocess-based task workers with lifecycle management and IPC.

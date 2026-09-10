@@ -243,14 +243,19 @@ max_limit = 100
 default_owner_id = "primary"
 
 
-# Optional RAG (Retrieval-Augmented Generation) via Qdrant.
-# Requires `tools.file_storage.enabled = true`, a running Qdrant instance,
-# and manual `torch` + `sentence-transformers` installation.
-# PDF ingestion additionally needs pypdf (install with extras: rag).
-# Run Qdrant with Docker: docker compose up minibot-qdrant
+# Optional RAG (Retrieval-Augmented Generation).
+# Requires `tools.file_storage.enabled = true` and manual `torch` + `sentence-transformers`
+# installation. PDF ingestion and the sqlite backend's numpy additionally come from extras: rag.
+#
+# backend = "sqlite" keeps vectors in a local file and needs no extra service. Scoring is an exact
+# scan over the rows left after the scope filters, which is what a self-hosted corpus wants.
+# backend = "qdrant" is for corpora large enough to need an approximate index; it expects a running
+# Qdrant (docker compose up minibot-qdrant) or any instance you point `qdrant_url` at.
 [tools.rag]
 enabled = false
-qdrant_url = "http://localhost:6333"
+backend = "sqlite"
+sqlite_url = "sqlite+aiosqlite:///./data/rag.db"
+# qdrant_url = "http://localhost:6333"  # Only read when backend = "qdrant".
 collection_name = "minibot_chunks"
 chunk_size_tokens = 96
 chunk_overlap_tokens = 20

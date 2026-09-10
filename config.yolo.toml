@@ -264,7 +264,10 @@ preload_catalog = true
 
 [tools.rag]
 enabled = true
-qdrant_url = "http://minibot-qdrant:6333"
+backend = "sqlite"
+sqlite_url = "sqlite+aiosqlite:///./data/rag.db"
+# Switch to backend = "qdrant" with qdrant_url = "http://minibot-qdrant:6333" after uncommenting
+# the minibot-qdrant service in docker-compose.yml.
 collection_name = "minibot_chunks"
 chunk_size_tokens = 96
 chunk_overlap_tokens = 20

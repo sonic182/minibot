@@ -40,7 +40,7 @@ def _tool(storage: LocalFileStorage) -> RagTools:
                 max_results=7,
             ),
         ),
-        qdrant=AsyncQdrantClient(url="http://example.com"),
+        store=AsyncQdrantClient(url="http://example.com"),
         storage=storage,
     )
 

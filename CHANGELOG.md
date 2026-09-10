@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **RAG now has a pluggable vector backend, and SQLite is the default.** `[tools.rag].backend`
+  selects `"sqlite"` (new) or `"qdrant"`, mirroring how `[tasks].backend` picks between SQLite and
+  RabbitMQ. The SQLite backend keeps vectors in a local file (`sqlite_url`, default
+  `./data/rag.db`), so enabling RAG no longer requires running a vector database. Scope filters
+  (`user_id`/`agent_id`/`chat_id`/`document_id`/`filename`) run in SQL before scoring and the
+  similarity scan is exact, which suits filtered single-tenant corpora; Qdrant remains the option
+  for corpora large enough to need an approximate index. Both live behind the new
+  `core/vectors.py::VectorStore` protocol.
+
 ### Changed
+
+- **Breaking:** `[tools.rag].backend` defaults to `"sqlite"`. An existing deployment using Qdrant
+  must add `backend = "qdrant"` to `[tools.rag]` in `config.toml`; otherwise RAG starts against an
+  empty local store. There is no automatic migration — documents are reindexed from the managed
+  file workspace. The `minibot-qdrant` service in `docker-compose.yml` is now commented out, like
+  `minibot-rabbitmq`; uncomment it when using that backend.
+- `numpy` joins the `rag` extra (the SQLite backend's similarity scan). It was already installed in
+  practice as a sentence-transformers dependency, but was undeclared.
 
 - **Optional dependencies are now actually optional.** `aiogram` + `telegramify-markdown` and
   `pypdf` moved out of the core dependency set into the new `telegram` and `rag` extras; the bundled

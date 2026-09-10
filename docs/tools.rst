@@ -153,7 +153,7 @@ Tool Surface
    * - RAG / vector store
      - ``rag_index``, ``rag_search``, ``rag_list_metadata``, ``rag_delete``
      - ``[tools.rag]``
-     - Index text files into Qdrant and retrieve semantically relevant chunks.
+     - Index text files into the configured vector store and retrieve semantically relevant chunks.
 
 Runtime Notes
 -------------
@@ -172,8 +172,9 @@ Runtime Notes
 - ``[tasks]`` gates the task tools and the consumer. ``backend = "sqlite"`` (the recommended default)
   needs no broker and no extra; ``backend = "rabbitmq"`` requires the ``rabbitmq`` extra and a broker
   configured in ``[rabbitmq]``. See :doc:`architecture` for the trade-off.
-- ``[tools.rag]`` requires the ``rag`` extra for PDF ingestion (``pip install "minibot[rag]"``), plus
-  torch and sentence-transformers installed manually and a running Qdrant instance; see :doc:`rag`.
+- ``[tools.rag]`` requires the ``rag`` extra (``pip install "minibot[rag]"``) for PDF ingestion and
+  the SQLite backend's numpy, plus torch and sentence-transformers installed manually. The default
+  ``backend = "sqlite"`` needs no service; ``"qdrant"`` needs a running instance. See :doc:`rag`.
 - Hidden compatibility aliases are normalized at execution time; prefer the public names in the table.
 
 Implementation Reference

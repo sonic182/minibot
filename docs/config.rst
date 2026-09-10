@@ -153,7 +153,7 @@ Tool Configuration
      - ``enabled``, ``paths``, ``preload_catalog``
    * - ``[tools.rag]``
      - ``RagToolConfig``
-     - ``enabled``, ``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
+     - ``enabled``, ``backend``, ``sqlite_url``/``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
    * - ``[tasks]``
      - ``TasksConfig``
      - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``max_concurrent_workers``, ``sqlite``

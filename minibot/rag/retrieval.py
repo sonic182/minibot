@@ -5,7 +5,7 @@ import logging
 import uuid
 from typing import Any
 
-from minibot.adapters.qdrant.client import AsyncQdrantClient
+from minibot.core.vectors import VectorStore
 from minibot.rag.chunking import chunk_text
 from minibot.rag.embeddings import embed_text, embed_texts
 from minibot.rag.reranking import rerank_texts
@@ -15,7 +15,7 @@ _logger = logging.getLogger("minibot.rag.retrieval")
 
 async def index_document(
     *,
-    client: AsyncQdrantClient,
+    client: VectorStore,
     collection: str,
     document_id: str,
     text: str,
@@ -97,7 +97,7 @@ async def index_document(
 
 async def delete_document(
     *,
-    client: AsyncQdrantClient,
+    client: VectorStore,
     collection: str,
     document_id: str | None = None,
     user_id: str | None = None,
@@ -123,7 +123,7 @@ async def delete_document(
 
 async def retrieve_context(
     *,
-    client: AsyncQdrantClient,
+    client: VectorStore,
     collection: str,
     query: str,
     limit: int = 5,
@@ -224,7 +224,7 @@ async def retrieve_context(
 
 async def list_metadata_facets(
     *,
-    client: AsyncQdrantClient,
+    client: VectorStore,
     collection: str,
     limit: int = 10,
     document_id: str | None = None,

@@ -9,7 +9,7 @@ from llm_async.models import Tool
 
 from minibot.adapters.config.schema import RagToolConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
-from minibot.adapters.qdrant.client import AsyncQdrantClient
+from minibot.core.vectors import VectorStore
 from minibot.llm.tools.arg_utils import int_with_default, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
@@ -25,11 +25,11 @@ class RagTools:
     def __init__(
         self,
         config: RagToolConfig,
-        qdrant: AsyncQdrantClient,
+        store: VectorStore,
         storage: LocalFileStorage | None = None,
     ) -> None:
         self._config = config
-        self._qdrant = qdrant
+        self._store = store
         self._storage = storage
 
     def bindings(self) -> list[ToolBinding]:
@@ -86,7 +86,7 @@ class RagTools:
         document_id = optional_str(payload.get("document_id")) or _hash_path(file_path_raw)
 
         chunks = await index_document(
-            client=self._qdrant,
+            client=self._store,
             collection=self._config.collection_name,
             document_id=document_id,
             text=document.text,
@@ -154,7 +154,7 @@ class RagTools:
             raise ValueError("rag_delete requires at least one explicit filter")
 
         await delete_document(
-            client=self._qdrant,
+            client=self._store,
             collection=self._config.collection_name,
             document_id=document_id,
             user_id=_scope_value(explicit_user_id, context.user_id, field="user_id"),
@@ -175,7 +175,7 @@ class RagTools:
         )
 
         results = await retrieve_context(
-            client=self._qdrant,
+            client=self._store,
             collection=self._config.collection_name,
             query=query,
             limit=limit,
@@ -228,7 +228,7 @@ class RagTools:
             min_value=1,
         )
         facets = await list_metadata_facets(
-            client=self._qdrant,
+            client=self._store,
             collection=self._config.collection_name,
             limit=limit,
             document_id=optional_str(payload.get("document_id")),
