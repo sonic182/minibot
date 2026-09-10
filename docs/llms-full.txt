@@ -11,7 +11,7 @@ not a third-party service.
 
 ## Getting started
 
-- Install: `pip install minibot` (extras: `mcp`, `stt`, `rabbitmq`).
+- Install: `pip install minibot` (extras: `telegram`, `rag`, `stt`, `rabbitmq`).
 - Configure: `minibot configure` writes `config.toml`.
 - Run: `minibot` starts the daemon; `minibot console` runs a local terminal channel.
 - Docker: `docker compose up -d` (starts Qdrant alongside; RabbitMQ is optional).

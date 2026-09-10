@@ -23,8 +23,8 @@ class MCPToolBridge:
     """Bridge Model Context Protocol (MCP) servers to LLM tool bindings.
 
     Enabled by ``[tools.mcp]`` in ``config.toml``.  Each entry under
-    ``[[tools.mcp.servers]]`` creates one bridge instance.
-    Requires the ``mcp`` extra: ``poetry install --extras mcp``.
+    ``[[tools.mcp.servers]]`` creates one bridge instance. Needs no extra: the MCP client is a
+    self-contained JSON-RPC implementation with no third-party SDK dependency.
 
     Remote tools are exposed with the naming convention::
 

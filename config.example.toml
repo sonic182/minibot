@@ -246,7 +246,8 @@ default_owner_id = "primary"
 # Optional RAG (Retrieval-Augmented Generation) via Qdrant.
 # Requires `tools.file_storage.enabled = true`, a running Qdrant instance,
 # and manual `torch` + `sentence-transformers` installation.
-# Run Qdrant locally: ./qdrant/qdrant  (see qdrant/download_bin.sh)
+# PDF ingestion additionally needs pypdf (install with extras: rag).
+# Run Qdrant with Docker: docker compose up minibot-qdrant
 [tools.rag]
 enabled = false
 qdrant_url = "http://localhost:6333"
@@ -272,6 +273,8 @@ max_results = 7
 # Optional HTTP fetch tool.
 [tools.http_client]
 enabled = false
+# Compact HTML rendering uses selectolax, a core dependency. Without it, HTML responses fall
+# back to plain-text extraction.
 timeout_seconds = 30
 max_bytes = "16KB"
 # HTML-only parse budget: how much markup is decoded before it is compacted.

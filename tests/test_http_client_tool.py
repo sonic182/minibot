@@ -312,6 +312,33 @@ async def test_http_tool_compact_mode_keeps_link_targets_and_forms(http_server: 
 
 
 @pytest.mark.asyncio
+async def test_http_tool_compact_mode_falls_back_without_selectolax(
+    http_server: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    http_server["state"]["content_type"] = "text/html"
+    http_server["state"]["body"] = b"<html><body><h1>News</h1><p>Hello <b>world</b>.</p></body></html>"
+
+    def _raise(_text: str) -> str:
+        raise RuntimeError("HTML compaction requires selectolax")
+
+    monkeypatch.setattr("minibot.llm.tools.http_client.html_to_compact", _raise)
+    config = HTTPClientToolConfig(enabled=True, timeout_seconds=5, max_bytes=4096)
+    binding = HTTPClientTool(config).bindings()[0]
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"method": "GET", "url": http_server["url"]},
+            ToolContext(owner_id="tester"),
+        ),
+    )
+
+    # selectolax missing: the compact renderer raises and the tool degrades to plain text.
+    # ``processor_used`` still reports "html_compact" (pre-existing); the body tells the truth.
+    assert result["body"] == "News Hello world."
+    assert 'h1 "News"' not in result["body"]
+
+
+@pytest.mark.asyncio
 async def test_http_tool_text_mode_keeps_legacy_plain_text(http_server: dict[str, Any]) -> None:
     http_server["state"]["content_type"] = "text/html"
     http_server["state"]["body"] = b"<html><body><h1>News</h1><p>Hello <b>world</b>.</p></body></html>"

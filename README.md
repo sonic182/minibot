@@ -67,14 +67,19 @@ Quick start
 
 ```bash
 pip install minibot
-# add extras as needed, e.g.: pip install "minibot[mcp,stt,rabbitmq]"
+# add extras as needed, e.g.: pip install "minibot[telegram,stt,rag,rabbitmq]"
 
 minibot configure   # interactive wizard, writes config.toml
 minibot              # start the daemon
 ```
 
-Extras: `mcp` (MCP server tools), `stt` (speech-to-text via faster-whisper), `rabbitmq` (RabbitMQ task
-queue backend — not needed with the default `sqlite` backend).
+Extras: `telegram` (aiogram + Telegram markdown rendering — the daemon needs it only when
+`[channels.telegram]` is enabled), `rag` (pypdf, PDF ingestion for the RAG tool), `stt`
+(speech-to-text via faster-whisper), `rabbitmq` (RabbitMQ task queue backend — not needed with the
+default `sqlite` backend). Compact HTML rendering in `http_request` uses selectolax, which ships
+with the base install.
+
+MCP needs no extra: the MCP client is a JSON-RPC implementation with no third-party SDK dependency.
 
 No Telegram bot yet? Run `minibot console` instead of `minibot` to chat with it in your terminal.
 
