@@ -20,6 +20,11 @@ This is useful when:
 Setup
 -----
 
+.. note::
+
+   PDF ingestion needs the ``rag`` extra: ``pip install "minibot[rag]"``. Torch and
+   sentence-transformers are not managed by Poetry and are installed manually below.
+
 1. **Install torch**
 
    Choose CPU or GPU depending on your environment:

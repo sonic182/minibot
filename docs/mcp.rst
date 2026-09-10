@@ -9,11 +9,8 @@ MiniBot can discover and expose remote `Model Context Protocol <https://modelcon
 tools as local tool bindings at startup, so any MCP server becomes part of the agent's tool
 surface.
 
-.. note::
-
-   Requires the ``mcp`` extra::
-
-      poetry install --extras mcp
+No extra is required: the MCP client speaks JSON-RPC to the server process directly and has no
+third-party MCP SDK dependency. Only the test fixtures use the ``mcp`` package.
 
 Tool Naming
 -----------

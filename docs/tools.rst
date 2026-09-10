@@ -165,12 +165,15 @@ Runtime Notes
   plus a managed-file pointer the agent can read back with ``grep``, ``code_read``, ``read_file``, or
   ``bash``. Tools in ``exclude_tools`` (``bash``, ``http_request``, ``pre_response`` by default) are
   skipped since they already manage their own output size.
-- ``[tools.audio_transcription]`` requires the ``stt`` extra: ``poetry install --extras stt``.
-- ``[tools.mcp]`` requires the ``mcp`` extra: ``poetry install --extras mcp``.
+- ``[tools.audio_transcription]`` requires the ``stt`` extra: ``pip install "minibot[stt]"``.
+- ``[tools.http_client]`` works without extras; the ``http`` extra (``pip install "minibot[http]"``)
+  adds selectolax, which renders HTML as compact semantic text instead of plain-text extraction.
+- ``[tools.mcp]`` needs no extra: the MCP client is a JSON-RPC implementation with no third-party SDK.
 - ``[tasks]`` gates the task tools and the consumer. ``backend = "sqlite"`` (the recommended default)
   needs no broker and no extra; ``backend = "rabbitmq"`` requires the ``rabbitmq`` extra and a broker
   configured in ``[rabbitmq]``. See :doc:`architecture` for the trade-off.
-- ``[tools.rag]`` requires torch and sentence-transformers installed manually and a running Qdrant instance; see :doc:`rag`.
+- ``[tools.rag]`` requires the ``rag`` extra for PDF ingestion (``pip install "minibot[rag]"``), plus
+  torch and sentence-transformers installed manually and a running Qdrant instance; see :doc:`rag`.
 - Hidden compatibility aliases are normalized at execution time; prefer the public names in the table.
 
 Implementation Reference

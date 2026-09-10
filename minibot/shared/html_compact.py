@@ -8,8 +8,10 @@ while dropping presentation markup (classes, styles, ``data-*``, scripts, SVG).
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
-from selectolax.lexbor import LexborHTMLParser, LexborNode
+if TYPE_CHECKING:
+    from selectolax.lexbor import LexborNode
 
 _DROP = frozenset(
     {
@@ -69,6 +71,12 @@ def html_to_compact(html: str, *, base_url: str | None = None) -> str:
     del base_url
     if not html or not html.strip():
         return ""
+    try:
+        from selectolax.lexbor import LexborHTMLParser
+    except ImportError as exc:  # pragma: no cover - exercised only without the extra
+        raise RuntimeError(
+            "HTML compaction requires selectolax; install the 'http' extra: pip install 'minibot[http]'"
+        ) from exc
     root = LexborHTMLParser(html).root
     if root is None:
         return ""
@@ -86,6 +94,9 @@ def html_to_compact(html: str, *, base_url: str | None = None) -> str:
 
 def _render(node: LexborNode, depth: int, out: list[str]) -> None:
     tag = node.tag
+    if tag is None:
+        # selectolax types ``tag`` as optional; a tagless node carries nothing renderable.
+        return
     if tag in _DROP or _is_hidden(node):
         return
     if tag == "-text":

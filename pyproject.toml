@@ -33,15 +33,14 @@ include = [
 python = ">=3.12,<3.15"
 aiosonic = "^1.0.6"
 llm-async = "0.5.1"
-aiogram = "^3.24.0"
 pydantic = "^2.12.5"
 pydantic-settings = "^2.12.0"
 sqlalchemy = {extras = ["asyncio"], version = "^2.0.46"}
 aiosqlite = "^0.22.1"
 logfmter = "^0.0.11"
 rich = "^14.2.0"
-mcp = {version = ">=1.0.0,<2.0.0", optional = true}
-telegramify-markdown = "^0.5.4"
+aiogram = {version = "^3.24.0", optional = true}
+telegramify-markdown = {version = "^0.5.4", optional = true}
 faster-whisper = {version = ">=1.0.0,<2.0.0", optional = true}
 aio-pika = {version = ">=9.6.2", optional = true}
 aiopipe = ">=0.2.2"
@@ -50,8 +49,8 @@ aiopipe = ">=0.2.2"
 #   CPU: pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install sentence-transformers
 #   GPU: pip install torch && pip install sentence-transformers
 pypdf = {version = "^6.10.2", optional = true}
+selectolax = {version = "^0.4.11", optional = true}
 croniter = "^6.2.4"
-selectolax = "^0.4.11"
 tomlkit = "^0.15.1"
 prompt-toolkit = "^3.0.53"
 
@@ -62,6 +61,9 @@ pytest-cov = "^7.0.0"
 ruff = "^0.15.0"
 pyright = "^1.1.408"
 pytest-timeout = "^2.4.0"
+# Test fixtures under tests/fixtures/mcp run real MCP servers; the runtime MCP client is
+# a self-contained JSON-RPC implementation and needs no mcp package.
+mcp = ">=1.0.0,<2.0.0"
 
 
 [tool.poetry.group.docs.dependencies]
@@ -73,7 +75,9 @@ sphinxcontrib-mermaid = "^2.1.1"
 minibot = "minibot.app.daemon:main"
 
 [tool.poetry.extras]
-mcp = ["mcp"]
+telegram = ["aiogram", "telegramify-markdown"]
+http = ["selectolax"]
+rag = ["pypdf"]
 stt = ["faster-whisper"]
 rabbitmq = ["aio-pika"]
 

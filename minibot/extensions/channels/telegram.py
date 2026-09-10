@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.extensions import ExtensionContext
 
 
@@ -14,4 +13,8 @@ def register(mb: ExtensionContext) -> None:
     config = mb.settings.channels.telegram
     if not (config.enabled and config.bot_token):
         return
+    # Imported only once Telegram is actually configured: aiogram lives in the `telegram`
+    # extra, so a daemon that never enables this channel must not need it installed.
+    from minibot.adapters.messaging.telegram.service import TelegramService
+
     mb.add_service(TelegramService(config, mb.event_bus, mb.settings.tools.file_storage))

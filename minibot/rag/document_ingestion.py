@@ -77,5 +77,7 @@ def _load_pdf_reader_class():
     try:
         from pypdf import PdfReader
     except ImportError as exc:
-        raise RuntimeError("pypdf is required for PDF indexing. Run `poetry install --all-extras`.") from exc
+        raise RuntimeError(
+            "pypdf is required for PDF indexing; install the 'rag' extra: pip install 'minibot[rag]'"
+        ) from exc
     return PdfReader
