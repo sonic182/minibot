@@ -23,7 +23,7 @@ and emit outbound responses back to the active channel adapter.
 .
 ├── ARCHITECTURE.md
 ├── README.md
-├── TODO.md
+├── todos/               (developer todo notes)
 ├── agents/              (specialist agent definition markdown files)
 ├── config.example.toml
 ├── config.yolo.toml
@@ -51,6 +51,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── dispatcher.py
 │   │   ├── environment_context.py
 │   │   ├── event_bus.py
+│   │   ├── extensions.py
 │   │   ├── incoming_files_context.py
 │   │   ├── llm_client_factory.py
 │   │   ├── mcp_tool_name.py
@@ -59,6 +60,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── scheduler_service.py
 │   │   ├── skill_definitions_loader.py
 │   │   ├── skill_registry.py
+│   │   ├── task_consumer_service.py
 │   │   ├── token_limits_autoconfig.py
 │   │   ├── tool_capabilities.py
 │   │   ├── tool_guardrail_validator.py
@@ -84,9 +86,11 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── events.py
 │   │   ├── jobs.py
 │   │   ├── memory.py
-│   │   └── skills.py
+│   │   ├── skills.py
+│   │   └── tasks.py
 │   ├── adapters/
 │   │   ├── config/
+│   │   │   ├── configurator.py
 │   │   │   ├── loader.py
 │   │   │   └── schema.py
 │   │   ├── container/
@@ -160,6 +164,7 @@ and emit outbound responses back to the active channel adapter.
 │   │       ├── grep.py
 │   │       ├── http_client.py
 │   │       ├── mcp_bridge.py
+│   │       ├── output_spill.py
 │   │       ├── pre_response.py
 │   │       ├── python_exec.py
 │   │       ├── patch_engine.py
@@ -169,6 +174,7 @@ and emit outbound responses back to the active channel adapter.
 │   │       ├── skill_loader.py
 │   │       ├── tasks.py
 │   │       ├── time.py
+│   │       ├── tool_events.py
 │   │       ├── user_memory.py
 │   │       └── wait.py
 │   ├── extensions/            (bundled extensions: thin register(mb) composition)
@@ -299,10 +305,11 @@ flowchart TD
 - `app/mcp_tool_name.py`: utilities for parsing and validating MCP-namespaced tool names (`is_mcp_tool_name`, `extract_mcp_server`).
 - `app/response_parser.py`: parses structured LLM output payloads into render objects (`extract_answer`, `render_from_payload`, `payload_to_object`, `plain_render`).
 - `app/runtime_limits.py`: constructs `AgentRuntimeLimits` from config and client capabilities (`build_runtime_limits`).
-- `app/runtime_structured_output.py`: ratchet-backed structured-output schema validation with retries/fallback payload shaping (`RuntimeStructuredOutputValidator`).
-- `app/tool_guardrail_validator.py`: ratchet-backed structured-output validator for tool-use guardrail classification payloads.
+- `app/extensions.py`: loads and boots Python extensions declared under `[extensions].modules`, exposing `ExtensionContext` (`config`, `tool`, `on`, `add_service`, `entrypoint`).
+- `app/task_consumer_service.py`: the async task poll loop; leases queued tasks from the configured backend and runs them through the task manager.
+- `app/tool_guardrail_validator.py`: structured-output validator for tool-use guardrail classification payloads.
 - `app/tool_policy_utils.py`: shared `fnmatch`-based tool allow/deny filtering used by agent policies and tool capability views.
-- `app/tool_use_guardrail.py`: `ToolUseGuardrail` protocol with `NoopToolUseGuardrail` (default) and ratchet-validated `LLMClassifierToolUseGuardrail` (opt-in via `[orchestration].main_tool_use_guardrail = "llm_classifier"`).
+- `app/tool_use_guardrail.py`: `ToolUseGuardrail` protocol with `NoopToolUseGuardrail` (default) and `LLMClassifierToolUseGuardrail` (opt-in via `[orchestration].main_tool_use_guardrail = "llm_classifier"`).
 - `app/handlers/llm_handler.py`: top-level request flow coordinator for history persistence, runtime execution, format repair, and response metadata assembly.
 - `app/handlers/services/*`: extracted collaborators used by `LLMMessageHandler`:
   - `audio_transcription_service.py`: short-audio candidate selection, auto-transcription execution, and prompt-prefix composition,
@@ -358,7 +365,7 @@ Current notes:
 
 - Config:
   - `adapters/config/schema.py` holds Pydantic settings models.
-  - `adapters/config/loader.py` resolves config discovery and format-aware loading for TOML/Lua files.
+  - `adapters/config/loader.py` resolves config discovery and loading from `config.toml`.
   - `adapters/config/configurator.py` owns the interactive TOML configurator.
 - Container:
   - `adapters/container/app_container.py` wires singleton-style service graph.
@@ -466,11 +473,13 @@ an `aiopipe` duplex. Everything except the queue itself is backend-agnostic.
 
 ### Choosing a backend
 
-`[tasks].backend` selects one; only one consumer ever runs. `AppContainer` builds the matching
-store/producer pair, and `daemon.build_task_service()` builds the matching consumer.
+`[tasks].backend` selects one; only one consumer ever runs. The bundled task extensions build
+matching store/producer/consumer triples from that selection — `extensions/services/tasks.py` for
+`sqlite`, `extensions/integrations/rabbitmq.py` for `rabbitmq`, each returning early when the
+configured backend is not its own.
 
 | | `sqlite` | `rabbitmq` |
-|---|---|---|
+| --- | --- | --- |
 | Infrastructure | none — a local DB file | a broker to run and operate |
 | Extra required | none | `poetry install --extras rabbitmq` |
 | Dispatch | poll (`poll_interval_seconds`, default 5s) | push, near-instant |
@@ -561,8 +570,9 @@ Main sections:
 - `[orchestration]` (definitions directory, delegated runtime timeout defaults, main-agent policy, `main_tool_use_guardrail`: `"disabled"` | `"llm_classifier"`)
 - `[orchestration.main_agent]` (main-agent tool allow/deny)
 - `[memory]`
+- `[tasks]` (`enabled`, `backend`, `worker_timeout_seconds`, `max_concurrent_workers`) and `[tasks.sqlite]` / `[rabbitmq]`
 - `[scheduler.prompts]`
-- `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `bash`, `apply_patch`, `time`, `file_storage`, `grep`, `audio_transcription`, `browser`, `mcp`)
+- `[tools.*]` (`kv_memory`, `http_client`, `calculator`, `python_exec`, `bash`, `apply_patch`, `time`, `file_storage`, `grep`, `audio_transcription`, `browser`, `mcp`, `wait`, `rag`, `skills`, `tool_output_spill`)
 - `[logging]`
 
 Agent definition files under `./agents` are part of the effective config surface.

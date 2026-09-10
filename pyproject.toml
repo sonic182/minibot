@@ -67,6 +67,7 @@ pytest-timeout = "^2.4.0"
 [tool.poetry.group.docs.dependencies]
 sphinx = "^9.1.0"
 shibuya = "^2026.1.9"
+sphinxcontrib-mermaid = "^2.1.1"
 
 [tool.poetry.scripts]
 minibot = "minibot.app.daemon:main"

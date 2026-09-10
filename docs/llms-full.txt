@@ -1,0 +1,81 @@
+# Minibot
+
+> Minibot is an open-source, self-hosted AI assistant for Telegram, built in Python.
+> It provides persistent memory, tools, skills, scheduled automations, MCP integration,
+> and multi-agent orchestration. Telegram-first, SQLite-first, async-first, auditable.
+
+Minibot is a lightweight personal AI assistant you run on your own infrastructure. It is
+built for people who want reliable automation and chat assistance without a giant platform
+footprint. Your chats, memory, and scheduled prompts stay in your instance (SQLite files),
+not a third-party service.
+
+## Getting started
+
+- Install: `pip install minibot` (extras: `mcp`, `stt`, `rabbitmq`).
+- Configure: `minibot configure` writes `config.toml`.
+- Run: `minibot` starts the daemon; `minibot console` runs a local terminal channel.
+- Docker: `docker compose up -d` (starts Qdrant alongside; RabbitMQ is optional).
+
+## Extending Minibot
+
+Minibot is built to be extended, and most changes need no Python:
+
+- Level 0 — config: toggle tools, providers, models, limits in `config.toml`.
+- Level 1 — content: prompt packs (`prompts/`), skills (`skills/`), agent definitions (`agents/*.md`).
+- Level 2 — external tools: any MCP server via `[[tools.mcp.servers]]`.
+- Level 3 — Python extensions: `register(mb)` modules enabled via `[extensions].modules`.
+
+A Python extension can contribute tools (`@mb.tool`), subscribe to events (`@mb.on`),
+register services (`mb.add_service`), or implement a channel. The tool name comes from the
+function name, the description from its docstring, and the schema from its first argument's
+pydantic model.
+
+## Events
+
+The in-process asyncio event bus publishes `MessageEvent`, `TurnStartedEvent`,
+`TurnCompletedEvent`, `TurnFailedEvent`, `ToolCallEvent`, `OutboundEvent`,
+`OutboundFileEvent`, and `OutboundFormatRepairEvent`. Extensions subscribe with `@mb.on`.
+Handlers are async and lossy: slow handlers drop events rather than blocking the pipeline.
+
+## Multi-agent orchestration
+
+Specialist agents are Markdown files in `./agents` with YAML frontmatter (name, description,
+model provider, temperature, `tools_allow`/`tools_deny`, `mcp_servers`). The main agent
+delegates via `invoke_agent` and inspects definitions via `fetch_agent_info`. Tool ownership
+is controlled by `[orchestration].tool_ownership_mode` (`shared`, `exclusive`, `exclusive_mcp`).
+
+## Agent tools
+
+Tools are LLM-callable functions assembled at startup: chat history, KV memory, calculator,
+datetime, wait, HTTP client, Python execution, Bash, patch editing (`apply_patch`), file
+storage, grep, audio transcription, scheduler, delegation, skills, async tasks, MCP bridges,
+and RAG. Each is enabled via its `[tools.*]` section (or `[tasks]`, `[scheduler.prompts]`).
+
+## MCP integration
+
+`[tools.mcp]` + `[[tools.mcp.servers]]` connect stdio or HTTP MCP servers. Remote tools are
+exposed as `mcp_<server>__<remote_tool>`, with per-server `enabled_tools`/`disabled_tools`
+allowlists and a configurable `name_prefix`.
+
+## Scheduling
+
+`[scheduler.prompts]` persists one-shot, fixed-interval, and cron prompts in SQLite. Schedule
+by chatting naturally; recurrence is floored by `min_recurrence_interval_seconds`.
+
+## RAG
+
+`[tools.rag]` indexes text documents into Qdrant (`chunk_size_tokens`, `chunk_overlap_tokens`)
+and retrieves semantically relevant chunks (`search_limit`, `max_result_tokens`), with optional
+cross-encoder reranking.
+
+## Security
+
+Minibot exposes a minimal tool surface by default. `python_execute` and `bash` support
+sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`); `apply_patch` and `file_storage`
+are restricted to the workspace/managed root unless explicitly widened.
+
+## Links
+
+- [Documentation](https://sonic182.github.io/minibot/)
+- [GitHub](https://github.com/sonic182/minibot)
+- [PyPI](https://pypi.org/project/minibot/)

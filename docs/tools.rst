@@ -1,5 +1,9 @@
-Tools
-=====
+Agent Tools
+===========
+
+.. meta::
+   :description: The Minibot agent tool surface — Python, Bash, HTTP, file storage, grep, patch editing, and MCP bridges — with config and defaults.
+   :keywords: AI agent tools, Python AI agent, AI assistant with tools, Telegram bot tools
 
 Tools are LLM-callable functions assembled at startup from ``config.toml``.
 Each row below lists the public tool name exposed to the model, how it is enabled,
@@ -40,6 +44,10 @@ Tool Surface
      - ``calculate_expression``
      - ``[tools.calculator]``; enabled by default
      - Evaluate bounded arithmetic with Decimal precision.
+   * - Response
+     - ``pre_response``
+     - Always available
+     - Declare final-answer metadata before answering: ``kind`` (``text``/``html``/``markdown``), ``meta.disable_link_preview``, and outbound ``attachments``.
    * - HTTP
      - ``http_request``
      - ``[tools.http_client]``

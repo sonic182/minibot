@@ -28,6 +28,7 @@ def _coerce_byte_size(value: Any) -> int:
         return value
     if isinstance(value, float):
         if value.is_integer():
+            # pi-lens-ignore: unchecked-throwing-call-python
             return int(value)
         raise ValueError("byte size numeric values must be whole numbers")
     try:
@@ -739,14 +740,15 @@ class TasksConfig(BaseModel):
     Gates both the task consumer service and the ``spawn_task``/``cancel_task``/``list_tasks`` tools.
 
     - ``enabled`` — enable the async task system (default: ``false``).
-    - ``backend`` — queue backend: ``"rabbitmq"`` (see ``[rabbitmq]``) or ``"sqlite"`` (default: ``"rabbitmq"``).
+    - ``backend`` — queue backend: ``"sqlite"`` (default; no broker required) or
+      ``"rabbitmq"`` (see ``[rabbitmq]``).
     - ``worker_timeout_seconds`` — per-task processing timeout (default: ``60``).
     - ``max_concurrent_workers`` — maximum parallel task handlers (default: ``4``).
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
     enabled: bool = False
-    backend: Literal["rabbitmq", "sqlite"] = "rabbitmq"
+    backend: Literal["rabbitmq", "sqlite"] = "sqlite"
     worker_timeout_seconds: PositiveInt = 60
     max_concurrent_workers: PositiveInt = 4
     sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()

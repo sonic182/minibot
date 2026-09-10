@@ -6,6 +6,7 @@
 - `minibot.app`: orchestration, dispatcher flow, runtime policy, handler coordination, environment context, tool visibility rules, response parsing.
 - `minibot.adapters`: concrete implementations for config loading, container wiring, logging, messaging, memory persistence, file storage, scheduler persistence, MCP clients.
 - `minibot.llm`: provider factory, request building, schema handling, tool execution, tool definitions, provider registry, usage parsing.
+- `minibot.rag`: chunking, embedding, reranking, and retrieval — a domain-algorithm layer that may use the Qdrant adapter client for transport, never channels or providers.
 - `minibot.app.extensions`: extension API, loading, and registry lifecycle.
 - `minibot.extensions`: bundled extension entry points; each is thin composition over adapter implementations.
 - `minibot.shared`: low-level reusable helpers that do not pull in channel, persistence, or provider policy.
@@ -37,7 +38,7 @@ Flag as violations:
 
 Allowed:
 - dataclasses, pydantic models, protocols, enums, domain validation
-- abstract event, channel, agent, memory, or job contracts
+- abstract event, channel, agent, memory, job, or task contracts (`core/tasks.py` for task contracts)
 
 Disallowed:
 - Telegram or console transport types

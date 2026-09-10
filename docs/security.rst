@@ -1,6 +1,10 @@
 Security & Sandboxing
 =====================
 
+.. meta::
+   :description: How Minibot keeps a self-hosted AI agent safe: minimal tool surface, sandboxing, path restrictions, and sandbox modes for Python and Bash.
+   :keywords: self-hosted AI agent security, AI sandboxing, safe Python agent, auditable AI agent
+
 MiniBot exposes a minimal tool surface by default. The most sensitive capabilities are
 ``python_execute``, ``bash``, and ``apply_patch`` — they can run arbitrary code or edit
 host files when enabled.
@@ -12,7 +16,7 @@ Recommendations
 - Disable ``tools.bash`` unless you need direct shell access.
 - Keep ``tools.apply_patch.restrict_to_workspace = true`` unless unrestricted edits are required.
 - Keep ``tools.file_storage.allow_outside_root = false`` to prevent path traversal.
-- Prefer explicit sandbox isolation for untrusted code (``sandbox_mode``: ``rlimit``, ``cgroup``, ``jail``).
+- Prefer explicit sandbox isolation for untrusted code (``sandbox_mode``: ``none``, ``basic``, ``rlimit``, ``cgroup``, or ``jail``; default is ``basic``).
 - Run the daemon as a non-privileged user; mount only the data directory in Docker.
 
 Jail Mode (Firejail)
