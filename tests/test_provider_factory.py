@@ -256,10 +256,10 @@ async def test_complete_once_includes_xai_native_search_tools(monkeypatch: pytes
             "enable_video_understanding": True,
         },
     ]
-    assert client.provider_capability_hints() == [
+    assert client.provider_capability_hints() == (
         "Provider-native web search is available for web/current-info tasks.",
         "Provider-native X search is available for X/Twitter posts and discussion.",
-    ]
+    )
 
 
 @pytest.mark.asyncio
@@ -282,7 +282,7 @@ async def test_complete_once_skips_xai_native_tools_for_non_xai_target(monkeypat
 
     call = client._provider.calls[-1]
     assert call["tools"] is None
-    assert client.provider_capability_hints() == []
+    assert client.provider_capability_hints() == ()
 
 
 @pytest.mark.asyncio
@@ -305,10 +305,10 @@ async def test_generate_can_suppress_xai_native_tools_for_internal_calls(monkeyp
 
     call = client._provider.calls[-1]
     assert call["tools"] is None
-    assert client.provider_capability_hints() == [
+    assert client.provider_capability_hints() == (
         "Provider-native web search is available for web/current-info tasks.",
         "Provider-native X search is available for X/Twitter posts and discussion.",
-    ]
+    )
 
 
 @pytest.mark.asyncio

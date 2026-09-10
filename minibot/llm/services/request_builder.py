@@ -56,9 +56,10 @@ def build_generate_extra_kwargs(
         extra_kwargs["previous_response_id"] = previous_response_id
     if ctx.is_responses_provider and ctx.prompt_cache_enabled and ctx.prompt_cache_retention:
         extra_kwargs["prompt_cache_retention"] = ctx.prompt_cache_retention
-    reasoning = responses_reasoning_kwargs(ctx)
-    if reasoning:
-        extra_kwargs.setdefault("reasoning", reasoning)
+    if ctx.is_responses_provider:
+        reasoning = responses_reasoning_kwargs(ctx)
+        if reasoning:
+            extra_kwargs.setdefault("reasoning", reasoning)
     if ctx.is_responses_provider and not previous_response_id:
         extra_kwargs["instructions"] = system_prompt
     return extra_kwargs
@@ -124,9 +125,10 @@ def build_complete_once_call_kwargs(
         call_kwargs["previous_response_id"] = previous_response_id
     if ctx.is_responses_provider and ctx.prompt_cache_enabled and ctx.prompt_cache_retention:
         call_kwargs["prompt_cache_retention"] = ctx.prompt_cache_retention
-    reasoning = responses_reasoning_kwargs(ctx)
-    if reasoning:
-        call_kwargs.setdefault("reasoning", reasoning)
+    if ctx.is_responses_provider:
+        reasoning = responses_reasoning_kwargs(ctx)
+        if reasoning:
+            call_kwargs.setdefault("reasoning", reasoning)
     return call_kwargs
 
 

@@ -50,8 +50,8 @@ class StubMemory:
         self._store: dict[str, list[MemoryEntry]] = {}
         self.trim_calls: list[tuple[str, int]] = []
 
-    async def append_history(self, session_id: str, role: str, content: str) -> None:
-        entry = MemoryEntry(role=role, content=content, created_at=datetime.now(UTC))
+    async def append_history(self, session_id: str, role: str, content: str, *, reasoning: str | None = None) -> None:
+        entry = MemoryEntry(role=role, content=content, created_at=datetime.now(UTC), reasoning=reasoning)
         self._store.setdefault(session_id, []).append(entry)
 
     async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:
