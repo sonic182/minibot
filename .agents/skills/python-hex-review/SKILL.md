@@ -58,6 +58,8 @@ Only include refactored code when the user asked for code changes or an example.
 - `minibot.app` orchestrates runtime flow and policy, but should not absorb adapter or provider specifics.
 - `minibot.adapters` owns concrete integrations for config, messaging, memory, files, scheduler, logging, and MCP clients.
 - `minibot.llm` owns provider wiring, request shaping, schema policy, and tool integration details.
+- `minibot.rag` owns chunking/embedding/reranking/retrieval; it may use the Qdrant adapter client but no channel or provider policy.
+- `minibot.core.tasks` owns the task contracts (`TaskRequest`/`TaskRecord`/`TaskStatus`/`TaskProducer`).
 - `minibot.app.extensions` owns the extension API and registry lifecycle; `minibot.extensions` contains bundled, thin `register(mb)` composition modules.
 - Extension modules use the curated `ExtensionContext`, not `AppContainer`; adapter implementations remain under `minibot.adapters`.
 - Channel handlers stay thin and should not become a second application layer.

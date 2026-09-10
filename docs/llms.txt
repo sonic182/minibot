@@ -1,0 +1,39 @@
+# Minibot
+
+> Minibot is an open-source, self-hosted AI assistant for Telegram, built in Python.
+> It provides persistent memory, tools, skills, scheduled automations, MCP integration,
+> and multi-agent orchestration. Telegram-first, SQLite-first, async-first, auditable.
+
+## Docs
+
+- [Getting Started](https://sonic182.github.io/minibot/getting_started.html): install and run
+- [Extending Minibot](https://sonic182.github.io/minibot/extending.html): the customization ladder
+- [Python extensions](https://sonic182.github.io/minibot/extensions.html): tools, events, services, channels
+- [Events](https://sonic182.github.io/minibot/events.html): event-bus reference
+- [Multi-agent orchestration](https://sonic182.github.io/minibot/agents.html)
+- [Agent tools](https://sonic182.github.io/minibot/tools.html)
+- [MCP integration](https://sonic182.github.io/minibot/mcp.html)
+- [Configuration reference](https://sonic182.github.io/minibot/config.html)
+- [Scheduled tasks & automation](https://sonic182.github.io/minibot/scheduler.html)
+- [RAG & persistent knowledge](https://sonic182.github.io/minibot/rag.html)
+- [Security & sandboxing](https://sonic182.github.io/minibot/security.html)
+
+## Features
+
+- Self-hosted Telegram AI assistant
+- Persistent memory (SQLite)
+- Agent tools: Python, Bash, HTTP, files, grep, patch editing
+- Agent skills (Markdown)
+- Multi-agent orchestration with delegation
+- Scheduled prompts (one-shot, interval, cron)
+- MCP integration
+- RAG over Qdrant
+- Browser automation (Playwright)
+- Voice (speech-to-text)
+- Python extensions for tools, events, services, and channels
+
+## Links
+
+- [Documentation](https://sonic182.github.io/minibot/)
+- [GitHub](https://github.com/sonic182/minibot)
+- [PyPI](https://pypi.org/project/minibot/)

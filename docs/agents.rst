@@ -1,9 +1,14 @@
-Agents
-======
+Multi-Agent Orchestration
+=========================
 
-Agent definitions live in ``./agents/*.md`` as markdown files with YAML frontmatter
-followed by a system prompt body. The main agent discovers and delegates to specialists
-at runtime.
+.. meta::
+   :description: Minibot multi-agent orchestration: define specialist AI agents in Markdown, scope their tools, and delegate work at runtime.
+   :keywords: multi-agent AI assistant, AI agents, agent delegation, tool scoping, Python AI agent
+
+Minibot supports multi-agent orchestration with specialist AI agents, tool scoping, and
+delegation. Agent definitions live in ``./agents/*.md`` as markdown files with YAML
+frontmatter followed by a system prompt body. The main agent discovers and delegates to
+specialists at runtime.
 
 Delegation Tools
 ----------------
@@ -136,7 +141,8 @@ Runtime behavior
 
 - ``list_skills`` rescans skill directories on demand — new skills are picked up without restarting.
 - ``activate_skill`` requires the exact name returned by ``list_skills``.
-- Set ``tools.skills.preload_catalog = true`` to embed a names/descriptions snapshot in the system prompt.
+- Set ``tools.skills.preload_catalog`` (default ``true``) to embed a names/descriptions snapshot
+  in the system prompt; set it to ``false`` to render the catalog only on demand.
 
 Discovery paths
 ~~~~~~~~~~~~~~~
@@ -164,7 +170,7 @@ Recommended setup: ``./skills``
 
    [tools.skills]
    enabled = true
-   preload_catalog = false
+   preload_catalog = true
    paths = ["./skills"]
 
 Then place one subdirectory per skill::

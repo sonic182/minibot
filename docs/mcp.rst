@@ -1,8 +1,13 @@
-MCP Bridge
-==========
+MCP Integration
+===============
+
+.. meta::
+   :description: Connect Model Context Protocol (MCP) servers to Minibot and expose their remote tools to your AI agent.
+   :keywords: MCP AI agent, Telegram MCP bot, Model Context Protocol, MCP tools
 
 MiniBot can discover and expose remote `Model Context Protocol <https://modelcontextprotocol.io>`_
-tools as local tool bindings at startup.
+tools as local tool bindings at startup, so any MCP server becomes part of the agent's tool
+surface.
 
 .. note::
 

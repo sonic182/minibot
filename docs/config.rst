@@ -73,6 +73,14 @@ configures the first, ``[rabbitmq]`` the second.
 .. autoclass:: minibot.adapters.config.schema.RabbitMQConsumerConfig
    :no-members:
 
+Extensions
+----------
+
+Python extensions loaded at startup. See :doc:`extensions` for the full extension API.
+
+.. autoclass:: minibot.adapters.config.schema.ExtensionsConfig
+   :no-members:
+
 Tool Configuration
 ------------------
 
@@ -92,6 +100,9 @@ Tool Configuration
    * - ``[tools.time]``
      - ``TimeToolConfig``
      - ``enabled``, ``default_format``
+   * - ``[tools.wait]``
+     - ``WaitToolConfig``
+     - ``enabled`` (default ``false``), ``max_milliseconds``
    * - ``[tools.calculator]``
      - ``CalculatorToolConfig``
      - ``enabled``, ``default_scale``, ``max_expression_length``, ``max_exponent_abs``
@@ -137,6 +148,9 @@ Tool Configuration
    * - ``[tools.skills]``
      - ``SkillsToolConfig``
      - ``enabled``, ``paths``, ``preload_catalog``
+   * - ``[tools.rag]``
+     - ``RagToolConfig``
+     - ``enabled``, ``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
    * - ``[tasks]``
      - ``TasksConfig``
      - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``max_concurrent_workers``, ``sqlite``
@@ -154,6 +168,9 @@ Tool Config Models
    :no-members:
 
 .. autoclass:: minibot.adapters.config.schema.TimeToolConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.WaitToolConfig
    :no-members:
 
 .. autoclass:: minibot.adapters.config.schema.CalculatorToolConfig
@@ -199,5 +216,8 @@ Tool Config Models
    :no-members:
 
 .. autoclass:: minibot.adapters.config.schema.SkillsToolConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.RagToolConfig
    :no-members:
 

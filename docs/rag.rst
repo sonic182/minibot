@@ -1,5 +1,9 @@
-RAG (Retrieval-Augmented Generation)
-=====================================
+RAG & Persistent Knowledge
+==========================
+
+.. meta::
+   :description: Add retrieval-augmented generation to Minibot: index documents into Qdrant and answer with semantically retrieved chunks.
+   :keywords: RAG AI assistant, persistent knowledge, Qdrant, vector search AI assistant
 
 MiniBot can index text documents into a `Qdrant <https://qdrant.tech>`_ vector store and
 retrieve semantically relevant passages at query time using
@@ -39,17 +43,13 @@ Setup
 
 3. **Start Qdrant**
 
-   Using the pre-downloaded binary (see ``qdrant/download_bin.sh``):
-
-   .. code-block:: bash
-
-      ./qdrant/qdrant
-
-   Or via Docker (service is defined in ``docker-compose.yml``):
+   Run it via Docker (service is defined in ``docker-compose.yml``):
 
    .. code-block:: bash
 
       docker compose up minibot-qdrant
+
+   Or point ``[tools.rag].qdrant_url`` at any Qdrant instance you already run.
 
 4. **Enable RAG in** ``config.toml``:
 

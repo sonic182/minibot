@@ -15,7 +15,7 @@ Quickstart (Docker)
 
 The Docker image includes:
 
-- Python deps with all MiniBot extras (``stt``, ``mcp``)
+- Python deps with all MiniBot extras (``stt``, ``mcp``, ``rabbitmq``)
 - Node.js/npm (v24 from official tarball)
 - Playwright + Chromium
 - ffmpeg

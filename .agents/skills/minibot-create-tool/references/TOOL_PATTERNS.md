@@ -1,15 +1,52 @@
 # Tool Patterns Reference
 
-## File layout
+## Choose a path first
 
-```
-minibot/llm/tools/
-├── <module>.py                  # tool class
-└── descriptions/
-    └── <tool_name>.txt          # one file per tool name
+- **Extension (default)** — standalone `register(mb)` module, enabled via `[extensions].modules`.
+  No factory/config/schema wiring. The docstring is the description; the first argument's
+  pydantic model is the schema. Best for user-specific or experimental tools.
+- **Core (bundled)** — tool class under `minibot/llm/tools/`, optional `[tools.<key>]` config,
+  registered from a bundled extension module (`minibot/extensions/tools/`) or wired into
+  `build_enabled_tools` for always-on tools.
+
+## Extension tool (default path)
+
+One file. Tool name = function name, description = docstring, schema = first argument's
+pydantic model. Settings come from the extension's `[extensions.config.<module>]` slice.
+
+```python
+# my_tool.py — enable via [extensions].modules = ["my_tool"]
+from pydantic import BaseModel, Field
+
+from minibot.app.extensions import ExtensionContext
+from minibot.llm.tools.base import ToolContext
+
+
+class WordCountArgs(BaseModel):
+    text: str = Field(description="Text to count words in.")
+
+
+def register(mb: ExtensionContext) -> None:
+    @mb.tool
+    async def word_count(args: WordCountArgs, context: ToolContext) -> dict[str, int]:
+        """Count the words in a piece of text."""
+        return {"words": len(args.text.split())}
 ```
 
-## Minimal single tool
+```toml
+[extensions]
+modules = ["my_tool"]
+```
+
+Notes:
+- Define pydantic models at module scope, not inside `register()` (postponed annotations
+  cannot resolve them otherwise).
+- Use `mb.add_tool(binding)` when you need a custom tool name, a hand-written schema, or a
+  description loaded from a file.
+- Invalid arguments produce `invalid_tool_arguments` to the model instead of reaching the handler.
+- See `examples/minibot_ext_demo.py` for a tool plus an event subscriber.
+
+## Core tool class
 
 ```python
 from __future__ import annotations
@@ -44,7 +81,7 @@ class MyTool:
         return {"result": param1}
 ```
 
-## Tool with constructor config and context
+### Tool with constructor config and context
 
 ```python
 class MyTool:
@@ -59,7 +96,7 @@ class MyTool:
         ...
 ```
 
-## Multi-tool class
+### Multi-tool class
 
 ```python
 class MyTool:
@@ -103,7 +140,9 @@ Use these to coerce/validate payload values inside handlers:
 - `int_with_default(value, default, field, ...)` — returns `int`
 - `optional_bool(value, field)` — returns `bool | None`
 
-## Config model pattern (schema.py)
+## Config model pattern (schema.py, core path)
+
+Only when the tool needs settings:
 
 ```python
 class MyToolConfig(BaseModel):
@@ -118,33 +157,35 @@ class ToolsConfig(BaseModel):
     my_tool: MyToolConfig = MyToolConfig()
 ```
 
-## Factory builder pattern (factory.py)
+## Registration (core path)
+
+`ToolFeature` / `_OPTIONAL_FEATURES` no longer exist in `llm/tools/factory.py`. Choose one:
+
+### Bundled extension (default for optional tools)
+
+Add to the matching module under `minibot/extensions/tools/` (e.g. `utility.py`), reading
+settings from `mb.settings`:
 
 ```python
-def _build_my_tool_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
-    return MyTool(config=context.settings.tools.my_tool).bindings()
+from minibot.app.extensions import ExtensionContext
+from minibot.llm.tools.my_tool import MyTool
+
+
+def register(mb: ExtensionContext) -> None:
+    if mb.settings.tools.my_tool.enabled:
+        mb.add_tool(MyTool(config=mb.settings.tools.my_tool).bindings())
 ```
 
-```python
-ToolFeature(
-    key="my_tool",
-    labels=("my_tool_name",),
-    enabled_in_config=lambda settings: _tool_enabled(settings, "my_tool"),
-    builder=_build_my_tool_feature,
-),
-```
+### `build_enabled_tools` (always-on tools only)
 
-If the builder needs an optional dependency that may be `None`, return `[]` early:
-```python
-def _build_my_tool_feature(context: ToolAssemblyContext, _: list[ToolBinding]) -> list[ToolBinding]:
-    if context.some_dep is None:
-        return []
-    return MyTool(dep=context.some_dep, config=context.settings.tools.my_tool).bindings()
-```
+Wire directly in `minibot/llm/tools/factory.py` — see `CalculatorTool` or `SkillLoaderTool`
+in `build_enabled_tools` for the pattern. These appear unconditionally (or gated by their
+own config) next to the always-on core set.
 
-## Description file (.txt)
+## Description file (.txt, core path)
 
-Plain text, no markdown. Three parts:
+Extension tools use the docstring; core tools may use a `.txt` description via
+`load_tool_description`. Plain text, no markdown. Three parts:
 1. One-sentence summary.
 2. Usage guidance — when to call, when NOT to call, preconditions.
 3. What the tool returns.

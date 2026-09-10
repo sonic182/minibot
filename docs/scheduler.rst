@@ -1,5 +1,9 @@
-Scheduler
-=========
+Scheduled Tasks & Automation
+============================
+
+.. meta::
+   :description: Schedule one-shot, interval, and cron prompts in Minibot for Telegram automations, persisted in SQLite.
+   :keywords: scheduled AI assistant, AI automation, Telegram scheduled prompts, cron AI agent
 
 MiniBot supports one-time and recurring scheduled prompts persisted in SQLite.
 Schedule by chatting naturally — no special syntax required.
