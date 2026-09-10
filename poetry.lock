@@ -3065,10 +3065,9 @@ files = [
 name = "selectolax"
 version = "0.4.11"
 description = "A fast HTML5 parser with CSS selectors, written in Cython, using Modest and Lexbor engines."
-optional = true
+optional = false
 python-versions = "<3.15,>=3.9"
 groups = ["main"]
-markers = "extra == \"http\""
 files = [
     {file = "selectolax-0.4.11-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:3066be35f630e4c4a00cf2c829548574fcba5963735411e6a9ac78bd4ca830ce"},
     {file = "selectolax-0.4.11-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:57e71c021d9950113e7d49892eba56014c072c9d86b71c0b3b7cb846ee913e20"},
@@ -3866,7 +3865,6 @@ multidict = ">=4.0"
 propcache = ">=0.2.1"
 
 [extras]
-http = ["selectolax"]
 rabbitmq = ["aio-pika"]
 rag = ["pypdf"]
 stt = ["faster-whisper"]
@@ -3875,4 +3873,4 @@ telegram = ["aiogram", "telegramify-markdown"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "45124c69c57a566efe7f276da756d5061e491d41c44dc0c09a386a3865210eeb"
+content-hash = "7f791309cab1e1ccb737e0b27d624ec3d0b3d41be062792fca196b04ea8fe60e"

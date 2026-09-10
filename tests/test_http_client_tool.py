@@ -319,7 +319,7 @@ async def test_http_tool_compact_mode_falls_back_without_selectolax(
     http_server["state"]["body"] = b"<html><body><h1>News</h1><p>Hello <b>world</b>.</p></body></html>"
 
     def _raise(_text: str) -> str:
-        raise RuntimeError("HTML compaction requires selectolax; install the 'http' extra")
+        raise RuntimeError("HTML compaction requires selectolax")
 
     monkeypatch.setattr("minibot.llm.tools.http_client.html_to_compact", _raise)
     config = HTTPClientToolConfig(enabled=True, timeout_seconds=5, max_bytes=4096)

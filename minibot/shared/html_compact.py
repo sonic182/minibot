@@ -71,11 +71,13 @@ def html_to_compact(html: str, *, base_url: str | None = None) -> str:
     del base_url
     if not html or not html.strip():
         return ""
+    # Imported here rather than at module level so a process that never compacts HTML (the tool
+    # disabled, or only non-HTML responses) never pays selectolax's import cost.
     try:
         from selectolax.lexbor import LexborHTMLParser
-    except ImportError as exc:  # pragma: no cover - exercised only without the extra
+    except ImportError as exc:  # pragma: no cover - selectolax ships with minibot
         raise RuntimeError(
-            "HTML compaction requires selectolax; install the 'http' extra: pip install 'minibot[http]'"
+            "HTML compaction requires selectolax, a core minibot dependency; reinstall minibot."
         ) from exc
     root = LexborHTMLParser(html).root
     if root is None:

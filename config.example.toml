@@ -273,8 +273,8 @@ max_results = 7
 # Optional HTTP fetch tool.
 [tools.http_client]
 enabled = false
-# Compact HTML rendering uses selectolax (install with extras: http). Without it, HTML
-# responses fall back to plain-text extraction.
+# Compact HTML rendering uses selectolax, a core dependency. Without it, HTML responses fall
+# back to plain-text extraction.
 timeout_seconds = 30
 max_bytes = "16KB"
 # HTML-only parse budget: how much markup is decoded before it is compacted.

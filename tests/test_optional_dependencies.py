@@ -20,7 +20,6 @@ OPTIONAL_THIRD_PARTY = (
     "aiogram",
     "telegramify_markdown",
     "aio_pika",
-    "selectolax",
     "pypdf",
     "faster_whisper",
     "sentence_transformers",

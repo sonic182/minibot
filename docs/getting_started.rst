@@ -15,7 +15,7 @@ Quickstart (Docker)
 
 The Docker image includes:
 
-- Python deps with all MiniBot extras (``telegram``, ``http``, ``stt``, ``rag``, ``rabbitmq``)
+- Python deps with all MiniBot extras (``telegram``, ``stt``, ``rag``, ``rabbitmq``)
 - Node.js/npm (v24 from official tarball)
 - Playwright + Chromium
 - ffmpeg
@@ -32,7 +32,7 @@ No Telegram bot yet? Run ``docker compose run --rm minibot minibot console`` ins
 Quickstart (pip)
 ----------------
 
-1. ``pip install minibot``, adding extras as needed: ``pip install "minibot[telegram,http,stt,rag,rabbitmq]"``.
+1. ``pip install minibot``, adding extras as needed: ``pip install "minibot[telegram,stt,rag,rabbitmq]"``.
 2. ``minibot configure`` to create ``config.toml`` interactively (see below).
 3. ``minibot``
 

@@ -67,16 +67,17 @@ Quick start
 
 ```bash
 pip install minibot
-# add extras as needed, e.g.: pip install "minibot[telegram,http,stt,rag,rabbitmq]"
+# add extras as needed, e.g.: pip install "minibot[telegram,stt,rag,rabbitmq]"
 
 minibot configure   # interactive wizard, writes config.toml
 minibot              # start the daemon
 ```
 
 Extras: `telegram` (aiogram + Telegram markdown rendering — the daemon needs it only when
-`[channels.telegram]` is enabled), `http` (selectolax, compact HTML rendering in `http_request`),
-`rag` (pypdf, PDF ingestion for the RAG tool), `stt` (speech-to-text via faster-whisper), `rabbitmq`
-(RabbitMQ task queue backend — not needed with the default `sqlite` backend).
+`[channels.telegram]` is enabled), `rag` (pypdf, PDF ingestion for the RAG tool), `stt`
+(speech-to-text via faster-whisper), `rabbitmq` (RabbitMQ task queue backend — not needed with the
+default `sqlite` backend). Compact HTML rendering in `http_request` uses selectolax, which ships
+with the base install.
 
 MCP needs no extra: the MCP client is a JSON-RPC implementation with no third-party SDK dependency.
 

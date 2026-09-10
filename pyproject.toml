@@ -49,7 +49,7 @@ aiopipe = ">=0.2.2"
 #   CPU: pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install sentence-transformers
 #   GPU: pip install torch && pip install sentence-transformers
 pypdf = {version = "^6.10.2", optional = true}
-selectolax = {version = "^0.4.11", optional = true}
+selectolax = "^0.4.11"
 croniter = "^6.2.4"
 tomlkit = "^0.15.1"
 prompt-toolkit = "^3.0.53"
@@ -76,7 +76,6 @@ minibot = "minibot.app.daemon:main"
 
 [tool.poetry.extras]
 telegram = ["aiogram", "telegramify-markdown"]
-http = ["selectolax"]
 rag = ["pypdf"]
 stt = ["faster-whisper"]
 rabbitmq = ["aio-pika"]

@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Optional dependencies are now actually optional.** `aiogram` + `telegramify-markdown`,
-  `selectolax`, and `pypdf` moved out of the core dependency set into the new `telegram`, `http`,
-  and `rag` extras; the bundled extensions that need them now import them lazily, after their
-  config gate. A daemon that never enables the Telegram channel no longer needs aiogram installed,
-  and `http_request`/RAG work without selectolax/pypdf (HTML falls back to plain-text extraction,
-  PDF ingestion reports the missing extra). `pip install "minibot[telegram,http,rag]"` restores the
-  previous install surface.
+- **Optional dependencies are now actually optional.** `aiogram` + `telegramify-markdown` and
+  `pypdf` moved out of the core dependency set into the new `telegram` and `rag` extras; the bundled
+  extensions that need them now import them lazily, after their config gate. A daemon that never
+  enables the Telegram channel no longer needs aiogram installed, and RAG works without pypdf (PDF
+  ingestion reports the missing extra). `pip install "minibot[telegram,rag]"` restores the previous
+  install surface. `selectolax` (compact HTML rendering in `http_request`) stays a core dependency,
+  but is now imported lazily on first HTML compaction so a disabled HTTP tool never loads it.
 - **Breaking:** the `mcp` extra is gone: nothing at runtime imports the `mcp` package — the MCP
   client is a self-contained JSON-RPC implementation. Only the test fixtures use it, so `mcp` is
   now a dev dependency. `pip install "minibot[mcp]"` still works (pip warns about the unknown
