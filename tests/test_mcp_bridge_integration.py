@@ -77,11 +77,11 @@ class _LazyMCPClient:
             raise self.metadata_error
         return self.metadata
 
-    def list_tools_blocking(self) -> list[MCPToolDefinition]:
+    async def list_tools(self) -> list[MCPToolDefinition]:
         self.list_tools_calls += 1
         return self.tools
 
-    def call_tool_blocking(self, tool_name: str, payload: dict[str, object]) -> MCPToolCallResult:
+    async def call_tool(self, tool_name: str, payload: dict[str, object]) -> MCPToolCallResult:
         self.tool_calls.append((tool_name, payload))
         return MCPToolCallResult(content=[{"type": "text", "text": "completed"}])
 

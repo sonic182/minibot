@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from dataclasses import dataclass
-from threading import Lock
 from typing import Any
 
 from llm_async.models import Tool
@@ -139,7 +139,7 @@ class MCPLazyToolBridge:
         self._catalog_cache_ttl_seconds = catalog_cache_ttl_seconds
         self._catalog: list[MCPToolDefinition] | None = None
         self._catalog_loaded_at: float | None = None
-        self._catalog_lock = Lock()
+        self._catalog_lock = asyncio.Lock()
         self._logger = logging.getLogger("minibot.mcp.lazy_bridge")
 
     def build_bindings(self) -> list[ToolBinding]:
@@ -194,7 +194,7 @@ class MCPLazyToolBridge:
     async def _handle_list_tools(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         del payload
         try:
-            tools, _from_cache = self._load_catalog(force_refresh=True)
+            tools, _from_cache = await self._load_catalog(force_refresh=True)
         except Exception as exc:
             self._logger.warning(
                 "failed to load mcp tool catalog",
@@ -224,7 +224,7 @@ class MCPLazyToolBridge:
             return self._error("invalid_arguments", "arguments must be an object")
         remote_tool_name = remote_tool_name.strip()
         try:
-            tools, _from_cache = self._load_catalog(force_refresh=False)
+            tools, _from_cache = await self._load_catalog(force_refresh=False)
         except Exception as exc:
             self._logger.warning(
                 "failed to load mcp tool catalog before call",
@@ -249,7 +249,7 @@ class MCPLazyToolBridge:
             },
         )
         try:
-            result = self._client.call_tool_blocking(remote_tool_name, sanitized_payload)
+            result = await self._client.call_tool(remote_tool_name, sanitized_payload)
         except Exception as exc:
             self._logger.warning(
                 "lazy mcp tool call failed",
@@ -268,11 +268,11 @@ class MCPLazyToolBridge:
             "result": content,
         }
 
-    def _load_catalog(self, *, force_refresh: bool) -> tuple[list[MCPToolDefinition], bool]:
-        with self._catalog_lock:
+    async def _load_catalog(self, *, force_refresh: bool) -> tuple[list[MCPToolDefinition], bool]:
+        async with self._catalog_lock:
             if not force_refresh and self._catalog_is_fresh():
                 return self._catalog or [], True
-            tools = [tool for tool in self._client.list_tools_blocking() if self._is_allowed(tool.name)]
+            tools = [tool for tool in await self._client.list_tools() if self._is_allowed(tool.name)]
             self._catalog = tools
             self._catalog_loaded_at = time.monotonic()
             return tools, False
