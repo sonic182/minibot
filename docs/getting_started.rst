@@ -21,10 +21,10 @@ The Docker image includes:
 - ffmpeg
 - additional Python packages from ``docker-requirements.txt``
 
-``docker-compose.yml`` also starts Qdrant (used by the RAG tool). The ``minibot-rabbitmq`` service
-is commented out by default: ``[tasks].backend`` defaults to ``"sqlite"``, which needs no broker.
-Uncomment it (and its ``depends_on`` entry on the ``minibot`` service) only if you set
-``[tasks].backend = "rabbitmq"``.
+The ``minibot-rabbitmq`` and ``minibot-qdrant`` services are commented out by default: both
+``[tasks].backend`` and ``[tools.rag].backend`` default to ``"sqlite"``, which needs no extra
+service. Uncomment one (and its ``depends_on`` entry on the ``minibot`` service) only if you set
+the matching backend to ``"rabbitmq"`` or ``"qdrant"``.
 
 No Telegram bot yet? Run ``docker compose run --rm minibot minibot console`` instead of
 ``up`` to chat with MiniBot in your terminal — see `Console Test Channel`_ below.

@@ -13,25 +13,27 @@ services:
   #     timeout: 5s
   #     retries: 10
 
-  minibot-qdrant:
-    image: qdrant/qdrant:latest
-    container_name: minibot-qdrant
-    restart: unless-stopped
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - ./data/qdrant:/qdrant/storage
+  # Only needed with [tools.rag].backend = "qdrant" in config.toml; sqlite is the default and needs no service.
+  # minibot-qdrant:
+  #   image: qdrant/qdrant:latest
+  #   container_name: minibot-qdrant
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6333:6333"
+  #     - "6334:6334"
+  #   volumes:
+  #     - ./data/qdrant:/qdrant/storage
 
   minibot:
     build: .
     container_name: minibot
     restart: unless-stopped
-    depends_on:
-      # minibot-rabbitmq:
-      #   condition: service_healthy
-      minibot-qdrant:
-        condition: service_started
+    # Uncomment alongside the service it names.
+    # depends_on:
+    #   minibot-rabbitmq:
+    #     condition: service_healthy
+    #   minibot-qdrant:
+    #     condition: service_started
     init: true
     volumes:
       - ./config.toml:/app/config.toml:ro

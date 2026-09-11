@@ -18,7 +18,7 @@ Top features
 - 💬 Telegram channel with chat/user allowlists, long-polling or webhook modes, and multimodal inputs.
 - 🧠 Provider support via [llm-async]: `openai`, `openai_responses`, `openrouter`, and more.
 - 🧰 Configurable tools: chat memory, KV notes, HTTP fetch, calculator, datetime, Python execution, Bash, patch-based editing (`apply_patch`), file storage, grep, speech-to-text, and MCP server bridges.
-- 🔎 RAG (optional): index local documents into Qdrant and retrieve semantically relevant chunks.
+- 🔎 RAG (optional): index local documents into SQLite (or Qdrant) and retrieve semantically relevant chunks.
 - ⏳ Async task workers: offload long-running jobs to a background queue (SQLite by default, optional RabbitMQ).
 - ⏰ Scheduled prompts (one-shot, fixed-interval, and cron recurrence) persisted in SQLite.
 - 🤝 Multi-agent orchestration with specialist agent definitions and skill packs.
@@ -92,8 +92,9 @@ cp config.example.toml config.toml
 docker compose up -d
 ```
 
-`docker-compose.yml` builds the `minibot` image and starts Qdrant alongside it (used by the RAG tool);
-the RabbitMQ service is commented out and only needed if you set `[tasks].backend = "rabbitmq"`.
+`docker-compose.yml` builds and starts the `minibot` image. The Qdrant and RabbitMQ services are
+commented out — `[tools.rag].backend` and `[tasks].backend` both default to `"sqlite"` — and are
+only needed if you switch either to `"qdrant"` or `"rabbitmq"`.
 
 Demo
 ----

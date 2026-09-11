@@ -2,13 +2,21 @@ RAG & Persistent Knowledge
 ==========================
 
 .. meta::
-   :description: Add retrieval-augmented generation to Minibot: index documents into Qdrant and answer with semantically retrieved chunks.
-   :keywords: RAG AI assistant, persistent knowledge, Qdrant, vector search AI assistant
+   :description: Add retrieval-augmented generation to Minibot: index documents into a local SQLite vector store or Qdrant and answer with semantically retrieved chunks.
+   :keywords: RAG AI assistant, persistent knowledge, SQLite vector search, Qdrant, vector search AI assistant
 
-MiniBot can index text documents into a `Qdrant <https://qdrant.tech>`_ vector store and
-retrieve semantically relevant passages at query time using
-`sentence-transformers <https://www.sbert.net>`_. It can also optionally rerank the semantic
-candidate set with a cross-encoder for higher precision on the final results.
+MiniBot can index text documents into a vector store and retrieve semantically relevant passages
+at query time using `sentence-transformers <https://www.sbert.net>`_. It can also optionally rerank
+the semantic candidate set with a cross-encoder for higher precision on the final results.
+
+Two backends are available, selected with ``[tools.rag].backend``:
+
+- ``"sqlite"`` (default) — vectors live in a local SQLite file, no extra service. Scope filters
+  (``user_id``/``agent_id``/``chat_id``/``document_id``/``filename``) run in SQL first and the
+  similarity scan only touches the surviving rows, so search is exact: there is no approximate
+  index whose recall could degrade under filtering.
+- ``"qdrant"`` — a `Qdrant <https://qdrant.tech>`_ instance. Worth the extra service once a corpus
+  grows past what an exact scan handles comfortably, since its HNSW index is approximate.
 
 This is useful when:
 
@@ -46,15 +54,16 @@ Setup
    Reranking uses ``sentence-transformers.CrossEncoder`` from this same install family, so
    no separate package is needed beyond ``torch`` and ``sentence-transformers``.
 
-3. **Start Qdrant**
+3. **Start Qdrant** *(only for* ``backend = "qdrant"``\ *)*
 
-   Run it via Docker (service is defined in ``docker-compose.yml``):
+   The service is defined — commented out — in ``docker-compose.yml``. Uncomment it, then:
 
    .. code-block:: bash
 
       docker compose up minibot-qdrant
 
-   Or point ``[tools.rag].qdrant_url`` at any Qdrant instance you already run.
+   Or point ``[tools.rag].qdrant_url`` at any Qdrant instance you already run. With the default
+   ``backend = "sqlite"`` there is nothing to start.
 
 4. **Enable RAG in** ``config.toml``:
 
@@ -62,7 +71,8 @@ Setup
 
       [tools.rag]
       enabled = true
-      qdrant_url = "http://localhost:6333"
+      backend = "sqlite"
+      sqlite_url = "sqlite+aiosqlite:///./data/rag.db"
       collection_name = "minibot_chunks"
       chunk_size_tokens = 96
       chunk_overlap_tokens = 20
@@ -82,9 +92,9 @@ Setup
       candidate_limit = 50
       max_results = 7
 
-   On startup, MiniBot creates the Qdrant collection automatically if it does not exist.
-   If it already exists with an incompatible vector size, or from the older ``source_name``
-   era without the ``filename`` payload schema, startup fails fast.
+   On startup, MiniBot creates the collection automatically if it does not exist. If it already
+   exists with an incompatible vector size, startup fails fast — on Qdrant this also covers
+   collections from the older ``source_name`` era that lack the ``filename`` payload schema.
 
 Usage
 -----
@@ -93,7 +103,7 @@ Once enabled, the bot has access to four tools:
 
 - **rag_index** — provide a file path plus optional ``tags`` and ``categories`` metadata.
   The bot reads the file, splits it into overlapping chunks, embeds each chunk, and upserts
-  the vectors into Qdrant. Returns the number of chunks indexed and the ``document_id`` used.
+  the vectors into the store. Returns the number of chunks indexed and the ``document_id`` used.
 
 - **rag_search** — provide a natural language query. The bot embeds the query and returns
   the top-k most relevant chunks with their similarity score and source metadata. Optional
@@ -101,9 +111,9 @@ Once enabled, the bot has access to four tools:
   filters match any of the provided values. Scope filters are bound to the active runtime
   context; if ``user_id``, ``agent_id``, or ``chat_id`` is provided explicitly, it must match
   the current context. When reranking is
-  enabled, MiniBot first pulls a larger semantic candidate set from Qdrant, reranks it with
+  enabled, MiniBot first pulls a larger semantic candidate set from the store, reranks it with
   a cross-encoder, then returns only the final top results. Reranked responses use ``score``
-  for the rerank score and also include ``semantic_score`` from Qdrant.
+  for the rerank score and also include the store's ``semantic_score``.
 
 - **rag_list_metadata** — list available ``tags``, ``categories``, and ``filenames`` values, with counts,
   so the bot can choose real filters before calling ``rag_search``.
@@ -134,11 +144,11 @@ To use a truncated dimension:
 
    [tools.rag.embedding]
    model = "BAAI/bge-m3"
-   dim = 256        # effective vector size stored in Qdrant
+   dim = 256        # effective stored vector size
    truncate_dim = 256
 
 ``dim`` and ``truncate_dim`` must match — ``dim`` tells MiniBot what size to use when
-creating the Qdrant collection, and ``truncate_dim`` tells sentence-transformers to truncate
+creating the collection, and ``truncate_dim`` tells sentence-transformers to truncate
 the output to that size.
 
 Resetting the collection
@@ -146,15 +156,23 @@ Resetting the collection
 
 When switching embedding models (different model or different ``truncate_dim``), existing
 vectors are incompatible and the collection must be recreated. MiniBot validates the expected
-vector size at startup and fails if the existing collection is incompatible:
+vector size at startup and fails if the existing collection is incompatible.
+
+With ``backend = "sqlite"``, delete the database file named by ``sqlite_url``:
+
+.. code-block:: bash
+
+   rm data/rag.db
+
+With ``backend = "qdrant"``:
 
 .. code-block:: bash
 
    ./scripts/rag_clear_collection.sh            # default collection
    ./scripts/rag_clear_collection.sh my_chunks  # custom name
 
-MiniBot recreates the collection automatically on next startup. This reset is required for
-older collections that were indexed before ``filename`` replaced ``source_name``.
+MiniBot recreates the collection automatically on next startup. On Qdrant this reset is also
+required for older collections that were indexed before ``filename`` replaced ``source_name``.
 
 Configuration reference
 -----------------------
@@ -171,12 +189,21 @@ Configuration reference
    * - ``enabled``
      - ``false``
      - Enable ``rag_index``, ``rag_search``, ``rag_list_metadata``, and ``rag_delete`` tools.
+   * - ``backend``
+     - ``"sqlite"``
+     - Vector store: ``"sqlite"`` (local file, exact search, no service) or ``"qdrant"``.
+   * - ``sqlite_url``
+     - ``sqlite+aiosqlite:///./data/rag.db``
+     - Database URL, read only when ``backend = "sqlite"``.
+   * - ``echo``
+     - ``false``
+     - Log SQL emitted by the sqlite backend.
    * - ``qdrant_url``
      - ``http://localhost:6333``
-     - Qdrant HTTP endpoint.
+     - Qdrant HTTP endpoint, read only when ``backend = "qdrant"``.
    * - ``collection_name``
      - ``minibot_chunks``
-     - Qdrant collection used for chunk vectors.
+     - Collection used for chunk vectors.
    * - ``chunk_size_tokens``
      - ``96``
      - Embedding-token count per chunk. Must not exceed ``tools.rag.embedding.max_sequence_tokens``.
@@ -211,7 +238,7 @@ Configuration reference
      - Description
    * - ``enabled``
      - ``false``
-     - Enable cross-encoder reranking after the initial semantic Qdrant search.
+     - Enable cross-encoder reranking after the initial semantic search.
    * - ``model``
      - ``cross-encoder/ms-marco-MiniLM-L2-v2``
      - Cross-encoder model ID loaded lazily on first reranked search.
@@ -238,7 +265,7 @@ Configuration reference
      - Any sentence-transformers compatible model ID.
    * - ``dim``
      - ``384``
-     - Full output dimension; must match the Qdrant collection vector size.
+     - Full output dimension; must match the collection vector size.
    * - ``max_sequence_tokens``
      - ``128``
      - Hard max input token length for the embedding model. MiniBot fails startup if

@@ -634,7 +634,21 @@ class RagRerankConfig(BaseModel):
 
 
 class RagToolConfig(BaseModel):
+    """Retrieval-augmented generation settings. TOML section: ``[tools.rag]``
+
+    - ``backend`` — vector store: ``"sqlite"`` (default; no service required) or ``"qdrant"``.
+    - ``sqlite_url`` — SQLite database URL used when ``backend = "sqlite"``.
+    - ``qdrant_url`` — Qdrant HTTP endpoint used when ``backend = "qdrant"``.
+
+    The SQLite backend scores with an exact scan over the rows left after the scope filters, so it
+    trades throughput at very large corpora for exact recall under filtering; Qdrant keeps an
+    approximate index and is the option to reach for when the corpus outgrows that.
+    """
+
     enabled: bool = False
+    backend: Literal["sqlite", "qdrant"] = "sqlite"
+    sqlite_url: str = "sqlite+aiosqlite:///./data/rag.db"
+    echo: bool = False
     qdrant_url: str = "http://localhost:6333"
     collection_name: str = "minibot_chunks"
     embedding: RagEmbeddingConfig = RagEmbeddingConfig()
