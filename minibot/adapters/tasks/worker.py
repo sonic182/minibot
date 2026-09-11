@@ -34,7 +34,7 @@ from minibot.llm.tools.code_read import CodeReadTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
-from minibot.llm.tools.mcp_bridge import MCPToolBridge
+from minibot.llm.tools.mcp_bridge import build_mcp_bindings
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.time import CurrentTimeTool
@@ -214,14 +214,17 @@ def _build_worker_tools(
                 url=server.url,
                 headers=server.headers,
             )
-            bridge = MCPToolBridge(
-                server_name=server.name,
-                client=client,
-                name_prefix=settings.tools.mcp.name_prefix,
-                enabled_tools=server.enabled_tools,
-                disabled_tools=server.disabled_tools,
+            bindings.extend(
+                build_mcp_bindings(
+                    mode=server.mode,
+                    server_name=server.name,
+                    client=client,
+                    name_prefix=settings.tools.mcp.name_prefix,
+                    enabled_tools=server.enabled_tools,
+                    disabled_tools=server.disabled_tools,
+                    catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
+                )
             )
-            bindings.extend(bridge.build_bindings())
 
     bindings.extend(extension_tools)
     scoped = strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))

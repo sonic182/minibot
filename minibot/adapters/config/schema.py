@@ -556,6 +556,7 @@ class ApplyPatchToolConfig(BaseModel):
 
 class MCPServerConfig(BaseModel):
     name: str
+    mode: Literal["bridge", "lazy"] = "bridge"
     transport: Literal["stdio", "http"] = "stdio"
     command: str | None = None
     args: list[str] = Field(default_factory=list)
@@ -565,6 +566,7 @@ class MCPServerConfig(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
     enabled_tools: list[str] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
+    catalog_cache_ttl_seconds: Annotated[int, Field(ge=0)] = 60
 
 
 class MCPToolConfig(BaseModel):
