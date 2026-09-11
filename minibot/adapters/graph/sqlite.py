@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import unicodedata
 from datetime import datetime
 from typing import Any
 
@@ -96,6 +98,7 @@ class SqliteGraphStore:
         attrs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         await self._ensure_schema()
+        source, rel, target = _normalize_node(source), _normalize_rel(rel), _normalize_node(target)
         now = utcnow()
         stmt = sqlite_insert(GRAPH_EDGES).values(
             graph=graph,
@@ -123,6 +126,7 @@ class SqliteGraphStore:
 
     async def unlink(self, *, graph: str, owner_id: str, source: str, rel: str, target: str) -> dict[str, Any]:
         await self._ensure_schema()
+        source, rel, target = _normalize_node(source), _normalize_rel(rel), _normalize_node(target)
         stmt = (
             update(GRAPH_EDGES)
             .where(
@@ -153,7 +157,8 @@ class SqliteGraphStore:
         limit: int = 100,
     ) -> dict[str, Any]:
         await self._ensure_schema()
-        edges = await self._live_edges(graph=graph, owner_id=owner_id, rel=rel)
+        node = _normalize_node(node)
+        edges = await self._live_edges(graph=graph, owner_id=owner_id, rel=_normalize_rel(rel) if rel else None)
         materialized = _materialize(edges)
         if node not in materialized:
             return {"node": node, "found": False, "nodes": [], "edges": [], "history": []}
@@ -171,6 +176,7 @@ class SqliteGraphStore:
 
     async def path(self, *, graph: str, owner_id: str, source: str, target: str, max_depth: int = 4) -> dict[str, Any]:
         await self._ensure_schema()
+        source, target = _normalize_node(source), _normalize_node(target)
         edges = await self._live_edges(graph=graph, owner_id=owner_id)
         materialized = _materialize(edges)
         if source not in materialized or target not in materialized:
@@ -195,7 +201,7 @@ class SqliteGraphStore:
         self, *, graph: str, owner_id: str, query: str, limit: int = 25, history: bool = False
     ) -> dict[str, Any]:
         await self._ensure_schema()
-        pattern = f"%{query}%"
+        pattern = f"%{_slug(query, field='query')}%"
         stmt = select(GRAPH_EDGES).where(
             GRAPH_EDGES.c.graph == graph,
             GRAPH_EDGES.c.owner_id == owner_id,
@@ -211,6 +217,35 @@ class SqliteGraphStore:
         async with self._session_factory() as session:
             rows = (await session.execute(stmt)).mappings().all()
         return {"query": query, "edges": [_edge_payload(**_row_to_edge(row)) for row in rows]}
+
+    async def merge(self, *, graph: str, owner_id: str, source: str, target: str) -> dict[str, Any]:
+        """Rewrite every edge mentioning ``source`` to ``target``.
+
+        A duplicate node id is a naming mistake, not a change in the world, so closed edges are
+        rewritten too and every edge keeps its original dates. ``OR REPLACE`` resolves the case
+        where the rewrite collides with an edge already recorded under the right name: same fact,
+        one row survives.
+        """
+        await self._ensure_schema()
+        source, target = _normalize_node(source), _normalize_node(target)
+        if source == target:
+            raise ValueError("source and target are the same node")
+        rewritten = 0
+        async with self._session_factory() as session:
+            for column in (GRAPH_EDGES.c.source, GRAPH_EDGES.c.target):
+                stmt = (
+                    update(GRAPH_EDGES)
+                    .prefix_with("OR REPLACE")
+                    .where(
+                        GRAPH_EDGES.c.graph == graph,
+                        GRAPH_EDGES.c.owner_id == owner_id,
+                        column == source,
+                    )
+                    .values({column: target})
+                )
+                rewritten += (await session.execute(stmt)).rowcount
+            await session.commit()
+        return {"merged": source, "into": target, "edges_rewritten": rewritten}
 
     async def close(self) -> None:
         await self._engine.dispose()
@@ -257,6 +292,28 @@ class SqliteGraphStore:
         async with self._session_factory() as session:
             rows = (await session.execute(stmt)).mappings().all()
         return [_edge_payload(**_row_to_edge(row)) for row in rows]
+
+
+def _slug(value: str, *, field: str) -> str:
+    # Deterministic format normalization, not interpretation: "Arch-Linux" and "arch_linux" are the
+    # same node, and a graph whose ids do not converge is only a slower key-value store.
+    folded = unicodedata.normalize("NFKD", value)
+    ascii_only = "".join(character for character in folded if not unicodedata.combining(character))
+    slug = re.sub(r"[^a-z0-9]+", "_", ascii_only.lower()).strip("_")
+    if not slug:
+        raise ValueError(f"{field} must contain at least one letter or digit")
+    return slug
+
+
+def _normalize_node(value: str) -> str:
+    prefix, separator, rest = value.partition(":")
+    if not separator:
+        return _slug(value, field="node id")
+    return f"{_slug(prefix, field='node type')}:{_slug(rest, field='node id')}"
+
+
+def _normalize_rel(value: str) -> str:
+    return _slug(value, field="rel")
 
 
 def _apply_sqlite_pragmas(engine: AsyncEngine) -> None:

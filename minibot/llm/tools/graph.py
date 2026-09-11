@@ -20,7 +20,7 @@ from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_boolean, nullable_integer, nullable_string, strict_object
 
-GRAPH_ACTIONS = ("link", "unlink", "neighbors", "path", "search")
+GRAPH_ACTIONS = ("link", "unlink", "merge", "neighbors", "path", "search")
 DIRECTIONS = ("out", "in", "both")
 DEFAULT_NAMESPACE = "memory"
 
@@ -44,11 +44,15 @@ def _graph_tool() -> Tool:
                     f'Graph namespace. Defaults to "{DEFAULT_NAMESPACE}". Use a separate namespace '
                     "only for a clearly different domain, never to shard the same one."
                 ),
-                "source": nullable_string('Edge origin for link and unlink, e.g. "person:johanderson".'),
+                "source": nullable_string(
+                    'Edge origin for link and unlink, e.g. "person:johanderson". For merge, the wrong node id.'
+                ),
                 "rel": nullable_string(
                     'Relation type for link and unlink, e.g. "prefers". Optional filter for neighbors.'
                 ),
-                "target": nullable_string('Edge destination for link and unlink, e.g. "tech:vue".'),
+                "target": nullable_string(
+                    'Edge destination for link and unlink, e.g. "tech:vue". For merge, the id to keep.'
+                ),
                 "attrs": nullable_string("Optional JSON object with extra edge fields, for link only."),
                 "node": nullable_string("Entry-point node for neighbors."),
                 "direction": _nullable_direction_schema(),
@@ -89,6 +93,7 @@ async def _graph_action(store: SqliteGraphStore, payload: dict[str, Any], contex
     handlers = {
         "link": lambda pl, ctx: _link(store, pl, ctx),
         "unlink": lambda pl, ctx: _unlink(store, pl, ctx),
+        "merge": lambda pl, ctx: _merge(store, pl, ctx),
         "neighbors": lambda pl, ctx: _neighbors(store, pl, ctx),
         "path": lambda pl, ctx: _path(store, pl, ctx),
         "search": lambda pl, ctx: _search(store, pl, ctx),
@@ -119,6 +124,15 @@ async def _unlink(store: SqliteGraphStore, payload: dict[str, Any], context: Too
         owner_id=require_owner(context),
         source=require_non_empty_str(payload, "source"),
         rel=require_non_empty_str(payload, "rel"),
+        target=require_non_empty_str(payload, "target"),
+    )
+
+
+async def _merge(store: SqliteGraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+    return await store.merge(
+        graph=_namespace(payload),
+        owner_id=require_owner(context),
+        source=require_non_empty_str(payload, "source"),
         target=require_non_empty_str(payload, "target"),
     )
 
