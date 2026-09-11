@@ -148,7 +148,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   │   ├── tool_loop_guard.py
 │   │   │   └── usage_parser.py
 │   │   └── tools/
-│   │       ├── descriptions/      (tool description .txt files, loaded at runtime)
+│   │       ├── *.txt              (tool descriptions, each beside the module that builds the tool)
 │   │       ├── action_dispatcher.py
 │   │       ├── agent_delegate.py
 │   │       ├── arg_utils.py
@@ -417,7 +417,7 @@ Current notes:
 - `llm/services/tool_executor.py` + `tool_loop_guard.py`: tool call execution and repeated-loop safeguards/fallback payloads.
 - `llm/services/usage_parser.py` + `models.py`: usage/response parsing and typed return models (`LLMGeneration`, `LLMCompletionStep`, `LLMCompaction`).
 - `llm/tools/factory.py`: builds enabled tool bindings from settings.
-- `llm/tools/description_loader.py`: loads per-tool description strings from the `descriptions/` package at runtime.
+- `llm/tools/description_loader.py`: loads a tool's description from the `<name>.txt` sitting beside its module, in any package — so a tool that moves out of core takes its description with it.
 - `llm/tools/action_dispatcher.py`: routes tool actions to registered handlers by action type with error handling.
 - `llm/tools/*`: concrete tool schemas + handlers:
   - agent delegation (`fetch_agent_info`, `invoke_agent`),

@@ -195,9 +195,11 @@ Roughly 150-200 LOC of new core code.
 - **No API versioning.** Pre-1.0. Add when we break someone.
 - **No hot reload for extensions.** Skills hot-reload because they are markdown;
   Python modules do not reload cleanly. Restart the daemon.
-- **No extension-owned description files.** Extensions pass description strings
-  inline. `load_tool_description` (`minibot/llm/tools/description_loader.py:8`)
-  stays hardcoded to `minibot.llm.tools.descriptions`.
+- ~~**No extension-owned description files.**~~ Reversed. `load_tool_description`
+  (`minibot/llm/tools/description_loader.py:8`) now takes a `package`, and the `.txt`
+  files sit beside the module that builds the tool rather than in a central
+  `descriptions/` package — so a tool moved out of core in Phase 7 carries its
+  description along. Extensions may still pass a string inline.
 - **No repo split.** See non-goal above.
 
 ---

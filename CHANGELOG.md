@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Tool descriptions now live beside the module that builds the tool (`minibot/llm/tools/graph.txt`
+  next to `graph.py`) instead of in a central `minibot/llm/tools/descriptions/` package, and
+  `load_tool_description` takes a `package` argument so a tool moved out of core keeps its
+  description. Internal refactor; the description text and every tool are unchanged.
 - **Breaking:** `[tools.rag].backend` defaults to `"sqlite"`. An existing deployment using Qdrant
   must add `backend = "qdrant"` to `[tools.rag]` in `config.toml`; otherwise RAG starts against an
   empty local store. There is no automatic migration — documents are reindexed from the managed
