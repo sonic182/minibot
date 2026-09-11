@@ -77,6 +77,10 @@ _TOOL_DESCRIPTIONS = {
     "spill": "save large outputs",
     "scheduler": "scheduled prompts",
 }
+# Opt-in extension rather than a [tools.*] section, so it is toggled in extensions.modules.
+# Listing it there instead of bundling it is also what makes the tool reach task workers.
+_GRAPH_MODULE = "minibot.extensions.tools.graph"
+
 _KEEP = object()
 _CLEAR = object()
 
@@ -164,16 +168,23 @@ def _configure_llm(document: Any, settings: Settings) -> None:
 
 def _configure_tools(document: Any, settings: Settings) -> None:
     defaults = [name for name, tool_path in _TOOLS.items() if _tool_enabled(settings, tool_path)]
+    if _GRAPH_MODULE in settings.extensions.modules:
+        defaults.append("graph")
     _write("python, bash and patch can execute or modify files; grep enables files automatically.\n")
+    _write("graph needs its extra installed: poetry install --extras graph\n")
     selected = _ask_multiselect(
         "Enabled tools",
-        [(name, f"{name} — {_TOOL_DESCRIPTIONS[name]}") for name in _TOOLS],
+        [
+            *((name, f"{name} — {_TOOL_DESCRIPTIONS[name]}") for name in _TOOLS),
+            ("graph", "graph — relations between entities, queried by traversal"),
+        ],
         defaults,
     )
     if "grep" in selected:
         selected.add("files")
     for name, tool_path in _TOOLS.items():
         _set_value(document, (*tool_path, "enabled"), name in selected)
+    _configure_graph_module(document, settings, enabled="graph" in selected)
     if "tasks" in selected:
         backend = _ask_single_select("Task queue backend", ("sqlite", "rabbitmq"), settings.tasks.backend)
         _set_value(document, ("tasks", "backend"), backend)
@@ -190,6 +201,16 @@ def _configure_tools(document: Any, settings: Settings) -> None:
         _set_value(document, ("tools", "skills", "preload_catalog"), True)
     # The wizard keeps rerank tied to rag for simplicity; edit config.toml directly to decouple them.
     _set_value(document, ("tools", "rag", "rerank", "enabled"), "rag" in selected)
+
+
+def _configure_graph_module(document: Any, settings: Settings, *, enabled: bool) -> None:
+    modules = list(settings.extensions.modules)
+    if enabled == (_GRAPH_MODULE in modules):
+        return
+    modules = [module for module in modules if module != _GRAPH_MODULE]
+    if enabled:
+        modules.append(_GRAPH_MODULE)
+    _set_value(document, ("extensions", "modules"), modules)
 
 
 def _ask_llm_target(default: str) -> str:
@@ -397,6 +418,8 @@ def _unset_value(document: Any, path: tuple[str, ...]) -> None:
 
 def _write_summary(path: Path, profile: str | None, settings: Settings) -> None:
     tools = [name for name, tool_path in _TOOLS.items() if _tool_enabled(settings, tool_path)]
+    if _GRAPH_MODULE in settings.extensions.modules:
+        tools.append("graph")
     provider = settings.providers.get(settings.llm.provider)
     _write(
         "\nSummary\n"

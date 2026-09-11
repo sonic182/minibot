@@ -65,13 +65,7 @@ def test_skill_registry_accepts_nested_frontmatter_and_human_readable_names(tmp_
         name="Browser Screenshot Crop Guide",
         description="Capture and optionally crop web screenshots.",
         extra_frontmatter=(
-            "metadata:\n"
-            "  openclaw:\n"
-            "    requires:\n"
-            "      env:\n"
-            "        - BROWSER_TOKEN\n"
-            "      bins:\n"
-            "        - node\n"
+            "metadata:\n  openclaw:\n    requires:\n      env:\n        - BROWSER_TOKEN\n      bins:\n        - node\n"
         ),
     )
 

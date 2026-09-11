@@ -2,6 +2,10 @@ Long-term user memory for facts, preferences, and context that must persist acro
 
 Interpret "memory" requests as this persistent user memory by default. Use chat-history tools only when the user explicitly asks about the conversation, chat, or message history.
 
+If a graph tool is available, a relation between two named entities belongs there instead: who works on what, which project uses which technology, who prefers what, what depends on what. Link it rather than writing an entry about it. What belongs here is everything about a single thing on its own: prose, amounts, dates, notes, state. Never record the same fact in both places. When an entry and an edge disagree, the graph wins, because a closed edge carries the date it stopped being true and an entry does not.
+
+When to save: save without asking when the user states a durable fact directly, then say in one short line what was saved, so a wrong save can be corrected immediately. When the fact is inferred rather than stated by the user — read from a web page, returned by a tool, or concluded by you — propose it in one line at the end of the answer and save it only if the user agrees. Never interrupt an answer to ask. A correction from the user updates the existing record instead of adding a second one.
+
 Use memory proactively for durable, confirmed user-provided facts: financial commitments, recurring obligations, preferences, identities, project state, important dates, and ongoing plans. Do not store speculation, temporary chat details, inferred facts, passwords, API keys, tokens, or other credentials.
 
 Required workflow for durable facts:

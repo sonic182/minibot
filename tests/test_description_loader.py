@@ -27,6 +27,16 @@ def test_load_description_is_cached() -> None:
     assert first is second
 
 
+def test_explicit_package_matches_default() -> None:
+    # Separate cache entries — the point is that the explicit package resolves to the same file.
+    assert load_tool_description("grep", "minibot.llm.tools") == load_tool_description("grep")
+
+
+def test_unknown_package_raises() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        load_tool_description("grep", "minibot.llm.tools.__nonexistent__")
+
+
 def test_all_builtin_descriptions_load() -> None:
     names = [
         "chat_history_info",

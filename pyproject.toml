@@ -23,7 +23,8 @@ packages = [
   { include = "minibot" }
 ]
 include = [
-  { path = "minibot/llm/tools/descriptions/*.txt", format = ["sdist", "wheel"] },
+  # Tool descriptions live next to the module that builds the tool, wherever that module is.
+  { path = "minibot/**/*.txt", format = ["sdist", "wheel"] },
   { path = "config.example.toml", format = ["sdist", "wheel"] },
   { path = "config.yolo.toml", format = ["sdist", "wheel"] },
   { path = "prompts/**/*.md", format = ["sdist", "wheel"] },
@@ -56,6 +57,8 @@ selectolax = "^0.4.11"
 croniter = "^6.2.4"
 tomlkit = "^0.15.1"
 prompt-toolkit = "^3.0.53"
+# Graph tool backend. The python marker excludes 3.14.1 only because networkx itself does.
+networkx = {version = "^3.6.1", optional = true, python = ">=3.12,<3.14.1 || >3.14.1,<3.15"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"
@@ -82,6 +85,7 @@ telegram = ["aiogram", "telegramify-markdown"]
 rag = ["pypdf", "numpy"]
 stt = ["faster-whisper"]
 rabbitmq = ["aio-pika"]
+graph = ["networkx"]
 
 
 [build-system]

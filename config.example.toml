@@ -540,3 +540,11 @@ modules = []
 # receives its own slice as mb.config.
 # [extensions.config.minibot_ext_demo]
 # greeting = "hola"
+
+# Relation-graph tool ("graph"): typed edges between entities, queried by traversal.
+# Ships with minibot but stays opt-in, so add it to modules above to enable it:
+#   modules = ["minibot.extensions.tools.graph"]
+# Needs the graph extra: poetry install --extras graph
+# Listing it here rather than bundling it is what makes the tool reach spawned task workers.
+# [extensions.config."minibot.extensions.tools.graph"]
+# sqlite_url = "sqlite+aiosqlite:///./data/graph.db"
