@@ -32,6 +32,10 @@ Tool Surface
      - ``memory``
      - ``[tools.kv_memory]``
      - Save, retrieve, search, list, and delete persistent user notes.
+   * - Relation graph
+     - ``graph``
+     - ``minibot.extensions.tools.graph`` extension; ``graph`` extra
+     - Store and traverse typed, owner-scoped relationships between entities. See :doc:`graph`.
    * - Utility
      - ``current_datetime``
      - ``[tools.time]``; enabled by default
@@ -175,6 +179,8 @@ Runtime Notes
 - ``[tools.rag]`` requires the ``rag`` extra (``pip install "minibot[rag]"``) for PDF ingestion and
   the SQLite backend's numpy, plus torch and sentence-transformers installed manually. The default
   ``backend = "sqlite"`` needs no service; ``"qdrant"`` needs a running instance. See :doc:`rag`.
+- The relation graph requires the ``graph`` extra and the ``minibot.extensions.tools.graph``
+  extension. It persists typed edges in SQLite; see :doc:`graph`.
 - Hidden compatibility aliases are normalized at execution time; prefer the public names in the table.
 
 Implementation Reference

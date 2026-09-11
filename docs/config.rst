@@ -81,6 +81,11 @@ Extensions
 
 Python extensions loaded at startup. See :doc:`extensions` for the full extension API.
 
+The optional relation graph is a built-in extension. After installing the ``graph`` extra, enable
+``minibot.extensions.tools.graph`` in ``[extensions].modules``. Its optional configuration accepts
+``sqlite_url`` (default ``sqlite+aiosqlite:///./data/graph.db``) and ``echo`` for SQL logging. See
+:doc:`graph`.
+
 .. autoclass:: minibot.adapters.config.schema.ExtensionsConfig
    :no-members:
 
@@ -223,4 +228,3 @@ Tool Config Models
 
 .. autoclass:: minibot.adapters.config.schema.RagToolConfig
    :no-members:
-

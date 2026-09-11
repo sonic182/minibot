@@ -62,4 +62,5 @@ Why self-host
    scheduler
    audio
    rag
+   graph
    security
