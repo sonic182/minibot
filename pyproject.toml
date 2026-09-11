@@ -67,6 +67,7 @@ pytest-cov = "^7.0.0"
 ruff = "^0.15.0"
 pyright = "^1.1.408"
 pytest-timeout = "^2.4.0"
+pylint = "^4.0.5"
 # Test fixtures under tests/fixtures/mcp run real MCP servers; the runtime MCP client is
 # a self-contained JSON-RPC implementation and needs no mcp package.
 mcp = ">=1.0.0,<2.0.0"
@@ -110,6 +111,7 @@ select = [
     "B",
     "T201",
 ]
+
 # Exclude certain directories from linting
 exclude = [
     ".bzr",
@@ -133,3 +135,6 @@ exclude = [
     "build",
     "dist"
 ]
+
+[tool.pylint.basic]
+bad-names-rgxs = ["^(?!(?:i|j|x|y|mb|on|ok)$).{1,2}$"]

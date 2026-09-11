@@ -37,7 +37,7 @@ def _get_model(model_name: str, truncate_dim: int | None) -> Any:
 def _encode_sync(model_name: str, truncate_dim: int | None, texts: list[str]) -> list[list[float]]:
     model = _get_model(model_name, truncate_dim)
     vectors = model.encode(texts, normalize_embeddings=True)
-    return [v.tolist() for v in vectors]
+    return [embedding.tolist() for embedding in vectors]
 
 
 async def embed_texts(model_name: str, truncate_dim: int | None, texts: list[str]) -> list[list[float]]:
