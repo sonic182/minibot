@@ -35,7 +35,7 @@ Minimal example:
    description: Handles workspace file operations
    mode: agent
    model_provider: openai_responses
-   model: gpt-5-mini
+   model: gpt-5.6-luna
    temperature: 0.1
    tools_allow:
      - filesystem
@@ -97,7 +97,7 @@ Assigning an MCP server to an agent:
    description: Dice-rolling specialist
    mode: agent
    model_provider: openai_responses
-   model: gpt-5-mini
+   model: gpt-5.6-luna
    mcp_servers:
      - dice_cli
    ---
@@ -197,7 +197,7 @@ For agents running on OpenRouter, override provider-routing params in frontmatte
    description: Browser automation specialist
    mode: agent
    model_provider: openrouter
-   model: x-ai/grok-4.1-fast
+   model: x-ai/grok-4.3
    openrouter_provider_only:
      - openai
      - anthropic
@@ -211,8 +211,14 @@ Supported keys mirror ``[llm.openrouter.provider]`` fields (``only``, ``sort``, 
 ``allow_fallbacks``, ``max_price``, etc.). Agent-level values override global provider config
 for matching fields. Keep credentials in ``[providers.openrouter]`` — never in agent files.
 
-Suggested Model Presets
------------------------
+Choosing a Model
+----------------
 
-- ``openai_responses``: ``gpt-5-mini`` with ``reasoning_effort = "medium"`` — solid quality/cost balance.
-- ``openrouter``: ``x-ai/grok-4.1-fast`` with medium reasoning effort — comparable balance.
+Run ``minibot configure`` and it queries your configured provider for the models it currently
+serves, then offers them as a list — which beats any set of names written down here, since those go
+stale as providers retire and rename models. The model IDs in the examples above are illustrative
+only; use whatever your provider lists.
+
+``reasoning_effort`` is unset by default, which leaves the provider's own default in place. Set it
+per agent when you want to steer that: higher for agents that plan multi-step work, lower for agents
+that mostly call one tool and summarize.

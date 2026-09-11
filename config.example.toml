@@ -36,7 +36,7 @@ allowed_document_mime_types = []
 # LLM provider and generation settings.
 [llm]
 provider = "openai_responses"
-model = "gpt-5-mini"
+model = "gpt-5.6-luna"
 # reasoning_effort = "medium"
 # Structured-output mode for the main/orchestrator agent:
 # Enable HTTP/2 for provider HTTP clients when supported (recommended for OpenAI Responses).
