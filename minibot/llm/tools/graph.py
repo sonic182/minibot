@@ -7,7 +7,7 @@ from typing import Any
 
 from llm_async.models import Tool
 
-from minibot.adapters.graph.sqlite import SqliteGraphStore
+from minibot.core.graph import GraphStore
 from minibot.llm.tools.action_dispatcher import dispatch_action
 from minibot.llm.tools.arg_utils import (
     int_with_default,
@@ -25,7 +25,7 @@ DIRECTIONS = ("out", "in", "both")
 DEFAULT_NAMESPACE = "memory"
 
 
-def build_graph_tools(store: SqliteGraphStore) -> list[ToolBinding]:
+def build_graph_tools(store: GraphStore) -> list[ToolBinding]:
     return [ToolBinding(tool=_graph_tool(), handler=lambda payload, ctx: _graph_action(store, payload, ctx))]
 
 
@@ -61,6 +61,7 @@ def _graph_tool() -> Tool:
                 "history": nullable_boolean("When true, also return closed edges. Defaults to false."),
                 "query": nullable_string("Text fragment matched against source, rel, and target for search."),
                 "limit": nullable_integer(minimum=1, description="Maximum edges returned."),
+                "max_nodes": nullable_integer(minimum=1, description="Maximum nodes returned by neighbors."),
             },
             required=[
                 "action",
@@ -76,6 +77,7 @@ def _graph_tool() -> Tool:
                 "history",
                 "query",
                 "limit",
+                "max_nodes",
             ],
         ),
     )
@@ -88,7 +90,7 @@ def _nullable_direction_schema() -> dict[str, Any]:
     }
 
 
-async def _graph_action(store: SqliteGraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+async def _graph_action(store: GraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     action = (optional_str(payload.get("action")) or "").lower()
     handlers = {
         "link": lambda pl, ctx: _link(store, pl, ctx),
@@ -107,7 +109,7 @@ async def _graph_action(store: SqliteGraphStore, payload: dict[str, Any], contex
     )
 
 
-async def _link(store: SqliteGraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+async def _link(store: GraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     return await store.link(
         graph=_namespace(payload),
         owner_id=require_owner(context),
@@ -118,7 +120,7 @@ async def _link(store: SqliteGraphStore, payload: dict[str, Any], context: ToolC
     )
 
 
-async def _unlink(store: SqliteGraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+async def _unlink(store: GraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     return await store.unlink(
         graph=_namespace(payload),
         owner_id=require_owner(context),
@@ -128,7 +130,7 @@ async def _unlink(store: SqliteGraphStore, payload: dict[str, Any], context: Too
     )
 
 
-async def _merge(store: SqliteGraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+async def _merge(store: GraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     return await store.merge(
         graph=_namespace(payload),
         owner_id=require_owner(context),
@@ -137,7 +139,7 @@ async def _merge(store: SqliteGraphStore, payload: dict[str, Any], context: Tool
     )
 
 
-async def _neighbors(store: SqliteGraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+async def _neighbors(store: GraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     return await store.neighbors(
         graph=_namespace(payload),
         owner_id=require_owner(context),
@@ -149,10 +151,13 @@ async def _neighbors(store: SqliteGraphStore, payload: dict[str, Any], context: 
         rel=optional_str(payload.get("rel")),
         history=optional_bool(payload.get("history"), default=False, error_message="history must be a boolean"),
         limit=_limit(payload, default=50),
+        max_nodes=int_with_default(
+            payload.get("max_nodes"), default=100, field="max_nodes", min_value=1, max_value=200, clamp_max=True
+        ),
     )
 
 
-async def _path(store: SqliteGraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+async def _path(store: GraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     return await store.path(
         graph=_namespace(payload),
         owner_id=require_owner(context),
@@ -164,7 +169,7 @@ async def _path(store: SqliteGraphStore, payload: dict[str, Any], context: ToolC
     )
 
 
-async def _search(store: SqliteGraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+async def _search(store: GraphStore, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     return await store.search(
         graph=_namespace(payload),
         owner_id=require_owner(context),

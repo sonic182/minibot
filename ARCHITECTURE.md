@@ -84,6 +84,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── agents.py
 │   │   ├── channels.py
 │   │   ├── events.py
+│   │   ├── graph.py
 │   │   ├── jobs.py
 │   │   ├── memory.py
 │   │   ├── skills.py
@@ -95,6 +96,8 @@ and emit outbound responses back to the active channel adapter.
 │   │   │   └── schema.py
 │   │   ├── container/
 │   │   │   └── app_container.py
+│   │   ├── graph/
+│   │   │   └── sqlite.py
 │   │   ├── sqlalchemy_utils.py
 │   │   ├── logging/
 │   │   │   └── setup.py
@@ -289,6 +292,7 @@ flowchart TD
 - `core/agent_runtime.py`: runtime state/message/part model (`AgentState`, `AgentMessage`, `MessagePart`, limits/directives).
 - `core/channels.py`: inbound/outbound DTOs (`ChannelMessage`, `ChannelResponse`) and message metadata; includes attachment payloads for multimodal inputs.
 - `core/events.py`: event types (`MessageEvent`, `OutboundEvent`, base event envelope).
+- `core/graph.py`: relation-graph storage protocol.
 - `core/memory.py`: transcript and KV memory protocols.
 - `core/jobs.py`: scheduled prompt entities, status enums, recurrence model, and repository protocol.
 - `core/skills.py`: immutable data structure representing a skill's metadata and content (`SkillSpec`).
@@ -373,6 +377,8 @@ Current notes:
   - `adapters/container/app_container.py` wires singleton-style service graph.
 - Shared SQLAlchemy utilities:
   - `adapters/sqlalchemy_utils.py` provides `resolve_sqlite_storage_path` and `ensure_parent_dir` used by memory and scheduler adapters.
+- Relation graph:
+  - `adapters/graph/sqlite.py` implements `core/graph.py::GraphStore` with SQLite persistence and query-local NetworkX traversal.
 - Logging:
   - `adapters/logging/setup.py` configures structured logfmt-friendly logging.
 - Messaging:
@@ -431,6 +437,7 @@ Current notes:
   - file storage/workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `code_read`, `grep`, `self_insert_artifact` (path confinement defaults to `tools.file_storage.root_dir` and can be relaxed with `allow_outside_root`),
   - audio transcription: `transcribe_audio` (backed by `audio_transcription_facade.py` for model lifecycle/transcription normalization),
   - RAG: `rag_index`, `rag_search`, `rag_delete`, `rag_list_metadata` (backed by `minibot/rag/` module and Qdrant),
+  - relation graph: `graph` (an opt-in extension backed by `core/graph.py::GraphStore`),
   - scheduler controls (`schedule` action facade, `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`),
   - skills: `list_skills`, `activate_skill` (via `skill_loader.py`),
   - tasks: `spawn_task`, `cancel_task`, `list_tasks` (subprocess workers via `adapters/tasks/`),

@@ -14,9 +14,22 @@ from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.graph import build_graph_tools
 
 
+class _GraphStoreService:
+    def __init__(self, store: SqliteGraphStore) -> None:
+        self._store = store
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        await self._store.close()
+
+
 def register(mb: ExtensionContext) -> None:
     store = SqliteGraphStore(
         sqlite_url=str(mb.config.get("sqlite_url") or DEFAULT_SQLITE_URL),
         echo=bool(mb.config.get("echo", False)),
     )
     mb.add_tool(build_graph_tools(store))
+    if mb.entrypoint != "worker":
+        mb.add_service(_GraphStoreService(store))

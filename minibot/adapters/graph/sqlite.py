@@ -3,7 +3,7 @@
 SQLite is authoritative: task workers are forked processes (``adapters/tasks/manager.py``), so the
 store has to survive concurrent writers, which is what WAL mode is for. NetworkX is the algorithm
 engine only, materialized per query and never handed out past this module — a future Cypher backend
-implements the same five methods without the tool layer noticing.
+implements the same six methods without the tool layer noticing.
 """
 
 from __future__ import annotations
@@ -24,6 +24,8 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    case,
+    delete,
     or_,
     select,
     text,
@@ -155,23 +157,27 @@ class SqliteGraphStore:
         rel: str | None = None,
         history: bool = False,
         limit: int = 100,
+        max_nodes: int = 100,
     ) -> dict[str, Any]:
         await self._ensure_schema()
         node = _normalize_node(node)
         edges = await self._live_edges(graph=graph, owner_id=owner_id, rel=_normalize_rel(rel) if rel else None)
         materialized = _materialize(edges)
         if node not in materialized:
-            return {"node": node, "found": False, "nodes": [], "edges": [], "history": []}
+            return {"node": node, "found": False, "nodes": [], "edges": [], "history": [], "truncated": False}
 
-        reached = _reachable(materialized, node=node, direction=direction, depth=depth)
+        distances = _distances(materialized, node=node, direction=direction, depth=depth)
+        nodes = sorted(distances, key=lambda reached: (distances[reached], reached))[:max_nodes]
+        reached = set(nodes)
         selected = [edge for edge in edges if edge["source"] in reached and edge["target"] in reached][:limit]
         past = await self._closed_edges(graph=graph, owner_id=owner_id, nodes=reached, limit=limit) if history else []
         return {
             "node": node,
             "found": True,
-            "nodes": sorted(reached),
+            "nodes": nodes,
             "edges": [_edge_payload(**edge) for edge in selected],
             "history": past,
+            "truncated": len(distances) > len(nodes),
         }
 
     async def path(self, *, graph: str, owner_id: str, source: str, target: str, max_depth: int = 4) -> dict[str, Any]:
@@ -201,14 +207,14 @@ class SqliteGraphStore:
         self, *, graph: str, owner_id: str, query: str, limit: int = 25, history: bool = False
     ) -> dict[str, Any]:
         await self._ensure_schema()
-        pattern = f"%{_slug(query, field='query')}%"
+        pattern = _like_pattern(_slug(query, field="query"))
         stmt = select(GRAPH_EDGES).where(
             GRAPH_EDGES.c.graph == graph,
             GRAPH_EDGES.c.owner_id == owner_id,
             or_(
-                GRAPH_EDGES.c.source.like(pattern),
-                GRAPH_EDGES.c.rel.like(pattern),
-                GRAPH_EDGES.c.target.like(pattern),
+                GRAPH_EDGES.c.source.like(pattern, escape="\\"),
+                GRAPH_EDGES.c.rel.like(pattern, escape="\\"),
+                GRAPH_EDGES.c.target.like(pattern, escape="\\"),
             ),
         )
         if not history:
@@ -221,31 +227,72 @@ class SqliteGraphStore:
     async def merge(self, *, graph: str, owner_id: str, source: str, target: str) -> dict[str, Any]:
         """Rewrite every edge mentioning ``source`` to ``target``.
 
-        A duplicate node id is a naming mistake, not a change in the world, so closed edges are
-        rewritten too and every edge keeps its original dates. ``OR REPLACE`` resolves the case
-        where the rewrite collides with an edge already recorded under the right name: same fact,
-        one row survives.
+        The target id is canonical. If both nodes have the same live relation, the target edge
+        keeps its attrs and dates while the source duplicate is discarded. Closed edges are only
+        re-keyed: separate historical intervals remain meaningful even if their triples match.
         """
         await self._ensure_schema()
         source, target = _normalize_node(source), _normalize_node(target)
         if source == target:
             raise ValueError("source and target are the same node")
-        rewritten = 0
+        active_rekeyed = 0
+        active_duplicates_discarded = 0
         async with self._session_factory() as session:
-            for column in (GRAPH_EDGES.c.source, GRAPH_EDGES.c.target):
-                stmt = (
-                    update(GRAPH_EDGES)
-                    .prefix_with("OR REPLACE")
-                    .where(
+            # A merge makes multiple read/write decisions; serialize it with other SQLite writers.
+            await session.execute(text("BEGIN IMMEDIATE"))
+            live_rows = (
+                await session.execute(
+                    select(GRAPH_EDGES).where(
                         GRAPH_EDGES.c.graph == graph,
                         GRAPH_EDGES.c.owner_id == owner_id,
-                        column == source,
+                        GRAPH_EDGES.c.valid_to.is_(None),
                     )
-                    .values({column: target})
                 )
-                rewritten += (await session.execute(stmt)).rowcount
+            ).mappings()
+            active_edges = [dict(row) for row in live_rows]
+            canonical_keys = {
+                _edge_key(edge) for edge in active_edges if edge["source"] != source and edge["target"] != source
+            }
+            affected = sorted(
+                (edge for edge in active_edges if edge["source"] == source or edge["target"] == source),
+                key=_merge_sort_key,
+            )
+            for edge in affected:
+                merged_source = target if edge["source"] == source else edge["source"]
+                merged_target = target if edge["target"] == source else edge["target"]
+                merged_key = (merged_source, edge["rel"], merged_target)
+                row_filter = _live_edge_filter(graph=graph, owner_id=owner_id, edge=edge)
+                if merged_key in canonical_keys:
+                    result = await session.execute(delete(GRAPH_EDGES).where(*row_filter))
+                    active_duplicates_discarded += result.rowcount
+                    continue
+                result = await session.execute(
+                    update(GRAPH_EDGES).where(*row_filter).values(source=merged_source, target=merged_target)
+                )
+                active_rekeyed += result.rowcount
+                canonical_keys.add(merged_key)
+            history_result = await session.execute(
+                update(GRAPH_EDGES)
+                .where(
+                    GRAPH_EDGES.c.graph == graph,
+                    GRAPH_EDGES.c.owner_id == owner_id,
+                    GRAPH_EDGES.c.valid_to.is_not(None),
+                    or_(GRAPH_EDGES.c.source == source, GRAPH_EDGES.c.target == source),
+                )
+                .values(
+                    source=case((GRAPH_EDGES.c.source == source, target), else_=GRAPH_EDGES.c.source),
+                    target=case((GRAPH_EDGES.c.target == source, target), else_=GRAPH_EDGES.c.target),
+                )
+            )
             await session.commit()
-        return {"merged": source, "into": target, "edges_rewritten": rewritten}
+        history_rekeyed = history_result.rowcount
+        return {
+            "merged": source,
+            "into": target,
+            "edges_rewritten": active_rekeyed + history_rekeyed,
+            "active_duplicates_discarded": active_duplicates_discarded,
+            "history_edges_rekeyed": history_rekeyed,
+        }
 
     async def close(self) -> None:
         await self._engine.dispose()
@@ -316,6 +363,30 @@ def _normalize_rel(value: str) -> str:
     return _slug(value, field="rel")
 
 
+def _like_pattern(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _edge_key(edge: dict[str, Any]) -> tuple[str, str, str]:
+    return edge["source"], edge["rel"], edge["target"]
+
+
+def _merge_sort_key(edge: dict[str, Any]) -> tuple[datetime, str, str, str]:
+    return ensure_utc(edge["valid_from"]), edge["source"], edge["rel"], edge["target"]
+
+
+def _live_edge_filter(*, graph: str, owner_id: str, edge: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        GRAPH_EDGES.c.graph == graph,
+        GRAPH_EDGES.c.owner_id == owner_id,
+        GRAPH_EDGES.c.source == edge["source"],
+        GRAPH_EDGES.c.rel == edge["rel"],
+        GRAPH_EDGES.c.target == edge["target"],
+        GRAPH_EDGES.c.valid_to.is_(None),
+    )
+
+
 def _apply_sqlite_pragmas(engine: AsyncEngine) -> None:
     @listens_for(engine.sync_engine, "connect")
     def _set_pragmas(dbapi_connection: Any, _record: Any) -> None:
@@ -336,12 +407,14 @@ def _materialize(edges: list[dict[str, Any]]) -> nx.MultiDiGraph:
     return graph
 
 
-def _reachable(graph: nx.MultiDiGraph, *, node: str, direction: str, depth: int) -> set[str]:
+def _distances(graph: nx.MultiDiGraph, *, node: str, direction: str, depth: int) -> dict[str, int]:
     if direction == "in":
-        return set(nx.ego_graph(graph.reverse(copy=False), node, radius=depth).nodes)
-    if direction == "both":
-        return set(nx.ego_graph(graph, node, radius=depth, undirected=True).nodes)
-    return set(nx.ego_graph(graph, node, radius=depth).nodes)
+        traversal = graph.reverse(copy=False)
+    elif direction == "both":
+        traversal = graph.to_undirected(as_view=True)
+    else:
+        traversal = graph
+    return dict(nx.single_source_shortest_path_length(traversal, node, cutoff=depth))
 
 
 def _hops(graph: nx.MultiDiGraph, nodes: list[str]) -> list[dict[str, str]]:
