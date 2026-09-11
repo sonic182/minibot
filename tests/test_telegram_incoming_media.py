@@ -88,6 +88,7 @@ class _RetryBotStub:
             raise outcome
         destination.write(outcome)
 
+
 def _collector(
     tmp_path: Path,
     *,

@@ -1,0 +1,327 @@
+"""SQLite-backed relation graph.
+
+SQLite is authoritative: task workers are forked processes (``adapters/tasks/manager.py``), so the
+store has to survive concurrent writers, which is what WAL mode is for. NetworkX is the algorithm
+engine only, materialized per query and never handed out past this module — a future Cypher backend
+implements the same five methods without the tool layer noticing.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from datetime import datetime
+from typing import Any
+
+import networkx as nx
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Index,
+    MetaData,
+    String,
+    Table,
+    Text,
+    or_,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import make_url
+from sqlalchemy.event import listens_for
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.schema import CreateIndex, CreateTable
+
+from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.shared.datetime_utils import ensure_utc, utcnow
+
+DEFAULT_SQLITE_URL = "sqlite+aiosqlite:///./data/graph.db"
+
+_METADATA = MetaData()
+
+GRAPH_EDGES = Table(
+    "graph_edges",
+    _METADATA,
+    Column("graph", String(64), nullable=False),
+    Column("owner_id", String(128), nullable=False),
+    Column("source", String(256), nullable=False),
+    Column("rel", String(128), nullable=False),
+    Column("target", String(256), nullable=False),
+    Column("attrs", Text, nullable=True),
+    Column("valid_from", DateTime(timezone=True), nullable=False),
+    Column("valid_to", DateTime(timezone=True), nullable=True),
+    Index("ix_graph_edges_source", "graph", "owner_id", "source"),
+    Index("ix_graph_edges_target", "graph", "owner_id", "target"),
+    # One live edge per (namespace, owner, source, rel, target). Without this partial index two
+    # identical link calls a millisecond apart would both insert.
+    Index(
+        "ux_graph_edges_active",
+        "graph",
+        "owner_id",
+        "source",
+        "rel",
+        "target",
+        unique=True,
+        sqlite_where=text("valid_to IS NULL"),
+    ),
+)
+
+_CONFLICT_KEYS = ["graph", "owner_id", "source", "rel", "target"]
+_LIVE = text("valid_to IS NULL")
+
+
+class SqliteGraphStore:
+    """Typed relations between entities, with history via ``valid_to``."""
+
+    def __init__(self, sqlite_url: str = DEFAULT_SQLITE_URL, *, echo: bool = False) -> None:
+        storage_path = resolve_sqlite_storage_path(sqlite_url)
+        if storage_path:
+            ensure_parent_dir(storage_path)
+        self._engine: AsyncEngine = create_async_engine(sqlite_url, future=True, echo=echo)
+        if make_url(sqlite_url).drivername.startswith("sqlite"):
+            _apply_sqlite_pragmas(self._engine)
+        self._session_factory = async_sessionmaker(bind=self._engine, expire_on_commit=False)
+        self._ready = False
+        self._ready_lock = asyncio.Lock()
+
+    async def link(
+        self,
+        *,
+        graph: str,
+        owner_id: str,
+        source: str,
+        rel: str,
+        target: str,
+        attrs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        await self._ensure_schema()
+        now = utcnow()
+        stmt = sqlite_insert(GRAPH_EDGES).values(
+            graph=graph,
+            owner_id=owner_id,
+            source=source,
+            rel=rel,
+            target=target,
+            attrs=json.dumps(attrs) if attrs else None,
+            valid_from=now,
+            valid_to=None,
+        )
+        upsert = stmt.on_conflict_do_update(
+            index_elements=_CONFLICT_KEYS,
+            index_where=_LIVE,
+            set_={"attrs": stmt.excluded.attrs},
+        ).returning(GRAPH_EDGES.c.valid_from)
+        async with self._session_factory() as session:
+            stored = (await session.execute(upsert)).scalar_one()
+            await session.commit()
+        # The stored valid_from only matches the one just generated when this call inserted.
+        return {
+            "created": ensure_utc(stored) == now,
+            "edge": _edge_payload(source=source, rel=rel, target=target, attrs=attrs, valid_from=stored),
+        }
+
+    async def unlink(self, *, graph: str, owner_id: str, source: str, rel: str, target: str) -> dict[str, Any]:
+        await self._ensure_schema()
+        stmt = (
+            update(GRAPH_EDGES)
+            .where(
+                GRAPH_EDGES.c.graph == graph,
+                GRAPH_EDGES.c.owner_id == owner_id,
+                GRAPH_EDGES.c.source == source,
+                GRAPH_EDGES.c.rel == rel,
+                GRAPH_EDGES.c.target == target,
+                GRAPH_EDGES.c.valid_to.is_(None),
+            )
+            .values(valid_to=utcnow())
+        )
+        async with self._session_factory() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return {"closed": bool(result.rowcount)}
+
+    async def neighbors(
+        self,
+        *,
+        graph: str,
+        owner_id: str,
+        node: str,
+        direction: str = "out",
+        depth: int = 1,
+        rel: str | None = None,
+        history: bool = False,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        await self._ensure_schema()
+        edges = await self._live_edges(graph=graph, owner_id=owner_id, rel=rel)
+        materialized = _materialize(edges)
+        if node not in materialized:
+            return {"node": node, "found": False, "nodes": [], "edges": [], "history": []}
+
+        reached = _reachable(materialized, node=node, direction=direction, depth=depth)
+        selected = [edge for edge in edges if edge["source"] in reached and edge["target"] in reached][:limit]
+        past = await self._closed_edges(graph=graph, owner_id=owner_id, nodes=reached, limit=limit) if history else []
+        return {
+            "node": node,
+            "found": True,
+            "nodes": sorted(reached),
+            "edges": [_edge_payload(**edge) for edge in selected],
+            "history": past,
+        }
+
+    async def path(self, *, graph: str, owner_id: str, source: str, target: str, max_depth: int = 4) -> dict[str, Any]:
+        await self._ensure_schema()
+        edges = await self._live_edges(graph=graph, owner_id=owner_id)
+        materialized = _materialize(edges)
+        if source not in materialized or target not in materialized:
+            missing = [n for n in (source, target) if n not in materialized]
+            return {"found": False, "reason": f"unknown node(s): {', '.join(missing)}", "nodes": [], "hops": []}
+        try:
+            # Undirected: "how are X and Y related" has to traverse an edge backwards, which is how
+            # person -prefers-> vue <-migration_target- project resolves at all.
+            nodes = nx.shortest_path(materialized.to_undirected(as_view=True), source, target)
+        except nx.NetworkXNoPath:
+            return {"found": False, "reason": "no path", "nodes": [], "hops": []}
+        if len(nodes) - 1 > max_depth:
+            return {
+                "found": False,
+                "reason": f"shortest path is longer than max_depth={max_depth}",
+                "nodes": [],
+                "hops": [],
+            }
+        return {"found": True, "nodes": nodes, "hops": _hops(materialized, nodes)}
+
+    async def search(
+        self, *, graph: str, owner_id: str, query: str, limit: int = 25, history: bool = False
+    ) -> dict[str, Any]:
+        await self._ensure_schema()
+        pattern = f"%{query}%"
+        stmt = select(GRAPH_EDGES).where(
+            GRAPH_EDGES.c.graph == graph,
+            GRAPH_EDGES.c.owner_id == owner_id,
+            or_(
+                GRAPH_EDGES.c.source.like(pattern),
+                GRAPH_EDGES.c.rel.like(pattern),
+                GRAPH_EDGES.c.target.like(pattern),
+            ),
+        )
+        if not history:
+            stmt = stmt.where(GRAPH_EDGES.c.valid_to.is_(None))
+        stmt = stmt.order_by(GRAPH_EDGES.c.valid_from.desc()).limit(limit)
+        async with self._session_factory() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+        return {"query": query, "edges": [_edge_payload(**_row_to_edge(row)) for row in rows]}
+
+    async def close(self) -> None:
+        await self._engine.dispose()
+
+    async def _ensure_schema(self) -> None:
+        if self._ready:
+            return
+        async with self._ready_lock:
+            if self._ready:
+                return
+            # Native IF NOT EXISTS rather than create_all: its checkfirst does a SELECT and then a
+            # CREATE, and on a cold start the daemon and a forked worker can interleave those two
+            # and crash one of them.
+            async with self._engine.begin() as conn:
+                await conn.execute(CreateTable(GRAPH_EDGES, if_not_exists=True))
+                for index in GRAPH_EDGES.indexes:
+                    await conn.execute(CreateIndex(index, if_not_exists=True))
+            self._ready = True
+
+    async def _live_edges(self, *, graph: str, owner_id: str, rel: str | None = None) -> list[dict[str, Any]]:
+        stmt = select(GRAPH_EDGES).where(
+            GRAPH_EDGES.c.graph == graph,
+            GRAPH_EDGES.c.owner_id == owner_id,
+            GRAPH_EDGES.c.valid_to.is_(None),
+        )
+        if rel:
+            stmt = stmt.where(GRAPH_EDGES.c.rel == rel)
+        async with self._session_factory() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+        return [_row_to_edge(row) for row in rows]
+
+    async def _closed_edges(self, *, graph: str, owner_id: str, nodes: set[str], limit: int) -> list[dict[str, Any]]:
+        stmt = (
+            select(GRAPH_EDGES)
+            .where(
+                GRAPH_EDGES.c.graph == graph,
+                GRAPH_EDGES.c.owner_id == owner_id,
+                GRAPH_EDGES.c.valid_to.is_not(None),
+                or_(GRAPH_EDGES.c.source.in_(nodes), GRAPH_EDGES.c.target.in_(nodes)),
+            )
+            .order_by(GRAPH_EDGES.c.valid_to.desc())
+            .limit(limit)
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+        return [_edge_payload(**_row_to_edge(row)) for row in rows]
+
+
+def _apply_sqlite_pragmas(engine: AsyncEngine) -> None:
+    @listens_for(engine.sync_engine, "connect")
+    def _set_pragmas(dbapi_connection: Any, _record: Any) -> None:
+        # WAL is what lets the forked task workers write this file alongside the daemon. It requires
+        # a local filesystem; on NFS this degrades and concurrent writers are no longer safe.
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+
+
+def _materialize(edges: list[dict[str, Any]]) -> nx.MultiDiGraph:
+    # Loads the whole namespace per call. Fine to ~10k edges; past that push neighbors/path into
+    # recursive SQL and keep the full load only for whole-graph analysis.
+    graph = nx.MultiDiGraph()
+    for edge in edges:
+        graph.add_edge(edge["source"], edge["target"], key=edge["rel"])
+    return graph
+
+
+def _reachable(graph: nx.MultiDiGraph, *, node: str, direction: str, depth: int) -> set[str]:
+    if direction == "in":
+        return set(nx.ego_graph(graph.reverse(copy=False), node, radius=depth).nodes)
+    if direction == "both":
+        return set(nx.ego_graph(graph, node, radius=depth, undirected=True).nodes)
+    return set(nx.ego_graph(graph, node, radius=depth).nodes)
+
+
+def _hops(graph: nx.MultiDiGraph, nodes: list[str]) -> list[dict[str, str]]:
+    hops: list[dict[str, str]] = []
+    for left, right in zip(nodes, nodes[1:], strict=False):
+        for rel in graph.succ[left].get(right, {}):
+            hops.append({"source": left, "rel": rel, "target": right, "direction": "forward"})
+        for rel in graph.succ[right].get(left, {}):
+            hops.append({"source": right, "rel": rel, "target": left, "direction": "backward"})
+    return hops
+
+
+def _row_to_edge(row: Any) -> dict[str, Any]:
+    return {
+        "source": row["source"],
+        "rel": row["rel"],
+        "target": row["target"],
+        "attrs": json.loads(row["attrs"]) if row["attrs"] else None,
+        "valid_from": row["valid_from"],
+        "valid_to": row["valid_to"],
+    }
+
+
+def _edge_payload(
+    *,
+    source: str,
+    rel: str,
+    target: str,
+    attrs: dict[str, Any] | None = None,
+    valid_from: datetime | None = None,
+    valid_to: datetime | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"source": source, "rel": rel, "target": target}
+    if attrs:
+        payload["attrs"] = attrs
+    if valid_from is not None:
+        payload["valid_from"] = ensure_utc(valid_from).isoformat()
+    if valid_to is not None:
+        payload["valid_to"] = ensure_utc(valid_to).isoformat()
+    return payload

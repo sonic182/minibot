@@ -24,6 +24,7 @@ OPTIONAL_THIRD_PARTY = (
     "faster_whisper",
     "sentence_transformers",
     "mcp",
+    "networkx",
 )
 
 _IMPORT_WITH_OPTIONALS_BLOCKED = """
