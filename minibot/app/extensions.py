@@ -74,7 +74,7 @@ class ExtensionContext:
     services: list[ExtensionService] = field(default_factory=list)
 
     def on(self, event_type: type[BaseEvent], handler: EventHandler | None = None) -> Any:
-        """Subscribe to ``event_type``. Usable as ``on(EventType, handler)`` or as a decorator."""
+        """Subscribe to ``event_type``. Usable directly or as a decorator."""
         if handler is not None:
             self.subscriptions.append((event_type, handler))
             return None

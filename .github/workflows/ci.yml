@@ -29,5 +29,8 @@ jobs:
       - name: Install dependencies
         run: poetry install --all-extras
 
+      - name: Run custom variable-name lint
+        run: poetry run pylint --disable=all --enable=disallowed-name minibot
+
       - name: Run tests
         run: poetry run pytest

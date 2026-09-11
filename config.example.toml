@@ -441,6 +441,9 @@ timeout_seconds = 30
 # Requires Node.js and npx on the host running MiniBot.
 # [[tools.mcp.servers]]
 # name = "playwright-cli"
+# "bridge" (default) exposes every remote tool at startup. "lazy" exposes a catalog
+# loader and generic caller instead, then fetches complete remote schemas on demand.
+# mode = "bridge"
 # transport = "stdio"
 # command = "npx"
 # Notice: if npx is not on PATH (for example with asdf), use "/home/myuser/.asdf/shims/npx".
@@ -468,6 +471,8 @@ timeout_seconds = 30
 # cwd = "."
 # enabled_tools = []
 # disabled_tools = []
+# # Lazy-mode catalog cache lifetime. Set to 0 to discover before every lazy call.
+# catalog_cache_ttl_seconds = 60
 
 # Agent Skills support (agentskills.io spec).
 # Skills are instruction packs discovered via list_skills and loaded via activate_skill.

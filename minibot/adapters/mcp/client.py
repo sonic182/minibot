@@ -26,6 +26,13 @@ class MCPToolCallResult:
     is_error: bool = False
 
 
+@dataclass(frozen=True)
+class MCPServerMetadata:
+    name: str
+    version: str | None = None
+    instructions: str | None = None
+
+
 class MCPClient:
     _STDIO_READ_CHUNK_SIZE = 64 * 1024
 
@@ -54,6 +61,7 @@ class MCPClient:
         self._logger = logging.getLogger("minibot.mcp.client")
         self._request_id = 0
         self._initialized = False
+        self._server_metadata: MCPServerMetadata | None = None
         self._http_session_id: str | None = None
         self._http_client_class = aiosonic.HTTPClient
         self._stdio_process: asyncio.subprocess.Process | None = None
@@ -65,23 +73,36 @@ class MCPClient:
 
     async def list_tools(self) -> list[MCPToolDefinition]:
         await self._initialize()
-        response = await self._request("tools/list", params={})
-        tools_payload = response.get("result", {}).get("tools", [])
         tools: list[MCPToolDefinition] = []
-        for tool_payload in tools_payload:
-            if not isinstance(tool_payload, dict):
-                continue
-            tool_name = str(tool_payload.get("name", "")).strip()
-            if not tool_name:
-                continue
-            tools.append(
-                MCPToolDefinition(
-                    name=tool_name,
-                    description=str(tool_payload.get("description", "")).strip(),
-                    input_schema=tool_payload.get("inputSchema") or tool_payload.get("input_schema") or {},
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            params = {"cursor": cursor} if cursor else {}
+            response = await self._request("tools/list", params=params)
+            result = response.get("result", {})
+            tools_payload = result.get("tools", [])
+            for tool_payload in tools_payload:
+                if not isinstance(tool_payload, dict):
+                    continue
+                tool_name = str(tool_payload.get("name", "")).strip()
+                if not tool_name:
+                    continue
+                tools.append(
+                    MCPToolDefinition(
+                        name=tool_name,
+                        description=str(tool_payload.get("description", "")).strip(),
+                        input_schema=tool_payload.get("inputSchema") or tool_payload.get("input_schema") or {},
+                    )
                 )
-            )
-        return tools
+            next_cursor = result.get("nextCursor")
+            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+                return tools
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+    async def get_server_metadata(self) -> MCPServerMetadata:
+        await self._initialize()
+        return self._server_metadata or MCPServerMetadata(name=self._server_name)
 
     async def call_tool(self, tool_name: str, payload: dict[str, Any]) -> MCPToolCallResult:
         await self._initialize()
@@ -98,7 +119,7 @@ class MCPClient:
             await self._ensure_stdio_process()
             self._initialized = True
             return
-        await self._request(
+        response = await self._request(
             "initialize",
             params={
                 "protocolVersion": "2024-11-05",
@@ -106,6 +127,7 @@ class MCPClient:
                 "clientInfo": {"name": "minibot", "version": "0.0.3"},
             },
         )
+        self._store_server_metadata(response)
         self._initialized = True
 
     async def _request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -156,21 +178,30 @@ class MCPClient:
             )
             self._stdio_process = process
             self._stdio_read_buffer.clear()
-            response = await self._request_stdio_raw(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 0,
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": {"name": "minibot", "version": "0.0.3"},
-                    },
-                }
-            )
-            if "error" in response:
-                raise RuntimeError(f"mcp server error: {response['error']}")
-            await self._send_stdio_notification("notifications/initialized", params={}, process=process)
+            try:
+                response = await self._request_stdio_raw(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 0,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": {"name": "minibot", "version": "0.0.3"},
+                        },
+                    }
+                )
+                if "error" in response:
+                    raise RuntimeError(f"mcp server error: {response['error']}")
+                self._store_server_metadata(response)
+                await self._send_stdio_notification("notifications/initialized", params={}, process=process)
+            except Exception:
+                if process.returncode is None:
+                    with suppress(ProcessLookupError):
+                        process.kill()
+                self._stdio_process = None
+                self._stdio_read_buffer.clear()
+                raise
             return process
 
     async def _send_stdio_notification(
@@ -311,8 +342,27 @@ class MCPClient:
     def list_tools_blocking(self) -> list[MCPToolDefinition]:
         return self._blocking_runner.run(self.list_tools)
 
+    def get_server_metadata_blocking(self) -> MCPServerMetadata:
+        return self._blocking_runner.run(self.get_server_metadata)
+
     def call_tool_blocking(self, tool_name: str, payload: dict[str, Any]) -> MCPToolCallResult:
         return self._blocking_runner.run(lambda: self.call_tool(tool_name, payload))
+
+    def _store_server_metadata(self, response: dict[str, Any]) -> None:
+        result = response.get("result", {})
+        server_info = result.get("serverInfo", {})
+        if not isinstance(server_info, dict):
+            server_info = {}
+        name = str(server_info.get("name") or self._server_name).strip() or self._server_name
+        version_value = server_info.get("version")
+        version = str(version_value).strip() if version_value is not None else None
+        instructions_value = result.get("instructions")
+        instructions = str(instructions_value).strip() if instructions_value is not None else None
+        self._server_metadata = MCPServerMetadata(
+            name=name,
+            version=version or None,
+            instructions=instructions or None,
+        )
 
 
 class _BlockingLoopRunner:
