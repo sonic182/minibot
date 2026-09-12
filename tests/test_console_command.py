@@ -157,6 +157,7 @@ async def test_console_repl_requires_double_ctrl_c_to_exit(monkeypatch: pytest.M
         user_id=1,
         timeout_seconds=1.0,
         config_path=None,
+        tui=False,
     )
 
     assert printed

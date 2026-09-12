@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
@@ -27,6 +27,9 @@ from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import session_id_for, session_identifier
+
+if TYPE_CHECKING:  # pragma: no cover
+    from minibot.app.event_bus import EventBus
 
 
 class LLMTurnService:
@@ -240,6 +243,7 @@ class LLMTurnService:
             self._logger.exception("LLM call failed", exc_info=exc)
             render = plain_render(self._format_runtime_error_message(exc))
             should_reply = True
+        reasoning_text = _extract_reasoning_text(runtime_result.runtime_state) if runtime_result is not None else None
         visible_messages: list[str] = []
         response_updates_payload: list[dict[str, Any]] = []
         if runtime_result is not None and runtime_result.response_updates:
@@ -249,8 +253,9 @@ class LLMTurnService:
         answer = render.text
         if should_reply and answer.strip():
             visible_messages.append(answer)
-        for message_text in visible_messages:
-            await self._memory.append_history(session_id, "assistant", message_text)
+        for index, message_text in enumerate(visible_messages):
+            reasoning = reasoning_text if index == len(visible_messages) - 1 else None
+            await self._memory.append_history(session_id, "assistant", message_text, reasoning=reasoning)
         if visible_messages:
             await self._enforce_history_limit(session_id)
         compact_prompt_cache_key = prompt_cache_key or f"{session_id}:runtime"
@@ -266,6 +271,8 @@ class LLMTurnService:
         chat_id = message.chat_id or message.user_id or 0
         metadata = self._metadata_service.response_metadata(should_reply)
         metadata["primary_agent"] = "minibot"
+        if reasoning_text:
+            metadata["reasoning"] = reasoning_text
         if agent_trace:
             metadata["agent_trace"] = agent_trace
         metadata["delegation_fallback_used"] = delegation_fallback_used
@@ -415,6 +422,48 @@ def _render_to_metadata(render: Any) -> dict[str, Any]:
     }
 
 
+def _extract_reasoning_text(state: Any) -> str | None:
+    """Collect model reasoning/thinking text from an agent runtime state.
+
+    Reasoning lands on assistant messages as ``reasoning`` (plain string) or
+    ``reasoning_details`` (provider-native structured chunks, e.g. OpenAI
+    Responses ``summary`` items). Concatenate every assistant message's
+    reasoning in order so tool-call-bounded thinking is preserved too.
+    """
+    if state is None:
+        return None
+    messages = getattr(state, "messages", None) or []
+    parts: list[str] = []
+    for message in messages:
+        if getattr(message, "role", None) != "assistant":
+            continue
+        metadata = getattr(message, "metadata", None) or {}
+        reasoning = metadata.get("reasoning")
+        if isinstance(reasoning, str) and reasoning.strip():
+            parts.append(reasoning.strip())
+        details = metadata.get("reasoning_details")
+        if isinstance(details, list):
+            for item in details:
+                parts.extend(_reasoning_detail_texts(item))
+    return "\n\n".join(parts) or None
+
+
+def _reasoning_detail_texts(item: Any) -> list[str]:
+    if isinstance(item, str):
+        return [item.strip()] if item.strip() else []
+    if not isinstance(item, dict):
+        return []
+    texts: list[str] = []
+    text = item.get("text")
+    if isinstance(text, str) and text.strip():
+        texts.append(text.strip())
+    summary = item.get("summary")
+    if isinstance(summary, list):
+        for nested in summary:
+            texts.extend(_reasoning_detail_texts(nested))
+    return texts
+
+
 def build_llm_turn_service(
     *,
     memory: MemoryBackend,
@@ -433,6 +482,7 @@ def build_llm_turn_service(
     agent_registry: AgentRegistry | None = None,
     skill_registry: SkillRegistry | None = None,
     preload_skill_catalog: bool = False,
+    event_bus: EventBus | None = None,
     task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> LLMTurnService:
     service_logger = logger or logging.getLogger("minibot.handler")
@@ -476,6 +526,7 @@ def build_llm_turn_service(
             allowed_append_message_tools=["self_insert_artifact"],
             allow_system_inserts=False,
             managed_files_root=managed_files_root,
+            event_bus=event_bus,
         )
     return LLMTurnService(
         memory=memory,

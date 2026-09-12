@@ -81,10 +81,29 @@ class TurnFailedEvent(BaseEvent):
     error: str
 
 
+class ReasoningEvent(BaseEvent):
+    """Emitted as soon as one provider step returns reasoning, before the turn finishes.
+
+    Reasoning is also attached to the final response metadata; this event exists so a channel can
+    show thinking while the turn is still running instead of only after it completes.
+    """
+
+    event_type: str = "reasoning"
+    text: str
+    step: int
+    turn_id: str | None = None
+    owner_id: str | None = None
+    channel: str | None = None
+    chat_id: int | None = None
+
+
 class ToolCallEvent(BaseEvent):
     """Emitted around every tool handler invocation.
 
-    Carries argument *keys* only: values can be large and can hold credentials.
+    ``detail`` is already redacted and clipped by ``minibot/shared/tool_call_display.py`` before
+    this event is published — the raw argument payload (which can hold credentials, e.g.
+    ``http_request`` headers, ``bash`` env, ``python_execute`` code) never leaves the tool-execution
+    layer. Safe to log, persist, or forward to any subscriber, including extensions.
     """
 
     event_type: str = "tool_call"
@@ -94,5 +113,5 @@ class ToolCallEvent(BaseEvent):
     owner_id: str | None = None
     channel: str | None = None
     chat_id: int | None = None
-    argument_keys: list[str] = Field(default_factory=list)
+    detail: str = ""
     error: str | None = None

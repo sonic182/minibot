@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, delete, func, select
+from sqlalchemy import Column, DateTime, Integer, String, Text, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
@@ -22,6 +22,7 @@ class Message(Base):
     session_id = Column(String(64), index=True, nullable=False)
     role = Column(String(16), nullable=False)
     content = Column(Text, nullable=False)
+    reasoning = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -41,10 +42,23 @@ class SQLAlchemyMemoryBackend(MemoryBackend):
     async def initialize(self) -> None:
         async with self._engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            await connection.run_sync(self._ensure_reasoning_column)
 
-    async def append_history(self, session_id: str, role: str, content: str) -> None:
+    @staticmethod
+    def _ensure_reasoning_column(connection: Any) -> None:
+        columns = [row[1] for row in connection.execute(text("PRAGMA table_info(messages)"))]
+        if "reasoning" not in columns:
+            connection.execute(text("ALTER TABLE messages ADD COLUMN reasoning TEXT"))
+
+    async def append_history(self, session_id: str, role: str, content: str, *, reasoning: str | None = None) -> None:
         async with self._session_factory() as session:
-            message = Message(session_id=session_id, role=role, content=content, created_at=utcnow())
+            message = Message(
+                session_id=session_id,
+                role=role,
+                content=content,
+                reasoning=reasoning,
+                created_at=utcnow(),
+            )
             session.add(message)
             await session.commit()
 
@@ -60,6 +74,7 @@ class SQLAlchemyMemoryBackend(MemoryBackend):
                     role=str(message.role),
                     content=str(message.content),
                     created_at=cast(datetime, message.created_at),
+                    reasoning=cast(str | None, message.reasoning),
                 )
                 for message in reversed(messages)
             ]

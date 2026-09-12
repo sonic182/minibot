@@ -107,6 +107,7 @@ class Dispatcher:
             agent_registry=agent_registry,
             skill_registry=skill_registry,
             preload_skill_catalog=settings.tools.skills.preload_catalog,
+            event_bus=event_bus,
             task_handoff_callback=task_handoff_callback,
         )
         self._handler = LLMMessageHandler(turn_service)

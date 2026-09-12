@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from minibot.core.events import ToolCallEvent
 from minibot.llm.services.tool_executor import canonical_tool_name
 from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
+from minibot.shared.tool_call_display import ToolCallDisplay, summarize_tool_call
 
 if TYPE_CHECKING:  # pragma: no cover
     from minibot.app.event_bus import EventBus
@@ -34,14 +35,15 @@ def _wrap(binding: ToolBinding, *, event_bus: EventBus) -> ToolBinding:
     tool_name = canonical_tool_name(binding.tool.name)
 
     async def handler(payload: ToolPayload, context: ToolContext) -> Any:
-        argument_keys = sorted(str(key) for key in payload) if isinstance(payload, dict) else []
-        await _publish(event_bus, tool_name, "started", context, argument_keys)
+        # Copied because the handler may mutate the payload, and the event must record what was sent.
+        arguments = {str(key): value for key, value in payload.items()} if isinstance(payload, dict) else {}
+        await _publish(event_bus, tool_name, "started", context, arguments)
         try:
             result = await binding.handler(payload, context)
         except Exception as exc:
-            await _publish(event_bus, tool_name, "failed", context, argument_keys, error=str(exc))
+            await _publish(event_bus, tool_name, "failed", context, arguments, error=str(exc))
             raise
-        await _publish(event_bus, tool_name, "completed", context, argument_keys)
+        await _publish(event_bus, tool_name, "completed", context, arguments)
         return result
 
     return ToolBinding(tool=binding.tool, handler=handler)
@@ -52,11 +54,19 @@ async def _publish(
     tool_name: str,
     phase: Literal["started", "completed", "failed"],
     context: ToolContext,
-    argument_keys: list[str],
+    arguments: dict[str, Any],
     error: str | None = None,
 ) -> None:
-    """Telemetry must never break a tool: a stopped bus raises, and shutdown races are normal."""
+    """Telemetry must never break a tool: a stopped bus raises, and shutdown races are normal.
+
+    ``arguments`` is redacted into ``detail`` right here, synchronously, before anything is
+    published — the raw dict never crosses the event-bus boundary, so no subscriber (the console
+    today, any extension tomorrow) can ever see unredacted values.
+    """
     try:
+        detail = summarize_tool_call(
+            ToolCallDisplay(phase=phase, tool_name=tool_name, arguments=arguments, error=error)
+        )
         await event_bus.publish(
             ToolCallEvent(
                 phase=phase,
@@ -65,7 +75,7 @@ async def _publish(
                 owner_id=context.owner_id,
                 channel=context.channel,
                 chat_id=context.chat_id,
-                argument_keys=argument_keys,
+                detail=detail,
                 error=error,
             )
         )

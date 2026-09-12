@@ -5,7 +5,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from minibot.app.response_parser import extract_pre_response_meta
 from minibot.core.agent_runtime import (
@@ -15,8 +15,10 @@ from minibot.core.agent_runtime import (
     MessagePart,
     RuntimeLimits,
 )
+from minibot.core.events import ReasoningEvent
 from minibot.core.tasks import TaskStopReason
 from minibot.llm.provider_factory import LLMClient
+from minibot.llm.services.reasoning_replay import reasoning_text_from_message
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
 from minibot.llm.services.tool_loop_guard import (
     MAX_REPEATED_TOOL_ITERATIONS,
@@ -27,6 +29,9 @@ from minibot.llm.services.tool_loop_guard import (
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.pre_response import pre_response_binding
 from minibot.shared.utils import humanize_token_count
+
+if TYPE_CHECKING:  # pragma: no cover
+    from minibot.app.event_bus import EventBus
 
 
 def _has_pseudo_tool_call_tag(text: str) -> bool:
@@ -60,18 +65,41 @@ class AgentRuntime:
         allowed_append_message_tools: Sequence[str] | None = None,
         allow_system_inserts: bool = False,
         managed_files_root: str | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._llm_client = llm_client
         self._tools = [pre_response_binding(), *list(tools or [])]
         self._limits = limits or RuntimeLimits()
         self._allow_system_inserts = allow_system_inserts
         self._allowed_append_message_tools = set(allowed_append_message_tools or [])
+        self._event_bus = event_bus
         self._logger = logging.getLogger("minibot.agent_runtime")
         self._message_renderer = RuntimeMessageRenderer(
             media_input_mode=llm_client.media_input_mode(),
             managed_files_root=managed_files_root,
             logger=self._logger,
         )
+
+    async def _publish_reasoning(self, message: Any, *, step: int, tool_context: ToolContext) -> None:
+        """Telemetry must never break a turn: a stopped bus raises, and shutdown races are normal."""
+        if self._event_bus is None:
+            return
+        text = reasoning_text_from_message(message)
+        if not text:
+            return
+        try:
+            await self._event_bus.publish(
+                ReasoningEvent(
+                    text=text,
+                    step=step,
+                    turn_id=tool_context.turn_id,
+                    owner_id=tool_context.owner_id,
+                    channel=tool_context.channel,
+                    chat_id=tool_context.chat_id,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            self._logger.debug("reasoning event publish failed", extra={"step": step}, exc_info=True)
 
     async def run(
         self,
@@ -144,6 +172,7 @@ class AgentRuntime:
                         exc_info=True,
                     )
                     raise
+                await self._publish_reasoning(completion.message, step=step, tool_context=tool_context)
                 if isinstance(completion.total_tokens, int) and completion.total_tokens > 0:
                     total_tokens += completion.total_tokens
                 input_tokens = completion.input_tokens

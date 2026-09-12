@@ -256,6 +256,8 @@ class LLMMConfig(BaseModel):
     - ``system_prompt_file`` — path to the main system prompt markdown file.
     - ``prompts_dir`` — directory for runtime prompt fragments.
     - ``reasoning_effort`` — reasoning budget hint for supported models (e.g. ``"high"``).
+    - ``reasoning_summary`` — request a plaintext reasoning summary from Responses models
+      (``"auto"``/``"concise"``/``"detailed"``).
     - ``main_responses_state_mode`` — how conversation state is passed for the main agent
       (``"full_messages"`` or ``"previous_response_id"``).
     - ``prompt_cache_enabled`` — enable provider-side prompt caching (default: ``true``).
@@ -283,6 +285,7 @@ class LLMMConfig(BaseModel):
     system_prompt_file: str | None = "./prompts/main_agent_system.md"
     prompts_dir: str = "./prompts"
     reasoning_effort: str | None = None
+    reasoning_summary: str | None = None
     main_responses_state_mode: Literal["full_messages", "previous_response_id"] = "full_messages"
     agent_responses_state_mode: Literal["full_messages", "previous_response_id"] = "previous_response_id"
     responses_state_mode: Literal["full_messages", "previous_response_id"] = "full_messages"
