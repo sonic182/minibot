@@ -67,7 +67,7 @@ class _FakePendingTurnStore:
 class _FakeSettings:
     class _Tools:
         class _KV:
-            default_owner_id = "primary"
+            enabled = False
 
         class _Browser:
             output_dir = "./data/files/browser"
@@ -96,6 +96,7 @@ class _FakeSettings:
 
     class _Runtime:
         agent_timeout_seconds = 120
+        owner_id = "primary"
 
     class _Orchestration:
         class _MainAgent:

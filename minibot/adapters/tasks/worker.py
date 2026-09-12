@@ -128,7 +128,7 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             context=_coerce_context(task.get("context")),
         )
         tool_context = ToolContext(
-            owner_id=_resolve_owner_id(task),
+            owner_id=settings.runtime.owner_id,
             channel=channel,
             chat_id=_coerce_int(task.get("chat_id")),
             user_id=_coerce_int(task.get("user_id")),
@@ -313,19 +313,8 @@ def _build_managed_storage(settings: Settings) -> LocalFileStorage | None:
     )
 
 
-def _resolve_owner_id(task: dict[str, Any]) -> str:
-    user_id = _coerce_int(task.get("user_id"))
-    if user_id is not None:
-        return str(user_id)
-    chat_id = _coerce_int(task.get("chat_id"))
-    if chat_id is not None:
-        return str(chat_id)
-    channel = str(task.get("channel") or "task")
-    return session_identifier(channel, chat_id, user_id)
-
-
 def _worker_prompt_cache_key(*, tool_context: ToolContext, task_id: str) -> str:
-    session_id = session_identifier(tool_context.channel or "task", tool_context.chat_id, tool_context.user_id)
+    session_id = session_identifier(tool_context.channel or "task", tool_context.chat_id)
     return f"{session_id}:task:{task_id or 'worker'}"
 
 

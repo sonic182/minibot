@@ -620,3 +620,22 @@ async def test_turn_service_runtime_exception_returns_fallback_response() -> Non
 
     assert response.metadata.get("should_reply") is True
     assert response.text == "Sorry, I couldn't answer right now."
+
+
+@pytest.mark.asyncio
+async def test_turn_service_keeps_history_per_chat_for_one_owner() -> None:
+    service, _, memory = _service("ok", owner_id="primary")
+    owner_chat = _message(user_id=7, chat_id=100)
+    other_chat = _message(user_id=7, chat_id=200)
+
+    for text in ("first question", "second question"):
+        await service.handle(MessageEvent(message=_message(text=text, user_id=7, chat_id=100)))
+    await service.handle(MessageEvent(message=_message(text="unrelated chat", user_id=7, chat_id=200)))
+
+    owner_history = await memory.get_history(session_id_for(owner_chat))
+    other_history = await memory.get_history(session_id_for(other_chat))
+
+    assert len(owner_history) == 4
+    assert [entry.role for entry in owner_history] == ["user", "assistant", "user", "assistant"]
+    assert len(other_history) == 2
+    assert not [entry for entry in other_history if "question" in entry.content]

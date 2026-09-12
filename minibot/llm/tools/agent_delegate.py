@@ -474,5 +474,5 @@ def _agent_prompt_cache_key(*, llm_client: Any, context: ToolContext, agent_name
     if not profile.prompt_cache_enabled:
         return None
     channel = context.channel or "agent"
-    session_id = session_identifier(channel, context.chat_id, context.user_id)
+    session_id = session_identifier(channel, context.chat_id)
     return f"{session_id}:agent:{agent_name}"

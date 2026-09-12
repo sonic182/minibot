@@ -92,7 +92,7 @@ class Dispatcher:
             memory=memory_backend,
             llm_client=llm_client,
             tools=main_agent_tools_view.tools,
-            default_owner_id=settings.tools.kv_memory.default_owner_id,
+            owner_id=settings.runtime.owner_id,
             max_history_messages=settings.memory.max_history_messages,
             max_history_tokens=settings.memory.max_history_tokens,
             notify_compaction_updates=settings.memory.notify_compaction_updates,
