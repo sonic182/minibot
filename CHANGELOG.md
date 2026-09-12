@@ -33,6 +33,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `textual` is now a runtime dependency.
 - `LLMClient.provider_capability_hints()` returns a tuple instead of a list.
 
+### Fixed
+
+- **`bash` and `python_execute` hung forever when a command left a child holding the output pipes**
+  (#62). `communicate()` waits for pipe EOF, not just process exit, so a backgrounded child that
+  inherited stdout/stderr kept the call pending after the shell itself exited — a task blocked this
+  way for 569s until the runtime timeout, orphaning the shell, an http server and a
+  Playwright/Chromium tree. Two defects made it unrecoverable: `_terminate_process` skipped
+  `killpg` whenever the direct child already had a returncode (the process holding the pipes was in
+  that same group), and the drain that followed had no timeout. Both tools now share
+  `minibot.shared.subprocess_utils`, which always signals the group, bounds the post-kill drain, and
+  also kills the group on cancellation so a cancelled turn or task no longer leaks processes. The
+  `bash` description gained the `setsid cmd >log 2>&1 </dev/null &` pattern for long-lived
+  processes, since redirecting inside a backgrounded compound command leaves the subshell holding
+  the descriptors.
+
 ## [0.12.0] - 2026-09-12
 
 ### Added
