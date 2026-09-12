@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-12
+
 ### Added
 
 - **RAG now has a pluggable vector backend, and SQLite is the default.** `[tools.rag].backend`
@@ -61,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migrated. Multi-user or multi-tenant
   isolation stays out of scope — it would need its own identity model in an opt-in extension.
 - Dependency bumps across the pip group (#55).
+- `aiogram` is updated from 3.27.0 to 3.31.0 and optional `aiohttp` from 3.13.5 to 3.14.3.
 
 ### Fixed
 
@@ -624,6 +627,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
+[0.12.0]: https://github.com/sonic182/minibot/compare/0.11.0..0.12.0
 [0.11.0]: https://github.com/sonic182/minibot/compare/0.10.0..0.11.0
 [0.10.0]: https://github.com/sonic182/minibot/compare/0.9.0..0.10.0
 [0.9.0]: https://github.com/sonic182/minibot/compare/0.8.0..0.9.0
