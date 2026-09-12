@@ -98,9 +98,14 @@ class ReasoningEvent(BaseEvent):
 
 
 class ToolCallEvent(BaseEvent):
-    """Emitted around every tool handler invocation.
+    """Emitted around every tool handler invocation, carrying the arguments in full.
 
-    Carries argument *keys* only: values can be large and can hold credentials.
+    ``arguments`` is the decoded payload the model sent, values included, so a consumer can say what
+    a call actually did rather than only which keys it used. Those values can be large and can hold
+    credentials (``http_request`` headers, ``bash`` env, ``python_execute`` code), which makes this
+    event **in-process only**: never log it, never persist it and never forward it verbatim. Render
+    it through a redacting summarizer instead — ``adapters/messaging/console/tool_display.py`` is
+    the reference consumer. ``sorted(event.arguments)`` gives the keys alone.
     """
 
     event_type: str = "tool_call"
@@ -110,5 +115,5 @@ class ToolCallEvent(BaseEvent):
     owner_id: str | None = None
     channel: str | None = None
     chat_id: int | None = None
-    argument_keys: list[str] = Field(default_factory=list)
+    arguments: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None

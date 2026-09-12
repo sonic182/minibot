@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from textual import events
@@ -18,6 +19,7 @@ from textual.message import Message
 from textual.widgets import Footer, Header, LoadingIndicator, MarkdownViewer, Static, TextArea
 
 from minibot.adapters.messaging.console.service import ConsoleResponse, ConsoleService
+from minibot.adapters.messaging.console.tool_display import summarize_tool_call
 from minibot.core.memory import MemoryEntry
 
 _SEPARATOR = "\n\n---\n\n"
@@ -25,10 +27,11 @@ _SEPARATOR = "\n\n---\n\n"
 
 @dataclass(frozen=True)
 class _Turn:
-    """One transcript entry: its markdown body plus optional thinking text."""
+    """One transcript entry: its markdown body plus optional thinking text and tool notices."""
 
     markdown: str
     thinking: str | None = None
+    tools: tuple[str, ...] = ()
 
 
 class NoopConsole:
@@ -108,6 +111,7 @@ class ConsoleTui(App[None]):
         self._turns: list[_Turn] = self._history_turns(history)
         self._show_thinking = True
         self._live_thinking: list[str] = []
+        self._live_tools: list[str] = []
 
     @staticmethod
     def _history_turns(history: list[MemoryEntry] | None) -> list[_Turn]:
@@ -164,22 +168,37 @@ class ConsoleTui(App[None]):
         self._turns.append(_Turn(markdown=f"**You:**\n\n{text}"))
         await self._refresh()
         self._service.drain_reasoning()
+        self._service.drain_tool_calls()
         self._live_thinking = []
+        self._live_tools = []
         live_reasoning = asyncio.create_task(self._stream_reasoning())
+        live_tools = asyncio.create_task(self._stream_tool_calls())
         try:
             await self._service.publish_user_message(text)
             result = await self._service.wait_for_response(self._timeout_seconds)
-            self._turns.append(_Turn(markdown=result.rendered_text, thinking=_response_reasoning(result)))
+            self._turns.append(
+                _Turn(
+                    markdown=result.rendered_text,
+                    thinking=_response_reasoning(result),
+                    tools=tuple(self._live_tools),
+                )
+            )
         except TimeoutError:
             self._turns.append(
-                _Turn(markdown=f"*Timed out after {int(self._timeout_seconds)}s — the request may still be running.*")
+                _Turn(
+                    markdown=f"*Timed out after {int(self._timeout_seconds)}s — the request may still be running.*",
+                    tools=tuple(self._live_tools),
+                )
             )
         finally:
-            live_reasoning.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await live_reasoning
-            # The finished turn carries every step's reasoning, so keeping the live copy would double it.
+            for task in (live_reasoning, live_tools):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            # The finished turn carries every step's reasoning, so keeping the live copy would double
+            # it. Tool notices move into the turn instead, so they stay in the scrollback.
             self._live_thinking = []
+            self._live_tools = []
             await self._refresh()
             self._set_busy(False)
 
@@ -189,6 +208,12 @@ class ConsoleTui(App[None]):
             if chunk not in self._live_thinking:
                 self._live_thinking.append(chunk)
                 await self._refresh()
+
+    async def _stream_tool_calls(self) -> None:
+        while True:
+            call = await self._service.next_tool_call()
+            self._live_tools.append(summarize_tool_call(call))
+            await self._refresh()
 
     def _set_busy(self, busy: bool) -> None:
         self.query_one("#thinking", LoadingIndicator).display = busy
@@ -202,12 +227,20 @@ class ConsoleTui(App[None]):
         for turn in self._turns:
             if self._show_thinking and turn.thinking:
                 blocks.append(f"**Thinking:**\n\n> {turn.thinking}")
+            if turn.tools:
+                blocks.append(_tools_block("Tools:", turn.tools))
             blocks.append(turn.markdown)
         if self._show_thinking and self._live_thinking:
             blocks.append("**Thinking…**\n\n> " + "\n>\n> ".join(self._live_thinking))
+        if self._live_tools:
+            blocks.append(_tools_block("Tools…", self._live_tools))
         viewer = self.query_one("#transcript", MarkdownViewer)
         await viewer.document.update(_SEPARATOR.join(blocks))
         viewer.scroll_end(animate=False)
+
+
+def _tools_block(heading: str, lines: Sequence[str]) -> str:
+    return f"**{heading}**\n\n" + "\n".join(f"- {line}" for line in lines)
 
 
 def _response_reasoning(result: ConsoleResponse) -> str | None:
