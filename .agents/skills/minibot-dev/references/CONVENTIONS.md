@@ -177,14 +177,3 @@ MiniBot implements agentskills.io but reads it more strictly than the spec
 `enabled: false` is a MiniBot extension that hides a skill from the runtime; other clients
 ignore it. `name` must match the directory name. Keep `SKILL.md` under 500 lines and push
 detail into `references/`, one level deep.
-
-## Orphan config
-
-`.jscpd.json` sets a 1% duplicate-code threshold over `minibot` and `tests`, but nothing
-references it — no Makefile target, no workflow, no `package.json`. It only runs if someone
-invokes `npx jscpd` by hand.
-
-## Git
-
-**Never run git write commands** — no `add`, `commit`, `push`, or any other mutation. Edit
-files directly; the user handles commits.

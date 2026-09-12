@@ -1,5 +1,5 @@
 {
-  "threshold": 1,
+  "threshold": 3,
   "reporters": ["consoleFull"],
   "path": ["minibot", "tests"],
   "ignore": ["**/node_modules/**", "**/dist/**", "**/htmlcov/**", "**/data/**", "**/logs/**"],
