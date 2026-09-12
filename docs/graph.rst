@@ -1,6 +1,10 @@
 Relation graph
 ==============
 
+.. meta::
+   :description: Use Minibot's optional relation graph to store and traverse typed, owner-scoped relationships between entities.
+   :keywords: knowledge graph AI assistant, relation graph, memory vs graph, self-hosted AI memory
+
 The optional ``graph`` tool records typed relationships between entities. It is useful for
 questions about connections — for example, who works on a project, which technology it uses,
 or what a task depends on — where a normal note or a retrieved document may not contain the

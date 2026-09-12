@@ -1,6 +1,10 @@
 Extending MiniBot
 =================
 
+.. meta::
+   :description: Customize Minibot without forking it — config, prompt packs, skills, agent definitions, MCP servers, and Python extensions.
+   :keywords: extend AI assistant, AI agent customization, MCP servers, Python AI extensions
+
 MiniBot is built to be customized, and most changes never touch Python. Everything
 below the extension layer is file- or config-driven; Python extensions exist for
 the parts that need real logic.

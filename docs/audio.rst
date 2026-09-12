@@ -1,6 +1,10 @@
 Audio Transcription
 ===================
 
+.. meta::
+   :description: Transcribe Telegram voice, audio, and uploaded files in Minibot with faster-whisper — setup, model selection, and GPU runtime notes.
+   :keywords: speech to text AI assistant, voice transcription Telegram, faster-whisper, self-hosted STT
+
 MiniBot can transcribe audio sent via Telegram using `faster-whisper <https://github.com/SYSTRAN/faster-whisper>`_.
 
 Setup
@@ -42,8 +46,8 @@ Model Selection
 
 ``[tools.audio_transcription].model`` is a `faster-whisper
 <https://github.com/SYSTRAN/faster-whisper>`_ model name, not an LLM. Valid values include ``tiny``,
-``base``, ``small``, ``medium``, ``large-v3`` and ``turbo`` (``.en`` variants exist for English-only
-use). Larger models are more accurate but slower.
+``base``, ``small`` (the default), ``medium``, ``large-v3`` and ``turbo`` (``.en`` variants exist
+for English-only use). Larger models are more accurate but slower.
 
 A CPU-only host is good enough for typical use — ``model = "medium"`` with ``device = "cpu"`` and
 ``compute_type = "int8"`` transcribes Spanish reliably and avoids CUDA setup entirely. Use

@@ -1,6 +1,10 @@
 Events
 ======
 
+.. meta::
+   :description: Minibot event-bus reference — the lifecycle of a turn and the events extensions can subscribe to with @mb.on.
+   :keywords: AI agent events, async event bus, minibot extensions, TurnCompletedEvent
+
 MiniBot runs on an in-process ``asyncio`` pub/sub event bus. Channel services publish
 inbound messages, the dispatcher drives turns, and outbound events are consumed by
 the channel adapters. Extensions observe any of it with ``@mb.on(EventType)``.
@@ -28,6 +32,7 @@ A normal turn flows through these events in order:
        C --> D["OutboundEvent(s)"]
        D --> E["TurnCompletedEvent"]
        B --> F["TurnFailedEvent (turn raised before a response)"]
+       B --> H["ReasoningEvent (per provider step)"]
        D --> G["OutboundFileEvent (sending files)"]
 
 Event reference
@@ -86,6 +91,19 @@ Payload:
 - ``turn_id``, ``channel``, ``chat_id``.
 - ``error`` — the exception message.
 
+ReasoningEvent
+~~~~~~~~~~~~~~
+
+**Fires when**: a provider step returns reasoning, before the turn finishes. Reasoning is
+also attached to the final response metadata; this event lets a channel show thinking while
+the turn is still running.
+
+Payload:
+
+- ``text`` — the reasoning text for this step.
+- ``step`` — the 1-based provider step that produced it.
+- ``turn_id``, ``owner_id``, ``channel``, ``chat_id``.
+
 ToolCallEvent
 ~~~~~~~~~~~~~
 
@@ -97,11 +115,12 @@ Payload:
 - ``phase`` — ``"started"`` | ``"completed"`` | ``"failed"``.
 - ``tool_name`` — the tool name.
 - ``turn_id``, ``owner_id``, ``channel``, ``chat_id``.
-- ``argument_keys`` — the argument *keys* only. Values are deliberately omitted: they can
-  be large and can hold credentials.
+- ``detail`` — a redacted, size-clipped human-readable summary of the call, produced by
+  ``minibot/shared/tool_call_display.py`` before the event is published. Raw argument values
+  never leave the tool-execution layer because they can be large and can hold credentials.
 - ``error`` — set when ``phase`` is ``failed``.
 
-Typical use: audit which tools ran with which arguments, without seeing their values.
+Typical use: audit which tools ran, safely, without exposing argument values.
 
 OutboundEvent
 ~~~~~~~~~~~~~
