@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import os
 import shlex
 import sys
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -13,6 +16,17 @@ from minibot.llm.tools.bash import BashTool
 
 def _binding(config: BashToolConfig, storage=None):
     return {item.tool.name: item for item in BashTool(config, storage=storage).bindings()}["bash"]
+
+
+async def _wait_until_gone(pid: int, timeout: float = 3.0) -> bool:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        await asyncio.sleep(0.05)
+    return False
 
 
 class _FakeStorage:
@@ -72,6 +86,56 @@ async def test_bash_honors_timeout() -> None:
     )
     assert result["ok"] is False
     assert result["timed_out"] is True
+
+
+@pytest.mark.asyncio
+async def test_bash_does_not_hang_on_background_child_holding_pipes(tmp_path: Path) -> None:
+    """A backgrounded child inheriting stdout/stderr must not keep the call pending forever."""
+    binding = _binding(BashToolConfig(default_timeout_seconds=1, max_timeout_seconds=1))
+    pid_file = tmp_path / "child.pid"
+    result = cast(
+        dict[str, Any],
+        await asyncio.wait_for(
+            binding.handler(
+                {
+                    "command": f"sleep 3141 & echo $! > {shlex.quote(str(pid_file))}",
+                    "timeout_seconds": None,
+                    "cwd": None,
+                    "env": None,
+                },
+                ToolContext(),
+            ),
+            timeout=10,
+        ),
+    )
+    assert result["timed_out"] is True
+    assert result["ok"] is False
+
+    child_pid = int(pid_file.read_text().strip())
+    assert await _wait_until_gone(child_pid), f"background child {child_pid} survived the timeout"
+
+
+@pytest.mark.asyncio
+async def test_bash_returns_immediately_for_detached_background_command() -> None:
+    binding = _binding(BashToolConfig(default_timeout_seconds=30, max_timeout_seconds=30))
+    result = cast(
+        dict[str, Any],
+        await asyncio.wait_for(
+            binding.handler(
+                {
+                    "command": "sleep 30 >/dev/null 2>&1 </dev/null & echo ok",
+                    "timeout_seconds": None,
+                    "cwd": None,
+                    "env": None,
+                },
+                ToolContext(),
+            ),
+            timeout=10,
+        ),
+    )
+    assert result["ok"] is True
+    assert result["timed_out"] is False
+    assert result["stdout"].strip() == "ok"
 
 
 @pytest.mark.asyncio

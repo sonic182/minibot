@@ -6,7 +6,6 @@ import logging
 import mimetypes
 import os
 import shutil
-import signal
 import sys
 import tempfile
 import time
@@ -27,6 +26,7 @@ from minibot.llm.tools.schema_utils import (
     string_field,
 )
 from minibot.shared.path_utils import normalize_path_separators, to_posix_relative
+from minibot.shared.subprocess_utils import communicate_with_timeout
 
 
 class HostPythonExecTool:
@@ -531,14 +531,12 @@ class HostPythonExecTool:
             )
 
             input_bytes = stdin.encode("utf-8") if stdin is not None else None
-            timed_out = False
-            try:
-                stdout_data, stderr_data = await asyncio.wait_for(
-                    process.communicate(input=input_bytes),
-                    timeout=timeout_seconds,
-                )
-            except TimeoutError:
-                timed_out = True
+            stdout_data, stderr_data, timed_out = await communicate_with_timeout(
+                process,
+                timeout_seconds,
+                input=input_bytes,
+            )
+            if timed_out:
                 self._logger.warning(
                     "python exec timed out",
                     extra={
@@ -547,8 +545,6 @@ class HostPythonExecTool:
                         "sandbox_mode": sandbox_applied,
                     },
                 )
-                await self._terminate_process(process)
-                stdout_data, stderr_data = await process.communicate()
 
             stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
             artifacts_saved: list[dict[str, Any]] = []
@@ -767,18 +763,6 @@ class HostPythonExecTool:
             },
         )
         return _apply_limits, "rlimit"
-
-    async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
-        if process.returncode is not None:
-            return
-        try:
-            if os.name == "nt":
-                process.kill()
-            else:
-                os.killpg(process.pid, signal.SIGKILL)
-        except Exception:
-            process.kill()
-        await process.wait()
 
     def _build_env(self) -> dict[str, str]:
         if self._config.pass_parent_env:

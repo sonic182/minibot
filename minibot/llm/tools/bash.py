@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-import signal
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,6 +14,7 @@ from minibot.llm.tools.arg_utils import int_with_default, optional_str, require_
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_integer, nullable_string, strict_object
+from minibot.shared.subprocess_utils import communicate_with_timeout
 
 if TYPE_CHECKING:
     from minibot.adapters.files.local_storage import LocalFileStorage
@@ -96,13 +96,7 @@ class BashTool:
                 "command": command,
             }
 
-        timed_out = False
-        try:
-            stdout_data, stderr_data = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-        except TimeoutError:
-            timed_out = True
-            await self._terminate_process(process)
-            stdout_data, stderr_data = await process.communicate()
+        stdout_data, stderr_data, timed_out = await communicate_with_timeout(process, timeout_seconds)
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         ok = process.returncode == 0 and not timed_out
@@ -217,18 +211,6 @@ class BashTool:
                 raise ValueError("env values must be strings")
             parsed[key] = item
         return parsed
-
-    async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
-        if process.returncode is not None:
-            return
-        try:
-            if os.name == "nt":
-                process.kill()
-            else:
-                os.killpg(process.pid, signal.SIGKILL)
-        except Exception:
-            process.kill()
-        await process.wait()
 
     def _truncate_output(self, stdout_data: bytes, stderr_data: bytes) -> tuple[str, str, bool]:
         cap = self._config.max_output_bytes
