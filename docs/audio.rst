@@ -22,8 +22,8 @@ Setup
 
    [tools.audio_transcription]
    enabled = true
-   model = "small"
-   device = "auto"
+   model = "medium"
+   device = "cpu"
    compute_type = "int8"
    beam_size = 5
    vad_filter = true
@@ -36,6 +36,24 @@ Notes:
 - Telegram ``voice`` and ``audio`` message types are ingested automatically, as well as file/document uploads.
 - If ``channels.telegram.allowed_document_mime_types`` is set, include your audio MIME types.
 - In the Docker yolo profile, Whisper model assets are downloaded lazily on first use and cached under ``/app/data/.cache``.
+
+Model Selection
+---------------
+
+``[tools.audio_transcription].model`` is a `faster-whisper
+<https://github.com/SYSTRAN/faster-whisper>`_ model name, not an LLM. Valid values include ``tiny``,
+``base``, ``small``, ``medium``, ``large-v3`` and ``turbo`` (``.en`` variants exist for English-only
+use). Larger models are more accurate but slower.
+
+A CPU-only host is good enough for typical use — ``model = "medium"`` with ``device = "cpu"`` and
+``compute_type = "int8"`` transcribes Spanish reliably and avoids CUDA setup entirely. Use
+``device = "auto"`` to prefer CUDA when available and fall back to CPU; see `GPU Runtime
+Dependencies`_ below when running on GPU.
+
+The automatic-ingest knobs default to transcribing short incoming voice/audio messages on arrival:
+
+- ``auto_transcribe_short_incoming`` — transcribe short Telegram voice/audio attachments automatically (default: ``true``).
+- ``auto_transcribe_max_duration_seconds`` — cap for automatic transcription (default: ``45``); longer files must be transcribed explicitly.
 
 GPU Runtime Dependencies
 ------------------------
