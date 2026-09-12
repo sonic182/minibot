@@ -98,14 +98,12 @@ class ReasoningEvent(BaseEvent):
 
 
 class ToolCallEvent(BaseEvent):
-    """Emitted around every tool handler invocation, carrying the arguments in full.
+    """Emitted around every tool handler invocation.
 
-    ``arguments`` is the decoded payload the model sent, values included, so a consumer can say what
-    a call actually did rather than only which keys it used. Those values can be large and can hold
-    credentials (``http_request`` headers, ``bash`` env, ``python_execute`` code), which makes this
-    event **in-process only**: never log it, never persist it and never forward it verbatim. Render
-    it through a redacting summarizer instead — ``adapters/messaging/console/tool_display.py`` is
-    the reference consumer. ``sorted(event.arguments)`` gives the keys alone.
+    ``detail`` is already redacted and clipped by ``minibot/shared/tool_call_display.py`` before
+    this event is published — the raw argument payload (which can hold credentials, e.g.
+    ``http_request`` headers, ``bash`` env, ``python_execute`` code) never leaves the tool-execution
+    layer. Safe to log, persist, or forward to any subscriber, including extensions.
     """
 
     event_type: str = "tool_call"
@@ -115,5 +113,5 @@ class ToolCallEvent(BaseEvent):
     owner_id: str | None = None
     channel: str | None = None
     chat_id: int | None = None
-    arguments: dict[str, Any] = Field(default_factory=dict)
+    detail: str = ""
     error: str | None = None

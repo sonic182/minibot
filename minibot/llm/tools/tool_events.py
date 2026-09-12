@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from minibot.core.events import ToolCallEvent
 from minibot.llm.services.tool_executor import canonical_tool_name
 from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
+from minibot.shared.tool_call_display import ToolCallDisplay, summarize_tool_call
 
 if TYPE_CHECKING:  # pragma: no cover
     from minibot.app.event_bus import EventBus
@@ -56,8 +57,16 @@ async def _publish(
     arguments: dict[str, Any],
     error: str | None = None,
 ) -> None:
-    """Telemetry must never break a tool: a stopped bus raises, and shutdown races are normal."""
+    """Telemetry must never break a tool: a stopped bus raises, and shutdown races are normal.
+
+    ``arguments`` is redacted into ``detail`` right here, synchronously, before anything is
+    published — the raw dict never crosses the event-bus boundary, so no subscriber (the console
+    today, any extension tomorrow) can ever see unredacted values.
+    """
     try:
+        detail = summarize_tool_call(
+            ToolCallDisplay(phase=phase, tool_name=tool_name, arguments=arguments, error=error)
+        )
         await event_bus.publish(
             ToolCallEvent(
                 phase=phase,
@@ -66,7 +75,7 @@ async def _publish(
                 owner_id=context.owner_id,
                 channel=context.channel,
                 chat_id=context.chat_id,
-                arguments=arguments,
+                detail=detail,
                 error=error,
             )
         )

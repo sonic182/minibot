@@ -1,8 +1,9 @@
 """Render a tool call as one short line for a terminal transcript.
 
-``ToolCallEvent`` carries arguments in full, values included. Everything user-facing goes through
-here, which makes this module the redaction boundary: secret-ish arguments are masked and long ones
-are clipped, so no credential or multi-kilobyte payload reaches the screen.
+``tool_events.py`` calls this before a ``ToolCallEvent`` is ever published, so the event itself only
+ever carries the resulting line, never raw argument values. This module is therefore the redaction
+boundary: secret-ish arguments are masked and long ones are clipped here, so no credential or
+multi-kilobyte payload leaves the tool-execution layer, let alone reaches the screen.
 
 The per-tool table names the argument that says what a call is *doing* — a path for a file read, a
 command for a shell call. Tools absent from it (every MCP tool, whose names are discovered at
@@ -152,9 +153,12 @@ def _redact_url_secrets(url: str) -> str:
     return urlunsplit(parsed._replace(query=urlencode(redacted, safe="<>")))
 
 
+_SECRET_SUBSTRINGS = ("token", "secret", "password", "api_key", "header", "cookie", "env")
+
+
 def _is_secret(key: str) -> bool:
     lowered = key.lower()
-    return lowered in _SECRET_KEYS or any(secret in lowered for secret in ("token", "secret", "password", "api_key"))
+    return lowered in _SECRET_KEYS or any(substring in lowered for substring in _SECRET_SUBSTRINGS)
 
 
 def _clip(text: str, *, limit: int = _MAX_VALUE_CHARS) -> str:

@@ -19,7 +19,6 @@ from textual.message import Message
 from textual.widgets import Footer, Header, LoadingIndicator, MarkdownViewer, Static, TextArea
 
 from minibot.adapters.messaging.console.service import ConsoleResponse, ConsoleService
-from minibot.adapters.messaging.console.tool_display import summarize_tool_call
 from minibot.core.memory import MemoryEntry
 
 _SEPARATOR = "\n\n---\n\n"
@@ -212,7 +211,7 @@ class ConsoleTui(App[None]):
     async def _stream_tool_calls(self) -> None:
         while True:
             call = await self._service.next_tool_call()
-            self._live_tools.append(summarize_tool_call(call))
+            self._live_tools.append(call)
             await self._refresh()
 
     def _set_busy(self, busy: bool) -> None:
