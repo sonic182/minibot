@@ -56,8 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MiniBot assists exactly one person, so ownership is now a constant of the deployment: it is read
   once from config and never derived from a message, a task payload or any caller-supplied field,
   on any entrypoint. Sessions are chat sessions (`channel` + `chat_id`); a channel's `user_id` is
-  authorization and audit context only and is no longer part of the session key. Every channel sets
-  `chat_id`, so existing conversation history keys are unchanged. Multi-user or multi-tenant
+  authorization and audit context only and is no longer part of the session key. Session IDs are
+  stored directly as `channel:chat_id`; histories created with earlier hashed identifiers are not
+  migrated. Multi-user or multi-tenant
   isolation stays out of scope — it would need its own identity model in an opt-in extension.
 - Dependency bumps across the pip group (#55).
 
