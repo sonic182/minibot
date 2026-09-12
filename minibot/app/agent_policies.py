@@ -12,6 +12,7 @@ RESERVED_DELEGATION_TOOL_NAMES = {
     "fetch_agent_info",
     "spawn_task",
     "list_tasks",
+    "get_task",
     "cancel_task",
 }
 

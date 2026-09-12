@@ -1,0 +1,5 @@
+Retrieve a durable task record and its final result.
+
+Use this to inspect a queued, running, completed, failed, timed-out, or cancelled task by task_id. It can include compact execution events but never raw tool arguments or outputs.
+
+Returns the task status, limits, progress, terminal result or error, attachments, metrics, and optional event history.

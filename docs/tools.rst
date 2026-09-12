@@ -149,7 +149,11 @@ Tool Surface
    * - Async tasks
      - ``list_tasks``
      - ``[tasks]``
-     - List active background tasks.
+     - List persisted background tasks and their terminal state.
+   * - Async tasks
+     - ``get_task``
+     - ``[tasks]``
+     - Retrieve one task's result, structured progress, and compact event history.
    * - MCP
      - ``mcp_<server>__<remote_tool>``
      - ``[tools.mcp]``

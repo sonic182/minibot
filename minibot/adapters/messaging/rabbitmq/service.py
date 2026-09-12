@@ -11,6 +11,7 @@ import aio_pika.abc
 
 from minibot.adapters.config.schema import RabbitMQConsumerConfig
 from minibot.app.event_bus import EventBus
+from minibot.core.tasks import TaskLimits, TaskRepository, TaskRequest, TaskStatus
 
 if TYPE_CHECKING:
     from minibot.adapters.tasks.manager import TaskManager
@@ -21,18 +22,29 @@ class RabbitMQConsumerService:
         self,
         config: RabbitMQConsumerConfig,
         event_bus: EventBus,
-        task_manager: TaskManager | None = None,
+        task_repository: TaskRepository | TaskManager | None,
+        task_manager: TaskManager | int | None = None,
         max_concurrent_workers: int = 4,
     ) -> None:
         self._config = config
         self._event_bus = event_bus
-        self._task_manager = task_manager
+        if isinstance(task_manager, int):
+            # Preserve the pre-persistence positional constructor while extensions migrate.
+            self._task_repository: TaskRepository | None = None
+            self._task_manager: TaskManager | None = task_repository
+            max_concurrent_workers = task_manager
+        else:
+            self._task_repository = task_repository
+            self._task_manager = task_manager
         self._logger = logging.getLogger("minibot.rabbitmq")
         self._consume_task: asyncio.Task[None] | None = None
         self._exchange: aio_pika.abc.AbstractExchange | None = None
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(max_concurrent_workers)
 
     async def start(self) -> None:
+        initializer = getattr(self._task_repository, "initialize", None)
+        if callable(initializer):
+            await initializer()
         self._consume_task = asyncio.create_task(self._consume())
 
     async def stop(self) -> None:
@@ -84,6 +96,42 @@ class RabbitMQConsumerService:
         user_id: int | None = body.get("user_id")
         agent_name = body.get("agent_name")
         context: dict[str, Any] = body.get("context", {})
+        limits_payload = body.get("limits")
+        limits = _task_limits(limits_payload)
+        request = TaskRequest(
+            task_id=str(task_id),
+            channel=str(channel),
+            prompt=str(prompt),
+            agent_name=agent_name if isinstance(agent_name, str) and agent_name.strip() else None,
+            context=context if isinstance(context, dict) else {},
+            chat_id=chat_id if isinstance(chat_id, int) else None,
+            user_id=user_id if isinstance(user_id, int) else None,
+            owner_id=str(body.get("owner_id") or "primary"),
+            limits=limits,
+        )
+        if self._task_repository is None:
+            if self._task_manager is None:
+                self._logger.warning("no task manager configured, discarding message", extra={"task_id": task_id})
+                await message.nack(requeue=False)
+                return
+            stored = None
+        else:
+            await self._task_repository.create(request)
+            stored = await self._task_repository.get(request.task_id, request.owner_id)
+        if stored is not None and stored.status in {
+            TaskStatus.DONE,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.TIMED_OUT,
+        }:
+            await message.ack()
+            return
+        replace_lease = (
+            stored is not None and stored.status in {TaskStatus.LEASED, TaskStatus.RUNNING} and message.redelivered
+        )
+        if stored is not None and stored.status in {TaskStatus.LEASED, TaskStatus.RUNNING} and not replace_lease:
+            await message.ack()
+            return
 
         await self._semaphore.acquire()
 
@@ -94,18 +142,25 @@ class RabbitMQConsumerService:
 
         if self._task_manager is not None:
             try:
-                await self._task_manager.spawn(
-                    task_id=task_id,
-                    channel=channel,
-                    prompt=prompt,
-                    agent_name=agent_name if isinstance(agent_name, str) and agent_name.strip() else None,
-                    context=context,
-                    chat_id=chat_id,
-                    user_id=user_id,
+                started = await self._task_manager.spawn(
+                    task_id=request.task_id,
+                    channel=request.channel,
+                    prompt=request.prompt,
+                    agent_name=request.agent_name,
+                    context=request.context,
+                    chat_id=request.chat_id,
+                    user_id=request.user_id,
+                    owner_id=request.owner_id,
+                    limits=request.limits,
+                    expected_status=stored.status if stored is not None else TaskStatus.PENDING,
+                    lease_token=stored.lease_token if stored is not None else None,
+                    replace_lease=replace_lease,
                     ack_cb=ack_cb,
                     nack_cb=nack_cb,
                     semaphore=self._semaphore,
                 )
+                if started is False:
+                    await message.ack()
             except Exception as exc:  # noqa: BLE001
                 self._semaphore.release()
                 self._logger.exception("failed to spawn task worker", exc_info=exc, extra={"task_id": task_id})
@@ -114,3 +169,24 @@ class RabbitMQConsumerService:
             self._semaphore.release()
             self._logger.warning("no task manager configured, discarding message", extra={"task_id": task_id})
             await message.nack(requeue=False)
+
+
+def _task_limits(value: Any) -> TaskLimits:
+    if not isinstance(value, dict):
+        return TaskLimits(timeout_seconds=1800)
+    timeout_seconds = value.get("timeout_seconds")
+    max_steps = value.get("max_steps")
+    max_tool_calls = value.get("max_tool_calls")
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or timeout_seconds < 1:
+        return TaskLimits(timeout_seconds=1800)
+    return TaskLimits(
+        timeout_seconds=timeout_seconds,
+        max_steps=_optional_limit(max_steps),
+        max_tool_calls=(_optional_limit(max_tool_calls)),
+    )
+
+
+def _optional_limit(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value

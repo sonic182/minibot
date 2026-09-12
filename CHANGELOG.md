@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Durable background tasks now use execution leases with token fencing: expired SQLite and redelivered
+  RabbitMQ tasks are recovered at least once, stale workers cannot overwrite newer attempts, and terminal
+  task records are purged by a dedicated retention service.
+
 ## [0.12.0] - 2026-09-12
 
 ### Added

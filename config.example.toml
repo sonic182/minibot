@@ -502,13 +502,16 @@ preload_catalog = true
 # paths = ["./skills"]
 
 # Optional async task system. Gates both the task consumer and the
-# spawn_task / cancel_task / list_tasks tools.
+# spawn_task / cancel_task / list_tasks / get_task tools.
 [tasks]
 enabled = false
 # Queue backend: "sqlite" (default, no broker needed) or "rabbitmq" (see [rabbitmq] below).
 backend = "sqlite"
 # Seconds to wait for a spawned worker process to return a result before it is terminated.
-worker_timeout_seconds = 60
+worker_timeout_seconds = 1800
+# Worker execution limits accept a positive integer or "unlimited". A finite timeout is always required.
+worker_max_steps = "unlimited"
+worker_max_tool_calls = "unlimited"
 # Max subprocesses running simultaneously; excess tasks wait in the queue.
 max_concurrent_workers = 4
 
@@ -519,14 +522,14 @@ sqlite_url = "sqlite+aiosqlite:///./data/tasks.db"
 poll_interval_seconds = 5
 # A task whose lease expires without finishing becomes claimable again. Must exceed
 # tasks.worker_timeout_seconds, or a still-running task can be leased and run twice.
-lease_timeout_seconds = 300
+lease_timeout_seconds = 2100
 # Max tasks leased per poll cycle.
 batch_size = 4
 # Queue-level redeliveries before a task is marked failed. Distinct from the in-process
 # provider rate-limit retry handled by the task manager.
 max_attempts = 3
-# How long completed rows are kept before being purged.
-done_retention_seconds = 86400
+# How long terminal task rows and compact event history are kept before being purged.
+done_retention_seconds = 2592000
 
 # Broker connection for tasks.backend = "rabbitmq" (requires extras: rabbitmq).
 # Each message body must be a JSON object with at least a "text" field.

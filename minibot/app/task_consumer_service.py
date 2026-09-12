@@ -3,16 +3,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from datetime import datetime, timedelta
 
 from minibot.adapters.config.schema import SqliteTaskQueueConfig
 from minibot.adapters.tasks.manager import TaskManager
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
 from minibot.core.tasks import TaskRecord
 from minibot.shared.datetime_utils import utcnow
-
-# ponytail: fixed purge cadence; make it configurable if retention tuning ever matters.
-_PURGE_INTERVAL_SECONDS = 3600
 
 
 class SQLiteTaskConsumerService:
@@ -37,7 +33,6 @@ class SQLiteTaskConsumerService:
         self._logger = logging.getLogger("minibot.tasks.sqlite")
         self._task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
-        self._next_purge_at: datetime | None = None
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -53,7 +48,6 @@ class SQLiteTaskConsumerService:
         await self._task_manager.stop()
 
     async def run_pending(self) -> int:
-        await self._purge_done_if_due()
         # Lease only what can start immediately: a row waiting behind a full semaphore would keep
         # ticking toward lease expiry and could be re-leased by the next poll while still queued.
         slots = self._max_concurrent_workers - len(self._task_manager.active())
@@ -87,7 +81,7 @@ class SQLiteTaskConsumerService:
         await self._semaphore.acquire()
 
         async def ack_cb() -> None:
-            await self._store.mark_done(request.task_id)
+            return None
 
         async def nack_cb() -> None:
             await self._store.retry_task(request.task_id, "redelivery requested")
@@ -101,6 +95,10 @@ class SQLiteTaskConsumerService:
                 context=request.context,
                 chat_id=request.chat_id,
                 user_id=request.user_id,
+                owner_id=request.owner_id,
+                limits=request.limits,
+                expected_status=record.status,
+                lease_token=record.lease_token,
                 ack_cb=ack_cb,
                 nack_cb=nack_cb,
                 semaphore=self._semaphore,
@@ -110,12 +108,3 @@ class SQLiteTaskConsumerService:
             self._semaphore.release()
             self._logger.exception("failed to spawn task worker", exc_info=exc, extra={"task_id": request.task_id})
             await self._store.retry_task(request.task_id, str(exc))
-
-    async def _purge_done_if_due(self) -> None:
-        now = utcnow()
-        if self._next_purge_at is not None and now < self._next_purge_at:
-            return
-        self._next_purge_at = now + timedelta(seconds=_PURGE_INTERVAL_SECONDS)
-        purged = await self._store.purge_done(now - timedelta(seconds=self._config.done_retention_seconds))
-        if purged:
-            self._logger.info("purged completed tasks", extra={"purged": purged})

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -15,6 +15,7 @@ from minibot.core.agent_runtime import (
     MessagePart,
     RuntimeLimits,
 )
+from minibot.core.tasks import TaskStopReason
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
 from minibot.llm.services.tool_loop_guard import (
@@ -47,6 +48,7 @@ class RuntimeResult:
     input_tokens: int | None = None
     provider_tool_calls: int = 0
     pre_response_meta: dict[str, Any] | None = field(default=None)
+    stop_reason: TaskStopReason = TaskStopReason.COMPLETED
 
 
 class AgentRuntime:
@@ -77,6 +79,7 @@ class AgentRuntime:
         tool_context: ToolContext,
         prompt_cache_key: str | None = None,
         initial_previous_response_id: str | None = None,
+        progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> RuntimeResult:
         tool_calls_count = 0
         step = 0
@@ -92,7 +95,7 @@ class AgentRuntime:
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
-                if step >= self._limits.max_steps:
+                if self._limits.max_steps is not None and step >= self._limits.max_steps:
                     return RuntimeResult(
                         payload="I reached the maximum execution steps before finishing.",
                         response_id=previous_response_id,
@@ -100,6 +103,7 @@ class AgentRuntime:
                         total_tokens=total_tokens,
                         input_tokens=input_tokens,
                         provider_tool_calls=provider_tool_calls,
+                        stop_reason=TaskStopReason.MAX_STEPS,
                     )
 
                 call_messages = self._message_renderer.render_messages(state)
@@ -160,6 +164,15 @@ class AgentRuntime:
                         "duration_ms": round((time.monotonic() - started_at) * 1000),
                     },
                 )
+                if progress_callback is not None:
+                    await progress_callback(
+                        {
+                            "phase": "provider",
+                            "step": step,
+                            "tool_calls": tool_calls_count,
+                            "total_tokens": total_tokens,
+                        }
+                    )
                 previous_response_id = completion.response_id
 
                 tool_calls = list(getattr(completion.message, "tool_calls", None) or [])
@@ -180,6 +193,7 @@ class AgentRuntime:
                                 total_tokens=total_tokens,
                                 input_tokens=input_tokens,
                                 provider_tool_calls=provider_tool_calls,
+                                stop_reason=TaskStopReason.TRUNCATED_TOOL_CALL,
                             )
                         state.messages.append(
                             self._message_renderer.from_provider_assistant_message(completion.message)
@@ -222,7 +236,7 @@ class AgentRuntime:
                         "tool_calls": len(tool_calls),
                     },
                 )
-                if tool_calls_count > self._limits.max_tool_calls:
+                if self._limits.max_tool_calls is not None and tool_calls_count > self._limits.max_tool_calls:
                     return RuntimeResult(
                         payload="I reached the maximum number of tool calls before finishing.",
                         response_id=completion.response_id,
@@ -230,6 +244,7 @@ class AgentRuntime:
                         total_tokens=total_tokens,
                         input_tokens=input_tokens,
                         provider_tool_calls=provider_tool_calls,
+                        stop_reason=TaskStopReason.MAX_TOOL_CALLS,
                     )
 
                 state.messages.append(
@@ -241,6 +256,16 @@ class AgentRuntime:
                     tool_context,
                     responses_mode=self._llm_client.is_responses_provider(),
                 )
+                if progress_callback is not None:
+                    await progress_callback(
+                        {
+                            "phase": "tools",
+                            "step": step,
+                            "tool_calls": tool_calls_count,
+                            "total_tokens": total_tokens,
+                            "tool_names": [execution.tool_name for execution in executions],
+                        }
+                    )
                 applied_directive_messages: list[AgentMessage] = []
                 for execution in executions:
                     self._logger.info(
@@ -288,6 +313,7 @@ class AgentRuntime:
                                     total_tokens=total_tokens,
                                     input_tokens=input_tokens,
                                     provider_tool_calls=provider_tool_calls,
+                                    stop_reason=TaskStopReason.REPEATED_TOOL_FAILURE,
                                 )
                 if self._llm_client.is_responses_provider():
                     responses_followup_messages = [execution.message_payload for execution in executions]
@@ -323,6 +349,7 @@ class AgentRuntime:
                         total_tokens=total_tokens,
                         input_tokens=input_tokens,
                         provider_tool_calls=provider_tool_calls,
+                        stop_reason=TaskStopReason.REPEATED_ITERATION,
                     )
                 step += 1
 
