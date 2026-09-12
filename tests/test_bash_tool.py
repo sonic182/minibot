@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shlex
+import signal
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -27,6 +29,12 @@ async def _wait_until_gone(pid: int, timeout: float = 3.0) -> bool:
             return True
         await asyncio.sleep(0.05)
     return False
+
+
+async def _kill_and_wait(pid: int) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
+    assert await _wait_until_gone(pid), f"child {pid} survived test cleanup"
 
 
 class _FakeStorage:
@@ -116,14 +124,56 @@ async def test_bash_does_not_hang_on_background_child_holding_pipes(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_bash_returns_immediately_for_detached_background_command() -> None:
+async def test_bash_cancellation_kills_process_group(tmp_path: Path) -> None:
     binding = _binding(BashToolConfig(default_timeout_seconds=30, max_timeout_seconds=30))
+    pid_file = tmp_path / "shell.pid"
+    task = asyncio.create_task(
+        binding.handler(
+            {
+                "command": f"echo $$ > {shlex.quote(str(pid_file))}; sleep 3141",
+                "timeout_seconds": None,
+                "cwd": None,
+                "env": None,
+            },
+            ToolContext(),
+        ),
+    )
+    child_pid: int | None = None
+    try:
+        for _ in range(100):
+            pid_text = pid_file.read_text().strip() if pid_file.exists() else ""
+            if pid_text:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("shell did not record its pid")
+
+        child_pid = int(pid_text)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await _wait_until_gone(child_pid), f"child {child_pid} survived cancellation"
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if child_pid is not None:
+            await _kill_and_wait(child_pid)
+
+
+@pytest.mark.asyncio
+async def test_bash_returns_immediately_for_detached_background_command(tmp_path: Path) -> None:
+    binding = _binding(BashToolConfig(default_timeout_seconds=30, max_timeout_seconds=30))
+    pid_file = tmp_path / "child.pid"
     result = cast(
         dict[str, Any],
         await asyncio.wait_for(
             binding.handler(
                 {
-                    "command": "sleep 30 >/dev/null 2>&1 </dev/null & echo ok",
+                    "command": (
+                        f"sleep 30 >/dev/null 2>&1 </dev/null & echo $! > {shlex.quote(str(pid_file))}; echo ok"
+                    ),
                     "timeout_seconds": None,
                     "cwd": None,
                     "env": None,
@@ -133,9 +183,13 @@ async def test_bash_returns_immediately_for_detached_background_command() -> Non
             timeout=10,
         ),
     )
-    assert result["ok"] is True
-    assert result["timed_out"] is False
-    assert result["stdout"].strip() == "ok"
+    child_pid = int(pid_file.read_text().strip())
+    try:
+        assert result["ok"] is True
+        assert result["timed_out"] is False
+        assert result["stdout"].strip() == "ok"
+    finally:
+        await _kill_and_wait(child_pid)
 
 
 @pytest.mark.asyncio

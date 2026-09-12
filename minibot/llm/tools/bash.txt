@@ -6,8 +6,9 @@ Supports full shell syntax (pipes, redirects, command chaining, subshells).
 
 Before commands with meaningful side effects (writes/deletes/system changes), briefly state what you will do.
 
-To start a long-lived process, background it with its own session and all three descriptors
-detached: setsid cmd >log 2>&1 </dev/null &
+To start a long-lived process on Linux, background it with its own session and all three descriptors
+detached: setsid cmd >log 2>&1 </dev/null &. Where setsid is unavailable, use
+nohup cmd >log 2>&1 </dev/null &.
 
 Any background process still holding stdout/stderr makes this call wait for it instead of
 returning, and the wait ends in a timeout that kills the whole process group. Note that

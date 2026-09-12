@@ -5,8 +5,6 @@ import contextlib
 import os
 import signal
 
-# Bounded drain after killing the group: the pipes close as soon as the group dies, so this only
-# matters for a holder that escaped the group (a `setsid` inside the command, say).
 _DRAIN_TIMEOUT_SECONDS = 2.0
 
 
@@ -24,7 +22,8 @@ async def kill_process_group(process: asyncio.subprocess.Process) -> None:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(process.pid, signal.SIGKILL)
     if process.returncode is None:
-        await process.wait()
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), timeout=_DRAIN_TIMEOUT_SECONDS)
 
 
 async def communicate_with_timeout(
@@ -39,8 +38,7 @@ async def communicate_with_timeout(
     holding stdout/stderr keeps it pending. On timeout the process group is killed — which closes
     those pipes — and the output is drained with a bound so this can never wait forever.
 
-    Output is best-effort once a timeout fires: ``wait_for`` cancels the pending read, and bytes it
-    had already consumed are gone with it.
+    Output is best-effort once a timeout fires because the post-kill drain is bounded.
     """
     try:
         stdout_data, stderr_data = await asyncio.wait_for(process.communicate(input=input), timeout=timeout)
@@ -52,7 +50,6 @@ async def communicate_with_timeout(
             stdout_data, stderr_data = b"", b""
         return stdout_data, stderr_data, True
     except asyncio.CancelledError:
-        # The turn or task was cancelled mid-command; without this the group is orphaned.
         await kill_process_group(process)
         raise
     return stdout_data, stderr_data, False

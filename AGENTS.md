@@ -36,9 +36,3 @@
 - **Event bus**: `app/event_bus.py` abstracts an `asyncio` queue with async iterators; keep observability (queue depth, latency) in mind for future monitoring.
 - **Memory backend**: SQLite/SQLAlchemy via `aiosqlite` powers Stage 1 conversation history.
 - **Config**: use `config.toml` to configure runtime, channels, logging, scheduler, memory, tools (`kv_memory`, `http_client`, `file_storage`, `audio_transcription`, `mcp`), and tasks. There is no `${ENV_VAR}` interpolation — the loader is plain `tomllib`, and the only environment variable it reads is `MINIBOT_CONFIG`. To pull a secret from the environment, store the variable *name* in config (`token_env = "GITHUB_TOKEN"`) and call `os.environ.get(...)` in the consuming code.
-- **Local reference repos**: when `./aiosonic`, `./llm-async`, or `./aiogram` directories maybe exist in the current working directory, we may look up references there; these are expected to be cloned repositories provided for reference purposes only. For convenience the corresponding public HTTPS URLs (cloneable for more information) are:
-  - `https://github.com/sonic182/aiosonic`
-  - `https://github.com/sonic182/llm-async`
-  - `https://github.com/aiogram/aiogram`
-
-  The agent may clone these repositories via HTTPS to inspect code locally; they are provided as reference material only.
