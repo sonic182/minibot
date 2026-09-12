@@ -137,6 +137,7 @@ class LLMTurnService:
             await self._enforce_history_limit(session_id)
             chat_id = message.chat_id or message.user_id or 0
             metadata = self._metadata_service.response_metadata(True)
+            _set_reply_target(metadata, channel=message.channel, message_id=message.message_id)
             metadata["token_trace"] = SessionStateService.build_token_trace(
                 turn_total_tokens=0,
                 session_total_tokens_before_compaction=None,
@@ -270,6 +271,7 @@ class LLMTurnService:
 
         chat_id = message.chat_id or message.user_id or 0
         metadata = self._metadata_service.response_metadata(should_reply)
+        _set_reply_target(metadata, channel=message.channel, message_id=message.message_id)
         metadata["primary_agent"] = "minibot"
         if reasoning_text:
             metadata["reasoning"] = reasoning_text
@@ -356,6 +358,11 @@ class LLMTurnService:
         )
         turn_total_tokens += compaction_result.tokens_used
         metadata = self._metadata_service.response_metadata(True)
+        _set_reply_target(
+            metadata,
+            channel=channel,
+            message_id=response.metadata.get("reply_to_message_id"),
+        )
         metadata["format_repair_attempt"] = attempt
         metadata["format_repair_original_kind"] = original_kind
         metadata["token_trace"] = SessionStateService.build_token_trace(
@@ -412,6 +419,11 @@ def _prompt_cache_key(message: ChannelMessage) -> str | None:
     if message.channel:
         return f"{message.channel}:{session_key}"
     return session_key
+
+
+def _set_reply_target(metadata: dict[str, Any], *, channel: str, message_id: object) -> None:
+    if channel == "telegram" and isinstance(message_id, int) and not isinstance(message_id, bool) and message_id > 0:
+        metadata["reply_to_message_id"] = message_id
 
 
 def _render_to_metadata(render: Any) -> dict[str, Any]:
