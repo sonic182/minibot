@@ -96,6 +96,7 @@ Run it from the directory containing ``my_github_extension.py``:
 ``@mb.tool`` uses the function name as the tool name, the docstring as the model-facing
 description, and the first argument's Pydantic model as the JSON schema. Invalid arguments
 return ``invalid_tool_arguments`` to the model instead of reaching the handler.
+
 Extension API
 -------------
 

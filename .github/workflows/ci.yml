@@ -34,3 +34,6 @@ jobs:
 
       - name: Run tests
         run: poetry run pytest
+
+      - name: Check duplicate code
+        run: npx --yes jscpd@4.2.3 --config .jscpd.json

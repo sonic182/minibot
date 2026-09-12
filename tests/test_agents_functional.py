@@ -1,27 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from minibot.adapters.container.app_container import AppContainer
-from minibot.adapters.messaging.console.service import ConsoleService
-from minibot.app.dispatcher import Dispatcher
+from tests.fixtures.console_harness import run_console_turn, write_config
+from tests.fixtures.console_harness import write_agent as _write_agent
 from tests.fixtures.llm.mock_client import ScriptedLLMClient, ScriptedLLMFactory
-
-
-def _reset_container() -> None:
-    AppContainer._settings = None
-    AppContainer._logger = None
-    AppContainer._event_bus = None
-    AppContainer._memory_backend = None
-    AppContainer._kv_memory_backend = None
-    AppContainer._llm_client = None
-    AppContainer._llm_factory = None
-    AppContainer._agent_registry = None
-    AppContainer._prompt_store = None
-    AppContainer._prompt_service = None
 
 
 def _write_config(
@@ -32,104 +17,19 @@ def _write_config(
     tool_ownership_mode: str = "shared",
     main_agent_tools_allow: list[str] | None = None,
 ) -> Path:
-    config_path = tmp_path / "config.toml"
-    sqlite_url = f"sqlite+aiosqlite:///{(tmp_path / 'test_agents_functional.db').as_posix()}"
-    main_agent_lines = ["\n[orchestration.main_agent]"]
-    if main_agent_tools_allow:
-        entries = ", ".join([f'"{name}"' for name in main_agent_tools_allow])
-        main_agent_lines.append(f"tools_allow = [{entries}]")
-    main_agent_block = "\n".join(main_agent_lines)
-    orchestration_block = (
-        "\n[orchestration]\n"
-        f'directory = "{orchestration_dir.as_posix()}"\n'
-        "default_timeout_seconds = 30\n"
-        f'tool_ownership_mode = "{tool_ownership_mode}"\n'
-    ) + main_agent_block
-    config_path.write_text(
-        "\n".join(
-            [
-                "[runtime]",
-                'log_level = "INFO"',
-                "",
-                "[channels.telegram]",
-                "enabled = false",
-                'bot_token = ""',
-                "",
-                "[llm]",
-                f'provider = "{provider}"',
-                'model = "gpt-4o-mini"',
-                'system_prompt = "You are Minibot, a helpful assistant."',
-                "",
-                f"[providers.{provider}]",
-                'api_key = "test-key"',
-                'base_url = "http://mock.local/v1"',
-                "",
-                "[memory]",
-                f'sqlite_url = "{sqlite_url}"',
-                "",
-                "[scheduler.prompts]",
-                "enabled = false",
-            ]
-        )
-        + orchestration_block
-        + "\n",
-        encoding="utf-8",
-    )
-    return config_path
-
-
-def _write_agent(
-    *,
-    agents_dir: Path,
-    name: str,
-    description: str,
-    model_provider: str,
-    enabled: bool = True,
-    tools_allow: list[str] | None = None,
-) -> None:
-    agents_dir.mkdir(parents=True, exist_ok=True)
-    allow_lines = ""
-    if tools_allow:
-        allow_lines = "tools_allow:\n" + "".join([f"  - {item}\n" for item in tools_allow])
-    enabled_line = "true" if enabled else "false"
-    (agents_dir / f"{name}.md").write_text(
-        (
-            "---\n"
-            f"name: {name}\n"
-            f"description: {description}\n"
-            f"enabled: {enabled_line}\n"
-            "mode: agent\n"
-            f"model_provider: {model_provider}\n"
-            "model: gpt-4o-mini\n"
-            f"{allow_lines}"
-            "---\n\n"
-            f"You are {name}."
-        ),
-        encoding="utf-8",
+    return write_config(
+        tmp_path=tmp_path,
+        provider=provider,
+        db_name="test_agents_functional.db",
+        orchestration_dir=orchestration_dir,
+        tool_ownership_mode=tool_ownership_mode,
+        main_agent_tools_allow=main_agent_tools_allow,
     )
 
 
 async def _run_single_turn(*, config_path: Path, text: str, llm_factory: ScriptedLLMFactory):
-    _reset_container()
-    AppContainer.configure(config_path)
-    await AppContainer.initialize_storage()
-    bus = AppContainer.get_event_bus()
-    with (
-        patch.object(AppContainer, "get_llm_factory", return_value=llm_factory),
-        patch.object(AppContainer, "get_llm_client", return_value=llm_factory.create_default()),
-    ):
-        dispatcher = Dispatcher(bus)
-        console_service = ConsoleService(bus, chat_id=999, user_id=777)
-        await dispatcher.start()
-        await console_service.start()
-        try:
-            await console_service.publish_user_message(text)
-            response = await console_service.wait_for_response(3.0)
-            return response.response
-        finally:
-            await console_service.stop()
-            await dispatcher.stop()
-            _reset_container()
+    result = await run_console_turn(config_path=config_path, text=text, llm_factory=llm_factory)
+    return result.response
 
 
 @pytest.mark.asyncio

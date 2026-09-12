@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,10 +22,11 @@ from minibot.app.tool_use_guardrail import GuardrailDecision
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
 from minibot.core.channels import ChannelMessage
-from minibot.core.memory import MemoryBackend, MemoryEntry
+from minibot.core.memory import MemoryBackend
 from minibot.core.skills import SkillSpec
 from minibot.llm.provider_factory import LLMClient, LLMCompaction, LLMGeneration
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from tests.fixtures.memory import InMemoryMemoryStore as _StubMemory
 
 
 class _StubClient:
@@ -79,34 +79,6 @@ class _StubClient:
         )
 
 
-class _StubMemory:
-    def __init__(self) -> None:
-        self._store: dict[str, list[MemoryEntry]] = {}
-
-    async def append_history(self, session_id: str, role: str, content: str) -> None:
-        self._store.setdefault(session_id, []).append(
-            MemoryEntry(role=role, content=content, created_at=datetime.now(UTC))
-        )
-
-    async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:
-        entries = self._store.get(session_id, [])
-        if limit is None:
-            return list(entries)
-        return entries[-limit:]
-
-    async def trim_history(self, session_id: str, keep_latest: int) -> int:
-        entries = self._store.get(session_id, [])
-        if keep_latest <= 0:
-            removed = len(entries)
-            self._store[session_id] = []
-            return removed
-        if len(entries) <= keep_latest:
-            return 0
-        removed = len(entries) - keep_latest
-        self._store[session_id] = entries[-keep_latest:]
-        return removed
-
-
 class _StubRuntime:
     def __init__(self, input_tokens: int | None = 12) -> None:
         self._input_tokens = input_tokens
@@ -147,6 +119,41 @@ def _message(**overrides: Any) -> ChannelMessage:
     }
     base.update(overrides)
     return ChannelMessage(**base)
+
+
+async def _noop_tool(_: Any, __: ToolContext) -> dict[str, Any]:
+    return {}
+
+
+def _tool_bindings(*names: str) -> list[ToolBinding]:
+    return [
+        ToolBinding(tool=Tool(name=name, description="", parameters={"type": "object"}), handler=_noop_tool)
+        for name in names
+    ]
+
+
+def _prompt_service(*, tools: list[ToolBinding], llm_client: LLMClient | None = None, **kwargs: Any) -> PromptService:
+    return PromptService(
+        llm_client=llm_client or cast(LLMClient, _StubClient()),
+        tools=tools,
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test"),
+        **kwargs,
+    )
+
+
+def _runtime_service(
+    runtime: Any,
+    guardrail: Any,
+    session_state: SessionStateService | None = None,
+) -> RuntimeOrchestrationService:
+    return RuntimeOrchestrationService(
+        runtime=cast(AgentRuntime, runtime),
+        llm_client=cast(LLMClient, _StubClient()),
+        guardrail=guardrail,
+        session_state=session_state or SessionStateService(),
+        logger=logging.getLogger("test"),
+    )
 
 
 def test_metadata_service_returns_provider_and_model() -> None:
@@ -195,22 +202,15 @@ def test_prompt_service_builds_format_repair_prompt() -> None:
     assert "placeholder" in prompt
 
 
-def test_prompt_service_prefers_task_delegation_guidance_when_task_tools_available() -> None:
-    tools = [
-        ToolBinding(tool=Tool(name="spawn_task", description="", parameters={"type": "object"}), handler=_noop_tool),
-        ToolBinding(tool=Tool(name="cancel_task", description="", parameters={"type": "object"}), handler=_noop_tool),
-        ToolBinding(tool=Tool(name="list_tasks", description="", parameters={"type": "object"}), handler=_noop_tool),
-        ToolBinding(tool=Tool(name="invoke_agent", description="", parameters={"type": "object"}), handler=_noop_tool),
-    ]
-    prompt_service = PromptService(
-        llm_client=cast(LLMClient, _StubClient()),
-        tools=tools,
-        environment_prompt_fragment="",
-        logger=logging.getLogger("test"),
-        agent_registry=AgentRegistry(
-            [AgentSpec(name="worker", description="Does work", system_prompt="x", source_path=Path("worker.md"))]
-        ),
+def _worker_agent_registry() -> AgentRegistry:
+    return AgentRegistry(
+        [AgentSpec(name="worker", description="Does work", system_prompt="x", source_path=Path("worker.md"))]
     )
+
+
+def test_prompt_service_prefers_task_delegation_guidance_when_task_tools_available() -> None:
+    tools = _tool_bindings("spawn_task", "cancel_task", "list_tasks", "invoke_agent")
+    prompt_service = _prompt_service(tools=tools, agent_registry=_worker_agent_registry())
 
     prompt = prompt_service.compose_system_prompt("telegram")
 
@@ -221,22 +221,8 @@ def test_prompt_service_prefers_task_delegation_guidance_when_task_tools_availab
 
 
 def test_prompt_service_uses_invoke_agent_guidance_when_task_tools_unavailable() -> None:
-    tools = [
-        ToolBinding(tool=Tool(name="invoke_agent", description="", parameters={"type": "object"}), handler=_noop_tool),
-        ToolBinding(
-            tool=Tool(name="fetch_agent_info", description="", parameters={"type": "object"}),
-            handler=_noop_tool,
-        ),
-    ]
-    prompt_service = PromptService(
-        llm_client=cast(LLMClient, _StubClient()),
-        tools=tools,
-        environment_prompt_fragment="",
-        logger=logging.getLogger("test"),
-        agent_registry=AgentRegistry(
-            [AgentSpec(name="worker", description="Does work", system_prompt="x", source_path=Path("worker.md"))]
-        ),
-    )
+    tools = _tool_bindings("invoke_agent", "fetch_agent_info")
+    prompt_service = _prompt_service(tools=tools, agent_registry=_worker_agent_registry())
 
     prompt = prompt_service.compose_system_prompt("telegram")
 
@@ -247,20 +233,8 @@ def test_prompt_service_uses_invoke_agent_guidance_when_task_tools_unavailable()
 
 
 def test_prompt_service_points_to_list_skills_instead_of_embedding_catalog() -> None:
-    tools = [
-        ToolBinding(tool=Tool(name="list_skills", description="", parameters={"type": "object"}), handler=_noop_tool),
-        ToolBinding(
-            tool=Tool(name="activate_skill", description="", parameters={"type": "object"}),
-            handler=_noop_tool,
-        ),
-    ]
-    prompt_service = PromptService(
-        llm_client=cast(LLMClient, _StubClient()),
-        tools=tools,
-        environment_prompt_fragment="",
-        logger=logging.getLogger("test"),
-        skill_registry=SkillRegistry([]),
-    )
+    tools = _tool_bindings("list_skills", "activate_skill")
+    prompt_service = _prompt_service(tools=tools, skill_registry=SkillRegistry([]))
 
     prompt = prompt_service.compose_system_prompt("telegram")
 
@@ -272,18 +246,9 @@ def test_prompt_service_points_to_list_skills_instead_of_embedding_catalog() -> 
 
 
 def test_prompt_service_can_preload_skill_catalog_snapshot() -> None:
-    tools = [
-        ToolBinding(tool=Tool(name="list_skills", description="", parameters={"type": "object"}), handler=_noop_tool),
-        ToolBinding(
-            tool=Tool(name="activate_skill", description="", parameters={"type": "object"}),
-            handler=_noop_tool,
-        ),
-    ]
-    prompt_service = PromptService(
-        llm_client=cast(LLMClient, _StubClient()),
+    tools = _tool_bindings("list_skills", "activate_skill")
+    prompt_service = _prompt_service(
         tools=tools,
-        environment_prompt_fragment="",
-        logger=logging.getLogger("test"),
         skill_registry=SkillRegistry(
             [
                 SkillSpec(
@@ -304,10 +269,6 @@ def test_prompt_service_can_preload_skill_catalog_snapshot() -> None:
     assert "prompt-time snapshot" in prompt
     assert "Call `list_skills` to search or refresh live skills from disk." in prompt
     assert "Full instructions stay out of the prompt." not in prompt
-
-
-async def _noop_tool(_: Any, __: ToolContext) -> dict[str, Any]:
-    return {}
 
 
 def test_session_state_service_tracks_tokens_and_previous_response_id() -> None:
@@ -348,37 +309,89 @@ def test_session_state_service_tracks_usage_snapshot() -> None:
     assert usage_trace["reasoning_output_tokens"] == 7
 
 
-@pytest.mark.asyncio
-async def test_compaction_service_uses_responses_endpoint_when_available() -> None:
-    client = _StubClient()
+async def _run_with_agent_runtime(service: RuntimeOrchestrationService, **overrides: Any):
+    kwargs: dict[str, Any] = {
+        "session_id": "s1",
+        "history": [],
+        "model_text": "hi",
+        "model_user_content": None,
+        "system_prompt": "system",
+        "tool_context": ToolContext(),
+        "prompt_cache_key": None,
+        "previous_response_id": None,
+        "chat_id": 1,
+        "channel": "telegram",
+    }
+    kwargs.update(overrides)
+    return await service.run_with_agent_runtime(**kwargs)
+
+
+async def _compact_history(service: HistoryCompactionService, **overrides: Any):
+    kwargs: dict[str, Any] = {
+        "prompt_cache_key": "telegram:1",
+        "system_prompt": "system",
+        "notify": True,
+        "responses_state_mode": "previous_response_id",
+    }
+    kwargs.update(overrides)
+    return await service.compact_history_if_needed("s1", **kwargs)
+
+
+class _UnsupportedCompactionClient(_StubClient):
+    def supports_responses_compaction(self) -> bool:
+        return False
+
+    async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+        _ = args, kwargs
+        return LLMGeneration("summary via fallback", response_id="cmp-fallback", total_tokens=7)
+
+
+class _FallbackCompactionClient(_StubClient):
+    def __init__(self, response_id: str | None = "cmp-fallback") -> None:
+        super().__init__()
+        self._fallback_response_id = response_id
+
+    async def compact_response(self, *, previous_response_id: str, prompt_cache_key: str | None) -> LLMCompaction:
+        _ = previous_response_id, prompt_cache_key
+        raise RuntimeError("compact endpoint unavailable")
+
+    async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
+        _ = args, kwargs
+        return LLMGeneration("summary via fallback", response_id=self._fallback_response_id, total_tokens=7)
+
+
+async def _build_compaction_service(
+    client: _StubClient,
+    *,
+    max_history_tokens: int = 10,
+) -> tuple[_StubMemory, SessionStateService, HistoryCompactionService]:
     memory = _StubMemory()
     state = SessionStateService()
     state.track_tokens("s1", 20)
     state.set_previous_response_id("s1", "resp-previous")
     await memory.append_history("s1", "user", "hi")
-    prompt_service = PromptService(
-        llm_client=cast(LLMClient, client),
-        tools=[],
-        environment_prompt_fragment="",
-        logger=logging.getLogger("test"),
-    )
-    service = HistoryCompactionService(
-        memory=cast(MemoryBackend, memory),
-        llm_client=cast(LLMClient, client),
-        session_state=state,
-        prompt_service=prompt_service,
-        logger=logging.getLogger("test"),
-        max_history_tokens=10,
-        compaction_user_request="Please compact the current conversation memory.",
+    prompt_service = _prompt_service(tools=[], llm_client=cast(LLMClient, client))
+    return (
+        memory,
+        state,
+        HistoryCompactionService(
+            memory=cast(MemoryBackend, memory),
+            llm_client=cast(LLMClient, client),
+            session_state=state,
+            prompt_service=prompt_service,
+            logger=logging.getLogger("test"),
+            max_history_tokens=max_history_tokens,
+            compaction_user_request="Please compact the current conversation memory.",
+        ),
     )
 
-    result = await service.compact_history_if_needed(
-        "s1",
-        prompt_cache_key="telegram:1",
-        system_prompt="system",
-        notify=True,
-        responses_state_mode="previous_response_id",
-    )
+
+@pytest.mark.asyncio
+async def test_compaction_service_uses_responses_endpoint_when_available() -> None:
+    client = _StubClient()
+    memory, state, service = await _build_compaction_service(client)
+
+    result = await _compact_history(service)
 
     assert result.performed is True
     assert client.compact_calls[0]["previous_response_id"] == "resp-previous"
@@ -388,43 +401,10 @@ async def test_compaction_service_uses_responses_endpoint_when_available() -> No
 
 @pytest.mark.asyncio
 async def test_compaction_service_skips_unsupported_responses_compaction() -> None:
-    class _UnsupportedCompactionClient(_StubClient):
-        def supports_responses_compaction(self) -> bool:
-            return False
-
-        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
-            _ = args, kwargs
-            return LLMGeneration("summary via fallback", response_id="cmp-fallback", total_tokens=7)
-
     client = _UnsupportedCompactionClient()
-    memory = _StubMemory()
-    state = SessionStateService()
-    state.track_tokens("s1", 20)
-    state.set_previous_response_id("s1", "resp-previous")
-    await memory.append_history("s1", "user", "hi")
-    prompt_service = PromptService(
-        llm_client=cast(LLMClient, client),
-        tools=[],
-        environment_prompt_fragment="",
-        logger=logging.getLogger("test"),
-    )
-    service = HistoryCompactionService(
-        memory=cast(MemoryBackend, memory),
-        llm_client=cast(LLMClient, client),
-        session_state=state,
-        prompt_service=prompt_service,
-        logger=logging.getLogger("test"),
-        max_history_tokens=10,
-        compaction_user_request="Please compact the current conversation memory.",
-    )
+    memory, state, service = await _build_compaction_service(client)
 
-    result = await service.compact_history_if_needed(
-        "s1",
-        prompt_cache_key="telegram:1",
-        system_prompt="system",
-        notify=True,
-        responses_state_mode="previous_response_id",
-    )
+    result = await _compact_history(service)
 
     assert result.performed is True
     assert client.compact_calls == []
@@ -434,9 +414,7 @@ async def test_compaction_service_skips_unsupported_responses_compaction() -> No
 @pytest.mark.asyncio
 async def test_compaction_service_uses_latest_input_tokens_for_responses_threshold() -> None:
     client = _StubClient()
-    memory = _StubMemory()
-    state = SessionStateService()
-    state.track_tokens("s1", 20)
+    memory, state, service = await _build_compaction_service(client, max_history_tokens=100)
     state.track_usage(
         "s1",
         input_tokens=120,
@@ -445,31 +423,7 @@ async def test_compaction_service_uses_latest_input_tokens_for_responses_thresho
         cached_input_tokens=None,
         reasoning_output_tokens=None,
     )
-    state.set_previous_response_id("s1", "resp-previous")
-    await memory.append_history("s1", "user", "hi")
-    prompt_service = PromptService(
-        llm_client=cast(LLMClient, client),
-        tools=[],
-        environment_prompt_fragment="",
-        logger=logging.getLogger("test"),
-    )
-    service = HistoryCompactionService(
-        memory=cast(MemoryBackend, memory),
-        llm_client=cast(LLMClient, client),
-        session_state=state,
-        prompt_service=prompt_service,
-        logger=logging.getLogger("test"),
-        max_history_tokens=100,
-        compaction_user_request="Please compact the current conversation memory.",
-    )
-
-    result = await service.compact_history_if_needed(
-        "s1",
-        prompt_cache_key="telegram:1",
-        system_prompt="system",
-        notify=True,
-        responses_state_mode="previous_response_id",
-    )
+    result = await _compact_history(service)
 
     assert result.performed is True
     assert client.compact_calls[0]["previous_response_id"] == "resp-previous"
@@ -477,48 +431,10 @@ async def test_compaction_service_uses_latest_input_tokens_for_responses_thresho
 
 @pytest.mark.asyncio
 async def test_compaction_service_fallback_summary_updates_previous_response_id() -> None:
-    class _FallbackClient(_StubClient):
-        async def compact_response(self, *, previous_response_id: str, prompt_cache_key: str | None) -> LLMCompaction:
-            _ = previous_response_id, prompt_cache_key
-            raise RuntimeError("compact endpoint unavailable")
+    client = _FallbackCompactionClient()
+    memory, state, service = await _build_compaction_service(client)
 
-        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
-            _ = args, kwargs
-            return LLMGeneration(
-                "summary via fallback",
-                response_id="cmp-fallback",
-                total_tokens=7,
-            )
-
-    client = _FallbackClient()
-    memory = _StubMemory()
-    state = SessionStateService()
-    state.track_tokens("s1", 20)
-    state.set_previous_response_id("s1", "resp-previous")
-    await memory.append_history("s1", "user", "hi")
-    prompt_service = PromptService(
-        llm_client=cast(LLMClient, client),
-        tools=[],
-        environment_prompt_fragment="",
-        logger=logging.getLogger("test"),
-    )
-    service = HistoryCompactionService(
-        memory=cast(MemoryBackend, memory),
-        llm_client=cast(LLMClient, client),
-        session_state=state,
-        prompt_service=prompt_service,
-        logger=logging.getLogger("test"),
-        max_history_tokens=10,
-        compaction_user_request="Please compact the current conversation memory.",
-    )
-
-    result = await service.compact_history_if_needed(
-        "s1",
-        prompt_cache_key="telegram:1",
-        system_prompt="system",
-        notify=True,
-        responses_state_mode="previous_response_id",
-    )
+    result = await _compact_history(service)
 
     assert result.performed is True
     assert state.get_previous_response_id("s1") == "cmp-fallback"
@@ -527,48 +443,10 @@ async def test_compaction_service_fallback_summary_updates_previous_response_id(
 
 @pytest.mark.asyncio
 async def test_compaction_service_fallback_summary_clears_previous_response_id_when_missing() -> None:
-    class _FallbackClientNoResponseId(_StubClient):
-        async def compact_response(self, *, previous_response_id: str, prompt_cache_key: str | None) -> LLMCompaction:
-            _ = previous_response_id, prompt_cache_key
-            raise RuntimeError("compact endpoint unavailable")
+    client = _FallbackCompactionClient(response_id=None)
+    memory, state, service = await _build_compaction_service(client)
 
-        async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
-            _ = args, kwargs
-            return LLMGeneration(
-                "summary via fallback",
-                response_id=None,
-                total_tokens=7,
-            )
-
-    client = _FallbackClientNoResponseId()
-    memory = _StubMemory()
-    state = SessionStateService()
-    state.track_tokens("s1", 20)
-    state.set_previous_response_id("s1", "resp-previous")
-    await memory.append_history("s1", "user", "hi")
-    prompt_service = PromptService(
-        llm_client=cast(LLMClient, client),
-        tools=[],
-        environment_prompt_fragment="",
-        logger=logging.getLogger("test"),
-    )
-    service = HistoryCompactionService(
-        memory=cast(MemoryBackend, memory),
-        llm_client=cast(LLMClient, client),
-        session_state=state,
-        prompt_service=prompt_service,
-        logger=logging.getLogger("test"),
-        max_history_tokens=10,
-        compaction_user_request="Please compact the current conversation memory.",
-    )
-
-    result = await service.compact_history_if_needed(
-        "s1",
-        prompt_cache_key="telegram:1",
-        system_prompt="system",
-        notify=True,
-        responses_state_mode="previous_response_id",
-    )
+    result = await _compact_history(service)
 
     assert result.performed is True
     assert state.get_previous_response_id("s1") is None
@@ -578,26 +456,9 @@ async def test_compaction_service_fallback_summary_clears_previous_response_id_w
 @pytest.mark.asyncio
 async def test_runtime_service_returns_guardrail_resolved_text() -> None:
     session_state = SessionStateService()
-    service = RuntimeOrchestrationService(
-        runtime=cast(AgentRuntime, _StubRuntime()),
-        llm_client=cast(LLMClient, _StubClient()),
-        guardrail=_ResolvedGuardrail(),
-        session_state=session_state,
-        logger=logging.getLogger("test"),
-    )
+    service = _runtime_service(_StubRuntime(), _ResolvedGuardrail(), session_state)
 
-    result = await service.run_with_agent_runtime(
-        session_id="s1",
-        history=[],
-        model_text="hi",
-        model_user_content=None,
-        system_prompt="system",
-        tool_context=ToolContext(),
-        prompt_cache_key=None,
-        previous_response_id=None,
-        chat_id=1,
-        channel="telegram",
-    )
+    result = await _run_with_agent_runtime(service)
 
     assert result.should_reply is True
     assert result.render.text == "resolved"
@@ -610,26 +471,9 @@ async def test_runtime_service_returns_guardrail_resolved_text() -> None:
 async def test_runtime_service_clears_stale_input_tokens_when_runtime_omits_usage() -> None:
     session_state = SessionStateService()
     session_state.set_latest_input_tokens("s1", 120)
-    service = RuntimeOrchestrationService(
-        runtime=cast(AgentRuntime, _StubRuntime(input_tokens=None)),
-        llm_client=cast(LLMClient, _StubClient()),
-        guardrail=_ResolvedGuardrail(),
-        session_state=session_state,
-        logger=logging.getLogger("test"),
-    )
+    service = _runtime_service(_StubRuntime(input_tokens=None), _ResolvedGuardrail(), session_state)
 
-    await service.run_with_agent_runtime(
-        session_id="s1",
-        history=[],
-        model_text="hi",
-        model_user_content=None,
-        system_prompt="system",
-        tool_context=ToolContext(),
-        prompt_cache_key=None,
-        previous_response_id=None,
-        chat_id=1,
-        channel="telegram",
-    )
+    await _run_with_agent_runtime(service)
 
     assert session_state.latest_input_tokens("s1") is None
 
@@ -655,26 +499,9 @@ async def test_runtime_service_skips_guardrail_when_tool_messages_exist() -> Non
             )
 
     guardrail = _CountingGuardrail()
-    service = RuntimeOrchestrationService(
-        runtime=cast(AgentRuntime, _ToolRuntime()),
-        llm_client=cast(LLMClient, _StubClient()),
-        guardrail=guardrail,
-        session_state=SessionStateService(),
-        logger=logging.getLogger("test"),
-    )
+    service = _runtime_service(_ToolRuntime(), guardrail)
 
-    result = await service.run_with_agent_runtime(
-        session_id="s1",
-        history=[],
-        model_text="read file",
-        model_user_content=None,
-        system_prompt="system",
-        tool_context=ToolContext(),
-        prompt_cache_key=None,
-        previous_response_id=None,
-        chat_id=1,
-        channel="telegram",
-    )
+    result = await _run_with_agent_runtime(service, model_text="read file")
 
     assert guardrail.calls == 0
     assert result.should_reply is True
@@ -684,26 +511,9 @@ async def test_runtime_service_skips_guardrail_when_tool_messages_exist() -> Non
 @pytest.mark.asyncio
 async def test_runtime_service_calls_guardrail_when_no_tool_messages() -> None:
     guardrail = _CountingGuardrail()
-    service = RuntimeOrchestrationService(
-        runtime=cast(AgentRuntime, _StubRuntime()),
-        llm_client=cast(LLMClient, _StubClient()),
-        guardrail=guardrail,
-        session_state=SessionStateService(),
-        logger=logging.getLogger("test"),
-    )
+    service = _runtime_service(_StubRuntime(), guardrail)
 
-    _ = await service.run_with_agent_runtime(
-        session_id="s1",
-        history=[],
-        model_text="hi",
-        model_user_content=None,
-        system_prompt="system",
-        tool_context=ToolContext(),
-        prompt_cache_key=None,
-        previous_response_id=None,
-        chat_id=1,
-        channel="telegram",
-    )
+    _ = await _run_with_agent_runtime(service)
 
     assert guardrail.calls == 1
 
@@ -744,26 +554,9 @@ async def test_runtime_service_does_not_retry_when_delegation_times_out() -> Non
             )
 
     runtime = _TimeoutDelegationRuntime()
-    service = RuntimeOrchestrationService(
-        runtime=cast(AgentRuntime, runtime),
-        llm_client=cast(LLMClient, _StubClient()),
-        guardrail=_CountingGuardrail(),
-        session_state=SessionStateService(),
-        logger=logging.getLogger("test"),
-    )
+    service = _runtime_service(runtime, _CountingGuardrail())
 
-    result = await service.run_with_agent_runtime(
-        session_id="s1",
-        history=[],
-        model_text="delegate this",
-        model_user_content=None,
-        system_prompt="system",
-        tool_context=ToolContext(),
-        prompt_cache_key=None,
-        previous_response_id=None,
-        chat_id=1,
-        channel="telegram",
-    )
+    result = await _run_with_agent_runtime(service, model_text="delegate this")
 
     assert runtime.calls == 1
     assert result.render.text == "delegate timeout surfaced"

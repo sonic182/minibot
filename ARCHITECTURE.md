@@ -36,6 +36,7 @@ and emit outbound responses back to the active channel adapter.
 │   ├── main_agent_system.md
 │   └── policies/
 │       ├── delegation.md
+│       ├── graph.md
 │       └── tool_usage.md
 ├── Dockerfile
 ├── docker-compose.yml

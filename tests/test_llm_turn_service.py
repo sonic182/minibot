@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,11 +19,11 @@ from minibot.app.tool_use_guardrail import NoopToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent
-from minibot.core.memory import MemoryEntry
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient, LLMGeneration
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import session_id_for
+from tests.fixtures.memory import InMemoryMemoryStore as StubMemory
 
 
 def _message(**overrides: Any) -> ChannelMessage:
@@ -43,38 +42,6 @@ def _message(**overrides: Any) -> ChannelMessage:
 
 def _message_event(text: str = "hi") -> MessageEvent:
     return MessageEvent(message=_message(text=text, user_id=1, chat_id=1))
-
-
-class StubMemory:
-    def __init__(self) -> None:
-        self._store: dict[str, list[MemoryEntry]] = {}
-        self.trim_calls: list[tuple[str, int]] = []
-
-    async def append_history(self, session_id: str, role: str, content: str) -> None:
-        entry = MemoryEntry(role=role, content=content, created_at=datetime.now(UTC))
-        self._store.setdefault(session_id, []).append(entry)
-
-    async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:
-        entries = self._store.get(session_id, [])
-        if limit is None:
-            return list(entries)
-        return entries[-limit:]
-
-    async def count_history(self, session_id: str) -> int:
-        return len(self._store.get(session_id, []))
-
-    async def trim_history(self, session_id: str, keep_latest: int) -> int:
-        self.trim_calls.append((session_id, keep_latest))
-        entries = self._store.get(session_id, [])
-        if keep_latest <= 0:
-            removed = len(entries)
-            self._store[session_id] = []
-            return removed
-        if len(entries) <= keep_latest:
-            return 0
-        removed = len(entries) - keep_latest
-        self._store[session_id] = entries[-keep_latest:]
-        return removed
 
 
 class StubLLMClient:
