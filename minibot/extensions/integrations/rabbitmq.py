@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from minibot.adapters.tasks.retention import TaskRetentionService
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
@@ -16,7 +17,12 @@ def register(mb: ExtensionContext) -> None:
 
     settings = mb.settings
     store = SQLiteTaskStore(settings.tasks.sqlite)
-    manager = TaskManager(mb.event_bus, settings.tasks.worker_timeout_seconds, store)
+    manager = TaskManager(
+        mb.event_bus,
+        settings.tasks.worker_timeout_seconds,
+        store,
+        settings.tasks.sqlite.lease_timeout_seconds,
+    )
     producer = RabbitMQTaskProducer(settings.rabbitmq, store)
     consumer = RabbitMQConsumerService(
         settings.rabbitmq,
@@ -25,6 +31,7 @@ def register(mb: ExtensionContext) -> None:
         manager,
         settings.tasks.max_concurrent_workers,
     )
+    mb.add_service(TaskRetentionService(store, settings.tasks.sqlite.done_retention_seconds))
     mb.add_tool(
         TaskTools(
             producer=producer,

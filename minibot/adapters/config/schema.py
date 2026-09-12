@@ -768,7 +768,7 @@ class SqliteTaskQueueConfig(BaseModel):
 
     - ``sqlite_url`` — SQLite database URL for the task queue.
     - ``poll_interval_seconds`` — how often the consumer checks for queued tasks (default: ``5``).
-    - ``lease_timeout_seconds`` — lease duration before a stalled task is claimable again (default: ``300``).
+    - ``lease_timeout_seconds`` — lease duration before a stalled task is claimable again (default: ``2100``).
     - ``batch_size`` — max tasks leased per poll cycle (default: ``4``).
     - ``max_attempts`` — redeliveries before a task is marked failed (default: ``3``). This is queue-level
       redelivery, distinct from the in-process provider rate-limit retry in ``adapters/tasks/manager.py``.

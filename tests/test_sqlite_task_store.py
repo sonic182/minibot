@@ -112,6 +112,60 @@ async def test_expired_lease_becomes_claimable_again(task_store: SQLiteTaskStore
 
 
 @pytest.mark.asyncio
+async def test_expired_running_task_is_reclaimed_and_stale_completion_is_rejected(task_store: SQLiteTaskStore) -> None:
+    await task_store.create(_request("task-1"))
+    now = _utcnow()
+    leased = await task_store.lease_due_tasks(now=now, limit=1, lease_timeout_seconds=1)
+    original_token = leased[0].lease_token
+    assert original_token is not None
+    assert (
+        await task_store.claim_execution(
+            "task-1",
+            expected_status=TaskStatus.LEASED,
+            lease_token=original_token,
+            lease_timeout_seconds=1,
+        )
+        == original_token
+    )
+
+    reclaimed = await task_store.lease_due_tasks(now=now + timedelta(seconds=5), limit=1, lease_timeout_seconds=30)
+    replacement_token = reclaimed[0].lease_token
+    assert replacement_token is not None
+    assert replacement_token != original_token
+    assert await task_store.mark_done("task-1", lease_token=original_token) is False
+
+    assert (
+        await task_store.claim_execution(
+            "task-1",
+            expected_status=TaskStatus.LEASED,
+            lease_token=replacement_token,
+            lease_timeout_seconds=30,
+        )
+        == replacement_token
+    )
+    assert await task_store.mark_done("task-1", lease_token=replacement_token) is True
+
+
+@pytest.mark.asyncio
+async def test_cancelled_lease_cannot_start_an_execution(task_store: SQLiteTaskStore) -> None:
+    await task_store.create(_request("task-1"))
+    leased = await task_store.lease_due_tasks(now=_utcnow(), limit=1, lease_timeout_seconds=30)
+    lease_token = leased[0].lease_token
+    assert lease_token is not None
+    assert await task_store.mark_cancelled("task-1") is True
+
+    assert (
+        await task_store.claim_execution(
+            "task-1",
+            expected_status=TaskStatus.LEASED,
+            lease_token=lease_token,
+            lease_timeout_seconds=30,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
 async def test_retry_requeues_until_attempts_are_exhausted(task_store: SQLiteTaskStore) -> None:
     await task_store.create(_request("task-1"))
     await task_store.lease_due_tasks(now=_utcnow(), limit=1, lease_timeout_seconds=300)

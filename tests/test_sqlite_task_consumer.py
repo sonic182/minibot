@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -62,21 +61,12 @@ async def store(tmp_path: Path) -> SQLiteTaskStore:
     return store
 
 
-def _record_cutoff(cutoffs: list[datetime]):
-    async def _purge_done(before: datetime) -> int:
-        cutoffs.append(before)
-        return 0
-
-    return _purge_done
-
-
 def _consumer(
     store: SQLiteTaskStore,
     task_manager: _TaskManagerStub,
     *,
     max_concurrent_workers: int = 4,
     batch_size: int = 5,
-    done_retention_seconds: int = 86400,
 ) -> SQLiteTaskConsumerService:
     return SQLiteTaskConsumerService(
         store=store,
@@ -85,7 +75,6 @@ def _consumer(
             poll_interval_seconds=1,
             lease_timeout_seconds=300,
             batch_size=batch_size,
-            done_retention_seconds=done_retention_seconds,
         ),
         max_concurrent_workers=max_concurrent_workers,
     )
@@ -165,32 +154,6 @@ async def test_lease_batch_is_capped_by_free_slots(store: SQLiteTaskStore) -> No
 
     # 4 workers, 3 already busy -> only 1 slot free even though batch_size is 5.
     assert await _consumer(store, manager, max_concurrent_workers=4, batch_size=5).run_pending() == 1
-
-
-@pytest.mark.asyncio
-async def test_purge_runs_on_the_first_poll_with_the_retention_cutoff(store: SQLiteTaskStore) -> None:
-    cutoffs: list[datetime] = []
-    store.purge_done = _record_cutoff(cutoffs)  # type: ignore[method-assign]
-
-    consumer = _consumer(store, _TaskManagerStub(active_count=99), done_retention_seconds=3600)
-    before = datetime.now(UTC)
-    await consumer.run_pending()
-
-    assert len(cutoffs) == 1
-    # Rows completed more than done_retention_seconds ago are the ones dropped.
-    assert before - timedelta(seconds=3600) <= cutoffs[0] <= datetime.now(UTC) - timedelta(seconds=3599)
-
-
-@pytest.mark.asyncio
-async def test_purge_is_skipped_until_the_interval_elapses(store: SQLiteTaskStore) -> None:
-    cutoffs: list[datetime] = []
-    store.purge_done = _record_cutoff(cutoffs)  # type: ignore[method-assign]
-
-    consumer = _consumer(store, _TaskManagerStub(active_count=99))
-    await consumer.run_pending()
-    await consumer.run_pending()
-
-    assert len(cutoffs) == 1, "purge should not run on every poll"
 
 
 @pytest.mark.asyncio

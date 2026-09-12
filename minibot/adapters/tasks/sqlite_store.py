@@ -3,14 +3,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, delete, select, text, update
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, and_, delete, or_, select, text, update
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from minibot.adapters.config.schema import SqliteTaskQueueConfig
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, lease_rows, resolve_sqlite_storage_path
+from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
 from minibot.core.tasks import TaskLimits, TaskRecord, TaskRequest, TaskResult, TaskStatus, TaskStopReason
 from minibot.shared.datetime_utils import ensure_utc, utcnow
 
@@ -30,6 +31,7 @@ class TaskModel(TaskBase):
     agent_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     context: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
@@ -90,6 +92,7 @@ class SQLiteTaskStore:
         columns = {str(row[1]) for row in connection.execute(text("PRAGMA table_info(tasks)"))}
         additions = {
             "owner_id": "VARCHAR(128) NOT NULL DEFAULT 'primary'",
+            "lease_token": "VARCHAR(36)",
             "timeout_seconds": "INTEGER NOT NULL DEFAULT 1800",
             "max_steps": "INTEGER",
             "max_tool_calls": "INTEGER",
@@ -105,6 +108,7 @@ class SQLiteTaskStore:
             if name not in columns:
                 connection.execute(text(f"ALTER TABLE tasks ADD COLUMN {name} {definition}"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_owner_id ON tasks (owner_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_lease_token ON tasks (lease_token)"))
 
     async def create(self, task: TaskRequest) -> None:
         async with self._session_factory() as session:
@@ -121,31 +125,96 @@ class SQLiteTaskStore:
         lease_timeout_seconds: int,
     ) -> Sequence[TaskRecord]:
         async with self._session_factory() as session:
-            records = await lease_rows(
-                session,
-                TaskModel,
-                now=now,
-                limit=limit,
-                lease_deadline=now + timedelta(seconds=lease_timeout_seconds),
-                order_by=TaskModel.created_at,
+            claimable = or_(
+                TaskModel.status == TaskStatus.PENDING.value,
+                and_(
+                    TaskModel.status.in_([TaskStatus.LEASED.value, TaskStatus.RUNNING.value]),
+                    or_(TaskModel.lease_expires_at.is_(None), TaskModel.lease_expires_at <= now),
+                ),
             )
+            candidates = list(
+                (
+                    await session.execute(
+                        select(TaskModel).where(claimable).order_by(TaskModel.created_at).limit(limit * 4)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            records: list[TaskModel] = []
+            for candidate in candidates:
+                if len(records) >= limit:
+                    break
+                lease_token = uuid4().hex
+                outcome = await session.execute(
+                    update(TaskModel)
+                    .where(TaskModel.id == candidate.id)
+                    .where(claimable)
+                    .values(
+                        status=TaskStatus.LEASED.value,
+                        lease_token=lease_token,
+                        lease_expires_at=now + timedelta(seconds=lease_timeout_seconds),
+                        updated_at=now,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                if getattr(outcome, "rowcount", 0):
+                    await session.refresh(candidate)
+                    records.append(candidate)
             for record in records:
                 session.add(TaskEventModel(task_id=record.id, event_type="leased", payload={}))
             leased = [_to_domain(record) for record in records]
             await session.commit()
             return leased
 
-    async def mark_running(self, task_id: str) -> None:
+    async def claim_execution(
+        self,
+        task_id: str,
+        *,
+        expected_status: TaskStatus,
+        lease_token: str | None,
+        lease_timeout_seconds: int,
+        replace_lease: bool = False,
+    ) -> str | None:
         now = utcnow()
-        await self._update(
-            task_id,
-            {"status": TaskStatus.RUNNING.value, "started_at": now, "progress": {"phase": "running"}},
-        )
-        await self.append_event(task_id, "running", {})
+        active_token = uuid4().hex if replace_lease or lease_token is None else lease_token
+        statement = update(TaskModel).where(TaskModel.id == task_id).where(TaskModel.status == expected_status.value)
+        if lease_token is not None:
+            statement = statement.where(TaskModel.lease_token == lease_token)
+        async with self._session_factory() as session:
+            outcome = await session.execute(
+                statement.values(
+                    status=TaskStatus.RUNNING.value,
+                    lease_token=active_token,
+                    lease_expires_at=now + timedelta(seconds=lease_timeout_seconds),
+                    started_at=now,
+                    progress={"phase": "running"},
+                    updated_at=now,
+                )
+            )
+            if not getattr(outcome, "rowcount", 0):
+                await session.rollback()
+                return None
+            session.add(TaskEventModel(task_id=task_id, event_type="running", payload={}))
+            await session.commit()
+        return active_token
 
-    async def update_progress(self, task_id: str, progress: dict[str, Any]) -> None:
-        await self._update(task_id, {"progress": dict(progress)})
-        await self.append_event(task_id, "progress", progress)
+    async def renew_execution(self, task_id: str, lease_token: str, lease_timeout_seconds: int) -> bool:
+        return await self._update_execution(
+            task_id,
+            lease_token,
+            {"lease_expires_at": utcnow() + timedelta(seconds=lease_timeout_seconds)},
+        )
+
+    async def update_progress(self, task_id: str, lease_token: str, progress: dict[str, Any]) -> bool:
+        updated = await self._update_execution(
+            task_id,
+            lease_token,
+            {"progress": dict(progress)},
+        )
+        if updated:
+            await self.append_event(task_id, "progress", progress)
+        return updated
 
     async def append_event(self, task_id: str, event_type: str, payload: dict[str, Any]) -> None:
         async with self._session_factory() as session:
@@ -165,12 +234,13 @@ class SQLiteTaskStore:
                 await session.execute(delete(TaskEventModel).where(TaskEventModel.id.in_(stale_event_ids)))
             await session.commit()
 
-    async def mark_done(self, task_id: str, result: TaskResult | None = None) -> None:
+    async def mark_done(self, task_id: str, result: TaskResult | None = None, lease_token: str | None = None) -> bool:
         task_result = result or TaskResult()
-        await self._update(
+        updated = await self._update(
             task_id,
             {
                 "status": TaskStatus.DONE.value,
+                "lease_token": None,
                 "lease_expires_at": None,
                 "last_error": None,
                 "stop_reason": task_result.stop_reason.value,
@@ -179,8 +249,11 @@ class SQLiteTaskStore:
                 "result_metadata": dict(task_result.metadata),
                 "completed_at": utcnow(),
             },
+            lease_token=lease_token,
         )
-        await self.append_event(task_id, "done", {"stop_reason": task_result.stop_reason.value})
+        if updated:
+            await self.append_event(task_id, "done", {"stop_reason": task_result.stop_reason.value})
+        return updated
 
     async def mark_failed(
         self,
@@ -189,11 +262,13 @@ class SQLiteTaskStore:
         stop_reason: TaskStopReason = TaskStopReason.WORKER_ERROR,
         status: TaskStatus = TaskStatus.FAILED,
         metadata: dict[str, Any] | None = None,
-    ) -> None:
-        await self._update(
+        lease_token: str | None = None,
+    ) -> bool:
+        updated = await self._update(
             task_id,
             {
                 "status": status.value,
+                "lease_token": None,
                 "lease_expires_at": None,
                 "last_error": error,
                 "stop_reason": stop_reason.value,
@@ -201,8 +276,11 @@ class SQLiteTaskStore:
                 "result_metadata": dict(metadata or {}),
                 "completed_at": utcnow(),
             },
+            lease_token=lease_token,
         )
-        await self.append_event(task_id, status.value, {"stop_reason": stop_reason.value})
+        if updated:
+            await self.append_event(task_id, status.value, {"stop_reason": stop_reason.value})
+        return updated
 
     async def mark_cancelled(self, task_id: str) -> bool:
         async with self._session_factory() as session:
@@ -215,6 +293,7 @@ class SQLiteTaskStore:
             }:
                 return False
             record.status = TaskStatus.CANCELLED.value
+            record.lease_token = None
             record.lease_expires_at = None
             record.stop_reason = TaskStopReason.CANCELLED.value
             record.completed_at = utcnow()
@@ -231,6 +310,7 @@ class SQLiteTaskStore:
             retry_count = record.retry_count + 1
             status = TaskStatus.FAILED if retry_count >= record.max_attempts else TaskStatus.PENDING
             record.status = status.value
+            record.lease_token = None
             record.retry_count = retry_count
             record.lease_expires_at = None
             record.last_error = error
@@ -307,12 +387,21 @@ class SQLiteTaskStore:
                 for row in rows
             ]
 
-    async def _update(self, task_id: str, values: dict[str, Any]) -> None:
+    async def _update(self, task_id: str, values: dict[str, Any], lease_token: str | None = None) -> bool:
         payload = dict(values)
         payload.setdefault("updated_at", utcnow())
         async with self._session_factory() as session:
-            await session.execute(update(TaskModel).where(TaskModel.id == task_id).values(**payload))
+            statement = update(TaskModel).where(TaskModel.id == task_id)
+            if lease_token is not None:
+                statement = statement.where(TaskModel.lease_token == lease_token).where(
+                    TaskModel.status == TaskStatus.RUNNING.value
+                )
+            result = await session.execute(statement.values(**payload))
             await session.commit()
+            return bool(getattr(result, "rowcount", 0))
+
+    async def _update_execution(self, task_id: str, lease_token: str, values: dict[str, Any]) -> bool:
+        return await self._update(task_id, values, lease_token=lease_token)
 
     def _model_from_request(self, task: TaskRequest) -> TaskModel:
         return TaskModel(
@@ -370,6 +459,7 @@ def _to_domain(model: TaskModel) -> TaskRecord:
         retry_count=model.retry_count,
         max_attempts=model.max_attempts,
         last_error=model.last_error,
+        lease_token=model.lease_token,
         lease_expires_at=_as_utc(model.lease_expires_at),
         created_at=_as_utc(model.created_at),
         updated_at=_as_utc(model.updated_at),

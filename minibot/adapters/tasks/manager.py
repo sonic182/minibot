@@ -24,6 +24,10 @@ _MAX_RETRYABLE_ATTEMPTS = 2
 _SUPERVISOR_GRACE_SECONDS = 10
 
 
+class _LeaseLostError(Exception):
+    pass
+
+
 @dataclass
 class Task:
     task_id: str
@@ -35,6 +39,7 @@ class Task:
     ack_cb: Callable[[], Any]
     nack_cb: Callable[[], Any]
     semaphore: asyncio.Semaphore
+    lease_token: str | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -44,9 +49,11 @@ class TaskManager:
         event_bus: EventBus,
         worker_timeout_seconds: float,
         task_repository: TaskRepository | None = None,
+        lease_timeout_seconds: int | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._worker_timeout_seconds = worker_timeout_seconds
+        self._lease_timeout_seconds = lease_timeout_seconds or max(1, int(worker_timeout_seconds))
         self._task_repository = task_repository
         self._tasks: dict[str, Task] = {}
         self._logger = logging.getLogger("minibot.tasks")
@@ -63,12 +70,31 @@ class TaskManager:
         user_id: int | None,
         owner_id: str = "primary",
         limits: TaskLimits | None = None,
+        expected_status: TaskStatus | None = None,
+        lease_token: str | None = None,
+        replace_lease: bool = False,
         ack_cb: Callable[[], Any],
         nack_cb: Callable[[], Any],
         semaphore: asyncio.Semaphore,
-    ) -> None:
+    ) -> bool:
         resolved_limits = limits or TaskLimits(timeout_seconds=max(1, int(self._worker_timeout_seconds)))
         supervisor_timeout_seconds = limits.timeout_seconds if limits is not None else self._worker_timeout_seconds
+        execution_lease_timeout = max(
+            self._lease_timeout_seconds,
+            int(resolved_limits.timeout_seconds) + _SUPERVISOR_GRACE_SECONDS + 1,
+        )
+        active_lease_token: str | None = None
+        if self._task_repository is not None:
+            active_lease_token = await self._task_repository.claim_execution(
+                task_id,
+                expected_status=expected_status or TaskStatus.PENDING,
+                lease_token=lease_token,
+                lease_timeout_seconds=execution_lease_timeout,
+                replace_lease=replace_lease,
+            )
+            if active_lease_token is None:
+                semaphore.release()
+                return False
         payload = {
             "task_id": task_id,
             "channel": channel,
@@ -82,7 +108,18 @@ class TaskManager:
         }
         mainpipe, proc = self._start_worker_process()
         reader = asyncio.create_task(
-            self._reader(task_id, mainpipe, proc, ack_cb, nack_cb, semaphore, payload, supervisor_timeout_seconds)
+            self._reader(
+                task_id,
+                mainpipe,
+                proc,
+                ack_cb,
+                nack_cb,
+                semaphore,
+                payload,
+                supervisor_timeout_seconds,
+                active_lease_token,
+                execution_lease_timeout,
+            )
         )
         self._tasks[task_id] = Task(
             task_id=task_id,
@@ -94,13 +131,13 @@ class TaskManager:
             ack_cb=ack_cb,
             nack_cb=nack_cb,
             semaphore=semaphore,
+            lease_token=active_lease_token,
         )
-        if self._task_repository is not None:
-            await self._task_repository.mark_running(task_id)
         self._logger.info(
             "task spawned",
             extra={"task_id": task_id, "timeout_seconds": resolved_limits.timeout_seconds},
         )
+        return True
 
     def _start_worker_process(self) -> tuple[Any, Process]:
         mainpipe, chpipe = aioduplex()
@@ -141,12 +178,20 @@ class TaskManager:
         semaphore: asyncio.Semaphore,
         payload: dict[str, Any],
         supervisor_timeout_seconds: float,
+        lease_token: str | None,
+        lease_timeout_seconds: int,
     ) -> None:
         loop = asyncio.get_running_loop()
         attempt = 1
         try:
             while True:
-                result = await self._read_worker_result(mainpipe, payload, supervisor_timeout_seconds)
+                result = await self._read_worker_result(
+                    mainpipe,
+                    payload,
+                    supervisor_timeout_seconds,
+                    lease_token,
+                    lease_timeout_seconds,
+                )
                 await loop.run_in_executor(None, proc.join)
                 metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
                 if result.get("status") == TaskStatus.DONE.value:
@@ -157,9 +202,13 @@ class TaskManager:
                         metadata=metadata,
                         stop_reason=TaskStopReason.COMPLETED,
                     )
-                    if self._task_repository is not None:
-                        await self._task_repository.mark_done(task_id, task_result)
+                    persisted = True
+                    if self._task_repository is not None and lease_token is not None:
+                        persisted = await self._task_repository.mark_done(task_id, task_result, lease_token)
                     await ack_cb()
+                    if not persisted:
+                        self._logger.warning("discarded stale task result", extra={"task_id": task_id})
+                        return
                     await self._publish_attachments(payload, attachments, metadata.get("managed_files_root"))
                     await self._publish_result(payload, task_result)
                     self._logger.info("task completed", extra={"task_id": task_id, "attempts": attempt})
@@ -168,11 +217,19 @@ class TaskManager:
                 retryable = bool(metadata.get("retryable")) and attempt < _MAX_RETRYABLE_ATTEMPTS
                 if retryable:
                     retry_after_seconds = _coerce_retry_after_seconds(metadata.get("retry_after_seconds"))
-                    if self._task_repository is not None:
-                        await self._task_repository.update_progress(
+                    if self._task_repository is not None and lease_token is not None:
+                        renewed = await self._task_repository.renew_execution(
+                            task_id, lease_token, lease_timeout_seconds
+                        )
+                        if not renewed:
+                            raise _LeaseLostError
+                        updated = await self._task_repository.update_progress(
                             task_id,
+                            lease_token,
                             {"phase": "retrying", "attempt": attempt, "retry_after_seconds": retry_after_seconds},
                         )
+                        if not updated:
+                            raise _LeaseLostError
                     await self._publish_status(
                         payload=payload,
                         text=f"La tarea asíncrona alcanzó un rate limit. Reintentando en {retry_after_seconds}s.",
@@ -185,15 +242,32 @@ class TaskManager:
                     )
                     attempt += 1
                     await asyncio.sleep(retry_after_seconds)
+                    if self._task_repository is not None and lease_token is not None:
+                        renewed = await self._task_repository.renew_execution(
+                            task_id, lease_token, lease_timeout_seconds
+                        )
+                        if not renewed:
+                            raise _LeaseLostError
                     mainpipe, proc = self._start_worker_process()
                     continue
 
                 status = _status_from_result(result)
                 stop_reason = _stop_reason_from_result(result)
                 error = str(result.get("error") or "task worker failed")
-                if self._task_repository is not None:
-                    await self._task_repository.mark_failed(task_id, error, stop_reason, status, metadata)
+                persisted = True
+                if self._task_repository is not None and lease_token is not None:
+                    persisted = await self._task_repository.mark_failed(
+                        task_id,
+                        error,
+                        stop_reason,
+                        status,
+                        metadata,
+                        lease_token,
+                    )
                 await ack_cb()
+                if not persisted:
+                    self._logger.warning("discarded stale task failure", extra={"task_id": task_id})
+                    return
                 await self._publish_status(
                     payload=payload,
                     text=_failure_text(status, stop_reason),
@@ -212,19 +286,28 @@ class TaskManager:
             self._logger.warning("task supervisor timed out", extra={"task_id": task_id})
             proc.terminate()
             await loop.run_in_executor(None, proc.join)
-            if self._task_repository is not None:
-                await self._task_repository.mark_failed(
+            persisted = True
+            if self._task_repository is not None and lease_token is not None:
+                persisted = await self._task_repository.mark_failed(
                     task_id,
                     "task worker exceeded the supervisor timeout",
                     TaskStopReason.TIMEOUT,
                     TaskStatus.TIMED_OUT,
+                    lease_token=lease_token,
                 )
             await ack_cb()
+            if not persisted:
+                return
             await self._publish_status(
                 payload=payload,
                 text="La tarea asíncrona excedió el tiempo límite y fue cancelada.",
                 metadata={"task_id": task_id, "source": "task_worker", "status": TaskStatus.TIMED_OUT.value},
             )
+        except _LeaseLostError:
+            self._logger.warning("task execution lease lost", extra={"task_id": task_id})
+            proc.terminate()
+            await loop.run_in_executor(None, proc.join)
+            await ack_cb()
         except asyncio.CancelledError:
             self._logger.info("task cancelled", extra={"task_id": task_id})
             proc.terminate()
@@ -242,6 +325,8 @@ class TaskManager:
         mainpipe: Any,
         payload: dict[str, Any],
         timeout_seconds: float,
+        lease_token: str | None,
+        lease_timeout_seconds: int,
     ) -> dict[str, Any]:
         loop = asyncio.get_running_loop()
         grace_seconds = _SUPERVISOR_GRACE_SECONDS if timeout_seconds >= 1 else 0
@@ -261,8 +346,15 @@ class TaskManager:
                     return {"status": TaskStatus.FAILED.value, "error": "worker returned invalid JSON"}
                 if event.get("type") == "progress":
                     progress = event.get("progress")
-                    if self._task_repository is not None and isinstance(progress, dict):
-                        await self._task_repository.update_progress(str(payload["task_id"]), progress)
+                    if self._task_repository is not None and lease_token is not None and isinstance(progress, dict):
+                        task_id = str(payload["task_id"])
+                        renewed = await self._task_repository.renew_execution(
+                            task_id, lease_token, lease_timeout_seconds
+                        )
+                        if not renewed:
+                            raise _LeaseLostError
+                        if not await self._task_repository.update_progress(task_id, lease_token, progress):
+                            raise _LeaseLostError
                     continue
                 if event.get("type") == "result":
                     return event

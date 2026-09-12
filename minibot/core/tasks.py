@@ -68,6 +68,7 @@ class TaskRecord:
     retry_count: int = 0
     max_attempts: int = 3
     last_error: str | None = None
+    lease_token: str | None = None
     lease_expires_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -89,13 +90,23 @@ class TaskRepository(Protocol):
 
     async def list(self, *, owner_id: str, statuses: list[TaskStatus] | None, limit: int) -> list[TaskRecord]: ...
 
-    async def mark_running(self, task_id: str) -> None: ...
+    async def claim_execution(
+        self,
+        task_id: str,
+        *,
+        expected_status: TaskStatus,
+        lease_token: str | None,
+        lease_timeout_seconds: int,
+        replace_lease: bool = False,
+    ) -> str | None: ...
 
-    async def update_progress(self, task_id: str, progress: dict[str, Any]) -> None: ...
+    async def renew_execution(self, task_id: str, lease_token: str, lease_timeout_seconds: int) -> bool: ...
+
+    async def update_progress(self, task_id: str, lease_token: str, progress: dict[str, Any]) -> bool: ...
 
     async def append_event(self, task_id: str, event_type: str, payload: dict[str, Any]) -> None: ...
 
-    async def mark_done(self, task_id: str, result: TaskResult) -> None: ...
+    async def mark_done(self, task_id: str, result: TaskResult, lease_token: str | None = None) -> bool: ...
 
     async def mark_failed(
         self,
@@ -104,7 +115,8 @@ class TaskRepository(Protocol):
         stop_reason: TaskStopReason = TaskStopReason.WORKER_ERROR,
         status: TaskStatus = TaskStatus.FAILED,
         metadata: dict[str, Any] | None = None,
-    ) -> None: ...
+        lease_token: str | None = None,
+    ) -> bool: ...
 
     async def mark_cancelled(self, task_id: str) -> bool: ...
 

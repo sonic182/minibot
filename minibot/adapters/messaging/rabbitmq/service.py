@@ -119,13 +119,17 @@ class RabbitMQConsumerService:
             await self._task_repository.create(request)
             stored = await self._task_repository.get(request.task_id, request.owner_id)
         if stored is not None and stored.status in {
-            TaskStatus.LEASED,
-            TaskStatus.RUNNING,
             TaskStatus.DONE,
             TaskStatus.FAILED,
             TaskStatus.CANCELLED,
             TaskStatus.TIMED_OUT,
         }:
+            await message.ack()
+            return
+        replace_lease = (
+            stored is not None and stored.status in {TaskStatus.LEASED, TaskStatus.RUNNING} and message.redelivered
+        )
+        if stored is not None and stored.status in {TaskStatus.LEASED, TaskStatus.RUNNING} and not replace_lease:
             await message.ack()
             return
 
@@ -138,7 +142,7 @@ class RabbitMQConsumerService:
 
         if self._task_manager is not None:
             try:
-                await self._task_manager.spawn(
+                started = await self._task_manager.spawn(
                     task_id=request.task_id,
                     channel=request.channel,
                     prompt=request.prompt,
@@ -148,10 +152,15 @@ class RabbitMQConsumerService:
                     user_id=request.user_id,
                     owner_id=request.owner_id,
                     limits=request.limits,
+                    expected_status=stored.status if stored is not None else TaskStatus.PENDING,
+                    lease_token=stored.lease_token if stored is not None else None,
+                    replace_lease=replace_lease,
                     ack_cb=ack_cb,
                     nack_cb=nack_cb,
                     semaphore=self._semaphore,
                 )
+                if started is False:
+                    await message.ack()
             except Exception as exc:  # noqa: BLE001
                 self._semaphore.release()
                 self._logger.exception("failed to spawn task worker", exc_info=exc, extra={"task_id": task_id})
