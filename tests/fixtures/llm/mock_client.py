@@ -2,28 +2,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Any
 
 from minibot.core.agent_runtime import ToolResult
 from minibot.core.agents import AgentSpec
 from minibot.llm.provider_factory import LLMCompletionStep, LLMGeneration, ToolExecutionRecord
 from minibot.llm.tools.base import ToolBinding, ToolContext
-
-
-@dataclass
-class _MockToolCall:
-    id: str
-    type: str
-    function: dict[str, Any] | None = None
-    name: str | None = None
-    input: dict[str, Any] | None = None
-
-
-@dataclass
-class _MockMessage:
-    content: Any
-    tool_calls: list[_MockToolCall] | None = None
+from tests.fixtures.llm.fakes import FakeMessage as _MockMessage
+from tests.fixtures.llm.fakes import FakeToolCall as _MockToolCall
 
 
 class ScriptedLLMClient:

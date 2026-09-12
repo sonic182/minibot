@@ -113,24 +113,51 @@ class _FakeSettings:
     orchestration = _Orchestration()
 
 
+class _StubHandlerBase:
+    def __init__(self, *args, **kwargs) -> None:
+        del args, kwargs
+
+
+@contextlib.asynccontextmanager
+async def _running_dispatcher(
+    monkeypatch: pytest.MonkeyPatch,
+    handler_cls: type,
+    *,
+    pending_store: object | None = None,
+    event_types: tuple[type, ...] | None = None,
+):
+    from minibot.app import dispatcher as dispatcher_module
+
+    _patch_container(monkeypatch, dispatcher_module, handler_cls, pending_store=pending_store)
+    bus = EventBus()
+    subscription = bus.subscribe(types=event_types)
+    dispatcher = dispatcher_module.Dispatcher(bus)
+    await dispatcher.start()
+    try:
+        yield bus, subscription
+    finally:
+        await subscription.close()
+        await dispatcher.stop()
+
+
 def _message_event(text: str) -> MessageEvent:
     return MessageEvent(
         message=ChannelMessage(channel="telegram", user_id=1, chat_id=1, message_id=1, text=text),
     )
 
 
+async def _next_outbound(subscription) -> OutboundEvent | None:
+    async for event in subscription:
+        if isinstance(event, OutboundEvent):
+            return event
+    return None
+
+
 async def _wait_outbound_messages(subscription, count: int, timeout: float = 0.6) -> list[OutboundEvent]:
     results: list[OutboundEvent] = []
-
-    async def _read_once() -> OutboundEvent | None:
-        async for event in subscription:
-            if isinstance(event, OutboundEvent):
-                return event
-        return None
-
     try:
         while len(results) < count:
-            event = await asyncio.wait_for(_read_once(), timeout=timeout)
+            event = await asyncio.wait_for(_next_outbound(subscription), timeout=timeout)
             if event is None:
                 break
             results.append(event)
@@ -140,55 +167,31 @@ async def _wait_outbound_messages(subscription, count: int, timeout: float = 0.6
 
 
 async def _wait_outbound(subscription, timeout: float = 0.4) -> OutboundEvent | None:
-    async def _read() -> OutboundEvent | None:
-        async for event in subscription:
-            if isinstance(event, OutboundEvent):
-                return event
-        return None
-
     try:
-        return await asyncio.wait_for(_read(), timeout=timeout)
+        return await asyncio.wait_for(_next_outbound(subscription), timeout=timeout)
     except TimeoutError:
         return None
 
 
 @pytest.mark.asyncio
 async def test_dispatcher_publishes_outbound_reply(monkeypatch: pytest.MonkeyPatch) -> None:
-    from minibot.app import dispatcher as dispatcher_module
-
-    class _StubHandler:
-        def __init__(self, *args, **kwargs) -> None:
-            del args, kwargs
-
+    class _StubHandler(_StubHandlerBase):
         async def handle(self, event: MessageEvent) -> ChannelResponse:
             return ChannelResponse(
                 channel="telegram", chat_id=1, text=f"ok:{event.message.text}", metadata={"should_reply": True}
             )
 
-    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
-
-    bus = EventBus()
-    subscription = bus.subscribe()
-    dispatcher = dispatcher_module.Dispatcher(bus)
-    await dispatcher.start()
-    await bus.publish(_message_event("hello"))
-
-    outbound = await _wait_outbound(subscription)
+    async with _running_dispatcher(monkeypatch, _StubHandler) as (bus, subscription):
+        await bus.publish(_message_event("hello"))
+        outbound = await _wait_outbound(subscription)
 
     assert outbound is not None
     assert outbound.response.text == "ok:hello"
-    await subscription.close()
-    await dispatcher.stop()
 
 
 @pytest.mark.asyncio
 async def test_dispatcher_skips_outbound_when_handler_marks_silent(monkeypatch: pytest.MonkeyPatch) -> None:
-    from minibot.app import dispatcher as dispatcher_module
-
-    class _StubHandler:
-        def __init__(self, *args, **kwargs) -> None:
-            del args, kwargs
-
+    class _StubHandler(_StubHandlerBase):
         async def handle(self, event: MessageEvent) -> ChannelResponse:
             return ChannelResponse(
                 channel="telegram",
@@ -197,31 +200,18 @@ async def test_dispatcher_skips_outbound_when_handler_marks_silent(monkeypatch: 
                 metadata={"should_reply": False},
             )
 
-    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
-
-    bus = EventBus()
-    subscription = bus.subscribe()
-    dispatcher = dispatcher_module.Dispatcher(bus)
-    await dispatcher.start()
-    await bus.publish(_message_event("hello"))
-
-    outbound = await _wait_outbound(subscription)
+    async with _running_dispatcher(monkeypatch, _StubHandler) as (bus, subscription):
+        await bus.publish(_message_event("hello"))
+        outbound = await _wait_outbound(subscription)
 
     assert outbound is None
-    await subscription.close()
-    await dispatcher.stop()
 
 
 @pytest.mark.asyncio
 async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from minibot.app import dispatcher as dispatcher_module
-
-    class _StubHandler:
-        def __init__(self, *args, **kwargs) -> None:
-            del args, kwargs
-
+    class _StubHandler(_StubHandlerBase):
         async def handle(self, event: MessageEvent) -> ChannelResponse:
             return ChannelResponse(channel="telegram", chat_id=1, text=f"ok:{event.message.text}")
 
@@ -229,30 +219,24 @@ async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
             del kwargs
             raise RuntimeError("provider timeout")
 
-    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
-
-    bus = EventBus()
-    subscription = bus.subscribe()
-    dispatcher = dispatcher_module.Dispatcher(bus)
-    await dispatcher.start()
-    await bus.publish(
-        OutboundFormatRepairEvent(
-            response=ChannelResponse(
-                channel="telegram",
+    async with _running_dispatcher(monkeypatch, _StubHandler) as (bus, subscription):
+        await bus.publish(
+            OutboundFormatRepairEvent(
+                response=ChannelResponse(
+                    channel="telegram",
+                    chat_id=1,
+                    text="bad markdown",
+                    render=RenderableResponse(kind="markdown", text="*bad"),
+                    metadata={"source_user_id": 1},
+                ),
+                parse_error="can't parse entities",
+                attempt=1,
                 chat_id=1,
-                text="bad markdown",
-                render=RenderableResponse(kind="markdown", text="*bad"),
-                metadata={"source_user_id": 1},
-            ),
-            parse_error="can't parse entities",
-            attempt=1,
-            chat_id=1,
-            channel="telegram",
-            user_id=1,
+                channel="telegram",
+                user_id=1,
+            )
         )
-    )
-
-    outbound = await _wait_outbound(subscription)
+        outbound = await _wait_outbound(subscription)
 
     assert outbound is not None
     assert outbound.response.text == "*bad"
@@ -260,81 +244,48 @@ async def test_dispatcher_publishes_plain_fallback_when_format_repair_fails(
     assert outbound.response.render.kind == "text"
     assert outbound.response.metadata["format_repair_failed"] is True
     assert "provider timeout" in outbound.response.metadata["format_repair_error"]
-    await subscription.close()
-    await dispatcher.stop()
 
 
 @pytest.mark.asyncio
 async def test_dispatcher_marks_and_clears_pending_turn_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    from minibot.app import dispatcher as dispatcher_module
-
-    class _StubHandler:
-        def __init__(self, *args, **kwargs) -> None:
-            del args, kwargs
-
+    class _StubHandler(_StubHandlerBase):
         async def handle(self, event: MessageEvent) -> ChannelResponse:
             return ChannelResponse(
                 channel="telegram", chat_id=1, text=f"ok:{event.message.text}", metadata={"should_reply": True}
             )
 
     pending_store = _FakePendingTurnStore()
-    _patch_container(monkeypatch, dispatcher_module, _StubHandler, pending_store=pending_store)
-
-    bus = EventBus()
-    subscription = bus.subscribe()
-    dispatcher = dispatcher_module.Dispatcher(bus)
-    await dispatcher.start()
-    event = _message_event("hello")
-    await bus.publish(event)
-
-    outbound = await _wait_outbound(subscription)
+    async with _running_dispatcher(monkeypatch, _StubHandler, pending_store=pending_store) as (bus, subscription):
+        event = _message_event("hello")
+        await bus.publish(event)
+        outbound = await _wait_outbound(subscription)
 
     assert outbound is not None
-    await subscription.close()
-    await dispatcher.stop()
     assert pending_store.marked == [event.event_id]
     assert pending_store.cleared == [event.event_id]
 
 
 @pytest.mark.asyncio
 async def test_dispatcher_clears_pending_turn_after_handler_exception(monkeypatch: pytest.MonkeyPatch) -> None:
-    from minibot.app import dispatcher as dispatcher_module
-
-    class _StubHandler:
-        def __init__(self, *args, **kwargs) -> None:
-            del args, kwargs
-
+    class _StubHandler(_StubHandlerBase):
         async def handle(self, event: MessageEvent) -> ChannelResponse:
             del event
             raise RuntimeError("provider exploded")
 
     pending_store = _FakePendingTurnStore()
-    _patch_container(monkeypatch, dispatcher_module, _StubHandler, pending_store=pending_store)
-
-    bus = EventBus()
-    subscription = bus.subscribe()
-    dispatcher = dispatcher_module.Dispatcher(bus)
-    await dispatcher.start()
-    event = _message_event("hello")
-    await bus.publish(event)
-
-    outbound = await _wait_outbound(subscription)
+    async with _running_dispatcher(monkeypatch, _StubHandler, pending_store=pending_store) as (bus, subscription):
+        event = _message_event("hello")
+        await bus.publish(event)
+        outbound = await _wait_outbound(subscription)
 
     assert outbound is None
-    await subscription.close()
-    await dispatcher.stop()
     assert pending_store.marked == [event.event_id]
     assert pending_store.cleared == [event.event_id]
 
 
 @pytest.mark.asyncio
 async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pytest.MonkeyPatch) -> None:
-    from minibot.app import dispatcher as dispatcher_module
-
-    class _StubHandler:
-        def __init__(self, *args, **kwargs) -> None:
-            del args, kwargs
-
+    class _StubHandler(_StubHandlerBase):
         async def handle(self, event: MessageEvent) -> ChannelResponse:
             return ChannelResponse(
                 channel="telegram",
@@ -346,15 +297,9 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
                 },
             )
 
-    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
-
-    bus = EventBus()
-    subscription = bus.subscribe()
-    dispatcher = dispatcher_module.Dispatcher(bus)
-    await dispatcher.start()
-    await bus.publish(_message_event("hello"))
-
-    outbound = await _wait_outbound_messages(subscription, 4)
+    async with _running_dispatcher(monkeypatch, _StubHandler) as (bus, subscription):
+        await bus.publish(_message_event("hello"))
+        outbound = await _wait_outbound_messages(subscription, 4)
 
     assert [event.response.text for event in outbound] == [
         "ok:hello",
@@ -362,19 +307,12 @@ async def test_dispatcher_publishes_compaction_update_messages(monkeypatch: pyte
         "done compacting",
         "compacted summary",
     ]
-    await subscription.close()
-    await dispatcher.stop()
 
 
 @pytest.mark.timeout(15)
 @pytest.mark.asyncio
 async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.MonkeyPatch) -> None:
-    from minibot.app import dispatcher as dispatcher_module
-
-    class _StubHandler:
-        def __init__(self, *args, **kwargs) -> None:
-            del args, kwargs
-
+    class _StubHandler(_StubHandlerBase):
         async def handle(self, event: MessageEvent) -> ChannelResponse:
             if event.message.text == "boom":
                 raise RuntimeError("handler exploded")
@@ -385,28 +323,23 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
                 metadata={"should_reply": True, "llm_provider": "openai", "llm_model": "gpt-4o-mini"},
             )
 
-    _patch_container(monkeypatch, dispatcher_module, _StubHandler)
+    event_types = (TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent, OutboundEvent)
+    async with _running_dispatcher(monkeypatch, _StubHandler, event_types=event_types) as (bus, subscription):
+        ok_event = _message_event("hello")
+        bad_event = _message_event("boom")
+        await bus.publish(ok_event)
+        await bus.publish(bad_event)
 
-    bus = EventBus()
-    subscription = bus.subscribe(types=(TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent, OutboundEvent))
-    dispatcher = dispatcher_module.Dispatcher(bus)
-    await dispatcher.start()
+        collected = []
 
-    ok_event = _message_event("hello")
-    bad_event = _message_event("boom")
-    await bus.publish(ok_event)
-    await bus.publish(bad_event)
+        async def _drain() -> None:
+            async for event in subscription:
+                collected.append(event)
+                if len(collected) == 5:
+                    break
 
-    collected = []
-
-    async def _drain() -> None:
-        async for event in subscription:
-            collected.append(event)
-            if len(collected) == 5:
-                break
-
-    with contextlib.suppress(TimeoutError):
-        await asyncio.wait_for(_drain(), timeout=1.0)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(_drain(), timeout=1.0)
 
     started = [e for e in collected if isinstance(e, TurnStartedEvent)]
     completed = [e for e in collected if isinstance(e, TurnCompletedEvent)]
@@ -424,6 +357,3 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
     # "completed" must mean delivered: the reply goes out before the turn is reported done.
     kinds = [type(e).__name__ for e in collected]
     assert kinds.index("OutboundEvent") < kinds.index("TurnCompletedEvent")
-
-    await subscription.close()
-    await dispatcher.stop()

@@ -1,100 +1,26 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from minibot.adapters.container.app_container import AppContainer
-from minibot.adapters.messaging.console.service import ConsoleService
-from minibot.app.dispatcher import Dispatcher
+from tests.fixtures.console_harness import run_console_turn as _run_console_turn
+from tests.fixtures.console_harness import write_agent
+from tests.fixtures.console_harness import write_config as _write_config
 from tests.fixtures.llm.mock_client import ScriptedLLMClient, ScriptedLLMFactory
 
 
-def _reset_container() -> None:
-    AppContainer._settings = None
-    AppContainer._logger = None
-    AppContainer._event_bus = None
-    AppContainer._memory_backend = None
-    AppContainer._kv_memory_backend = None
-    AppContainer._llm_client = None
-    AppContainer._llm_factory = None
-    AppContainer._agent_registry = None
-    AppContainer._prompt_store = None
-    AppContainer._prompt_service = None
+def _write_plain_config(tmp_path: Path, provider: str) -> Path:
+    return _write_config(tmp_path=tmp_path, provider=provider, db_name="test_console_minibot.db")
 
 
-def _write_config(tmp_path: Path, provider: str = "openai", with_agents: bool = False) -> Path:
-    config_path = tmp_path / "config.toml"
-    orchestration_lines = ""
-    if with_agents:
-        orchestration_lines = (
-            "\n[orchestration]\n"
-            f'directory = "{tmp_path / "agents"}"\n'
-            "default_timeout_seconds = 90\n"
-            'tool_ownership_mode = "shared"\n'
-        )
-    sqlite_url = f"sqlite+aiosqlite:///{(tmp_path / 'test_console_minibot.db').as_posix()}"
-    config_path.write_text(
-        "\n".join(
-            [
-                "[runtime]",
-                'log_level = "INFO"',
-                "",
-                "[channels.telegram]",
-                "enabled = false",
-                'bot_token = ""',
-                "",
-                "[llm]",
-                f'provider = "{provider}"',
-                'model = "gpt-4o-mini"',
-                'system_prompt = "You are Minibot, a helpful assistant."',
-                "",
-                f"[providers.{provider}]",
-                'api_key = "test-key"',
-                'base_url = "http://mock.local/v1"',
-                "",
-                "[memory]",
-                f'sqlite_url = "{sqlite_url}"',
-                "",
-                "[scheduler.prompts]",
-                "enabled = false",
-            ]
-        )
-        + orchestration_lines
-        + "\n",
-        encoding="utf-8",
+def _write_agents_config(tmp_path: Path, provider: str) -> Path:
+    return _write_config(
+        tmp_path=tmp_path,
+        provider=provider,
+        db_name="test_console_minibot.db",
+        orchestration_dir=tmp_path / "agents",
     )
-    return config_path
-
-
-async def _run_console_turn(
-    *,
-    config_path: Path,
-    llm_factory: ScriptedLLMFactory,
-    text: str,
-    chat_id: int,
-    user_id: int,
-):
-    _reset_container()
-    AppContainer.configure(config_path)
-    await AppContainer.initialize_storage()
-    bus = AppContainer.get_event_bus()
-    with (
-        patch.object(AppContainer, "get_llm_factory", return_value=llm_factory),
-        patch.object(AppContainer, "get_llm_client", return_value=llm_factory.create_default()),
-    ):
-        dispatcher = Dispatcher(bus)
-        console_service = ConsoleService(bus, chat_id=chat_id, user_id=user_id)
-        await dispatcher.start()
-        await console_service.start()
-        try:
-            await console_service.publish_user_message(text)
-            return await console_service.wait_for_response(3.0)
-        finally:
-            await console_service.stop()
-            await dispatcher.stop()
-            _reset_container()
 
 
 @pytest.mark.asyncio
@@ -108,7 +34,7 @@ async def test_console_functional_openai_chat_completion_flow(tmp_path: Path) ->
         }
     ]
     factory = ScriptedLLMFactory(default_client=default_client)
-    config_path = _write_config(tmp_path, provider="openai", with_agents=False)
+    config_path = _write_plain_config(tmp_path, provider="openai")
 
     response = await _run_console_turn(
         config_path=config_path,
@@ -134,7 +60,7 @@ async def test_console_functional_openai_responses_flow(tmp_path: Path) -> None:
         }
     ]
     factory = ScriptedLLMFactory(default_client=default_client)
-    config_path = _write_config(tmp_path, provider="openai_responses", with_agents=False)
+    config_path = _write_plain_config(tmp_path, provider="openai_responses")
 
     response = await _run_console_turn(
         config_path=config_path,
@@ -151,20 +77,11 @@ async def test_console_functional_openai_responses_flow(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> None:
-    agents_dir = tmp_path / "agents"
-    agents_dir.mkdir(parents=True, exist_ok=True)
-    (agents_dir / "worker.md").write_text(
-        (
-            "---\n"
-            "name: worker\n"
-            "description: test worker agent\n"
-            "mode: agent\n"
-            "model_provider: openai\n"
-            "model: gpt-4o-mini\n"
-            "---\n\n"
-            "You are worker agent."
-        ),
-        encoding="utf-8",
+    write_agent(
+        agents_dir=tmp_path / "agents",
+        name="worker",
+        description="test worker agent",
+        model_provider="openai",
     )
 
     default_client = ScriptedLLMClient(provider="openai")
@@ -195,7 +112,7 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
     ]
     factory = ScriptedLLMFactory(default_client=default_client, agent_clients={"worker": worker_client})
 
-    config_path = _write_config(tmp_path, provider="openai", with_agents=True)
+    config_path = _write_agents_config(tmp_path, provider="openai")
     response = await _run_console_turn(
         config_path=config_path,
         llm_factory=factory,
