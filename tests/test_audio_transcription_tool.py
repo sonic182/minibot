@@ -37,6 +37,7 @@ async def test_audio_transcription_tool_transcribes_with_metadata(
     audio_file.write_bytes(b"fake-audio")
     captured_init: dict[str, Any] = {}
     captured_transcribe: dict[str, Any] = {}
+    loader_calls: list[None] = []
 
     class _FakeWhisperModel:
         def __init__(self, model: str, *, device: str, compute_type: str) -> None:
@@ -52,7 +53,15 @@ async def test_audio_transcription_tool_transcribes_with_metadata(
                 _Segment(start=0.5, end=1.2, text="world"),
             ], _Info(language="en", language_probability=0.98, duration=1.2)
 
-    monkeypatch.setattr(AudioTranscriptionTool, "_load_whisper_model_class", staticmethod(lambda: _FakeWhisperModel))
+    def _load_whisper_model_class() -> type[_FakeWhisperModel]:
+        loader_calls.append(None)
+        return _FakeWhisperModel
+
+    monkeypatch.setattr(
+        AudioTranscriptionTool,
+        "_load_whisper_model_class",
+        staticmethod(_load_whisper_model_class),
+    )
     tool = AudioTranscriptionTool(
         config=AudioTranscriptionToolConfig(
             enabled=True,
@@ -65,6 +74,7 @@ async def test_audio_transcription_tool_transcribes_with_metadata(
         storage=storage,
     )
     binding = tool.bindings()[0]
+    assert loader_calls == []
 
     result = await binding.handler(
         {"path": "uploads/hello.wav", "language": "en", "task": "transcribe"},
@@ -85,6 +95,7 @@ async def test_audio_transcription_tool_transcribes_with_metadata(
     assert result["device"] == "cpu"
     assert result["compute_type"] == "int8"
     assert captured_init == {"model": "small", "device": "cpu", "compute_type": "int8"}
+    assert loader_calls == [None]
     assert captured_transcribe["path"] == str(audio_file)
     assert captured_transcribe["kwargs"] == {
         "beam_size": 3,
@@ -171,4 +182,5 @@ async def test_audio_transcription_tool_offloads_transcription_with_to_thread(
 
     assert result["ok"] is True
     assert result["text"] == "ok"
+    assert "_get_model" in to_thread_calls
     assert "_transcribe_sync" in to_thread_calls
