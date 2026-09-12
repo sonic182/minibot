@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] - 2026-09-12
 
 ### Added
 
@@ -27,10 +27,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Durable background tasks now use execution leases with token fencing: expired SQLite and redelivered
   RabbitMQ tasks are recovered at least once, stale workers cannot overwrite newer attempts, and terminal
   task records are purged by a dedicated retention service.
+- **Durable task results and retrieval** (#60). Terminal tasks persist their result — reply text,
+  attachments, metadata and a typed `stop_reason` — alongside step-level progress and a compact
+  `task_events` history, and the new `get_task` tool reads one record (with optional events) by
+  `task_id`. `list_tasks` gained `status`/`limit` filters and now reads persisted records instead of
+  only live process state, task statuses gained `running`, `retrying`, `cancelled` and `timed_out`,
+  and cancelling a persisted row that is no longer active marks it cancelled through the store.
+- **Per-task execution limits.** `spawn_task` accepts `timeout_seconds`, `max_steps` and
+  `max_tool_calls`, each bounded by the new `[tasks].worker_max_steps` / `worker_max_tool_calls`
+  ceilings (a positive integer or `"unlimited"`, the default). Hitting a limit stops the worker with a
+  typed `stop_reason` (`max_steps`, `max_tool_calls`, `timeout`, etc.) instead of an opaque failure.
+- **Reasoning capture beyond Responses providers, and live thinking events.** Reasoning returned
+  beside `content` under `reasoning` or `reasoning_content` is now collected and persisted, and a flat
+  `reasoning_effort` is sent to plain `/chat/completions` targets. A new `ReasoningEvent` is emitted
+  as soon as one provider step returns reasoning, before the turn finishes, so a channel can render
+  thinking while it is still running; the console TUI renders it live along with a redacted one-line
+  notice per tool call.
 
 ### Changed
 
-- `textual` is now a runtime dependency.
+- **Task defaults raised.** `[tasks].worker_timeout_seconds` 60 → 1800,
+  `[tasks.sqlite].lease_timeout_seconds` 300 → 2100 (now sized to the worker timeout plus a supervisor
+  grace), and `done_retention_seconds` 86400 → 2592000 (30 days) for terminal rows and their compact
+  event history. Existing SQLite task databases are migrated in place on startup, and
+  `config.example.toml` / `config.yolo.toml` are aligned (`config.yolo.toml` also sets
+  `reasoning_summary = "detailed"`).
+- `ToolCallEvent` carries a pre-redacted `detail` string instead of `argument_keys`, built by
+  `minibot/shared/tool_call_display.py` before the event is published so raw argument values (which can
+  hold credentials) never cross the event-bus boundary. Extension subscribers reading `argument_keys`
+  must switch to `detail`.
+- Task worker rate-limit retries are now detected from a typed `ProviderHTTPError` with status 429
+  instead of matching on error text, and use a fixed 30s delay.
+- The audio-transcription model is loaded lazily on first transcription, in a worker thread, instead
+  of at tool construction.
+- `textual` is now the direct console dependency; `rich` (still used by the plain console and pulled
+  in transitively by `textual`) is no longer declared directly.
 - `LLMClient.provider_capability_hints()` returns a tuple instead of a list.
 
 ### Fixed
@@ -47,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bash` description gained the `setsid cmd >log 2>&1 </dev/null &` pattern for long-lived
   processes, since redirecting inside a backgrounded compound command leaves the subshell holding
   the descriptors.
+- A turn that handed its work to a background task is no longer replayed as a pending turn after a
+  restart: `pending_turns` gains a `task_handoff_completed` flag, set when `spawn_task` enqueues, and
+  `list_pending` skips those rows. Existing tables are migrated in place.
 
 ## [0.12.0] - 2026-09-12
 
@@ -668,6 +702,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
+[0.13.0]: https://github.com/sonic182/minibot/compare/0.12.0..0.13.0
 [0.12.0]: https://github.com/sonic182/minibot/compare/0.11.0..0.12.0
 [0.11.0]: https://github.com/sonic182/minibot/compare/0.10.0..0.11.0
 [0.10.0]: https://github.com/sonic182/minibot/compare/0.9.0..0.10.0
