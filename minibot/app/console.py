@@ -11,7 +11,7 @@ from minibot.adapters.messaging.console.service import ConsoleService
 from minibot.app.dispatcher import Dispatcher
 from minibot.core.memory import MemoryEntry
 from minibot.shared.console_compat import CompatConsole, prompt_input
-from minibot.shared.utils import session_id_from_parts, summarize_items
+from minibot.shared.utils import session_identifier, summarize_items
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -100,7 +100,7 @@ async def run(
         if use_tui:
             from minibot.adapters.messaging.console.tui import ConsoleTui
 
-            history = await _load_console_history(chat_id=chat_id, user_id=user_id)
+            history = await _load_console_history(chat_id=chat_id)
             await ConsoleTui(
                 console_service,
                 timeout_seconds=effective_timeout_seconds,
@@ -156,9 +156,9 @@ def main(argv: list[str] | None = None) -> None:
         return
 
 
-async def _load_console_history(*, chat_id: int, user_id: int) -> list[MemoryEntry]:
+async def _load_console_history(*, chat_id: int) -> list[MemoryEntry]:
     memory = AppContainer.get_memory_backend()
-    session_id = session_id_from_parts("console", chat_id, user_id)
+    session_id = session_identifier("console", chat_id)
     return list(await memory.get_history(session_id, limit=10))
 
 

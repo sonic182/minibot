@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -26,5 +29,11 @@ jobs:
       - name: Install dependencies
         run: poetry install --all-extras
 
+      - name: Run custom variable-name lint
+        run: poetry run pylint --disable=all --enable=disallowed-name minibot
+
       - name: Run tests
         run: poetry run pytest
+
+      - name: Check duplicate code
+        run: npx --yes jscpd@4.2.3 --config .jscpd.json

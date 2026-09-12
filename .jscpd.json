@@ -1,6 +1,6 @@
 {
-  "threshold": 1,
-  "reporters": ["consoleFull"],
+  "threshold": 3,
+  "reporters": ["ai"],
   "path": ["minibot", "tests"],
   "ignore": ["**/node_modules/**", "**/dist/**", "**/htmlcov/**", "**/data/**", "**/logs/**"],
   "format": ["python"],

@@ -32,6 +32,10 @@ Tool Surface
      - ``memory``
      - ``[tools.kv_memory]``
      - Save, retrieve, search, list, and delete persistent user notes.
+   * - Relation graph
+     - ``graph``
+     - ``minibot.extensions.tools.graph`` extension; ``graph`` extra
+     - Store and traverse typed, owner-scoped relationships between entities. See :doc:`graph`.
    * - Utility
      - ``current_datetime``
      - ``[tools.time]``; enabled by default
@@ -153,7 +157,7 @@ Tool Surface
    * - RAG / vector store
      - ``rag_index``, ``rag_search``, ``rag_list_metadata``, ``rag_delete``
      - ``[tools.rag]``
-     - Index text files into Qdrant and retrieve semantically relevant chunks.
+     - Index text files into the configured vector store and retrieve semantically relevant chunks.
 
 Runtime Notes
 -------------
@@ -165,12 +169,18 @@ Runtime Notes
   plus a managed-file pointer the agent can read back with ``grep``, ``code_read``, ``read_file``, or
   ``bash``. Tools in ``exclude_tools`` (``bash``, ``http_request``, ``pre_response`` by default) are
   skipped since they already manage their own output size.
-- ``[tools.audio_transcription]`` requires the ``stt`` extra: ``poetry install --extras stt``.
-- ``[tools.mcp]`` requires the ``mcp`` extra: ``poetry install --extras mcp``.
+- ``[tools.audio_transcription]`` requires the ``stt`` extra: ``pip install "minibot[stt]"``.
+- ``[tools.http_client]`` needs no extra: selectolax ships with the base install and renders HTML
+  as compact semantic text instead of plain-text extraction.
+- ``[tools.mcp]`` needs no extra: the MCP client is a JSON-RPC implementation with no third-party SDK.
 - ``[tasks]`` gates the task tools and the consumer. ``backend = "sqlite"`` (the recommended default)
   needs no broker and no extra; ``backend = "rabbitmq"`` requires the ``rabbitmq`` extra and a broker
   configured in ``[rabbitmq]``. See :doc:`architecture` for the trade-off.
-- ``[tools.rag]`` requires torch and sentence-transformers installed manually and a running Qdrant instance; see :doc:`rag`.
+- ``[tools.rag]`` requires the ``rag`` extra (``pip install "minibot[rag]"``) for PDF ingestion and
+  the SQLite backend's numpy, plus torch and sentence-transformers installed manually. The default
+  ``backend = "sqlite"`` needs no service; ``"qdrant"`` needs a running instance. See :doc:`rag`.
+- The relation graph requires the ``graph`` extra and the ``minibot.extensions.tools.graph``
+  extension. It persists typed edges in SQLite; see :doc:`graph`.
 - Hidden compatibility aliases are normalized at execution time; prefer the public names in the table.
 
 Implementation Reference

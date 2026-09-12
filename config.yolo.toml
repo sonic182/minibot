@@ -2,6 +2,8 @@
 log_level = "DEBUG"
 environment = "development"
 agent_timeout_seconds = 420
+# The single person this MiniBot assists; owns memory, graph, schedules and RAG everywhere.
+owner_id = "primary"
 
 [channels.telegram]
 enabled = true
@@ -20,7 +22,7 @@ allowed_document_mime_types = []
 
 [llm]
 provider = "openai_responses"
-model = "gpt-5-mini"
+model = "gpt-5.6-luna"
 reasoning_effort = "high"
 http2 = true
 max_tool_iterations = 60
@@ -109,7 +111,6 @@ pool_size = 5
 echo = false
 default_limit = 20
 max_limit = 100
-default_owner_id = "primary"
 
 
 [tools.http_client]
@@ -265,7 +266,10 @@ preload_catalog = true
 
 [tools.rag]
 enabled = true
-qdrant_url = "http://minibot-qdrant:6333"
+backend = "sqlite"
+sqlite_url = "sqlite+aiosqlite:///./data/rag.db"
+# Switch to backend = "qdrant" with qdrant_url = "http://minibot-qdrant:6333" after uncommenting
+# the minibot-qdrant service in docker-compose.yml.
 collection_name = "minibot_chunks"
 chunk_size_tokens = 96
 chunk_overlap_tokens = 20
@@ -304,3 +308,8 @@ broker_url = "amqp://guest:guest@minibot-rabbitmq:5672/"
 queue_name = "minibot.tasks.worker"
 exchange_name = "minibot.tasks"
 prefetch_count = 1
+
+# Relation-graph tool. Listed here rather than bundled so it also loads inside task workers.
+# Needs its extra installed: poetry install --extras graph
+[extensions]
+modules = ["minibot.extensions.tools.graph"]

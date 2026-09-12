@@ -7,7 +7,7 @@ def register(mb: ExtensionContext) -> None:
     if mb.entrypoint == "worker" or not mb.settings.tools.mcp.enabled:
         return
     from minibot.adapters.mcp.client import MCPClient
-    from minibot.llm.tools.mcp_bridge import MCPToolBridge
+    from minibot.llm.tools.mcp_bridge import build_mcp_bindings
 
     settings = mb.settings
     bindings = []
@@ -23,15 +23,18 @@ def register(mb: ExtensionContext) -> None:
             url=server.url,
             headers=server.headers,
         )
-        bridge = MCPToolBridge(
-            server_name=server.name,
-            client=client,
-            name_prefix=settings.tools.mcp.name_prefix,
-            enabled_tools=server.enabled_tools,
-            disabled_tools=server.disabled_tools,
-        )
         try:
-            bindings.extend(bridge.build_bindings())
+            bindings.extend(
+                build_mcp_bindings(
+                    mode=server.mode,
+                    server_name=server.name,
+                    client=client,
+                    name_prefix=settings.tools.mcp.name_prefix,
+                    enabled_tools=server.enabled_tools,
+                    disabled_tools=server.disabled_tools,
+                    catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
+                )
+            )
         except Exception as exc:  # noqa: BLE001
             mb.logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
     mb.add_tool(bindings)

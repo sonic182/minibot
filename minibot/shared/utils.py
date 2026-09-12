@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-from hashlib import sha1
 from typing import Any
 
 from minibot.core.channels import ChannelMessage
 
 
 def session_id_for(message: ChannelMessage) -> str:
-    return session_id_from_parts(message.channel, message.chat_id, message.user_id)
+    return session_identifier(message.channel, message.chat_id)
 
 
-def session_identifier(channel: str, chat_id: int | None, user_id: int | None) -> str:
-    return f"{channel}:{chat_id or user_id or 0}"
+def session_identifier(channel: str, chat_id: int | None) -> str:
+    """Readable key for one chat session.
 
-
-def session_id_from_parts(channel: str, chat_id: int | None, user_id: int | None) -> str:
-    identifier = session_identifier(channel, chat_id, user_id)
-    return sha1(identifier.encode()).hexdigest()
+    MiniBot assists a single owner, so a session identifies a conversation, never a person. The
+    sender's ``user_id`` is deliberately not part of the key: every chat belongs to the one owner
+    configured in ``[runtime].owner_id``.
+    """
+    return f"{channel}:{chat_id or 0}"
 
 
 def humanize_token_count(value: int) -> str:

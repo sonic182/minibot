@@ -34,7 +34,7 @@ from minibot.llm.tools.code_read import CodeReadTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
-from minibot.llm.tools.mcp_bridge import MCPToolBridge
+from minibot.llm.tools.mcp_bridge import build_mcp_bindings
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.time import CurrentTimeTool
@@ -128,7 +128,7 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             context=_coerce_context(task.get("context")),
         )
         tool_context = ToolContext(
-            owner_id=_resolve_owner_id(task),
+            owner_id=settings.runtime.owner_id,
             channel=channel,
             chat_id=_coerce_int(task.get("chat_id")),
             user_id=_coerce_int(task.get("user_id")),
@@ -214,14 +214,17 @@ def _build_worker_tools(
                 url=server.url,
                 headers=server.headers,
             )
-            bridge = MCPToolBridge(
-                server_name=server.name,
-                client=client,
-                name_prefix=settings.tools.mcp.name_prefix,
-                enabled_tools=server.enabled_tools,
-                disabled_tools=server.disabled_tools,
+            bindings.extend(
+                build_mcp_bindings(
+                    mode=server.mode,
+                    server_name=server.name,
+                    client=client,
+                    name_prefix=settings.tools.mcp.name_prefix,
+                    enabled_tools=server.enabled_tools,
+                    disabled_tools=server.disabled_tools,
+                    catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
+                )
             )
-            bindings.extend(bridge.build_bindings())
 
     bindings.extend(extension_tools)
     scoped = strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))
@@ -310,19 +313,8 @@ def _build_managed_storage(settings: Settings) -> LocalFileStorage | None:
     )
 
 
-def _resolve_owner_id(task: dict[str, Any]) -> str:
-    user_id = _coerce_int(task.get("user_id"))
-    if user_id is not None:
-        return str(user_id)
-    chat_id = _coerce_int(task.get("chat_id"))
-    if chat_id is not None:
-        return str(chat_id)
-    channel = str(task.get("channel") or "task")
-    return session_identifier(channel, chat_id, user_id)
-
-
 def _worker_prompt_cache_key(*, tool_context: ToolContext, task_id: str) -> str:
-    session_id = session_identifier(tool_context.channel or "task", tool_context.chat_id, tool_context.user_id)
+    session_id = session_identifier(tool_context.channel or "task", tool_context.chat_id)
     return f"{session_id}:task:{task_id or 'worker'}"
 
 

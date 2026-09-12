@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable, Sequence
 from fnmatch import fnmatch
 from typing import TypeVar
 
-_T = TypeVar("_T")
+ItemT = TypeVar("ItemT")
 
 
 def normalize_patterns(patterns: Iterable[str]) -> list[str]:
@@ -21,12 +21,12 @@ def validate_allow_deny(allow_patterns: Sequence[str], deny_patterns: Sequence[s
 
 
 def apply_allow_deny(  # noqa: UP047
-    items: Sequence[_T],
+    items: Sequence[ItemT],
     *,
-    name_of: Callable[[_T], str],
+    name_of: Callable[[ItemT], str],
     allow_patterns: Sequence[str],
     deny_patterns: Sequence[str],
-) -> list[_T]:
+) -> list[ItemT]:
     if allow_patterns and deny_patterns:
         raise ValueError("only one of allow_patterns or deny_patterns can be set")
     if allow_patterns:

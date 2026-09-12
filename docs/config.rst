@@ -81,6 +81,11 @@ Extensions
 
 Python extensions loaded at startup. See :doc:`extensions` for the full extension API.
 
+The optional relation graph is a built-in extension. After installing the ``graph`` extra, enable
+``minibot.extensions.tools.graph`` in ``[extensions].modules``. Its optional configuration accepts
+``sqlite_url`` (default ``sqlite+aiosqlite:///./data/graph.db``) and ``echo`` for SQL logging. See
+:doc:`graph`.
+
 .. autoclass:: minibot.adapters.config.schema.ExtensionsConfig
    :no-members:
 
@@ -96,7 +101,7 @@ Tool Configuration
      - Key options
    * - ``[tools.kv_memory]``
      - ``KeyValueMemoryConfig``
-     - ``enabled``, ``sqlite_url``, ``default_limit``, ``max_limit``, ``default_owner_id``
+     - ``enabled``, ``sqlite_url``, ``default_limit``, ``max_limit``
    * - ``[tools.http_client]``
      - ``HTTPClientToolConfig``
      - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings
@@ -153,13 +158,27 @@ Tool Configuration
      - ``enabled``, ``paths``, ``preload_catalog``
    * - ``[tools.rag]``
      - ``RagToolConfig``
-     - ``enabled``, ``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
+     - ``enabled``, ``backend``, ``sqlite_url``/``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
    * - ``[tasks]``
      - ``TasksConfig``
      - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``max_concurrent_workers``, ``sqlite``
    * - ``[tasks.sqlite]``
      - ``SqliteTaskQueueConfig``
      - ``sqlite_url``, ``poll_interval_seconds``, ``lease_timeout_seconds``, ``batch_size``, ``max_attempts``, ``done_retention_seconds``
+
+.. note::
+
+   Every owner-scoped tool — key/value memory, the relation graph, scheduled jobs and the RAG
+   corpus — is owned by ``[runtime].owner_id`` (default ``"primary"``). MiniBot assists exactly
+   one person, so that value is a constant of the deployment and is never derived from a message
+   or a task payload.
+
+   Conversation history is scoped separately, per channel and chat. One owner, many chat sessions
+   — a private Telegram chat, a group and the console do not share history, but they do share
+   that owner's memory, graph and schedules.
+
+   Multi-user or multi-tenant isolation is deliberately not supported; it would arrive as an
+   opt-in extension with its own identity model, not by reusing a channel's sender id.
 
 Tool Config Models
 ------------------
@@ -223,4 +242,3 @@ Tool Config Models
 
 .. autoclass:: minibot.adapters.config.schema.RagToolConfig
    :no-members:
-

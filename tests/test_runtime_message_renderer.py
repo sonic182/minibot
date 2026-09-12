@@ -1,25 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
-
-
-@dataclass
-class _FakeToolCall:
-    id: str
-    type: str = "function"
-    function: dict[str, Any] | None = None
-    name: str | None = None
-    input: dict[str, Any] | None = None
-
-
-@dataclass
-class _FakeMessage:
-    content: Any
-    tool_calls: list[_FakeToolCall] | None = None
+from tests.fixtures.llm.fakes import FakeMessage as _FakeMessage
+from tests.fixtures.llm.fakes import FakeToolCall as _FakeToolCall
 
 
 def test_renderer_renders_managed_file_reference_to_input_file_data_url(tmp_path) -> None:

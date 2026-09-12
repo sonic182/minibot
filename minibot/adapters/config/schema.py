@@ -94,11 +94,22 @@ class RuntimeConfig(BaseModel):
     - ``log_level`` — root log level (default: ``"INFO"``).
     - ``environment`` — label used in log context (default: ``"development"``).
     - ``agent_timeout_seconds`` — hard wall-clock timeout for any agent turn (min/default: ``120``).
+    - ``owner_id`` — the person this MiniBot assists (default: ``"primary"``).
+
+    MiniBot is a personal assistant for exactly one owner. ``owner_id`` is a constant of the
+    deployment: it is never derived from a message, a task payload or any caller-supplied field,
+    and it becomes ``ToolContext.owner_id`` for every tool call on every entrypoint. It therefore
+    owns long-term memory, the relation graph, scheduled jobs and the RAG corpus.
+
+    Conversations are scoped separately, per channel and chat. One owner, many chat sessions: a
+    private Telegram chat, a group and the console keep independent history while sharing that
+    one owner's long-term data.
     """
 
     log_level: str = "INFO"
     environment: str = "development"
     agent_timeout_seconds: int = Field(default=120, ge=120)
+    owner_id: str = Field(default="primary", min_length=1)
 
 
 class TelegramChannelConfig(BaseModel):
@@ -428,13 +439,36 @@ class MemoryConfig(BaseModel):
 
 
 class KeyValueMemoryConfig(BaseModel):
+    """Key/value memory tool settings. TOML section: ``[tools.kv_memory]``
+
+    - ``enabled`` — expose the ``memory`` tool (default: ``false``).
+    - ``sqlite_url`` — SQLite database URL for stored entries.
+    - ``pool_size`` / ``echo`` — SQLAlchemy engine settings.
+    - ``default_limit`` / ``max_limit`` — page size and hard cap for memory searches.
+
+    Entries are owned by ``[runtime].owner_id``, which is shared with every other owner-scoped
+    tool rather than configured here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = False
     sqlite_url: str = "sqlite+aiosqlite:///./data/kv_memory.db"
     pool_size: PositiveInt = 5
     echo: bool = False
     default_limit: PositiveInt = 20
     max_limit: PositiveInt = 100
-    default_owner_id: str | None = "primary"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_moved_owner_id(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "default_owner_id" in data:
+            raise ValueError(
+                "[tools.kv_memory].default_owner_id has moved to [runtime].owner_id, because it "
+                "owns the relation graph, scheduled jobs and the RAG corpus too, not just this "
+                "tool. Move the value there and delete this key."
+            )
+        return data
 
 
 class HTTPClientToolConfig(BaseModel):
@@ -559,6 +593,7 @@ class ApplyPatchToolConfig(BaseModel):
 
 class MCPServerConfig(BaseModel):
     name: str
+    mode: Literal["bridge", "lazy"] = "bridge"
     transport: Literal["stdio", "http"] = "stdio"
     command: str | None = None
     args: list[str] = Field(default_factory=list)
@@ -568,6 +603,7 @@ class MCPServerConfig(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
     enabled_tools: list[str] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
+    catalog_cache_ttl_seconds: Annotated[int, Field(ge=0)] = 60
 
 
 class MCPToolConfig(BaseModel):
@@ -637,7 +673,21 @@ class RagRerankConfig(BaseModel):
 
 
 class RagToolConfig(BaseModel):
+    """Retrieval-augmented generation settings. TOML section: ``[tools.rag]``
+
+    - ``backend`` — vector store: ``"sqlite"`` (default; no service required) or ``"qdrant"``.
+    - ``sqlite_url`` — SQLite database URL used when ``backend = "sqlite"``.
+    - ``qdrant_url`` — Qdrant HTTP endpoint used when ``backend = "qdrant"``.
+
+    The SQLite backend scores with an exact scan over the rows left after the scope filters, so it
+    trades throughput at very large corpora for exact recall under filtering; Qdrant keeps an
+    approximate index and is the option to reach for when the corpus outgrows that.
+    """
+
     enabled: bool = False
+    backend: Literal["sqlite", "qdrant"] = "sqlite"
+    sqlite_url: str = "sqlite+aiosqlite:///./data/rag.db"
+    echo: bool = False
     qdrant_url: str = "http://localhost:6333"
     collection_name: str = "minibot_chunks"
     embedding: RagEmbeddingConfig = RagEmbeddingConfig()

@@ -1,43 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import pytest
 
-from minibot.core.memory import MemoryEntry
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.chat_memory import ChatMemoryTool
-from minibot.shared.utils import session_id_from_parts
-
-
-class StubMemory:
-    def __init__(self) -> None:
-        self._store: dict[str, list[MemoryEntry]] = {}
-
-    async def append_history(self, session_id: str, role: str, content: str) -> None:
-        entry = MemoryEntry(role=role, content=content, created_at=datetime.now(UTC))
-        self._store.setdefault(session_id, []).append(entry)
-
-    async def get_history(self, session_id: str, limit: int | None = None) -> list[MemoryEntry]:
-        entries = self._store.get(session_id, [])
-        if limit is None:
-            return list(entries)
-        return entries[-limit:]
-
-    async def count_history(self, session_id: str) -> int:
-        return len(self._store.get(session_id, []))
-
-    async def trim_history(self, session_id: str, keep_latest: int) -> int:
-        entries = self._store.get(session_id, [])
-        if keep_latest <= 0:
-            removed = len(entries)
-            self._store[session_id] = []
-            return removed
-        if len(entries) <= keep_latest:
-            return 0
-        removed = len(entries) - keep_latest
-        self._store[session_id] = entries[-keep_latest:]
-        return removed
+from minibot.shared.utils import session_identifier
+from tests.fixtures.memory import InMemoryMemoryStore as StubMemory
 
 
 def _tool_map(memory: StubMemory) -> dict[str, ToolBinding]:
@@ -52,7 +20,7 @@ async def test_chat_memory_info_and_trim() -> None:
 
     info_binding = tools["chat_history_info"]
     trim_binding = tools["chat_history_trim"]
-    session_id = session_id_from_parts("telegram", 100, 1)
+    session_id = session_identifier("telegram", 100)
 
     await memory.append_history(session_id, "user", "one")
     await memory.append_history(session_id, "assistant", "two")

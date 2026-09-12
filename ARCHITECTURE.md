@@ -36,6 +36,7 @@ and emit outbound responses back to the active channel adapter.
 │   ├── main_agent_system.md
 │   └── policies/
 │       ├── delegation.md
+│       ├── graph.md
 │       └── tool_usage.md
 ├── Dockerfile
 ├── docker-compose.yml
@@ -84,6 +85,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   ├── agents.py
 │   │   ├── channels.py
 │   │   ├── events.py
+│   │   ├── graph.py
 │   │   ├── jobs.py
 │   │   ├── memory.py
 │   │   ├── skills.py
@@ -95,6 +97,8 @@ and emit outbound responses back to the active channel adapter.
 │   │   │   └── schema.py
 │   │   ├── container/
 │   │   │   └── app_container.py
+│   │   ├── graph/
+│   │   │   └── sqlite.py
 │   │   ├── sqlalchemy_utils.py
 │   │   ├── logging/
 │   │   │   └── setup.py
@@ -121,6 +125,8 @@ and emit outbound responses back to the active channel adapter.
 │   │   │   └── client.py
 │   │   ├── scheduler/
 │   │   │   └── sqlalchemy_prompt_store.py
+│   │   ├── vectors/
+│   │   │   └── sqlite.py
 │   │   └── tasks/
 │   │       ├── manager.py
 │   │       ├── sqlite_store.py   (SQLite queue store + producer)
@@ -146,7 +152,7 @@ and emit outbound responses back to the active channel adapter.
 │   │   │   ├── tool_loop_guard.py
 │   │   │   └── usage_parser.py
 │   │   └── tools/
-│   │       ├── descriptions/      (tool description .txt files, loaded at runtime)
+│   │       ├── *.txt              (tool descriptions, each beside the module that builds the tool)
 │   │       ├── action_dispatcher.py
 │   │       ├── agent_delegate.py
 │   │       ├── arg_utils.py
@@ -287,6 +293,7 @@ flowchart TD
 - `core/agent_runtime.py`: runtime state/message/part model (`AgentState`, `AgentMessage`, `MessagePart`, limits/directives).
 - `core/channels.py`: inbound/outbound DTOs (`ChannelMessage`, `ChannelResponse`) and message metadata; includes attachment payloads for multimodal inputs.
 - `core/events.py`: event types (`MessageEvent`, `OutboundEvent`, base event envelope).
+- `core/graph.py`: relation-graph storage protocol.
 - `core/memory.py`: transcript and KV memory protocols.
 - `core/jobs.py`: scheduled prompt entities, status enums, recurrence model, and repository protocol.
 - `core/skills.py`: immutable data structure representing a skill's metadata and content (`SkillSpec`).
@@ -371,6 +378,8 @@ Current notes:
   - `adapters/container/app_container.py` wires singleton-style service graph.
 - Shared SQLAlchemy utilities:
   - `adapters/sqlalchemy_utils.py` provides `resolve_sqlite_storage_path` and `ensure_parent_dir` used by memory and scheduler adapters.
+- Relation graph:
+  - `adapters/graph/sqlite.py` implements `core/graph.py::GraphStore` with SQLite persistence and query-local NetworkX traversal.
 - Logging:
   - `adapters/logging/setup.py` configures structured logfmt-friendly logging.
 - Messaging:
@@ -382,7 +391,8 @@ Current notes:
   - `adapters/messaging/telegram/incoming_media_collector.py` downloads and stores media attachments from Telegram messages.
   - `adapters/messaging/telegram/incoming_media_mapper.py` normalizes media-target paths and `IncomingFileRef` mapping for photo/document/audio/voice uploads.
   - `adapters/messaging/telegram/outbound_sender.py` sends text and file responses with formatting, link previews, and message splitting.
-- Qdrant:
+- Vector stores (both implement `core/vectors.py::VectorStore`, selected by `tools.rag.backend`):
+  - `adapters/vectors/sqlite.py` local SQLite store used by default; scope filters run in SQL and the similarity scan is exact.
   - `adapters/qdrant/client.py` async HTTP client for Qdrant vector database collections and operations.
 - Tasks:
   - `adapters/tasks/manager.py` manages subprocess-based task workers with lifecycle management and IPC.
@@ -414,7 +424,7 @@ Current notes:
 - `llm/services/tool_executor.py` + `tool_loop_guard.py`: tool call execution and repeated-loop safeguards/fallback payloads.
 - `llm/services/usage_parser.py` + `models.py`: usage/response parsing and typed return models (`LLMGeneration`, `LLMCompletionStep`, `LLMCompaction`).
 - `llm/tools/factory.py`: builds enabled tool bindings from settings.
-- `llm/tools/description_loader.py`: loads per-tool description strings from the `descriptions/` package at runtime.
+- `llm/tools/description_loader.py`: loads a tool's description from the `<name>.txt` sitting beside its module, in any package — so a tool that moves out of core takes its description with it.
 - `llm/tools/action_dispatcher.py`: routes tool actions to registered handlers by action type with error handling.
 - `llm/tools/*`: concrete tool schemas + handlers:
   - agent delegation (`fetch_agent_info`, `invoke_agent`),
@@ -428,6 +438,7 @@ Current notes:
   - file storage/workspace tools: `filesystem` action facade (list/glob/info/write/move/delete/send), `glob_files`, `read_file`, `code_read`, `grep`, `self_insert_artifact` (path confinement defaults to `tools.file_storage.root_dir` and can be relaxed with `allow_outside_root`),
   - audio transcription: `transcribe_audio` (backed by `audio_transcription_facade.py` for model lifecycle/transcription normalization),
   - RAG: `rag_index`, `rag_search`, `rag_delete`, `rag_list_metadata` (backed by `minibot/rag/` module and Qdrant),
+  - relation graph: `graph` (an opt-in extension backed by `core/graph.py::GraphStore`),
   - scheduler controls (`schedule` action facade, `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`, `delete_scheduled_prompt`),
   - skills: `list_skills`, `activate_skill` (via `skill_loader.py`),
   - tasks: `spawn_task`, `cancel_task`, `list_tasks` (subprocess workers via `adapters/tasks/`),

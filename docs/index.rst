@@ -22,7 +22,7 @@ What Minibot can do
 - **Skills and agents** — file-based skills plus specialist agents with delegation.
 - **Scheduling** — one-shot, interval, and cron prompts for Telegram automations.
 - **MCP integration** — connect external Model Context Protocol servers.
-- **RAG** — index documents into Qdrant for retrieval-augmented answers.
+- **RAG** — index documents into SQLite (or Qdrant) for retrieval-augmented answers.
 - **Browser automation** — Playwright-driven browsing and screenshots.
 - **Voice** — optional speech-to-text for audio messages.
 
@@ -62,4 +62,5 @@ Why self-host
    scheduler
    audio
    rag
+   graph
    security

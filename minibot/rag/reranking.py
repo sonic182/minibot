@@ -5,7 +5,7 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from sentence_transformers import CrossEncoder
+    from sentence_transformers import CrossEncoder  # pyright: ignore[reportMissingImports]
 
 _reranker_lock = threading.Lock()
 _reranker_instances: dict[str, CrossEncoder] = {}
@@ -13,12 +13,11 @@ _reranker_instances: dict[str, CrossEncoder] = {}
 
 def _get_reranker(model_name: str) -> Any:
     try:
-        from sentence_transformers import CrossEncoder
+        from sentence_transformers import CrossEncoder  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise RuntimeError(
-            "sentence-transformers CrossEncoder is required for RAG reranking. "
-            "Install the base project with `poetry install --all-extras`, then install "
-            "`torch` and `sentence-transformers` manually."
+            "sentence-transformers CrossEncoder is required for RAG reranking. Install `torch` and "
+            "`sentence-transformers` manually (see the RAG docs); Poetry does not manage them."
         ) from exc
 
     with _reranker_lock:
@@ -36,7 +35,10 @@ def _predict_scores_sync(model_name: str, query: str, texts: list[str]) -> list[
     reranker = _get_reranker(model_name)
     pairs = [(query, text) for text in texts]
     raw_scores = reranker.predict(pairs)
-    return [float(score) for score in raw_scores]
+    try:
+        return [float(score) for score in raw_scores]
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"RAG reranker returned non-numeric scores: {exc}") from exc
 
 
 async def rerank_texts(model_name: str, query: str, texts: list[str]) -> list[float]:

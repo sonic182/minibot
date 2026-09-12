@@ -5,7 +5,7 @@ import logging
 import uuid
 from typing import Any
 
-from minibot.adapters.qdrant.client import AsyncQdrantClient
+from minibot.core.vectors import VectorStore
 from minibot.rag.chunking import chunk_text
 from minibot.rag.embeddings import embed_text, embed_texts
 from minibot.rag.reranking import rerank_texts
@@ -15,7 +15,7 @@ _logger = logging.getLogger("minibot.rag.retrieval")
 
 async def index_document(
     *,
-    client: AsyncQdrantClient,
+    client: VectorStore,
     collection: str,
     document_id: str,
     text: str,
@@ -97,7 +97,7 @@ async def index_document(
 
 async def delete_document(
     *,
-    client: AsyncQdrantClient,
+    client: VectorStore,
     collection: str,
     document_id: str | None = None,
     user_id: str | None = None,
@@ -123,7 +123,7 @@ async def delete_document(
 
 async def retrieve_context(
     *,
-    client: AsyncQdrantClient,
+    client: VectorStore,
     collection: str,
     query: str,
     limit: int = 5,
@@ -160,11 +160,15 @@ async def retrieve_context(
         )
         return [
             {
-                "score": r["score"],
-                "text": r["payload"].get("text", ""),
-                "metadata": {k: v for k, v in r["payload"].items() if k != "text"},
+                "score": search_result["score"],
+                "text": search_result["payload"].get("text", ""),
+                "metadata": {
+                    metadata_key: metadata_value
+                    for metadata_key, metadata_value in search_result["payload"].items()
+                    if metadata_key != "text"
+                },
             }
-            for r in results
+            for search_result in results
         ]
 
     effective_final_limit = min(limit, rerank_max_results)
@@ -192,11 +196,15 @@ async def retrieve_context(
         )
         return [
             {
-                "score": r["score"],
-                "text": r["payload"].get("text", ""),
-                "metadata": {k: v for k, v in r["payload"].items() if k != "text"},
+                "score": search_result["score"],
+                "text": search_result["payload"].get("text", ""),
+                "metadata": {
+                    metadata_key: metadata_value
+                    for metadata_key, metadata_value in search_result["payload"].items()
+                    if metadata_key != "text"
+                },
             }
-            for r in results[:effective_final_limit]
+            for search_result in results[:effective_final_limit]
         ]
 
     texts = [result["payload"].get("text", "") for result in results]
@@ -216,7 +224,11 @@ async def retrieve_context(
             "score": rerank_score,
             "semantic_score": result["score"],
             "text": result["payload"].get("text", ""),
-            "metadata": {k: v for k, v in result["payload"].items() if k != "text"},
+            "metadata": {
+                metadata_key: metadata_value
+                for metadata_key, metadata_value in result["payload"].items()
+                if metadata_key != "text"
+            },
         }
         for result, rerank_score in ranked_pairs[:effective_final_limit]
     ]
@@ -224,7 +236,7 @@ async def retrieve_context(
 
 async def list_metadata_facets(
     *,
-    client: AsyncQdrantClient,
+    client: VectorStore,
     collection: str,
     limit: int = 10,
     document_id: str | None = None,

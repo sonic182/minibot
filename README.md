@@ -18,7 +18,7 @@ Top features
 - 💬 Telegram channel with chat/user allowlists, long-polling or webhook modes, and multimodal inputs.
 - 🧠 Provider support via [llm-async]: `openai`, `openai_responses`, `openrouter`, and more.
 - 🧰 Configurable tools: chat memory, KV notes, HTTP fetch, calculator, datetime, Python execution, Bash, patch-based editing (`apply_patch`), file storage, grep, speech-to-text, and MCP server bridges.
-- 🔎 RAG (optional): index local documents into Qdrant and retrieve semantically relevant chunks.
+- 🔎 RAG (optional): index local documents into SQLite (or Qdrant) and retrieve semantically relevant chunks.
 - ⏳ Async task workers: offload long-running jobs to a background queue (SQLite by default, optional RabbitMQ).
 - ⏰ Scheduled prompts (one-shot, fixed-interval, and cron recurrence) persisted in SQLite.
 - 🤝 Multi-agent orchestration with specialist agent definitions and skill packs.
@@ -67,14 +67,19 @@ Quick start
 
 ```bash
 pip install minibot
-# add extras as needed, e.g.: pip install "minibot[mcp,stt,rabbitmq]"
+# add extras as needed, e.g.: pip install "minibot[telegram,stt,rag,rabbitmq]"
 
 minibot configure   # interactive wizard, writes config.toml
 minibot              # start the daemon
 ```
 
-Extras: `mcp` (MCP server tools), `stt` (speech-to-text via faster-whisper), `rabbitmq` (RabbitMQ task
-queue backend — not needed with the default `sqlite` backend).
+Extras: `telegram` (aiogram + Telegram markdown rendering — the daemon needs it only when
+`[channels.telegram]` is enabled), `rag` (pypdf, PDF ingestion for the RAG tool), `stt`
+(speech-to-text via faster-whisper), `rabbitmq` (RabbitMQ task queue backend — not needed with the
+default `sqlite` backend). Compact HTML rendering in `http_request` uses selectolax, which ships
+with the base install.
+
+MCP needs no extra: the MCP client is a JSON-RPC implementation with no third-party SDK dependency.
 
 No Telegram bot yet? Run `minibot console` instead of `minibot` to chat with it in your terminal.
 
@@ -87,8 +92,9 @@ cp config.example.toml config.toml
 docker compose up -d
 ```
 
-`docker-compose.yml` builds the `minibot` image and starts Qdrant alongside it (used by the RAG tool);
-the RabbitMQ service is commented out and only needed if you set `[tasks].backend = "rabbitmq"`.
+`docker-compose.yml` builds and starts the `minibot` image. The Qdrant and RabbitMQ services are
+commented out — `[tools.rag].backend` and `[tasks].backend` both default to `"sqlite"` — and are
+only needed if you switch either to `"qdrant"` or `"rabbitmq"`.
 
 Demo
 ----

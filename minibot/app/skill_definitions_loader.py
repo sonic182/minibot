@@ -29,7 +29,7 @@ def load_skill_specs(paths: list[str] | None = None) -> list[SkillSpec]:
 
 def resolve_skill_discovery_paths(paths: list[str] | None = None) -> list[tuple[Path, bool]]:
     if paths:
-        return [(Path(p).expanduser().resolve(), True) for p in paths]
+        return [(Path(path).expanduser().resolve(), True) for path in paths]
     return _default_discovery_paths()
 
 
@@ -50,7 +50,7 @@ def _load_from_paths(resolved: list[tuple[Path, bool]]) -> list[SkillSpec]:
         if not base_path.exists() or not base_path.is_dir():
             continue
         try:
-            subdirs = sorted(p for p in base_path.iterdir() if p.is_dir())
+            subdirs = sorted(path for path in base_path.iterdir() if path.is_dir())
         except OSError as exc:
             logger.warning("could not list skills directory", extra={"path": str(base_path), "error": str(exc)})
             continue
@@ -91,7 +91,7 @@ def fingerprint_skill_paths(resolved: list[tuple[Path, bool]]) -> tuple[tuple[st
         if not base_path.exists() or not base_path.is_dir():
             continue
         try:
-            subdirs = sorted(p for p in base_path.iterdir() if p.is_dir())
+            subdirs = sorted(path for path in base_path.iterdir() if path.is_dir())
         except OSError as exc:
             logger.warning("could not list skills directory", extra={"path": str(base_path), "error": str(exc)})
             continue

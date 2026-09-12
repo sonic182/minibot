@@ -5,7 +5,7 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from sentence_transformers import SentenceTransformer
+    from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
 
 _model_lock = threading.Lock()
 _model_instance: SentenceTransformer | None = None
@@ -16,12 +16,11 @@ def _get_model(model_name: str, truncate_dim: int | None) -> Any:
     global _model_instance, _model_key  # noqa: PLW0603
 
     try:
-        from sentence_transformers import SentenceTransformer
+        from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise RuntimeError(
-            "sentence-transformers is required for RAG. "
-            "Install the base project with `poetry install --all-extras`, then install "
-            "`torch` and `sentence-transformers` manually."
+            "sentence-transformers is required for RAG embeddings. Install `torch` and "
+            "`sentence-transformers` manually (see the RAG docs); Poetry does not manage them."
         ) from exc
 
     model_key = (model_name, truncate_dim)
@@ -38,7 +37,7 @@ def _get_model(model_name: str, truncate_dim: int | None) -> Any:
 def _encode_sync(model_name: str, truncate_dim: int | None, texts: list[str]) -> list[list[float]]:
     model = _get_model(model_name, truncate_dim)
     vectors = model.encode(texts, normalize_embeddings=True)
-    return [v.tolist() for v in vectors]
+    return [embedding.tolist() for embedding in vectors]
 
 
 async def embed_texts(model_name: str, truncate_dim: int | None, texts: list[str]) -> list[list[float]]:

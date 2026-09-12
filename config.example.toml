@@ -5,6 +5,13 @@ log_level = "DEBUG"
 environment = "development"
 # E2E/research-heavy profile: increase agent timeout to reduce long-run failures.
 agent_timeout_seconds = 420
+# The person this MiniBot assists. MiniBot is a personal assistant for exactly one owner, so
+# this is a constant of the deployment: it is never derived from a message or a task payload.
+# It owns long-term memory, the relation graph, scheduled jobs and the RAG corpus, on every
+# entrypoint (daemon, console and task workers alike).
+# Chats are scoped separately: a private Telegram chat, a group and the console keep their own
+# conversation history while sharing this one owner's long-term data.
+owner_id = "primary"
 
 # Telegram adapter settings. Telegram is a bundled extension: it runs under the daemon,
 # never under `minibot console`. Any other `[channels.<name>]` section is passed through
@@ -36,7 +43,7 @@ allowed_document_mime_types = []
 # LLM provider and generation settings.
 [llm]
 provider = "openai_responses"
-model = "gpt-5-mini"
+model = "gpt-5.6-luna"
 # reasoning_effort = "medium"
 # Structured-output mode for the main/orchestrator agent:
 # Enable HTTP/2 for provider HTTP clients when supported (recommended for OpenAI Responses).
@@ -245,16 +252,21 @@ pool_size = 5
 echo = false
 default_limit = 20
 max_limit = 100
-default_owner_id = "primary"
 
 
-# Optional RAG (Retrieval-Augmented Generation) via Qdrant.
-# Requires `tools.file_storage.enabled = true`, a running Qdrant instance,
-# and manual `torch` + `sentence-transformers` installation.
-# Run Qdrant locally: ./qdrant/qdrant  (see qdrant/download_bin.sh)
+# Optional RAG (Retrieval-Augmented Generation).
+# Requires `tools.file_storage.enabled = true` and manual `torch` + `sentence-transformers`
+# installation. PDF ingestion and the sqlite backend's numpy additionally come from extras: rag.
+#
+# backend = "sqlite" keeps vectors in a local file and needs no extra service. Scoring is an exact
+# scan over the rows left after the scope filters, which is what a self-hosted corpus wants.
+# backend = "qdrant" is for corpora large enough to need an approximate index; it expects a running
+# Qdrant (docker compose up minibot-qdrant) or any instance you point `qdrant_url` at.
 [tools.rag]
 enabled = false
-qdrant_url = "http://localhost:6333"
+backend = "sqlite"
+sqlite_url = "sqlite+aiosqlite:///./data/rag.db"
+# qdrant_url = "http://localhost:6333"  # Only read when backend = "qdrant".
 collection_name = "minibot_chunks"
 chunk_size_tokens = 96
 chunk_overlap_tokens = 20
@@ -277,6 +289,8 @@ max_results = 7
 # Optional HTTP fetch tool.
 [tools.http_client]
 enabled = false
+# Compact HTML rendering uses selectolax, a core dependency. Without it, HTML responses fall
+# back to plain-text extraction.
 timeout_seconds = 30
 max_bytes = "16KB"
 # HTML-only parse budget: how much markup is decoded before it is compacted.
@@ -438,6 +452,9 @@ timeout_seconds = 30
 # Requires Node.js and npx on the host running MiniBot.
 # [[tools.mcp.servers]]
 # name = "playwright-cli"
+# "bridge" (default) exposes every remote tool at startup. "lazy" exposes a catalog
+# loader and generic caller instead, then fetches complete remote schemas on demand.
+# mode = "bridge"
 # transport = "stdio"
 # command = "npx"
 # Notice: if npx is not on PATH (for example with asdf), use "/home/myuser/.asdf/shims/npx".
@@ -465,6 +482,8 @@ timeout_seconds = 30
 # cwd = "."
 # enabled_tools = []
 # disabled_tools = []
+# # Lazy-mode catalog cache lifetime. Set to 0 to discover before every lazy call.
+# catalog_cache_ttl_seconds = 60
 
 # Agent Skills support (agentskills.io spec).
 # Skills are instruction packs discovered via list_skills and loaded via activate_skill.
@@ -537,3 +556,11 @@ modules = []
 # receives its own slice as mb.config.
 # [extensions.config.minibot_ext_demo]
 # greeting = "hola"
+
+# Relation-graph tool ("graph"): typed edges between entities, queried by traversal.
+# Ships with minibot but stays opt-in, so add it to modules above to enable it:
+#   modules = ["minibot.extensions.tools.graph"]
+# Needs the graph extra: poetry install --extras graph
+# Listing it here rather than bundling it is what makes the tool reach spawned task workers.
+# [extensions.config."minibot.extensions.tools.graph"]
+# sqlite_url = "sqlite+aiosqlite:///./data/graph.db"

@@ -66,7 +66,9 @@ def _write_e2e_config(
     text = _CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8")
     text = text.replace("[channels.telegram]\nenabled = true\n", "[channels.telegram]\nenabled = false\n")
     text = text.replace('provider = "openai_responses"\n', 'provider = "openai"\n')
-    text = text.replace('model = "gpt-5-mini"\n', 'model = "gpt-4o-mini"\n')
+    # Must track the model in config.example.toml; a stale literal here silently stops replacing,
+    # leaving the e2e run pointed at whatever the template ships instead of the pinned test model.
+    text = text.replace('model = "gpt-5.6-luna"\n', 'model = "gpt-4o-mini"\n')
     text = text.replace(
         '[providers.openai]\napi_key = ""\nbase_url = ""\n',
         (f'[providers.openai]\napi_key = "{os.environ["OPENAI_API_KEY"]}"\nbase_url = ""\n'),

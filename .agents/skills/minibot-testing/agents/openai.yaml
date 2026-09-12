@@ -1,0 +1,4 @@
+interface:
+  display_name: "Minibot Testing"
+  short_description: "Write concise pytest tests for Minibot."
+  default_prompt: "Use $minibot-testing to add or review Minibot tests with pytest fixtures, factories, MagicMock, and patch."

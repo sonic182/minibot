@@ -1,0 +1,19 @@
+Store and query typed relations between entities, so questions about how things connect can be answered by traversal instead of recall.
+
+Use it for relations: who works on what, which project uses which technology, what a task depends on, who prefers what. Query it before answering any question that depends on how two things connect, even when no memory entry mentions them together. Do not use it for prose, notes, amounts, dates, or anything said about a single thing on its own: those belong in the memory tool, and the same fact must never be recorded in both places. Never store credentials.
+
+When to save: link a relation without asking as soon as the user states one, then say in one short line what was linked, so a wrong edge can be corrected immediately. When the relation is inferred rather than stated by the user — read from a web page, returned by a tool, or concluded by you — propose it in one line at the end of the answer and link it only if the user agrees. Never interrupt an answer to ask. When the user says a relation is no longer true, unlink the old edge and link the new one in the same turn, so the change keeps its date instead of looking like it was always so.
+
+Nodes are typed string ids written as "type:id", lowercase ASCII with underscores between words and the type first: person:johanderson, project:ecosbox, tech:vue, device:work_laptop, task:deploy_v012. Ids are normalized on write, so accents, capitals and hyphens are folded for you, but a different word is a different node: search for the entity before linking it and reuse the id that comes back instead of coining a variant. This applies to the subject of the relation as much as the object, and the user is always the same person node. Relations are lowercase verb phrases read source-to-target: prefers, works_on, uses, runs, depends_on, owns, migration_target.
+
+Actions:
+- action=link: Create or update one edge. Requires source, rel, and target. Optional attrs, a JSON object string for extra fields. Calling it twice with the same triple updates the existing edge instead of duplicating it.
+- action=unlink: Close an edge that is no longer true. Requires source, rel, and target. The edge is kept as history, not deleted, so a superseded fact stays recoverable.
+- action=merge: Fix a duplicate node id. Requires source, the wrong id, and target, the canonical id to keep. Every edge mentioning the wrong id is rewritten to the right one. When both ids have the same live fact, the existing canonical edge wins and the duplicate is discarded; closed historical edges are only re-keyed, not deduplicated. Use it as soon as search shows two ids for the same thing.
+- action=neighbors: Expand around one node. Requires node. Optional direction ("out", "in", "both"; "in" walks edges backwards to find what points at the node), depth (hops, default 1), rel (only follow this relation), history, limit (edges and history, default 50), max_nodes (default 100). Returns a distance-ordered surrounding subgraph and `truncated=true` when max_nodes cuts it short.
+- action=path: Explain how two nodes are connected. Requires source and target. Optional max_depth (default 4). Edges are followed in both directions, so an indirect connection is found even when no single relation points from one to the other.
+- action=search: Find nodes and edges by text fragment, matched against source, rel, and target. Requires query. Use it to discover the exact id of an entity before traversing.
+
+The optional graph parameter selects a namespace and defaults to "memory". Keep everything about the user, their people, projects, and preferences in that default.
+
+Returns the matching edges as source, rel, target, with valid_from, and valid_to on closed ones. Edges with valid_to are no longer true and must be reported as past, never as current.

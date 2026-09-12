@@ -8,7 +8,7 @@ MiniBot uses a lightweight hexagonal layout:
 - ``adapters/`` — infrastructure (config, messaging, memory, scheduler, tasks)
 - ``llm/`` — provider factory and tool schemas/handlers
 - ``extensions/`` — bundled extensions that compose channels, integrations, services, and tools
-- ``rag/`` — chunking, embeddings, reranking, and retrieval for the Qdrant-backed RAG tools
+- ``rag/`` — chunking, embeddings, reranking, and retrieval, over whichever vector store ``[tools.rag].backend`` selects
 
 Dependency direction points inward: ``app``/``adapters`` depend on ``core``, never the reverse.
 
@@ -40,4 +40,5 @@ Subsystems
   subscribers, and services via an ``ExtensionContext``; see :doc:`extensions`.
 - **Tasks** — long-running work is queued to the ``[tasks]`` backend (SQLite by default) and
   drained by a background consumer service.
-- **RAG** — optional Qdrant-backed indexing and semantic retrieval; see :doc:`rag`.
+- **RAG** — optional indexing and semantic retrieval over the ``[tools.rag]`` backend (SQLite by
+  default, Qdrant optional); see :doc:`rag`.

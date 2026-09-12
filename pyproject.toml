@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minibot"
-version = "0.10.0"
+version = "0.12.0"
 description = "Self-hosted Telegram-first AI assistant with async tooling, memory, and scheduling."
 authors = ["sonic182 <johander1822@gmail.com>"]
 license = "MIT"
@@ -23,7 +23,8 @@ packages = [
   { include = "minibot" }
 ]
 include = [
-  { path = "minibot/llm/tools/descriptions/*.txt", format = ["sdist", "wheel"] },
+  # Tool descriptions live next to the module that builds the tool, wherever that module is.
+  { path = "minibot/**/*.txt", format = ["sdist", "wheel"] },
   { path = "config.example.toml", format = ["sdist", "wheel"] },
   { path = "config.yolo.toml", format = ["sdist", "wheel"] },
   { path = "prompts/**/*.md", format = ["sdist", "wheel"] },
@@ -33,15 +34,14 @@ include = [
 python = ">=3.12,<3.15"
 aiosonic = "^1.0.6"
 llm-async = "0.5.1"
-aiogram = "^3.24.0"
 pydantic = "^2.12.5"
 pydantic-settings = "^2.12.0"
 sqlalchemy = {extras = ["asyncio"], version = "^2.0.46"}
 aiosqlite = "^0.22.1"
 logfmter = "^0.0.11"
 rich = "^14.2.0"
-mcp = {version = ">=1.0.0,<2.0.0", optional = true}
-telegramify-markdown = "^0.5.4"
+aiogram = {version = "^3.24.0", optional = true}
+telegramify-markdown = {version = "^0.5.4", optional = true}
 faster-whisper = {version = ">=1.0.0,<2.0.0", optional = true}
 aio-pika = {version = ">=9.6.2", optional = true}
 aiopipe = ">=0.2.2"
@@ -50,11 +50,16 @@ aiopipe = ">=0.2.2"
 #   CPU: pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install sentence-transformers
 #   GPU: pip install torch && pip install sentence-transformers
 pypdf = {version = "^6.10.2", optional = true}
-croniter = "^6.2.4"
+# Used by the sqlite RAG backend for the similarity scan. Unlike torch it is a normal wheel, so
+# Poetry manages it.
+numpy = {version = "^2.0", optional = true}
 selectolax = "^0.4.11"
+croniter = "^6.2.4"
 tomlkit = "^0.15.1"
 prompt-toolkit = "^3.0.53"
 textual = "^8.2.8"
+# Graph tool backend. The python marker excludes 3.14.1 only because networkx itself does.
+networkx = {version = "^3.6.1", optional = true, python = ">=3.12,<3.14.1 || >3.14.1,<3.15"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"
@@ -63,6 +68,10 @@ pytest-cov = "^7.0.0"
 ruff = "^0.15.0"
 pyright = "^1.1.408"
 pytest-timeout = "^2.4.0"
+pylint = "^4.0.5"
+# Test fixtures under tests/fixtures/mcp run real MCP servers; the runtime MCP client is
+# a self-contained JSON-RPC implementation and needs no mcp package.
+mcp = ">=1.0.0,<2.0.0"
 
 
 [tool.poetry.group.docs.dependencies]
@@ -74,9 +83,11 @@ sphinxcontrib-mermaid = "^2.1.1"
 minibot = "minibot.app.daemon:main"
 
 [tool.poetry.extras]
-mcp = ["mcp"]
+telegram = ["aiogram", "telegramify-markdown"]
+rag = ["pypdf", "numpy"]
 stt = ["faster-whisper"]
 rabbitmq = ["aio-pika"]
+graph = ["networkx"]
 
 
 [build-system]
@@ -101,6 +112,7 @@ select = [
     "B",
     "T201",
 ]
+
 # Exclude certain directories from linting
 exclude = [
     ".bzr",
@@ -124,3 +136,6 @@ exclude = [
     "build",
     "dist"
 ]
+
+[tool.pylint.basic]
+bad-names-rgxs = ["^(?!(?:i|j|x|y|mb|on|ok)$).{1,2}$"]

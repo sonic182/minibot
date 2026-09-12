@@ -7,7 +7,7 @@ from minibot.llm.tools.arg_utils import optional_int, require_channel
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import empty_object_schema, integer_field, strict_object
-from minibot.shared.utils import session_id_from_parts
+from minibot.shared.utils import session_identifier
 
 
 class ChatMemoryTool:
@@ -69,7 +69,7 @@ class ChatMemoryTool:
 
     def _session_id(self, context: ToolContext) -> str:
         channel = require_channel(context)
-        return session_id_from_parts(channel, context.chat_id, context.user_id)
+        return session_identifier(channel, context.chat_id)
 
     @staticmethod
     def _to_non_negative_int(value: object, key: str) -> int:

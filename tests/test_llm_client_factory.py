@@ -39,6 +39,17 @@ def _agent_spec(
     )
 
 
+def _patch_fake_client(monkeypatch) -> list[LLMMConfig]:
+    created_configs: list[LLMMConfig] = []
+
+    class _FakeClient:
+        def __init__(self, config: LLMMConfig) -> None:
+            created_configs.append(config.model_copy(deep=True))
+
+    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+    return created_configs
+
+
 def test_create_for_agent_cache_key_includes_agent_overrides(monkeypatch) -> None:
     settings = Settings(
         llm=LLMMConfig(
@@ -49,14 +60,7 @@ def test_create_for_agent_cache_key_includes_agent_overrides(monkeypatch) -> Non
         )
     )
     factory = LLMClientFactory(settings)
-
-    created_configs: list[LLMMConfig] = []
-
-    class _FakeClient:
-        def __init__(self, config: LLMMConfig) -> None:
-            created_configs.append(config.model_copy(deep=True))
-
-    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+    created_configs = _patch_fake_client(monkeypatch)
 
     agent_a = _agent_spec(name="a", temperature=0.1)
     agent_b = _agent_spec(name="b", temperature=0.9)
@@ -82,13 +86,7 @@ def test_create_for_agent_provider_override_uses_provider_credentials(monkeypatc
     )
     factory = LLMClientFactory(settings)
 
-    created_configs: list[LLMMConfig] = []
-
-    class _FakeClient:
-        def __init__(self, config: LLMMConfig) -> None:
-            created_configs.append(config.model_copy(deep=True))
-
-    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+    created_configs = _patch_fake_client(monkeypatch)
 
     agent = _agent_spec(name="worker", model_provider="anthropic", model="claude-sonnet")
     factory.create_for_agent(agent)
@@ -109,13 +107,7 @@ def test_create_for_agent_openrouter_provider_overrides(monkeypatch) -> None:
     )
     factory = LLMClientFactory(settings)
 
-    created_configs: list[LLMMConfig] = []
-
-    class _FakeClient:
-        def __init__(self, config: LLMMConfig) -> None:
-            created_configs.append(config.model_copy(deep=True))
-
-    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+    created_configs = _patch_fake_client(monkeypatch)
 
     agent = _agent_spec(
         name="browser",
@@ -148,13 +140,7 @@ def test_create_for_agent_cache_key_includes_openrouter_provider_overrides(monke
     )
     factory = LLMClientFactory(settings)
 
-    created_configs: list[LLMMConfig] = []
-
-    class _FakeClient:
-        def __init__(self, config: LLMMConfig) -> None:
-            created_configs.append(config.model_copy(deep=True))
-
-    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+    created_configs = _patch_fake_client(monkeypatch)
 
     agent_a = _agent_spec(
         name="a",
@@ -191,13 +177,7 @@ def test_create_for_agent_openrouter_provider_overrides_merge_global(monkeypatch
     )
     factory = LLMClientFactory(settings)
 
-    created_configs: list[LLMMConfig] = []
-
-    class _FakeClient:
-        def __init__(self, config: LLMMConfig) -> None:
-            created_configs.append(config.model_copy(deep=True))
-
-    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+    created_configs = _patch_fake_client(monkeypatch)
 
     agent = _agent_spec(
         name="browser",
@@ -227,13 +207,7 @@ def test_factory_applies_distinct_responses_state_modes_for_main_and_agents(monk
     )
     factory = LLMClientFactory(settings)
 
-    created_configs: list[LLMMConfig] = []
-
-    class _FakeClient:
-        def __init__(self, config: LLMMConfig) -> None:
-            created_configs.append(config.model_copy(deep=True))
-
-    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+    created_configs = _patch_fake_client(monkeypatch)
 
     factory.create_default()
     factory.create_for_agent(_agent_spec(name="worker"))
@@ -255,13 +229,7 @@ def test_create_default_cache_key_includes_xai_config(monkeypatch) -> None:
     )
     factory = LLMClientFactory(settings)
 
-    created_configs: list[LLMMConfig] = []
-
-    class _FakeClient:
-        def __init__(self, config: LLMMConfig) -> None:
-            created_configs.append(config.model_copy(deep=True))
-
-    monkeypatch.setattr("minibot.app.llm_client_factory.LLMClient", _FakeClient)
+    created_configs = _patch_fake_client(monkeypatch)
 
     client_a = factory.create_default()
     settings.llm.xai.x_search_enabled = True

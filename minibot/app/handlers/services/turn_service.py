@@ -26,7 +26,7 @@ from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.shared.utils import session_id_for, session_id_from_parts
+from minibot.shared.utils import session_id_for, session_identifier
 
 
 class LLMTurnService:
@@ -36,7 +36,7 @@ class LLMTurnService:
         memory: MemoryBackend,
         llm_client: LLMClient,
         tools: Sequence[ToolBinding],
-        default_owner_id: str | None,
+        owner_id: str,
         max_history_messages: int | None,
         notify_compaction_updates: bool,
         tool_use_guardrail: ToolUseGuardrail,
@@ -53,7 +53,7 @@ class LLMTurnService:
         self._memory = memory
         self._llm_client = llm_client
         self._tools = list(tools)
-        self._default_owner_id = default_owner_id
+        self._owner_id = owner_id
         self._max_history_messages = max_history_messages
         self._notify_compaction_updates = notify_compaction_updates
         self._tool_use_guardrail = tool_use_guardrail
@@ -90,7 +90,7 @@ class LLMTurnService:
         message = event.message
         session_id = session_id_for(message)
         turn_total_tokens = 0
-        owner_id = self._resolve_owner_id(message)
+        owner_id = self._owner_id
         model_text, model_user_content = self._input_service.build_model_user_input(message)
         tool_context = ToolContext(
             owner_id=owner_id,
@@ -302,7 +302,7 @@ class LLMTurnService:
         user_id: int | None,
         attempt: int,
     ) -> ChannelResponse:
-        session_id = session_id_from_parts(channel, chat_id, user_id)
+        session_id = session_identifier(channel, chat_id)
         turn_total_tokens = 0
         history = list(await self._memory.get_history(session_id))
         system_prompt = self._prompt_service.compose_system_prompt(channel)
@@ -377,15 +377,6 @@ class LLMTurnService:
 
     def _use_previous_response_id(self) -> bool:
         return self._profile.is_responses_provider and self._profile.responses_state_mode == "previous_response_id"
-
-    def _resolve_owner_id(self, message: ChannelMessage) -> str:
-        if self._default_owner_id:
-            return self._default_owner_id
-        if message.user_id is not None:
-            return str(message.user_id)
-        if message.chat_id is not None:
-            return str(message.chat_id)
-        return session_id_for(message)
 
     async def _enforce_history_limit(self, session_id: str) -> None:
         if self._max_history_messages is None:
@@ -472,7 +463,7 @@ def build_llm_turn_service(
     memory: MemoryBackend,
     llm_client: LLMClient,
     tools: Sequence[ToolBinding] | None = None,
-    default_owner_id: str | None = None,
+    owner_id: str = "primary",
     max_history_messages: int | None = None,
     max_history_tokens: int | None = None,
     notify_compaction_updates: bool = False,
@@ -532,7 +523,7 @@ def build_llm_turn_service(
         memory=memory,
         llm_client=llm_client,
         tools=tool_bindings,
-        default_owner_id=default_owner_id,
+        owner_id=owner_id,
         max_history_messages=max_history_messages,
         notify_compaction_updates=notify_compaction_updates,
         tool_use_guardrail=tool_use_guardrail,
