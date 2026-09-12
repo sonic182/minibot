@@ -56,7 +56,7 @@ not in `policies/`.
 
 ## Caching
 
-All four loaders in `shared/prompt_loader.py` are `@lru_cache`'d on `prompts_dir`
+All three loaders in `shared/prompt_loader.py` are `@lru_cache`'d on `prompts_dir`
 (lines 7, 27, 44) — `load_channel_prompt`, `load_policy_prompts`, `load_compact_prompt`.
 
 **Prompt files are read once per process.** Editing a prompt file requires a restart. This is

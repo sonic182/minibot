@@ -26,9 +26,9 @@ Runtime Fragments
   attached, add a gated ``_<name>_fragment()`` method to
   ``minibot/app/handlers/services/prompt_service.py`` instead (see
   ``_skill_catalog_fragment`` for the pattern).
-- **Composition order**: base prompt → policy fragments → specialist roster → skill catalog
-  (when ``preload_catalog`` is on) → runtime capability status → channel fragment → environment
-  context → tool safety addenda.
+- **Composition order**: base prompt → policy fragments → specialist roster → skill guidance
+  (with a catalog snapshot when ``preload_catalog`` is on) → runtime capability status → channel
+  fragment → environment context → tool safety addenda.
 - **Prompts directory**: configure root folder with ``llm.prompts_dir`` (default: ``./prompts``).
 
 Shipped prompt files
