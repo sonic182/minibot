@@ -26,8 +26,8 @@ def register(mb: ExtensionContext) -> None:
     if mb.entrypoint == "worker" or not mb.settings.tasks.enabled or mb.settings.tasks.backend != "sqlite":
         return
     settings = mb.settings
-    manager = TaskManager(mb.event_bus, settings.tasks.worker_timeout_seconds)
     store = SQLiteTaskStore(settings.tasks.sqlite)
+    manager = TaskManager(mb.event_bus, settings.tasks.worker_timeout_seconds, store)
     producer = SQLiteTaskProducer(store)
     consumer = SQLiteTaskConsumerService(
         store=store,
@@ -39,6 +39,8 @@ def register(mb: ExtensionContext) -> None:
         TaskTools(
             producer=producer,
             task_manager=manager,
+            task_repository=store,
+            config=settings.tasks,
             agent_registry=AgentRegistry(load_agent_specs(settings.orchestration.directory)),
         ).bindings()
     )

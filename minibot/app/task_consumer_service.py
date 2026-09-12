@@ -87,7 +87,7 @@ class SQLiteTaskConsumerService:
         await self._semaphore.acquire()
 
         async def ack_cb() -> None:
-            await self._store.mark_done(request.task_id)
+            return None
 
         async def nack_cb() -> None:
             await self._store.retry_task(request.task_id, "redelivery requested")
@@ -101,6 +101,8 @@ class SQLiteTaskConsumerService:
                 context=request.context,
                 chat_id=request.chat_id,
                 user_id=request.user_id,
+                owner_id=request.owner_id,
+                limits=request.limits,
                 ack_cb=ack_cb,
                 nack_cb=nack_cb,
                 semaphore=self._semaphore,

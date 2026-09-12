@@ -86,6 +86,7 @@ def _normalize_for_annotation(value: Any, annotation: Any) -> Any:
 
 
 ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
+TaskLimitValue = PositiveInt | Literal["unlimited"]
 
 
 class RuntimeConfig(BaseModel):
@@ -771,15 +772,16 @@ class SqliteTaskQueueConfig(BaseModel):
     - ``batch_size`` — max tasks leased per poll cycle (default: ``4``).
     - ``max_attempts`` — redeliveries before a task is marked failed (default: ``3``). This is queue-level
       redelivery, distinct from the in-process provider rate-limit retry in ``adapters/tasks/manager.py``.
-    - ``done_retention_seconds`` — how long completed rows are kept before purging (default: ``86400``).
+    - ``done_retention_seconds`` — how long terminal task rows and their compact event history are kept before
+      purging (default: ``2592000``).
     """
 
     sqlite_url: str = "sqlite+aiosqlite:///./data/tasks.db"
     poll_interval_seconds: PositiveInt = 5
-    lease_timeout_seconds: PositiveInt = 300
+    lease_timeout_seconds: PositiveInt = 2100
     batch_size: PositiveInt = 4
     max_attempts: PositiveInt = 3
-    done_retention_seconds: PositiveInt = 86400
+    done_retention_seconds: PositiveInt = 2592000
     pool_size: PositiveInt = 5
     echo: bool = False
 
@@ -787,19 +789,23 @@ class SqliteTaskQueueConfig(BaseModel):
 class TasksConfig(BaseModel):
     """Async task system settings. TOML section: ``[tasks]``
 
-    Gates both the task consumer service and the ``spawn_task``/``cancel_task``/``list_tasks`` tools.
+    Gates both the task consumer service and the ``spawn_task``/``cancel_task``/``list_tasks``/``get_task`` tools.
 
     - ``enabled`` — enable the async task system (default: ``false``).
     - ``backend`` — queue backend: ``"sqlite"`` (default; no broker required) or
       ``"rabbitmq"`` (see ``[rabbitmq]``).
-    - ``worker_timeout_seconds`` — per-task processing timeout (default: ``60``).
+    - ``worker_timeout_seconds`` — hard per-task processing timeout (default: ``1800``).
+    - ``worker_max_steps`` — optional execution-step ceiling; ``"unlimited"`` disables it (default).
+    - ``worker_max_tool_calls`` — optional tool-call ceiling; ``"unlimited"`` disables it (default).
     - ``max_concurrent_workers`` — maximum parallel task handlers (default: ``4``).
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
     enabled: bool = False
     backend: Literal["rabbitmq", "sqlite"] = "sqlite"
-    worker_timeout_seconds: PositiveInt = 60
+    worker_timeout_seconds: PositiveInt = 1800
+    worker_max_steps: TaskLimitValue = "unlimited"
+    worker_max_tool_calls: TaskLimitValue = "unlimited"
     max_concurrent_workers: PositiveInt = 4
     sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
 
