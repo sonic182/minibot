@@ -107,8 +107,10 @@ If you change behavior, update the docs in the same PR:
 - `ARCHITECTURE.md` — new modules or changed wiring
 - `AGENTS.md` — only when a rule for working in the repo actually changes
 
-`docs/llms.txt` and `docs/llms-full.txt` are hand-written, not generated; update them if you
-add a docs page.
+`docs/llms.txt` and `docs/llms-full.txt` are not produced by the docs build — nothing
+regenerates them automatically, so they need updating deliberately when you add or rename a
+docs page. `tests/test_docs_llms_index.py` only checks that their links resolve, not that
+pages are covered.
 
 ## Commits and PR hygiene
 
