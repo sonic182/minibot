@@ -4101,4 +4101,4 @@ telegram = ["aiogram", "telegramify-markdown"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "ff68cdbd650cecb3ceae489b2d4a7dc9f5b92b1cd436991472ceb0f06f7933ac"
+content-hash = "a272ea02ac1f13b21bfbfdf1a82ec3c7903df332a750373705b5238afd6031ea"
