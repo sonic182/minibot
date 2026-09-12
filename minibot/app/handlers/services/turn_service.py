@@ -26,7 +26,7 @@ from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.shared.utils import session_id_for, session_id_from_parts
+from minibot.shared.utils import session_id_for, session_identifier
 
 
 class LLMTurnService:
@@ -298,7 +298,7 @@ class LLMTurnService:
         user_id: int | None,
         attempt: int,
     ) -> ChannelResponse:
-        session_id = session_id_from_parts(channel, chat_id)
+        session_id = session_identifier(channel, chat_id)
         turn_total_tokens = 0
         history = list(await self._memory.get_history(session_id))
         system_prompt = self._prompt_service.compose_system_prompt(channel)

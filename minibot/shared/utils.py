@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from hashlib import sha256
 from typing import Any
 
 from minibot.core.channels import ChannelMessage
 
 
 def session_id_for(message: ChannelMessage) -> str:
-    return session_id_from_parts(message.channel, message.chat_id)
+    return session_identifier(message.channel, message.chat_id)
 
 
 def session_identifier(channel: str, chat_id: int | None) -> str:
@@ -18,11 +17,6 @@ def session_identifier(channel: str, chat_id: int | None) -> str:
     configured in ``[runtime].owner_id``.
     """
     return f"{channel}:{chat_id or 0}"
-
-
-def session_id_from_parts(channel: str, chat_id: int | None) -> str:
-    identifier = session_identifier(channel, chat_id)
-    return sha256(identifier.encode()).hexdigest()
 
 
 def humanize_token_count(value: int) -> str:

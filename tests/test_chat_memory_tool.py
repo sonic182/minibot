@@ -4,7 +4,7 @@ import pytest
 
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.chat_memory import ChatMemoryTool
-from minibot.shared.utils import session_id_from_parts
+from minibot.shared.utils import session_identifier
 from tests.fixtures.memory import InMemoryMemoryStore as StubMemory
 
 
@@ -20,7 +20,7 @@ async def test_chat_memory_info_and_trim() -> None:
 
     info_binding = tools["chat_history_info"]
     trim_binding = tools["chat_history_trim"]
-    session_id = session_id_from_parts("telegram", 100)
+    session_id = session_identifier("telegram", 100)
 
     await memory.append_history(session_id, "user", "one")
     await memory.append_history(session_id, "assistant", "two")
