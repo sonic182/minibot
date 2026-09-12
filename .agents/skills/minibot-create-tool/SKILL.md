@@ -8,6 +8,10 @@ description: "Guided wizard for adding a new LLM tool to Minibot. Asks targeted 
 Guided wizard that collects tool requirements, picks the right integration path, then
 generates the files for that path.
 
+Start with the `minibot-dev` skill if you also need the architecture map, the wiring chain
+behind either path, or the project invariants (notably: tool names must be unique *after*
+alias canonicalization, and worker visibility is wired separately).
+
 ## Step 0 — Extension or core?
 
 There are two ways to add a tool; decide *before* collecting requirements and tell the

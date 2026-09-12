@@ -1,11 +1,13 @@
 ---
 name: python-hex-review
-description: Review and refactor Python code to preserve Minibot's mini hex architecture. Use when checking layer boundaries across `minibot.core`, `minibot.app`, `minibot.adapters`, `minibot.llm`, channel handlers, provider/tool integrations, async orchestration, dependency direction, or when a refactor risks moving logic into the wrong layer.
+description: Review and refactor Python code to preserve Minibot's mini hex architecture. Use when checking layer boundaries across `minibot.core`, `minibot.app`, `minibot.adapters` and `minibot.llm`, dependency direction, async orchestration, or when a refactor risks moving logic into the wrong layer.
 ---
 
 # Python Hex Review
 
 Review and refactor Minibot Python code without weakening its architecture.
+
+Start with the `minibot-dev` skill if you are *adding* something rather than reviewing it.
 
 Use this skill when the task involves:
 - reviewing Python changes for architectural regressions

@@ -19,7 +19,13 @@ Runtime Fragments
 - **Channel-specific**: place channel fragments at ``prompts/channels/<channel>.md``
   (e.g. ``prompts/channels/telegram.md``).
 - **Policy fragments**: add files under ``prompts/policies/*.md`` for cross-channel rules
-  (loaded in sorted order).
+  (loaded in sorted order). Every file in the directory is loaded **unconditionally** — the
+  loader globs the directory and never inspects which tools are attached. Prompt text such as
+  "applies when the ``graph`` tool is attached" is guidance addressed to the model, not a
+  condition the loader evaluates. For a fragment that must appear only when a given tool is
+  attached, add a gated ``_<name>_fragment()`` method to
+  ``minibot/app/handlers/services/prompt_service.py`` instead (see
+  ``_skill_catalog_fragment`` for the pattern).
 - **Composition order**: base prompt → policy fragments → specialist roster → skill catalog
   (when ``preload_catalog`` is on) → runtime capability status → channel fragment → environment
   context → tool safety addenda.
@@ -28,7 +34,7 @@ Runtime Fragments
 Shipped prompt files
 ---------------------
 
-The default ``./prompts`` tree ships six files, each playing one role in the composed
+The default ``./prompts`` tree ships seven files, each playing one role in the composed
 prompt (or the compaction pass):
 
 .. list-table::
@@ -40,6 +46,8 @@ prompt (or the compaction pass):
      - Base system prompt — persona and ground rules
    * - ``policies/delegation.md``
      - Cross-channel delegation policy
+   * - ``policies/graph.md``
+     - Cross-channel relation-graph vs durable-memory routing policy
    * - ``policies/tool_usage.md``
      - Cross-channel tool routing policy
    * - ``channels/telegram.md``
@@ -56,13 +64,16 @@ prompt (or the compaction pass):
    confirmed facts). Loaded as the base fragment via ``llm.system_prompt_file`` (default
    ``./prompts/main_agent_system.md``); startup fails fast if the file is missing or empty.
 
-``prompts/policies/delegation.md`` and ``prompts/policies/tool_usage.md``
+``prompts/policies/*.md``
    Cross-channel rules appended right after the base prompt, in alphabetical order,
-   regardless of the active channel.
+   regardless of the active channel and regardless of which tools are attached.
 
    - ``delegation.md`` — keep trivial requests local; prefer ``invoke_agent`` for multi-step
      specialist work; use ``fetch_agent_info`` when the roster description is not enough;
      continue locally when delegation is unavailable or fails.
+   - ``graph.md`` — decide between the relation ``graph`` and durable ``memory``: a fact naming
+     two things is an edge and belongs in the graph. Note this fragment ships even when the
+     ``graph`` tool is disabled; it relies on the model no-opping when the tool is absent.
    - ``tool_usage.md`` — route the model to the right tool: ``memory`` vs ``history``,
      ``apply_patch`` for existing-file edits vs ``filesystem`` for file management, reuse
      canonical path fields from tool output, absolute paths in yolo mode.
