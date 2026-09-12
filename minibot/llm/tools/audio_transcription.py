@@ -47,7 +47,7 @@ class AudioTranscriptionTool:
         self._facade = facade or AudioTranscriptionFacade(
             config=config,
             storage=storage,
-            whisper_model_class=self._load_whisper_model_class(),
+            whisper_model_class_loader=self._load_whisper_model_class,
         )
 
     def bindings(self) -> list[ToolBinding]:

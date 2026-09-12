@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from minibot.adapters.config.schema import AudioTranscriptionToolConfig
@@ -14,11 +15,11 @@ class AudioTranscriptionFacade:
         *,
         config: AudioTranscriptionToolConfig,
         storage: LocalFileStorage,
-        whisper_model_class: Any,
+        whisper_model_class_loader: Callable[[], Any],
     ) -> None:
         self._config = config
         self._storage = storage
-        self._whisper_model_class = whisper_model_class
+        self._whisper_model_class_loader = whisper_model_class_loader
         self._model: Any | None = None
         self._model_lock = threading.Lock()
 
@@ -30,7 +31,7 @@ class AudioTranscriptionFacade:
         task: str | None,
     ) -> dict[str, Any]:
         resolved_path = self._storage.resolve_existing_file(path)
-        model = self._get_model()
+        model = await asyncio.to_thread(self._get_model)
         options: dict[str, Any] = {
             "beam_size": self._config.beam_size,
             "vad_filter": self._config.vad_filter,
@@ -78,7 +79,8 @@ class AudioTranscriptionFacade:
             return self._model
         with self._model_lock:
             if self._model is None:
-                self._model = self._whisper_model_class(
+                whisper_model_class = self._whisper_model_class_loader()
+                self._model = whisper_model_class(
                     self._config.model,
                     device=self._config.device,
                     compute_type=self._config.compute_type,
