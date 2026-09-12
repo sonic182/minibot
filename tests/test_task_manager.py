@@ -9,7 +9,7 @@ import pytest
 
 from minibot.adapters.tasks.manager import TaskManager
 from minibot.app.event_bus import EventBus
-from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
+from minibot.core.events import OutboundEvent, OutboundFileEvent
 
 # ---------------------------------------------------------------------------
 # Fake pipe helpers
@@ -164,7 +164,7 @@ async def _spawn(
 
 
 @pytest.mark.asyncio
-async def test_reader_success_publishes_message_event() -> None:
+async def test_reader_success_publishes_direct_outbound_event() -> None:
     bus = EventBus()
     sub = bus.subscribe()
     manager = _make_manager(bus)
@@ -174,18 +174,17 @@ async def test_reader_success_publishes_message_event() -> None:
     await asyncio.wait_for(reader_task, timeout=1.0)
 
     event = await asyncio.wait_for(sub._queue.get(), timeout=2.0)
-    assert isinstance(event, MessageEvent)
-    assert event.message.text == "the answer"
-    assert event.message.channel == "console"
-    assert event.message.metadata["task_id"] == "t1"
-    assert event.message.metadata["source"] == "task_worker"
-    assert event.message.chat_id == 1
-    assert event.message.user_id == 2
+    assert isinstance(event, OutboundEvent)
+    assert event.response.text == "the answer"
+    assert event.response.channel == "console"
+    assert event.response.metadata["task_id"] == "t1"
+    assert event.response.metadata["source"] == "task_worker"
+    assert event.response.chat_id == 1
     await sub.close()
 
 
 @pytest.mark.asyncio
-async def test_reader_success_publishes_telegram_attachments_before_message() -> None:
+async def test_reader_success_publishes_telegram_attachments_before_result() -> None:
     bus = EventBus()
     sub = bus.subscribe()
     manager = _make_manager(bus)
@@ -204,7 +203,8 @@ async def test_reader_success_publishes_telegram_attachments_before_message() ->
     second_event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
     assert isinstance(first_event, OutboundFileEvent)
     assert first_event.response.file_path.endswith("data/files/browser/shot.png")
-    assert isinstance(second_event, MessageEvent)
+    assert isinstance(second_event, OutboundEvent)
+    assert second_event.response.text == "worker result"
     await sub.close()
 
 
@@ -225,9 +225,9 @@ async def test_reader_success_appends_attachment_paths_for_console() -> None:
     await asyncio.wait_for(reader_task, timeout=1.0)
 
     event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
-    assert isinstance(event, MessageEvent)
-    assert "Artifacts:" in event.message.text
-    assert "browser/shot.png" in event.message.text
+    assert isinstance(event, OutboundEvent)
+    assert "Artifacts:" in event.response.text
+    assert "browser/shot.png" in event.response.text
     await sub.close()
 
 
@@ -445,8 +445,8 @@ async def test_reader_retryable_worker_error_retries_then_succeeds(monkeypatch: 
         second_event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
         assert isinstance(first_event, OutboundEvent)
         assert "Reintentando en 1s" in first_event.response.text
-        assert isinstance(second_event, MessageEvent)
-        assert second_event.message.text == "done"
+        assert isinstance(second_event, OutboundEvent)
+        assert second_event.response.text == "done"
     ack_cb.assert_called_once()
     nack_cb.assert_not_called()
     await sub.close()

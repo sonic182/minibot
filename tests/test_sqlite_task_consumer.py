@@ -113,17 +113,17 @@ async def test_run_pending_leases_and_spawns(store: SQLiteTaskStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ack_callback_marks_the_row_done(store: SQLiteTaskStore) -> None:
+async def test_ack_callback_leaves_task_completion_to_the_manager(store: SQLiteTaskStore) -> None:
     await store.create(_request("task-1"))
     manager = _TaskManagerStub()
     await _consumer(store, manager).run_pending()
 
     await manager.spawned[0]["ack_cb"]()
 
-    done = await store.get("task-1")
-    assert done is not None
-    assert done.status == TaskStatus.DONE
-    assert done.lease_expires_at is None
+    leased = await store.get("task-1")
+    assert leased is not None
+    assert leased.status == TaskStatus.LEASED
+    assert leased.lease_expires_at is not None
 
 
 @pytest.mark.asyncio

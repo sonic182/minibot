@@ -18,6 +18,7 @@ class ToolContext:
     chat_id: int | None = None
     user_id: int | None = None
     turn_id: str | None = None
+    task_handoff_callback: Callable[[str], Awaitable[None]] | None = None
 
 
 ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[ToolResult | Any]]

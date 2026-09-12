@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from minibot.app.agent_registry import AgentRegistry
@@ -49,6 +49,7 @@ class LLMTurnService:
         recent_file_tracking_service: RecentFileTrackingService,
         logger: logging.Logger,
         runtime: AgentRuntime | None = None,
+        task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._memory = memory
         self._llm_client = llm_client
@@ -65,6 +66,7 @@ class LLMTurnService:
         self._compaction_service = compaction_service
         self._recent_file_tracking_service = recent_file_tracking_service
         self._logger = logger
+        self._task_handoff_callback = task_handoff_callback
         self._profile = LLMExecutionProfile.from_client(llm_client)
         self._runtime: AgentRuntime | None = None
         self._runtime_service: RuntimeOrchestrationService | None = None
@@ -98,6 +100,7 @@ class LLMTurnService:
             chat_id=message.chat_id,
             user_id=message.user_id,
             turn_id=event.event_id,
+            task_handoff_callback=self._task_handoff_callback,
         )
         if model_user_content is None and self._audio_auto_transcription_service is not None:
             auto_result = await self._audio_auto_transcription_service.transcribe_incoming_audio(
@@ -430,6 +433,7 @@ def build_llm_turn_service(
     agent_registry: AgentRegistry | None = None,
     skill_registry: SkillRegistry | None = None,
     preload_skill_catalog: bool = False,
+    task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> LLMTurnService:
     service_logger = logger or logging.getLogger("minibot.handler")
     tool_bindings = list(tools or [])
@@ -490,4 +494,5 @@ def build_llm_turn_service(
         recent_file_tracking_service=recent_file_tracking_service,
         logger=service_logger,
         runtime=runtime,
+        task_handoff_callback=task_handoff_callback,
     )

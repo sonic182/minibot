@@ -146,6 +146,12 @@ class TaskTools:
                 limits=limits,
             )
         )
+        if (
+            self._task_repository is not None
+            and context.task_handoff_callback is not None
+            and context.turn_id is not None
+        ):
+            await context.task_handoff_callback(context.turn_id)
         return {
             "task_id": task_id,
             "status": "queued",

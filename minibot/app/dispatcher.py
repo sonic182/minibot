@@ -88,6 +88,9 @@ class Dispatcher:
             enabled=auto_transcribe_enabled,
             max_duration_seconds=auto_transcribe_max_duration_seconds,
         )
+        task_handoff_callback = getattr(self._pending_turns, "mark_task_handoff", None)
+        if not callable(task_handoff_callback):
+            task_handoff_callback = None
         turn_service = build_llm_turn_service(
             memory=memory_backend,
             llm_client=llm_client,
@@ -104,6 +107,7 @@ class Dispatcher:
             agent_registry=agent_registry,
             skill_registry=skill_registry,
             preload_skill_catalog=settings.tools.skills.preload_catalog,
+            task_handoff_callback=task_handoff_callback,
         )
         self._handler = LLMMessageHandler(turn_service)
         self._logger = logging.getLogger("minibot.dispatcher")

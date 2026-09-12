@@ -140,7 +140,7 @@ async def test_retry_missing_task_returns_none(task_store: SQLiteTaskStore) -> N
 
 
 @pytest.mark.asyncio
-async def test_purge_done_only_removes_completed_rows(task_store: SQLiteTaskStore) -> None:
+async def test_purge_done_removes_terminal_rows(task_store: SQLiteTaskStore) -> None:
     for task_id in ("done-1", "pending-1", "failed-1"):
         await task_store.create(_request(task_id))
     await task_store.mark_done("done-1")
@@ -148,10 +148,10 @@ async def test_purge_done_only_removes_completed_rows(task_store: SQLiteTaskStor
 
     purged = await task_store.purge_done(_utcnow() + timedelta(seconds=1))
 
-    assert purged == 1
+    assert purged == 2
     assert await task_store.get("done-1") is None
     assert await task_store.get("pending-1") is not None
-    assert await task_store.get("failed-1") is not None
+    assert await task_store.get("failed-1") is None
 
 
 @pytest.mark.asyncio
