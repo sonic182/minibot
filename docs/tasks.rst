@@ -59,8 +59,11 @@ Statuses
 
 A task moves through ``pending``, ``leased``, ``running``, and a terminal state: ``done``,
 ``failed``, ``cancelled``, or ``timed_out``. A ``retrying`` task was redelivered after a failed
-attempt. Each record also carries a ``stop_reason`` (for example ``completed``, ``max_steps``,
-``max_tool_calls``, ``timeout``, or ``provider_error``) that explains why the worker stopped.
+attempt. These are the persisted, filterable states (``list_tasks`` accepts them); the
+``status = "queued"`` returned by ``spawn_task`` is only an immediate acknowledgement that the
+task was enqueued, not a stored state. Each record also carries a ``stop_reason`` (for example
+``completed``, ``max_steps``, ``max_tool_calls``, ``timeout``, or ``provider_error``) that
+explains why the worker stopped.
 
 Results and history
 -------------------
