@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
+from aiogram.enums import ChatAction
 from aiogram.types import Message as TelegramMessage
 
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
@@ -15,7 +16,16 @@ from minibot.adapters.messaging.telegram.incoming_media_collector import Telegra
 from minibot.adapters.messaging.telegram.outbound_sender import TelegramOutboundSender
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage
-from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
+from minibot.core.events import (
+    MessageEvent,
+    OutboundEvent,
+    OutboundFileEvent,
+    TurnCompletedEvent,
+    TurnFailedEvent,
+    TurnStartedEvent,
+)
+
+_TYPING_INTERVAL_SECONDS = 4
 
 
 class TelegramService:
@@ -53,7 +63,10 @@ class TelegramService:
         )
         self._poll_task: asyncio.Task[None] | None = None
         self._outgoing_task: asyncio.Task[None] | None = None
-        self._outgoing_subscription = event_bus.subscribe(types=(OutboundEvent, OutboundFileEvent))
+        self._typing_tasks: dict[str, asyncio.Task[None]] = {}
+        self._outgoing_subscription = event_bus.subscribe(
+            types=(OutboundEvent, OutboundFileEvent, TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent)
+        )
 
         self._dp.message.register(self._handle_message)
 
@@ -101,6 +114,14 @@ class TelegramService:
             await self._bot.send_message(chat_id=message.chat.id, text="I could not process the attachment you sent.")
             return
 
+        metadata: dict[str, object] = {
+            "username": getattr(message.from_user, "username", None),
+            "incoming_files": [entry.model_dump() for entry in incoming_files],
+            "incoming_media_errors": incoming_errors,
+        }
+        reply_metadata = _reply_metadata(message)
+        if reply_metadata is not None:
+            metadata["reply_to"] = reply_metadata
         channel_message = ChannelMessage(
             channel="telegram",
             user_id=message.from_user.id if message.from_user else None,
@@ -108,11 +129,7 @@ class TelegramService:
             message_id=message.message_id,
             text=text,
             attachments=[],
-            metadata={
-                "username": getattr(message.from_user, "username", None),
-                "incoming_files": [entry.model_dump() for entry in incoming_files],
-                "incoming_media_errors": incoming_errors,
-            },
+            metadata=metadata,
         )
         self._logger.info(
             "received message",
@@ -125,10 +142,35 @@ class TelegramService:
 
     async def _publish_outgoing(self) -> None:
         async for event in self._outgoing_subscription:
+            if isinstance(event, TurnStartedEvent) and event.channel == "telegram" and event.chat_id is not None:
+                self._start_typing(event.turn_id, event.chat_id)
+            if isinstance(event, (TurnCompletedEvent, TurnFailedEvent)) and event.channel == "telegram":
+                self._stop_typing(event.turn_id)
             if isinstance(event, OutboundEvent) and event.response.channel == "telegram":
                 await self._outbound_sender.send_text_response(event.response)
             if isinstance(event, OutboundFileEvent) and event.response.channel == "telegram":
                 await self._outbound_sender.send_file_response(event)
+
+    def _start_typing(self, turn_id: str, chat_id: int) -> None:
+        self._stop_typing(turn_id)
+        self._typing_tasks[turn_id] = asyncio.create_task(self._send_typing(turn_id, chat_id))
+
+    def _stop_typing(self, turn_id: str) -> None:
+        typing_task = self._typing_tasks.pop(turn_id, None)
+        if typing_task is not None:
+            typing_task.cancel()
+
+    async def _send_typing(self, turn_id: str, chat_id: int) -> None:
+        try:
+            while True:
+                await self._bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                await asyncio.sleep(_TYPING_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._logger.debug("telegram typing indicator failed", extra={"chat_id": chat_id}, exc_info=True)
+        finally:
+            self._typing_tasks.pop(turn_id, None)
 
     async def stop(self) -> None:
         if self._poll_task:
@@ -145,4 +187,28 @@ class TelegramService:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._outgoing_task
 
+        typing_tasks = list(self._typing_tasks.values())
+        self._typing_tasks.clear()
+        for typing_task in typing_tasks:
+            typing_task.cancel()
+        if typing_tasks:
+            await asyncio.gather(*typing_tasks, return_exceptions=True)
+
         await self._bot.session.close()
+
+
+def _reply_metadata(message: TelegramMessage) -> dict[str, int | str] | None:
+    reply_to_message = getattr(message, "reply_to_message", None)
+    if reply_to_message is None:
+        return None
+    metadata: dict[str, int | str] = {"message_id": reply_to_message.message_id}
+    reply_text = reply_to_message.text or reply_to_message.caption
+    if reply_text:
+        metadata["text"] = reply_text
+    username = getattr(reply_to_message.from_user, "username", None)
+    if username:
+        metadata["username"] = username
+    quote = getattr(message, "quote", None)
+    if quote is not None and quote.text:
+        metadata["quote"] = quote.text
+    return metadata

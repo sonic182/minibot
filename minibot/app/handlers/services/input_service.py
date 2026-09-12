@@ -22,14 +22,19 @@ class UserInputService:
         self,
         message: ChannelMessage,
     ) -> tuple[str, str | list[dict[str, Any]] | None]:
-        prompt_text = message.text.strip() if message.text else ""
+        message_text = message.text.strip() if message.text else ""
+        reply_context = self._reply_context(message)
+        prompt_text = self._with_reply_context(message_text, reply_context)
         incoming_files = incoming_files_from_metadata(message.metadata)
         if incoming_files and not message.attachments:
             return build_incoming_files_text(prompt_text, incoming_files), None
         if not message.attachments:
             return prompt_text, None
 
-        resolved_prompt = prompt_text or "Please analyze the attached media and summarize the key information."
+        resolved_prompt = self._with_reply_context(
+            message_text or "Please analyze the attached media and summarize the key information.",
+            reply_context,
+        )
         mode = self.media_input_mode()
         parts: list[dict[str, Any]] = []
         if mode == "chat_completions":
@@ -38,6 +43,31 @@ class UserInputService:
             parts.append({"type": "input_text", "text": resolved_prompt})
         parts.extend(self._transform_attachments_for_mode(message.attachments, mode))
         return resolved_prompt, parts
+
+    @staticmethod
+    def _reply_context(message: ChannelMessage) -> str:
+        reply_to = message.metadata.get("reply_to")
+        if not isinstance(reply_to, dict):
+            return ""
+        lines = ["Telegram reply context:"]
+        username = reply_to.get("username")
+        if isinstance(username, str) and username:
+            lines.append(f"Author: @{username}")
+        text = reply_to.get("text")
+        if isinstance(text, str) and text:
+            lines.append(f"Original message:\n{text}")
+        quote = reply_to.get("quote")
+        if isinstance(quote, str) and quote:
+            lines.append(f"Selected quote:\n{quote}")
+        return "\n".join(lines) if len(lines) > 1 else ""
+
+    @staticmethod
+    def _with_reply_context(message_text: str, reply_context: str) -> str:
+        if not reply_context:
+            return message_text
+        if not message_text:
+            return reply_context
+        return f"{reply_context}\n\nCurrent user message:\n{message_text}"
 
     def _transform_attachments_for_mode(
         self,

@@ -9,7 +9,7 @@ from typing import Any
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, InputRichMessage, ReplyParameters
 
 from minibot.adapters.config.schema import TelegramChannelConfig
 from minibot.app.event_bus import EventBus
@@ -36,7 +36,7 @@ class TelegramOutboundSender:
         self._logger = logger
 
     async def send_text_response(self, response: ChannelResponse) -> None:
-        render = self._resolve_render(response)
+        render = self._with_reply_target(self._resolve_render(response), response)
         self._logger.info(
             "sending response",
             extra={"chat_id": response.chat_id, "kind": render.kind},
@@ -70,7 +70,7 @@ class TelegramOutboundSender:
                 )
             )
             return
-        fallback_render = RenderableResponse(kind="text", text=render.text)
+        fallback_render = RenderableResponse(kind="text", text=render.text, meta=render.meta)
         self._logger.warning(
             "telegram rich text fallback to plain text",
             extra={"chat_id": response.chat_id, "kind": render.kind},
@@ -107,6 +107,8 @@ class TelegramOutboundSender:
         return render
 
     async def _send_render_chunks(self, chat_id: int, render: RenderableResponse) -> tuple[bool, str | None]:
+        if self._uses_rich_message(render):
+            return await self._send_rich_message(chat_id=chat_id, render=render)
         if render.kind == "html":
             self._logger.debug("telegram renderer applying html parse mode", extra={"chat_id": chat_id})
         elif render.kind == "markdown":
@@ -114,6 +116,26 @@ class TelegramOutboundSender:
         else:
             self._logger.debug("telegram renderer applying plain text mode", extra={"chat_id": chat_id})
         return await self._send_parse_mode_chunks(chat_id=chat_id, render=render)
+
+    async def _send_rich_message(self, *, chat_id: int, render: RenderableResponse) -> tuple[bool, str | None]:
+        if render.kind == "html":
+            rich_message = InputRichMessage(html=render.text)
+        else:
+            rich_message = InputRichMessage(markdown=render.text)
+        send_kwargs: dict[str, Any] = {"chat_id": chat_id, "rich_message": rich_message}
+        reply_parameters = self._reply_parameters(render)
+        if reply_parameters is not None:
+            send_kwargs["reply_parameters"] = reply_parameters
+        try:
+            await self._bot.send_rich_message(**send_kwargs)
+        except TelegramBadRequest as exc:
+            self._logger.exception(
+                "failed to send rich telegram response",
+                exc_info=exc,
+                extra={"chat_id": chat_id, "kind": render.kind},
+            )
+            return False, str(exc)
+        return True, None
 
     async def _send_parse_mode_chunks(self, chat_id: int, render: RenderableResponse) -> tuple[bool, str | None]:
         text_to_send = render.text
@@ -136,12 +158,17 @@ class TelegramOutboundSender:
         )
         for index, chunk in enumerate(chunks, start=1):
             try:
-                await self._bot.send_message(
-                    chat_id=chat_id,
-                    text=chunk,
-                    parse_mode=parse_mode,
-                    disable_web_page_preview=disable_preview,
-                )
+                send_kwargs: dict[str, Any] = {
+                    "chat_id": chat_id,
+                    "text": chunk,
+                    "parse_mode": parse_mode,
+                    "disable_web_page_preview": disable_preview,
+                }
+                if index == 1:
+                    reply_parameters = self._reply_parameters(render)
+                    if reply_parameters is not None:
+                        send_kwargs["reply_parameters"] = reply_parameters
+                await self._bot.send_message(**send_kwargs)
             except TelegramBadRequest as exc:
                 self._logger.exception(
                     "failed to send telegram response chunk",
@@ -180,6 +207,37 @@ class TelegramOutboundSender:
             )
             return markdown_text, None
         return formatted, ParseMode.MARKDOWN_V2
+
+    def _uses_rich_message(self, render: RenderableResponse) -> bool:
+        return (
+            render.kind in {"html", "markdown"}
+            and len(render.text) <= self._MAX_MESSAGE_LENGTH
+            and not bool(render.meta.get("disable_link_preview", False))
+        )
+
+    @staticmethod
+    def _with_reply_target(render: RenderableResponse, response: ChannelResponse) -> RenderableResponse:
+        reply_to_message_id = response.metadata.get("reply_to_message_id")
+        if (
+            not isinstance(reply_to_message_id, int)
+            or isinstance(reply_to_message_id, bool)
+            or reply_to_message_id < 1
+        ):
+            return render
+        return render.model_copy(
+            update={"meta": {**render.meta, "_telegram_reply_to_message_id": reply_to_message_id}}
+        )
+
+    @staticmethod
+    def _reply_parameters(render: RenderableResponse) -> ReplyParameters | None:
+        reply_to_message_id = render.meta.get("_telegram_reply_to_message_id")
+        if (
+            not isinstance(reply_to_message_id, int)
+            or isinstance(reply_to_message_id, bool)
+            or reply_to_message_id < 1
+        ):
+            return None
+        return ReplyParameters(message_id=reply_to_message_id)
 
     @staticmethod
     def _resolve_markdownify() -> Any | None:
