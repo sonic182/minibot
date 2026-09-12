@@ -21,8 +21,10 @@ What Minibot can do
 - **Agent tools** — Python, Bash, HTTP, file storage, grep, and patch-based editing.
 - **Skills and agents** — file-based skills plus specialist agents with delegation.
 - **Scheduling** — one-shot, interval, and cron prompts for Telegram automations.
+- **Async tasks** — offload long-running work to a SQLite- or RabbitMQ-backed worker queue.
 - **MCP integration** — connect external Model Context Protocol servers.
 - **RAG** — index documents into SQLite (or Qdrant) for retrieval-augmented answers.
+- **Relation graph** — optional typed, owner-scoped relationships between entities.
 - **Browser automation** — Playwright-driven browsing and screenshots.
 - **Voice** — optional speech-to-text for audio messages.
 
@@ -58,7 +60,10 @@ Why self-host
 
    architecture
    config
+   cli
+   extension-api
    tools
+   tasks
    scheduler
    audio
    rag

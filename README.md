@@ -19,6 +19,7 @@ Top features
 - 🧠 Provider support via [llm-async]: `openai`, `openai_responses`, `openrouter`, and more.
 - 🧰 Configurable tools: chat memory, KV notes, HTTP fetch, calculator, datetime, Python execution, Bash, patch-based editing (`apply_patch`), file storage, grep, speech-to-text, and MCP server bridges.
 - 🔎 RAG (optional): index local documents into SQLite (or Qdrant) and retrieve semantically relevant chunks.
+- 🕸️ Relation graph (optional): store and traverse typed relationships between entities.
 - ⏳ Async task workers: offload long-running jobs to a background queue (SQLite by default, optional RabbitMQ).
 - ⏰ Scheduled prompts (one-shot, fixed-interval, and cron recurrence) persisted in SQLite.
 - 🤝 Multi-agent orchestration with specialist agent definitions and skill packs.
@@ -76,8 +77,8 @@ minibot              # start the daemon
 Extras: `telegram` (aiogram + Telegram markdown rendering — the daemon needs it only when
 `[channels.telegram]` is enabled), `rag` (pypdf, PDF ingestion for the RAG tool), `stt`
 (speech-to-text via faster-whisper), `rabbitmq` (RabbitMQ task queue backend — not needed with the
-default `sqlite` backend). Compact HTML rendering in `http_request` uses selectolax, which ships
-with the base install.
+default `sqlite` backend), `graph` (networkx, the optional relation-graph tool). Compact HTML
+rendering in `http_request` uses selectolax, which ships with the base install.
 
 MCP needs no extra: the MCP client is a JSON-RPC implementation with no third-party SDK dependency.
 

@@ -12,6 +12,16 @@ on:
       - "poetry.lock"
       - "pyproject.toml"
       - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "minibot/**"
+      - "ARCHITECTURE.md"
+      - "README.md"
+      - "config.example.toml"
+      - "poetry.lock"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
@@ -47,6 +57,7 @@ jobs:
 
   deploy:
     needs: build
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

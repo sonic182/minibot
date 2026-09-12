@@ -14,7 +14,8 @@ not a third-party service.
 - Install: `pip install minibot` (extras: `telegram`, `rag`, `stt`, `rabbitmq`).
 - Configure: `minibot configure` writes `config.toml`.
 - Run: `minibot` starts the daemon; `minibot console` runs a local terminal channel.
-- Docker: `docker compose up -d` (starts Qdrant alongside; RabbitMQ is optional).
+- Docker: `docker compose up -d` (Qdrant and RabbitMQ are commented out; `[tools.rag]` and
+  `[tasks]` both default to SQLite).
 
 ## Extending Minibot
 
@@ -64,9 +65,41 @@ by chatting naturally; recurrence is floored by `min_recurrence_interval_seconds
 
 ## RAG
 
-`[tools.rag]` indexes text documents into Qdrant (`chunk_size_tokens`, `chunk_overlap_tokens`)
-and retrieves semantically relevant chunks (`search_limit`, `max_result_tokens`), with optional
-cross-encoder reranking.
+`[tools.rag]` indexes text documents into a local SQLite vector store by default and retrieves
+semantically relevant chunks (`search_limit`, `max_result_tokens`), with optional cross-encoder
+reranking. Set `backend = "qdrant"` to use a Qdrant instance instead.
+
+## Async tasks
+
+`[tasks]` queues long-running work to a background worker and exposes `spawn_task`, `get_task`,
+`list_tasks`, and `cancel_task`. `backend = "sqlite"` (default) needs no broker; `"rabbitmq"`
+requires the `rabbitmq` extra. Worker limits and retention live under `[tasks]` and
+`[tasks.sqlite]`.
+
+## Prompt packs
+
+The system prompt is composed from a base file (`prompts/main_agent_system.md`), policy
+fragments (`prompts/policies/*.md`), a specialist roster, optional skill catalog, runtime
+capability status, a channel fragment (`prompts/channels/<channel>.md`), and environment
+context. Configure the root with `llm.prompts_dir`.
+
+## Relation graph
+
+The optional `graph` tool (the `minibot.extensions.tools.graph` extension plus the `graph`
+extra) stores typed, owner-scoped relationships between entities in SQLite. Use it for
+connections; keep single-entity facts in `memory`.
+
+## Audio transcription
+
+`[tools.audio_transcription]` (the `stt` extra) transcribes Telegram voice/audio and uploaded
+files with faster-whisper. Short incoming messages are transcribed automatically by default.
+
+## Architecture
+
+MiniBot is a lightweight hexagonal app: `core` (domain contracts), `app` (orchestration),
+`adapters` (infrastructure), `llm` (provider/tool wiring), plus optional `rag` and `extensions`.
+Dependency direction points inward, and both the daemon and console entrypoints publish to an
+in-process asyncio event bus.
 
 ## Security
 

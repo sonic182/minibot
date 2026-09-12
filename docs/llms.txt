@@ -9,13 +9,20 @@
 - [Getting Started](https://sonic182.github.io/minibot/getting_started.html): install and run
 - [Extending Minibot](https://sonic182.github.io/minibot/extending.html): the customization ladder
 - [Python extensions](https://sonic182.github.io/minibot/extensions.html): tools, events, services, channels
+- [Extension API reference](https://sonic182.github.io/minibot/extension-api.html): ExtensionContext, ToolBinding, events
 - [Events](https://sonic182.github.io/minibot/events.html): event-bus reference
 - [Multi-agent orchestration](https://sonic182.github.io/minibot/agents.html)
-- [Agent tools](https://sonic182.github.io/minibot/tools.html)
+- [Prompt packs](https://sonic182.github.io/minibot/prompts.html)
 - [MCP integration](https://sonic182.github.io/minibot/mcp.html)
+- [Architecture](https://sonic182.github.io/minibot/architecture.html)
 - [Configuration reference](https://sonic182.github.io/minibot/config.html)
+- [CLI reference](https://sonic182.github.io/minibot/cli.html)
+- [Agent tools](https://sonic182.github.io/minibot/tools.html)
+- [Async tasks](https://sonic182.github.io/minibot/tasks.html)
 - [Scheduled tasks & automation](https://sonic182.github.io/minibot/scheduler.html)
+- [Audio transcription](https://sonic182.github.io/minibot/audio.html)
 - [RAG & persistent knowledge](https://sonic182.github.io/minibot/rag.html)
+- [Relation graph](https://sonic182.github.io/minibot/graph.html)
 - [Security & sandboxing](https://sonic182.github.io/minibot/security.html)
 
 ## Features
@@ -26,8 +33,10 @@
 - Agent skills (Markdown)
 - Multi-agent orchestration with delegation
 - Scheduled prompts (one-shot, interval, cron)
+- Async background task workers (SQLite or RabbitMQ)
 - MCP integration
-- RAG over Qdrant
+- RAG over SQLite or Qdrant
+- Optional relation graph
 - Browser automation (Playwright)
 - Voice (speech-to-text)
 - Python extensions for tools, events, services, and channels
