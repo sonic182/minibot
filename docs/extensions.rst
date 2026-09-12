@@ -1,6 +1,10 @@
 Writing extensions
 ==================
 
+.. meta::
+   :description: Write Python extensions for Minibot — add LLM tools, subscribe to events, and register lifecycle services via register(mb).
+   :keywords: minibot extension, Python AI agent plugin, custom LLM tools, ExtensionContext
+
 An extension is an importable Python module with a module-level ``register(mb)``
 function. It can add LLM tools, observe MiniBot events, and register services.
 Configure its import name in ``config.toml``; a local module only needs to be on
@@ -127,5 +131,7 @@ Operational rules
 - Check ``mb.entrypoint`` before adding channel services. Only the daemon runs channels.
 - Configured extension tools are available to task workers, but worker registries do not start
   extension services or event subscriptions.
+
+For the full type signatures behind ``mb``, see :doc:`extension-api`.
 
 See `minibot_ext_demo.py <https://github.com/sonic182/minibot/blob/main/examples/minibot_ext_demo.py>`_ for a tool plus a `TurnCompletedEvent <https://github.com/sonic182/minibot/blob/main/minibot/core/events.py>`_ subscriber.

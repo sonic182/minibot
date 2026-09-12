@@ -1,6 +1,10 @@
 Getting Started
 ===============
 
+.. meta::
+   :description: Install and run Minibot — Docker, pip, and Poetry quickstarts, Telegram setup, the console test channel, and Ollama configuration.
+   :keywords: install AI assistant Telegram, self-hosted AI bot, minibot quickstart, Ollama OpenAI compatible
+
 Quickstart (Docker)
 -------------------
 
@@ -15,7 +19,7 @@ Quickstart (Docker)
 
 The Docker image includes:
 
-- Python deps with all MiniBot extras (``telegram``, ``stt``, ``rag``, ``rabbitmq``)
+- Python deps with all MiniBot extras (``telegram``, ``stt``, ``rag``, ``rabbitmq``, ``graph``)
 - Node.js/npm (v24 from official tarball)
 - Playwright + Chromium
 - ffmpeg
@@ -32,7 +36,7 @@ No Telegram bot yet? Run ``docker compose run --rm minibot minibot console`` ins
 Quickstart (pip)
 ----------------
 
-1. ``pip install minibot``, adding extras as needed: ``pip install "minibot[telegram,stt,rag,rabbitmq]"``.
+1. ``pip install minibot``, adding extras as needed: ``pip install "minibot[telegram,stt,rag,rabbitmq,graph]"``.
 2. ``minibot configure`` to create ``config.toml`` interactively (see below).
 3. ``minibot``
 

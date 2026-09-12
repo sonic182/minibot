@@ -1,6 +1,10 @@
 Prompt Packs
 ============
 
+.. meta::
+   :description: How Minibot composes its system prompt — the base file, policy and channel fragments, the skill catalog, and compaction instructions.
+   :keywords: AI system prompt, prompt packs, AI agent persona, minibot prompts
+
 MiniBot composes the system prompt from a base file plus runtime fragments.
 
 Base System Prompt
