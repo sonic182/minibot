@@ -69,7 +69,7 @@ class ChatMemoryTool:
 
     def _session_id(self, context: ToolContext) -> str:
         channel = require_channel(context)
-        return session_id_from_parts(channel, context.chat_id, context.user_id)
+        return session_id_from_parts(channel, context.chat_id)
 
     @staticmethod
     def _to_non_negative_int(value: object, key: str) -> int:

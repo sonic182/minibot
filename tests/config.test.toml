@@ -126,7 +126,6 @@ pool_size = 5
 echo = false
 default_limit = 20
 max_limit = 100
-default_owner_id = "primary"
 
 # Optional HTTP fetch tool.
 [tools.http_client]

@@ -50,13 +50,17 @@ Two workflows, and they check less than you might expect — so run the rest loc
 |---|---|
 | Custom name lint | `poetry run pylint --disable=all --enable=disallowed-name minibot` |
 | Tests | `poetry run pytest` |
+| Duplicate code | `npx --yes jscpd@4.2.3 --config .jscpd.json` |
 | Docs (on `main`, when docs or source change) | `poetry run sphinx-build -W -b html docs docs/_build/html` |
 
-Two of these surprise people:
+Three of these surprise people:
 
 - **The name lint bans every 1–2 character identifier** except `i`, `j`, `x`, `y`, `mb`, `on`,
   `ok` (`pyproject.toml`). This is why the codebase writes `except … as exc` rather than
   `as e`. It runs on `minibot/` only.
+- **The duplicate-code check covers `tests/` as well as `minibot/`**, with a 3% threshold that
+  the tree already sits close to. Writing a new test by copy-pasting a neighbouring one is a
+  realistic way to fail CI — reuse the fixtures and helpers already in the file instead.
 - **The docs build uses `-W`**, so any new Sphinx warning fails it — including an RST heading
   without a blank line before it.
 

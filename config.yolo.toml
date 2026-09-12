@@ -2,6 +2,8 @@
 log_level = "DEBUG"
 environment = "development"
 agent_timeout_seconds = 420
+# The single person this MiniBot assists; owns memory, graph, schedules and RAG everywhere.
+owner_id = "primary"
 
 [channels.telegram]
 enabled = true
@@ -108,7 +110,6 @@ pool_size = 5
 echo = false
 default_limit = 20
 max_limit = 100
-default_owner_id = "primary"
 
 
 [tools.http_client]

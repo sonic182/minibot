@@ -5,6 +5,13 @@ log_level = "DEBUG"
 environment = "development"
 # E2E/research-heavy profile: increase agent timeout to reduce long-run failures.
 agent_timeout_seconds = 420
+# The person this MiniBot assists. MiniBot is a personal assistant for exactly one owner, so
+# this is a constant of the deployment: it is never derived from a message or a task payload.
+# It owns long-term memory, the relation graph, scheduled jobs and the RAG corpus, on every
+# entrypoint (daemon, console and task workers alike).
+# Chats are scoped separately: a private Telegram chat, a group and the console keep their own
+# conversation history while sharing this one owner's long-term data.
+owner_id = "primary"
 
 # Telegram adapter settings. Telegram is a bundled extension: it runs under the daemon,
 # never under `minibot console`. Any other `[channels.<name>]` section is passed through
@@ -240,7 +247,6 @@ pool_size = 5
 echo = false
 default_limit = 20
 max_limit = 100
-default_owner_id = "primary"
 
 
 # Optional RAG (Retrieval-Augmented Generation).

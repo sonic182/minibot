@@ -20,7 +20,7 @@ async def test_chat_memory_info_and_trim() -> None:
 
     info_binding = tools["chat_history_info"]
     trim_binding = tools["chat_history_trim"]
-    session_id = session_id_from_parts("telegram", 100, 1)
+    session_id = session_id_from_parts("telegram", 100)
 
     await memory.append_history(session_id, "user", "one")
     await memory.append_history(session_id, "assistant", "two")

@@ -1,14 +1,20 @@
 # Personal-first MiniBot
 
-Status: **proposed**
+Status: **phases 1 and 2 done**
 
 ## Product decision
 
 MiniBot is a self-hosted personal AI assistant for one trusted owner profile. It is
 not a multi-tenant service. A channel's `user_id` remains the raw sender ID used for
 channel authorization and audit context; it is not an application account or a data
-namespace. The existing `default_owner_id = "primary"` is the one profile that owns
-long-term memory, graph data, and scheduled work.
+namespace. `[runtime].owner_id` (default `"primary"`) is the one profile that owns
+long-term memory, graph data, scheduled work and the RAG corpus.
+
+The multi-user concept is now removed from the code, not merely discouraged. Ownership
+is a constant of the deployment: it is read once from config and is never derived from
+a message, a task payload or any caller-supplied field, on any entrypoint. Sessions are
+chat sessions — `channel` + `chat_id`, with `user_id` no longer part of the key — and
+every one of them belongs to that same single owner.
 
 Conversation state remains per channel/chat. This is intentional for a personal
 assistant: a private Telegram chat, a chosen group, and the console are distinct
@@ -34,11 +40,14 @@ The identity facts become behavior here:
 
 ```
 minibot/core/channels.py:8                          channel, user_id, chat_id
-  -> minibot/shared/utils.py:13                     session = channel + chat_id (or user_id)
-  -> minibot/app/handlers/services/turn_service.py:377
-                                                    owner = configured "primary"
-  -> minibot/llm/tools/base.py:14                   tool context carries raw IDs
+  -> minibot/shared/utils.py:13                     session = channel + chat_id
+  -> minibot/adapters/config/schema.py              owner = [runtime].owner_id, a constant
+  -> minibot/llm/tools/base.py:14                   tool context carries owner + raw IDs
 ```
+
+Both entrypoints read that same constant: `dispatcher.py` passes it to the turn service,
+and `adapters/tasks/worker.py` reads it directly for forked task workers. Nothing derives
+ownership from `user_id` any more.
 
 Future extension seam (not work for these phases):
 
@@ -50,30 +59,49 @@ minibot/app/extensions.py:197                       load_extensions()
 
 ## Phase 1 — Make the personal contract explicit
 
-- [ ] Document `primary` as the single personal profile in `config.example.toml:243`
+- [x] Document `primary` as the single personal profile in `config.example.toml:243`
       and the KV-memory configuration model in `minibot/adapters/config/schema.py:428`.
-- [ ] Document channel terminology next to `ChannelMessage` in
+      Superseded by phase 2: the setting moved to `[runtime].owner_id`, because it
+      owns graph data, scheduled jobs and the RAG corpus, not just this tool.
+      `docs/config.rst` autoclasses both models, so the docstrings render in the docs.
+- [x] Document channel terminology next to `ChannelMessage` in
       `minibot/core/channels.py:8`: `chat_id` identifies a conversation/delivery
       target; `user_id` is the channel's sender identifier, not MiniBot ownership.
-- [ ] Keep Telegram access deny-by-default:
+- [x] Keep Telegram access deny-by-default:
       `minibot/adapters/messaging/telegram/authorization.py:8` must require an
       allowlisted owner user or chat whenever `require_authorized` is enabled.
-- [ ] Add one functional regression proving that two turns in a configured personal
+      **Verified, not changed** — `authorization.py:29` already returns `False` when
+      `require_authorized` is set with empty allowlists, and all four cases are covered
+      by `tests/test_telegram_authorization.py`.
+- [x] Add one functional regression proving that two turns in a configured personal
       chat retain history while another chat does not share it. Land it with the
       session behavior in `minibot/shared/utils.py:13` and the turn flow in
       `minibot/app/handlers/services/turn_service.py:91`.
+      `tests/test_llm_turn_service.py::test_turn_service_keeps_history_per_chat_for_one_owner`.
 
 Done when a fresh operator can configure one trusted Telegram user/chat and knows
 exactly which data is shared across that owner's chats.
 
 ## Phase 2 — Keep personal state boring
 
-- [ ] Preserve the existing stable profile owner (`primary`) in
-      `minibot/app/handlers/services/turn_service.py:377`; do not derive ownership
-      from a caller-supplied API `user` field.
-- [ ] Keep history session ownership in `minibot/shared/utils.py:13` separate from
-      long-term tool ownership in `minibot/llm/tools/base.py:14`. Do not add tenant,
-      account, or user tables.
+- [x] Preserve the existing stable profile owner (`primary`); do not derive ownership
+      from a caller-supplied field. Ownership now comes only from `[runtime].owner_id`:
+      `TurnService._resolve_owner_id` and its message-derived fallbacks are gone, and
+      `[tools.kv_memory].default_owner_id` is rejected at load time with a message
+      naming the new key, so an old config fails loudly instead of silently reverting.
+      **This fixed a live bug.** `worker._resolve_owner_id(task)` never read config at
+      all and returned `str(task["user_id"])`, so a `spawn_task` worker wrote under the
+      Telegram sender id while the main agent used `"primary"`. The relation graph is
+      reachable from workers by design (see the module docstring in
+      `minibot/extensions/tools/graph.py`) and `adapters/graph/sqlite.py` filters every
+      query on `owner_id`, so edges a task recorded were invisible to the main agent —
+      silently, since `require_owner()` was satisfied by either value. kv_memory, RAG
+      and the scheduler escaped it only because they early-return for `entrypoint ==
+      "worker"`.
+- [x] Keep history session ownership separate from long-term tool ownership. Session
+      helpers in `minibot/shared/utils.py` no longer take `user_id` at all: a session is
+      `channel` + `chat_id`. For every real channel `chat_id` is always set, so existing
+      history keys are unchanged. No tenant, account or user tables were added.
 - [ ] Review the enabled tools in the personal deployment for local-machine safety
       (filesystem, shell, network, and MCP), using their existing configuration
       switches rather than inventing per-user permissions.
