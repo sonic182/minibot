@@ -10,7 +10,7 @@ from typing import Protocol
 
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.events import MessageEvent, OutboundEvent, ReasoningEvent
 from minibot.shared.console_compat import CompatConsole, format_assistant_output
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -43,18 +43,24 @@ class ConsoleService:
         self._logger = logging.getLogger("minibot.console")
         self._message_id = 0
         self._subscription = event_bus.subscribe(types=(OutboundEvent,))
+        self._reasoning_subscription = event_bus.subscribe(types=(ReasoningEvent,))
         self._outgoing_task: asyncio.Task[None] | None = None
+        self._reasoning_task: asyncio.Task[None] | None = None
         self._responses: asyncio.Queue[ConsoleResponse] = asyncio.Queue()
+        self._reasoning: asyncio.Queue[str] = asyncio.Queue()
 
     async def start(self) -> None:
         self._outgoing_task = asyncio.create_task(self._consume_outgoing())
+        self._reasoning_task = asyncio.create_task(self._consume_reasoning())
 
     async def stop(self) -> None:
         await self._subscription.close()
-        if self._outgoing_task is not None:
-            self._outgoing_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._outgoing_task
+        await self._reasoning_subscription.close()
+        for task in (self._outgoing_task, self._reasoning_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     async def publish_user_message(self, text: str) -> None:
         self._message_id += 1
@@ -73,6 +79,26 @@ class ConsoleService:
         result = await asyncio.wait_for(self._responses.get(), timeout=timeout_seconds)
         self._responses.task_done()
         return result
+
+    async def next_reasoning(self) -> str:
+        """Await the next reasoning chunk of the running turn, for channels that render it live."""
+        text = await self._reasoning.get()
+        self._reasoning.task_done()
+        return text
+
+    def drain_reasoning(self) -> None:
+        while not self._reasoning.empty():
+            self._reasoning.get_nowait()
+            self._reasoning.task_done()
+
+    async def _consume_reasoning(self) -> None:
+        async for event in self._reasoning_subscription:
+            if not isinstance(event, ReasoningEvent):
+                continue
+            if event.channel is not None and event.channel != "console":
+                continue
+            if event.text.strip():
+                self._reasoning.put_nowait(event.text)
 
     async def _consume_outgoing(self) -> None:
         async for event in self._subscription:

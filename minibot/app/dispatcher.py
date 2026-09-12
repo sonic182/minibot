@@ -104,6 +104,7 @@ class Dispatcher:
             agent_registry=agent_registry,
             skill_registry=skill_registry,
             preload_skill_catalog=settings.tools.skills.preload_catalog,
+            event_bus=event_bus,
         )
         self._handler = LLMMessageHandler(turn_service)
         self._logger = logging.getLogger("minibot.dispatcher")

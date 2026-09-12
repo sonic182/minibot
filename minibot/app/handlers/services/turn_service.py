@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
@@ -27,6 +27,9 @@ from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.utils import session_id_for, session_identifier
+
+if TYPE_CHECKING:  # pragma: no cover
+    from minibot.app.event_bus import EventBus
 
 
 class LLMTurnService:
@@ -476,6 +479,7 @@ def build_llm_turn_service(
     agent_registry: AgentRegistry | None = None,
     skill_registry: SkillRegistry | None = None,
     preload_skill_catalog: bool = False,
+    event_bus: EventBus | None = None,
 ) -> LLMTurnService:
     service_logger = logger or logging.getLogger("minibot.handler")
     tool_bindings = list(tools or [])
@@ -518,6 +522,7 @@ def build_llm_turn_service(
             allowed_append_message_tools=["self_insert_artifact"],
             allow_system_inserts=False,
             managed_files_root=managed_files_root,
+            event_bus=event_bus,
         )
     return LLMTurnService(
         memory=memory,

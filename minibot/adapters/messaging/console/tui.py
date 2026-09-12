@@ -6,6 +6,8 @@ in the spirit of opencode / claude code / codex but intentionally tiny.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from dataclasses import dataclass
 
 from textual import events
@@ -105,6 +107,7 @@ class ConsoleTui(App[None]):
         self._timeout_seconds = timeout_seconds
         self._turns: list[_Turn] = self._history_turns(history)
         self._show_thinking = True
+        self._live_thinking: list[str] = []
 
     @staticmethod
     def _history_turns(history: list[MemoryEntry] | None) -> list[_Turn]:
@@ -160,6 +163,9 @@ class ConsoleTui(App[None]):
         self._set_busy(True)
         self._turns.append(_Turn(markdown=f"**You:**\n\n{text}"))
         await self._refresh()
+        self._service.drain_reasoning()
+        self._live_thinking = []
+        live_reasoning = asyncio.create_task(self._stream_reasoning())
         try:
             await self._service.publish_user_message(text)
             result = await self._service.wait_for_response(self._timeout_seconds)
@@ -169,8 +175,20 @@ class ConsoleTui(App[None]):
                 _Turn(markdown=f"*Timed out after {int(self._timeout_seconds)}s — the request may still be running.*")
             )
         finally:
+            live_reasoning.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await live_reasoning
+            # The finished turn carries every step's reasoning, so keeping the live copy would double it.
+            self._live_thinking = []
             await self._refresh()
             self._set_busy(False)
+
+    async def _stream_reasoning(self) -> None:
+        while True:
+            chunk = await self._service.next_reasoning()
+            if chunk not in self._live_thinking:
+                self._live_thinking.append(chunk)
+                await self._refresh()
 
     def _set_busy(self, busy: bool) -> None:
         self.query_one("#thinking", LoadingIndicator).display = busy
@@ -185,6 +203,8 @@ class ConsoleTui(App[None]):
             if self._show_thinking and turn.thinking:
                 blocks.append(f"**Thinking:**\n\n> {turn.thinking}")
             blocks.append(turn.markdown)
+        if self._show_thinking and self._live_thinking:
+            blocks.append("**Thinking…**\n\n> " + "\n>\n> ".join(self._live_thinking))
         viewer = self.query_one("#transcript", MarkdownViewer)
         await viewer.document.update(_SEPARATOR.join(blocks))
         viewer.scroll_end(animate=False)

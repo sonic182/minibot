@@ -81,6 +81,22 @@ class TurnFailedEvent(BaseEvent):
     error: str
 
 
+class ReasoningEvent(BaseEvent):
+    """Emitted as soon as one provider step returns reasoning, before the turn finishes.
+
+    Reasoning is also attached to the final response metadata; this event exists so a channel can
+    show thinking while the turn is still running instead of only after it completes.
+    """
+
+    event_type: str = "reasoning"
+    text: str
+    step: int
+    turn_id: str | None = None
+    owner_id: str | None = None
+    channel: str | None = None
+    chat_id: int | None = None
+
+
 class ToolCallEvent(BaseEvent):
     """Emitted around every tool handler invocation.
 

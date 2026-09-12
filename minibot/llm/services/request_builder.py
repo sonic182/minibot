@@ -119,6 +119,7 @@ def build_complete_once_call_kwargs(
         if resolved_max_tokens is not None:
             call_kwargs["max_tokens"] = resolved_max_tokens
     call_kwargs.update(openrouter_kwargs(ctx))
+    call_kwargs.update(chat_completions_reasoning_kwargs(ctx))
     if prompt_cache_key and ctx.is_responses_provider and ctx.prompt_cache_enabled:
         call_kwargs["prompt_cache_key"] = prompt_cache_key
     if previous_response_id and ctx.is_responses_provider:
@@ -194,6 +195,18 @@ def openrouter_kwargs(ctx: RequestContext) -> dict[str, Any]:
     if ctx.openrouter_plugins:
         kwargs["plugins"] = list(ctx.openrouter_plugins)
     return kwargs
+
+
+def chat_completions_reasoning_kwargs(ctx: RequestContext) -> dict[str, Any]:
+    """Reasoning budget for plain ``/chat/completions`` targets.
+
+    Responses providers nest it under ``reasoning``, OpenRouter under its own object; the
+    chat-completions API takes a flat ``reasoning_effort``. Only sent when configured, so a target
+    that does not understand the field is unaffected until someone sets ``[llm].reasoning_effort``.
+    """
+    if ctx.is_responses_provider or ctx.provider_name == "openrouter" or not ctx.reasoning_effort:
+        return {}
+    return {"reasoning_effort": ctx.reasoning_effort}
 
 
 def openrouter_reasoning_kwargs(ctx: RequestContext) -> dict[str, Any]:
