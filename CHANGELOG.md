@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MemoryEntry.reasoning` field, and an optional `reasoning=` argument on
   `MemoryBackend.append_history`. Existing SQLite databases are migrated in place on startup
   (`ALTER TABLE messages ADD COLUMN reasoning TEXT` when the column is missing).
+- Durable background tasks now use execution leases with token fencing: expired SQLite and redelivered
+  RabbitMQ tasks are recovered at least once, stale workers cannot overwrite newer attempts, and terminal
+  task records are purged by a dedicated retention service.
 
 ### Changed
 

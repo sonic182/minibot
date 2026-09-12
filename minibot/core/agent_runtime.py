@@ -79,6 +79,6 @@ class ToolResult:
 
 @dataclass(frozen=True)
 class RuntimeLimits:
-    max_steps: int = 8
-    max_tool_calls: int = 12
+    max_steps: int | None = 8
+    max_tool_calls: int | None = 12
     timeout_seconds: int = 60

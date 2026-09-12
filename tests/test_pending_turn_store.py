@@ -45,3 +45,17 @@ async def test_pending_turn_store_clear_missing_is_noop(tmp_path: Path) -> None:
 
     await store.clear_pending("does-not-exist")
     assert await store.list_pending() == []
+
+
+@pytest.mark.asyncio
+async def test_pending_turn_store_skips_turns_with_a_completed_task_handoff(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "history.db"
+    config = MemoryConfig(sqlite_url=f"sqlite+aiosqlite:///{db_path}")
+    store = PendingTurnStore(config)
+    await store.initialize()
+
+    await store.mark_pending("task-turn", '{"channel": "telegram", "text": "delegate"}')
+    await store.mark_pending("ordinary-turn", '{"channel": "telegram", "text": "reply"}')
+    await store.mark_task_handoff("task-turn")
+
+    assert dict(await store.list_pending()) == {"ordinary-turn": '{"channel": "telegram", "text": "reply"}'}

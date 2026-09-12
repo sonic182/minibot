@@ -90,10 +90,16 @@ class PromptService:
         for hint in self._profile.provider_capability_hints:
             lines.append(f"- {hint}")
         if task_tools_available:
-            lines.append(
-                "- Asynchronous delegation is available now via `spawn_task`, with `list_tasks` and `cancel_task` "
-                "for tracking and cancellation."
-            )
+            if "get_task" in tool_names:
+                lines.append(
+                    "- Asynchronous delegation is available now via `spawn_task`, with `list_tasks`, `get_task`, "
+                    "and `cancel_task` for tracking, retrieval, and cancellation."
+                )
+            else:
+                lines.append(
+                    "- Asynchronous delegation is available now via `spawn_task`, with `list_tasks` and "
+                    "`cancel_task` for tracking and cancellation."
+                )
             lines.append(
                 "- `spawn_task` can also target a listed specialist via exact `agent_name`"
                 " for long-running async work."
@@ -184,13 +190,9 @@ class PromptService:
         return "\n".join(
             [
                 "Task-worker result handling:",
-                '- Messages with `metadata.source == "task_worker"` are asynchronous worker results '
-                "from earlier `spawn_task` calls.",
+                '- Messages with `metadata.source == "task_worker"` are direct asynchronous worker results '
+                "from earlier `spawn_task` calls; do not re-process them through the main agent.",
                 "- Track pending task ids explicitly. Use `list_tasks` to verify which tasks are still active.",
-                "- When only some task results have arrived, acknowledge the partial completion "
-                "briefly and wait for the remaining tasks.",
-                "- When all required task results have arrived, synthesize them and continue the "
-                "tool loop or answer the user.",
                 "- Use `cancel_task` only when the user asks to stop or the remaining work is no longer useful.",
             ]
         )

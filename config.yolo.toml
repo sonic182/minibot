@@ -291,17 +291,19 @@ max_results = 7
 [tasks]
 enabled = true
 backend = "sqlite"
-worker_timeout_seconds = 300
+worker_timeout_seconds = 1800
+worker_max_steps = "unlimited"
+worker_max_tool_calls = "unlimited"
 max_concurrent_workers = 4
 
 [tasks.sqlite]
 sqlite_url = "sqlite+aiosqlite:///./data/tasks.db"
 poll_interval_seconds = 5
 # Must exceed tasks.worker_timeout_seconds or a running task can be leased twice.
-lease_timeout_seconds = 600
+lease_timeout_seconds = 2100
 batch_size = 4
 max_attempts = 3
-done_retention_seconds = 86400
+done_retention_seconds = 2592000
 
 [rabbitmq]
 broker_url = "amqp://guest:guest@minibot-rabbitmq:5672/"

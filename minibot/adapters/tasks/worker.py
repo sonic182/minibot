@@ -3,9 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import signal
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +21,10 @@ from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.response_parser import extract_answer, resolve_reply_render
-from minibot.app.runtime_limits import build_runtime_limits
-from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
+from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentSpec
+from minibot.core.tasks import TaskLimits, TaskStopReason
+from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.tools.apply_patch import ApplyPatchTool
 from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -66,8 +66,6 @@ _WORKER_SYSTEM_PROMPT_SUFFIX = (
     "Avoid fetching linked JavaScript assets unless the page itself clearly points to required data living there.\n"
     "Return only the task result needed by the main agent."
 )
-_WORKER_MAX_TOOL_ITERATIONS = 8
-_RATE_LIMIT_RETRY_AFTER_RE = re.compile(r"Please try again in (?P<seconds>\d+(?:\.\d+)?)s", re.IGNORECASE)
 
 
 def worker_entry(pipe: Any) -> None:
@@ -83,16 +81,30 @@ def worker_entry(pipe: Any) -> None:
 async def _worker_async(pipe: Any) -> None:
     async with pipe.open() as (rx, tx):
         raw = await rx.readline()
+
+        async def emit_progress(progress: dict[str, Any]) -> None:
+            tx.write(json.dumps({"type": "progress", "progress": progress}).encode() + b"\n")
+
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
-            result = {"task_id": "", "error": "invalid task payload", "metadata": {"error_type": "invalid_payload"}}
+            result = {
+                "type": "result",
+                "task_id": "",
+                "status": "failed",
+                "error": "invalid task payload",
+                "stop_reason": TaskStopReason.INVALID_RESULT.value,
+                "metadata": {"error_type": "invalid_payload"},
+            }
         else:
-            result = await run_agent_loop(payload)
+            result = await run_agent_loop(payload, progress_callback=emit_progress)
         tx.write(json.dumps(result).encode() + b"\n")
 
 
-async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
+async def run_agent_loop(
+    task: dict[str, Any],
+    progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
     task_id = str(task.get("task_id") or "")
     try:
         channel = _require_string(task.get("channel"), "channel")
@@ -110,13 +122,14 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
         )
         llm_client = llm_factory.create_for_agent(spec)
         tools = _build_worker_tools(settings=settings, spec=spec, extension_tools=extensions.tools)
+        limits = _task_limits(task, settings)
         runtime = AgentRuntime(
             llm_client=llm_client,
             tools=tools,
-            limits=build_runtime_limits(
-                llm_client=llm_client,
-                timeout_seconds=settings.tasks.worker_timeout_seconds,
-                min_timeout_seconds=30,
+            limits=RuntimeLimits(
+                max_steps=limits.max_steps,
+                max_tool_calls=limits.max_tool_calls,
+                timeout_seconds=limits.timeout_seconds,
             ),
             allowed_append_message_tools=[],
             allow_system_inserts=False,
@@ -139,6 +152,7 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             tool_context=tool_context,
             prompt_cache_key=prompt_cache_key,
             initial_previous_response_id=None,
+            progress_callback=progress_callback,
         )
         parsed = extract_answer(generation.payload, pre_response_meta=generation.pre_response_meta)
         render = resolve_reply_render(parsed)
@@ -148,17 +162,49 @@ async def run_agent_loop(task: dict[str, Any]) -> dict[str, Any]:
             "model": llm_client.model_name(),
             "provider": llm_client.provider_name(),
             "agent_name": spec.name,
+            "total_tokens": getattr(generation, "total_tokens", 0),
+            "provider_tool_calls": getattr(generation, "provider_tool_calls", 0),
             "managed_files_root": settings.tools.file_storage.root_dir
             if settings.tools.file_storage.enabled
             else None,
         }
         attachments = validate_attachments((generation.pre_response_meta or {}).get("attachments"))
-        return {"task_id": task_id, "text": text, "attachments": attachments, "metadata": metadata}
+        stop_reason = getattr(generation, "stop_reason", TaskStopReason.COMPLETED)
+        if stop_reason is not TaskStopReason.COMPLETED:
+            return {
+                "type": "result",
+                "task_id": task_id,
+                "status": "failed",
+                "error": text,
+                "stop_reason": stop_reason.value,
+                "metadata": metadata,
+            }
+        return {
+            "type": "result",
+            "task_id": task_id,
+            "status": "done",
+            "text": text,
+            "attachments": attachments,
+            "stop_reason": TaskStopReason.COMPLETED.value,
+            "metadata": metadata,
+        }
+    except TimeoutError:
+        return {
+            "type": "result",
+            "task_id": task_id,
+            "status": "timed_out",
+            "error": "task worker timed out",
+            "stop_reason": TaskStopReason.TIMEOUT.value,
+            "metadata": {},
+        }
     except Exception as exc:  # noqa: BLE001
         _LOGGER.exception("task worker failed", exc_info=exc, extra={"task_id": task_id or "unknown"})
         return {
+            "type": "result",
             "task_id": task_id,
+            "status": "failed",
             "error": str(exc),
+            "stop_reason": _stop_reason_for_error(exc).value,
             "metadata": _build_error_metadata(exc),
         }
 
@@ -246,7 +292,7 @@ def _build_worker_spec(
         description="Isolated subprocess worker for async task execution.",
         system_prompt=prompt,
         source_path=_WORKER_SPEC_PATH,
-        max_tool_iterations=_WORKER_MAX_TOOL_ITERATIONS,
+        max_tool_iterations=None,
         tools_allow=[*_WORKER_TOOL_ALLOWLIST, *extension_tool_names],
     )
 
@@ -342,23 +388,65 @@ def _require_string(value: Any, field: str) -> str:
 
 def _build_error_metadata(exc: Exception) -> dict[str, Any]:
     metadata: dict[str, Any] = {"error_type": type(exc).__name__}
-    error_text = str(exc)
-    lowered = error_text.lower()
-    if "http 429" not in lowered or "rate_limit_exceeded" not in lowered:
+    if not isinstance(exc, ProviderHTTPError) or exc.status_code != 429:
         return metadata
-    retry_after_seconds = _extract_retry_after_seconds(error_text)
     metadata.update(
         {
             "error_code": "rate_limit_exceeded",
             "retryable": True,
-            "retry_after_seconds": retry_after_seconds,
+            "retry_after_seconds": 30,
         }
     )
     return metadata
 
 
-def _extract_retry_after_seconds(error_text: str) -> int:
-    match = _RATE_LIMIT_RETRY_AFTER_RE.search(error_text)
-    if match is None:
-        return 30
-    return max(1, int(float(match.group("seconds")) + 0.999))
+def _stop_reason_for_error(exc: Exception) -> TaskStopReason:
+    if isinstance(exc, ProviderHTTPError):
+        return TaskStopReason.PROVIDER_ERROR
+    return TaskStopReason.WORKER_ERROR
+
+
+def _task_limits(task: dict[str, Any], settings: Settings) -> TaskLimits:
+    configured_timeout = settings.tasks.worker_timeout_seconds
+    configured_max_steps = _config_limit(settings.tasks.worker_max_steps)
+    configured_max_tool_calls = _config_limit(settings.tasks.worker_max_tool_calls)
+    raw_limits = task.get("limits")
+    if not isinstance(raw_limits, dict):
+        return TaskLimits(
+            timeout_seconds=configured_timeout,
+            max_steps=configured_max_steps,
+            max_tool_calls=configured_max_tool_calls,
+        )
+    timeout_seconds = raw_limits.get("timeout_seconds")
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+        raise ValueError("task timeout_seconds must be a positive integer")
+    if timeout_seconds > configured_timeout:
+        raise ValueError("task timeout_seconds may not exceed the configured task-worker timeout")
+    max_steps = _payload_limit(raw_limits.get("max_steps"), "max_steps")
+    max_tool_calls = _payload_limit(raw_limits.get("max_tool_calls"), "max_tool_calls")
+    _validate_ceiling(max_steps, configured_max_steps, "max_steps")
+    _validate_ceiling(max_tool_calls, configured_max_tool_calls, "max_tool_calls")
+    return TaskLimits(
+        timeout_seconds=timeout_seconds,
+        max_steps=max_steps,
+        max_tool_calls=max_tool_calls,
+    )
+
+
+def _config_limit(value: int | str) -> int | None:
+    return None if value == "unlimited" else int(value)
+
+
+def _payload_limit(value: Any, field: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"task {field} must be a positive integer or null")
+    return value
+
+
+def _validate_ceiling(value: int | None, configured_ceiling: int | None, field: str) -> None:
+    if value is None and configured_ceiling is not None:
+        raise ValueError(f"task {field} may not be unlimited for this task system")
+    if value is not None and configured_ceiling is not None and value > configured_ceiling:
+        raise ValueError(f"task {field} may not exceed the configured task-worker limit")
