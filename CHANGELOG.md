@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Startup warns when `tools.rag.backend` resolves to the `"sqlite"` default while `qdrant_url` is
   customized — the shape of a config written before `backend` existed, which would otherwise start
   against an empty local store without failing.
+- **Relation graph tool** (#54), opt-in through `[extensions] modules` plus the new `graph` extra.
+  Facts that name two things are stored as edges in SQLite and traversed with `networkx`, so
+  "my sister lives in Madrid" becomes `person:sister --lives_in--> city:madrid` instead of another
+  memory blob. A `policies/graph.md` prompt fragment tells the model when to reach for it over
+  `memory`, and `docs/graph.rst` covers setup. Registered from `[extensions] modules` rather than
+  the bundled list specifically so it also reaches task workers.
+- **Lazy MCP tool discovery** (#56). `[tools.mcp].mode = "lazy"` stops the daemon from fetching
+  every configured server's catalog at startup, fetching on first use instead and caching for
+  `catalog_cache_ttl_seconds` (default 60). `mode = "bridge"` keeps the previous eager behavior.
+- `minibot-dev` agent skill (#57): an orientation and change-routing guide for working on MiniBot
+  itself — layer map, per-extension-point wiring chains, the two system-prompt mechanisms, and the
+  project invariants that are not visible in the file tree. `CONTRIBUTING.md` added alongside it.
 
 ### Changed
 
@@ -35,6 +47,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `minibot-rabbitmq`; uncomment it when using that backend.
 - `numpy` joins the `rag` extra (the SQLite backend's similarity scan). It was already installed in
   practice as a sentence-transformers dependency, but was undeclared.
+- **Breaking: one owner, many chat sessions** (#58). `[runtime].owner_id` replaces
+  `[tools.kv_memory].default_owner_id`, which despite its location owned the relation graph,
+  scheduled jobs and the RAG corpus as well as key/value memory, and applied even when that tool
+  was disabled. Move the value; the name is all that changes. The old key is **rejected at load
+  time** with a message naming the new one, rather than ignored — silently falling back to the
+  default would have orphaned a customized owner's data.
+  MiniBot assists exactly one person, so ownership is now a constant of the deployment: it is read
+  once from config and never derived from a message, a task payload or any caller-supplied field,
+  on any entrypoint. Sessions are chat sessions (`channel` + `chat_id`); a channel's `user_id` is
+  authorization and audit context only and is no longer part of the session key. Every channel sets
+  `chat_id`, so existing conversation history keys are unchanged. Multi-user or multi-tenant
+  isolation stays out of scope — it would need its own identity model in an opt-in extension.
+- Dependency bumps across the pip group (#55).
+
+### Fixed
+
+- **A `spawn_task` worker wrote long-term data under the wrong owner** (#58). It derived the owner
+  from the task's `user_id` and never read config at all, so a worker used the channel's sender id
+  while the main agent used `"primary"`. The relation graph is reachable from workers by design and
+  every graph query filters on `owner_id`, so edges a task recorded were invisible to the main
+  agent — silently, because the owner check was satisfied by either value. Key/value memory, RAG
+  and the scheduler escaped it only because they do not load in worker processes. Anyone who ran
+  the graph tool together with `spawn_task` can reclaim those rows with
+  `UPDATE graph_edges SET owner_id = '<owner_id>' WHERE owner_id = '<sender id>'`.
 
 ## [0.11.0] - 2026-09-10
 
