@@ -5,12 +5,13 @@ first edit in the repo.
 
 ## What CI actually gates
 
-`.github/workflows/ci.yml` runs exactly three steps on push-to-main and every PR:
+`.github/workflows/ci.yml` runs exactly four steps on push-to-main and every PR:
 
 ```
 poetry install --all-extras
 poetry run pylint --disable=all --enable=disallowed-name minibot     ← style gate
 poetry run pytest
+npx --yes jscpd@4.2.3 --config .jscpd.json
 ```
 
 **No ruff, no ruff format, no type checker, no coverage floor.** Ruff is a project convention
