@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minibot"
-version = "0.14.0"
+version = "0.14.1"
 description = "Self-hosted Telegram-first AI assistant with async tooling, memory, and scheduling."
 authors = ["sonic182 <johander1822@gmail.com>"]
 license = "MIT"
@@ -10,13 +10,19 @@ repository = "https://github.com/sonic182/minibot"
 documentation = "https://sonic182.github.io/minibot"
 keywords = ["telegram", "assistant", "llm", "bot", "automation", "self-hosted"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
   "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Communications :: Chat",
+  "Topic :: Internet",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 packages = [
