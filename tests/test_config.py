@@ -104,6 +104,70 @@ preload_catalog = true
     assert settings.tools.skills.preload_catalog is True
 
 
+def test_load_settings_expands_environment_variables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_TOKEN", "secret-${MINIBOT_CONFIG_TEST_RECURSIVE}")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_RECURSIVE", "must-not-expand")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_TIMEOUT", "180")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_CHAT_ID", "123")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_BYTES", "5MB")
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[runtime]
+agent_timeout_seconds = "${MINIBOT_CONFIG_TEST_TIMEOUT}"
+
+[llm]
+system_prompt = "$${LITERAL}"
+
+[providers.openai]
+api_key = "${MINIBOT_CONFIG_TEST_TOKEN}"
+
+[providers.openai.headers]
+Authorization = "Bearer ${MINIBOT_CONFIG_TEST_TOKEN}"
+
+[channels.telegram]
+bot_token = "${MINIBOT_CONFIG_TEST_TOKEN}"
+allowed_chat_ids = ["${MINIBOT_CONFIG_TEST_CHAT_ID}"]
+
+[extensions.config.example]
+items = ["${MINIBOT_CONFIG_TEST_TOKEN}"]
+
+[tools.http_client]
+max_bytes = "${MINIBOT_CONFIG_TEST_BYTES}"
+""",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_file)
+
+    assert settings.runtime.agent_timeout_seconds == 180
+    assert settings.llm.system_prompt == "${LITERAL}"
+    assert settings.providers["openai"].api_key == "secret-${MINIBOT_CONFIG_TEST_RECURSIVE}"
+    assert settings.providers["openai"].headers["Authorization"] == "Bearer secret-${MINIBOT_CONFIG_TEST_RECURSIVE}"
+    assert settings.channels.telegram.bot_token == "secret-${MINIBOT_CONFIG_TEST_RECURSIVE}"
+    assert settings.channels.telegram.allowed_chat_ids == [123]
+    assert settings.extensions.config["example"]["items"] == ["secret-${MINIBOT_CONFIG_TEST_RECURSIVE}"]
+    assert settings.tools.http_client.max_bytes == 5_000_000
+
+
+def test_load_settings_rejects_missing_environment_variable_in_disabled_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("MINIBOT_CONFIG_TEST_MISSING", raising=False)
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[tools.http_client]
+enabled = false
+spill_subdir = "${MINIBOT_CONFIG_TEST_MISSING}"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="MINIBOT_CONFIG_TEST_MISSING.*tools.http_client.spill_subdir"):
+        load_settings(config_file)
+
+
 def test_skills_preload_catalog_defaults_true() -> None:
     # A catalog the model never sees is a set of skills it never uses: without the preload the prompt
     # only says "call list_skills", while the specialist roster is already in the prompt.
