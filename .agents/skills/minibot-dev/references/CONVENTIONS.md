@@ -146,22 +146,18 @@ would make CI call paid APIs.
 Write as few tests as possible while covering the important paths; prefer integration and
 functional tests over granular unit tests. Use the `minibot-testing` skill.
 
-## Config has no `${ENV}` interpolation
+## Config environment interpolation
 
-`config.toml` is parsed with plain `tomllib`. The only environment variable read anywhere in
-config loading is `MINIBOT_CONFIG` (`adapters/config/loader.py:12`). A literal
-`api_key = "${OPENAI_API_KEY}"` is passed through as that exact string.
+`Settings.from_dict()` expands `${ENV}` string values after TOML parsing and before
+normalization and validation, including nested lists, tables, and extension configuration.
+The helper lives in `adapters/config/environment.py`. Missing variables fail loading even
+in disabled sections; `$${ENV}` escapes a literal reference. Expansion is single-pass and
+does not load `.env` files. See `docs/config.rst` for the full contract.
 
-The convention is to store the variable *name* and resolve it in the consuming code:
-
-```toml
-[extensions.config.my_module]
-token_env = "GITHUB_TOKEN"
-```
-
-```python
-token = os.environ.get(mb.config.get("token_env", ""))
-```
+The configurator must preserve references on disk while using resolved values at runtime.
+Direct `Settings(...)` and `Settings.model_validate(...)` calls do not expand values.
+Existing `token_env = "GITHUB_TOKEN"` fields still resolve names in their consuming code.
+`MINIBOT_CONFIG` continues to select the config path (`adapters/config/loader.py:12`).
 
 ## Skill frontmatter (MiniBot's own parser)
 

@@ -73,5 +73,6 @@ Project conventions, real CI gates and the traps that are not visible in the fil
   timezone-aware datetimes.
 - **No comments** unless a constraint is genuinely non-obvious, or the docstring is a public
   documentation surface (tool descriptions, config models).
-- **`config.toml` has no `${ENV}` interpolation.** Store the *variable name* in config and read
-  `os.environ` in the consuming code.
+- **Config expands `${ENV}` string values before validation.** Unset variables fail loading;
+  `$${ENV}` escapes a literal reference. Preserve references when writing configuration.
+  See `docs/config.rst` for the full contract.

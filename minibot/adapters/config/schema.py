@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tomllib
 import types
 from datetime import datetime
@@ -17,6 +18,8 @@ from pydantic import (
     ValidationError,
     model_validator,
 )
+
+from minibot.adapters.config.environment import expand_environment
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
 
@@ -885,7 +888,8 @@ class Settings(BaseModel):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Settings:
-        return cls.model_validate(_normalize_for_annotation(data, cls))
+        expanded = expand_environment(data, os.environ)
+        return cls.model_validate(_normalize_for_annotation(expanded, cls))
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> Settings:

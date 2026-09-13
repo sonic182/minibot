@@ -142,8 +142,9 @@ AppContainer.configure()
   └─ load_settings(path)                    adapters/config/loader.py:16
       ├─ resolve_config_path   (arg → $MINIBOT_CONFIG → ./config.toml)   loader.py:11
       └─ Settings.from_file → from_dict     adapters/config/schema.py
-          ├─ _normalize_for_annotation(...) schema.py:49
-          └─ Settings.model_validate        schema.py:818  (extra="forbid")
+          ├─ expand_environment(...)        adapters/config/environment.py
+          ├─ _normalize_for_annotation(...) adapters/config/schema.py
+          └─ Settings.model_validate        (extra="forbid")
 ```
 
 Create: nothing. Edit: a `BaseModel` in `adapters/config/schema.py` (keep the docstring
@@ -157,10 +158,10 @@ Two things to know:
 - **`Settings` is `extra="forbid"`** — an unknown top-level section is a hard boot failure.
   The two deliberate escape hatches that let you add config *without* touching the schema are
   `ChannelsConfig.section(...)` and `[extensions.config.<module>]`.
-- **There is no `${ENV}` interpolation.** The loader is plain `tomllib`; the only environment
-  variable read anywhere in config is `MINIBOT_CONFIG` (`loader.py:12`). The convention is to
-  store the env var *name* in config (`token_env = "GITHUB_TOKEN"`) and call
-  `os.environ.get(token_env)` in the consuming code.
+- **`${ENV}` expands in all string values before validation**, including extension config.
+  Missing variables fail loading; `$${ENV}` escapes a literal reference. Preserve references
+  when writing configuration. Existing `token_env` fields still resolve names in consuming
+  code. See `docs/config.rst` for the full contract.
 
 Byte-size fields use `ByteSizeValue`, which accepts strings like `"10MB"`.
 

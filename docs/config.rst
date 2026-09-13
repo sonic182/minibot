@@ -13,6 +13,57 @@ Start from the provided example::
 Values follow standard TOML syntax. Byte-size fields accept human-readable
 strings (e.g. ``"64KB"``, ``"5MB"``) in addition to raw integers.
 
+.. _config-environment-variables:
+
+Environment variables
+---------------------
+
+Use ``${NAME}`` in any string value to read a variable from MiniBot's process environment.
+References work in nested tables and lists, including provider headers and extension configuration:
+
+.. code-block:: toml
+
+   [providers.openai]
+   api_key = "${OPENAI_API_KEY}"
+   base_url = "${API_BASE_URL}/v1"
+
+   [providers.openai.headers]
+   Authorization = "Bearer ${PROXY_TOKEN}"
+
+   [runtime]
+   agent_timeout_seconds = "${AGENT_TIMEOUT_SECONDS}"
+
+   [channels.telegram]
+   enabled = "${TELEGRAM_ENABLED}"
+   allowed_chat_ids = ["${OWNER_CHAT_ID}"]
+
+Names follow ``[A-Za-z_][A-Za-z0-9_]*``. Multiple references in one value are supported.
+Write ``$${NAME}`` to produce literal ``${NAME}``. Bare ``$NAME`` and unsupported expressions such as
+``${NAME:-default}`` remain unchanged. Table names and keys are never expanded.
+
+TOML is parsed before substitution, so quotes, backslashes, and newlines in environment values are
+inserted verbatim without changing the TOML structure. Both TOML basic and literal strings are
+expanded. Inserted values are not expanded again. Non-string TOML values stay unchanged; quoted
+references for numeric, boolean, and byte-size fields use the existing schema's conversions and
+validation. Environment values are not parsed as TOML lists or tables.
+
+An unset variable raises an error naming the variable and configuration path, including list indexes,
+without showing its value. All sections are expanded, including disabled providers and tools.
+A variable set to an empty string produces ``""`` and follows the setting's existing validation.
+
+Supply variables to each process that loads configuration: the daemon, console, task workers, and
+``minibot configure``. MiniBot does not load ``.env`` files or execute shell expressions. Changes to
+the environment take effect the next time settings are loaded. ``MINIBOT_CONFIG`` still selects the
+configuration file when no explicit path is supplied.
+
+``minibot configure`` retains the original references for unchanged values, including list entries,
+and uses resolved credentials for model discovery. References entered in credential prompts are
+saved literally. Loading settings never rewrites the file; literal secrets remain plain text on disk.
+
+For Python callers, expansion occurs in ``Settings.from_dict()`` and ``Settings.from_file()`` before
+normalization and validation, without mutating the input dictionary. Direct ``Settings(...)`` and
+``Settings.model_validate(...)`` calls do not expand references.
+
 Runtime
 -------
 
