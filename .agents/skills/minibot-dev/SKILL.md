@@ -57,8 +57,7 @@ Project conventions, real CI gates and the traps that are not visible in the fil
    and extensions *differently* — a tool wired only into `factory.py` is invisible to workers.
 5. **Lint**: `poetry run ruff check --fix minibot tests` and `poetry run ruff format .`.
    Note ruff is *not* enforced in CI; the pylint name rule is (see CONVENTIONS.md).
-6. **No tests unless asked.** When asked, use the `minibot-testing` skill.
-7. **Never run git write commands** — no `add`, `commit`, `push`. The user commits.
+6. **Never run git write commands** — no `add`, `commit`, `push`. The user commits.
 
 ## Hard rules
 
