@@ -835,6 +835,7 @@ def test_media_support_modes() -> None:
     openrouter_client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
     openai_client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
     responses_client = LLMClient(LLMMConfig(provider="openai_responses", api_key="secret", model="x"))
+    codex_client = LLMClient(LLMMConfig(provider="chatgpt_codex", api_key="secret", model="x"))
     claude_client = LLMClient(LLMMConfig(provider="claude", api_key="secret", model="x"))
 
     assert openrouter_client.supports_media_inputs() is True
@@ -843,6 +844,8 @@ def test_media_support_modes() -> None:
     assert openai_client.media_input_mode() == "chat_completions"
     assert responses_client.supports_media_inputs() is True
     assert responses_client.media_input_mode() == "responses"
+    assert codex_client.supports_media_inputs() is True
+    assert codex_client.media_input_mode() == "responses"
     assert claude_client.supports_media_inputs() is False
     assert claude_client.media_input_mode() == "none"
 

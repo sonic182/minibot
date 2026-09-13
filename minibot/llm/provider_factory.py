@@ -261,10 +261,10 @@ class LLMClient:
         return self._max_tool_iterations
 
     def supports_media_inputs(self) -> bool:
-        return self._provider_name in {"openai_responses", "openai", "openrouter"}
+        return self._provider_name in {"openai_responses", "chatgpt_codex", "openai", "openrouter"}
 
     def media_input_mode(self) -> str:
-        if self._provider_name == "openai_responses":
+        if self._provider_name in {"openai_responses", "chatgpt_codex"}:
             return "responses"
         if self._provider_name in {"openai", "openrouter"}:
             return "chat_completions"
