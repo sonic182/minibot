@@ -57,7 +57,7 @@ async def generate_with_tools(
     model: str,
     request_ctx: RequestContext,
     is_responses_provider: bool,
-    max_new_tokens: int,
+    max_new_tokens: int | None,
     max_tool_iterations: int,
     provider_name: str,
     logger: logging.Logger,

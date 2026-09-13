@@ -240,13 +240,13 @@ def _choose_model(models: list[str], current: str) -> str:
 
 
 def _configure_chatgpt_codex(document: Any, settings: Settings) -> None:
-    from minibot.llm.services.client_bootstrap import resolve_codex_auth_path
+    from minibot.app.codex_setup import CodexDependencyError
 
     provider_config = settings.providers.get("chatgpt_codex", ProviderConfig())
-    auth_path = resolve_codex_auth_path(provider_config.auth_path)
+    auth_path = _resolve_codex_auth_path(provider_config.auth_path)
     try:
         credentials = _ensure_codex_login(auth_path)
-    except ImportError:
+    except CodexDependencyError:
         _write(
             "llm-async-codex is required for this provider. Install with "
             "`poetry install --extras codex` or `poetry install --all-extras` and rerun.\n"
@@ -261,28 +261,34 @@ def _configure_chatgpt_codex(document: Any, settings: Settings) -> None:
 
 
 def _ensure_codex_login(auth_path: Path) -> Any:
-    from llm_async_codex import CodexAuthError, load_credentials, login
+    from minibot.app.codex_setup import CodexCredentialsError, load_codex_credentials, login_to_codex
 
     try:
-        return load_credentials(auth_path)
-    except CodexAuthError:
+        return load_codex_credentials(auth_path)
+    except CodexCredentialsError:
         pass
     _write(f"Not logged in to ChatGPT Codex yet (looked for {auth_path}).\n")
     device_code = _ask_bool("Use device-code login (no local browser needed)", False)
     _write("Starting Codex login" + (" (device code)...\n" if device_code else " (browser)...\n"))
-    return asyncio.run(login(device_code=device_code, auth_path=auth_path))
+    return asyncio.run(login_to_codex(device_code=device_code, auth_path=auth_path))
 
 
 def _ask_chatgpt_codex_model(credentials: Any, current: str) -> str:
-    from minibot.llm.providers.codex import PatchedCodexProvider
+    from minibot.app.codex_setup import list_codex_model_slugs
 
     try:
-        models = asyncio.run(PatchedCodexProvider(credentials).list_model_slugs())
+        models = asyncio.run(list_codex_model_slugs(credentials))
     except Exception:
         _logger.debug("Could not list Codex models", exc_info=True)
         _write("Could not fetch the Codex model list; enter the model name manually.\n")
         models = []
     return _choose_model(models, current)
+
+
+def _resolve_codex_auth_path(auth_path: str | None) -> Path:
+    from minibot.app.codex_setup import resolve_codex_auth_path
+
+    return resolve_codex_auth_path(auth_path)
 
 
 async def _fetch_models(provider: str, base_url: str, api_key: str) -> list[str]:

@@ -224,16 +224,10 @@ async def _resolve_chatgpt_codex_limits(
     logger: Logger,
 ) -> dict[str, Any] | None:
     """Query Codex's own `/models` endpoint — it isn't in the models.dev catalog."""
-    try:
-        from llm_async_codex import load_credentials
+    from minibot.llm.services.codex_setup import get_model_capabilities, resolve_auth_path
 
-        from minibot.llm.providers.codex import PatchedCodexProvider
-        from minibot.llm.services.client_bootstrap import resolve_codex_auth_path
-    except ImportError:
-        return None
     try:
-        credentials = load_credentials(resolve_codex_auth_path(auth_path))
-        capabilities = await PatchedCodexProvider(credentials).get_model_capabilities(model_name)
+        capabilities = await get_model_capabilities(resolve_auth_path(auth_path), model_name)
     except Exception as exc:
         logger.warning(
             "chatgpt_codex token auto-config: /models lookup failed",

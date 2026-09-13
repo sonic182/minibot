@@ -8,6 +8,7 @@ import aiosonic
 from llm_async.utils.retry import RetryConfig
 
 from minibot.adapters.config.schema import LLMMConfig
+from minibot.llm.services.codex_setup import CodexCredentialsError, load_credentials, resolve_auth_path
 from minibot.llm.services.provider_registry import resolve_provider_class
 
 
@@ -59,12 +60,6 @@ def create_provider(config: LLMMConfig) -> tuple[Any, str]:
     return provider, provider_name
 
 
-def resolve_codex_auth_path(auth_path: str | None) -> Path:
-    if auth_path:
-        return Path(auth_path).expanduser()
-    return Path.home() / ".minibot" / "auth_codex.json"
-
-
 def _build_codex_provider(
     config: LLMMConfig,
     base_url: str | None,
@@ -72,7 +67,7 @@ def _build_codex_provider(
     connector: aiosonic.TCPConnector,
 ) -> Any:
     try:
-        from llm_async_codex import CODEX_BASE_URL, CodexAuthError, load_credentials
+        from llm_async_codex import CODEX_BASE_URL
 
         from minibot.llm.providers.codex import PatchedCodexProvider
     except ImportError as exc:
@@ -81,11 +76,11 @@ def _build_codex_provider(
             "Install with `poetry install --extras codex` or `poetry install --all-extras`."
         ) from exc
 
-    auth_path = resolve_codex_auth_path(config.auth_path)
+    auth_path = resolve_auth_path(config.auth_path)
     try:
         credentials = load_credentials(auth_path)
-    except CodexAuthError as exc:
-        raise CodexAuthError(
+    except CodexCredentialsError as exc:
+        raise RuntimeError(
             f"{exc} Run `poetry run minibot codex login` (add --device-code if there's no local browser) to log in."
         ) from exc
 

@@ -41,7 +41,7 @@ class RuntimeMessageRenderer:
             return AgentMessage(
                 role="assistant",
                 content=[MessagePart(type="text", text=content)],
-                metadata=metadata or None,
+                metadata=metadata,
             )
         if isinstance(content, list):
             parts: list[MessagePart] = []
@@ -59,12 +59,12 @@ class RuntimeMessageRenderer:
             return AgentMessage(
                 role="assistant",
                 content=parts or [MessagePart(type="text", text="")],
-                metadata=metadata or None,
+                metadata=metadata,
             )
         return AgentMessage(
             role="assistant",
             content=[MessagePart(type="text", text=str(content))],
-            metadata=metadata or None,
+            metadata=metadata,
         )
 
     def from_provider_assistant_tool_call_message(self, message: Any) -> AgentMessage:
