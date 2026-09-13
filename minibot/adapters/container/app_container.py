@@ -4,6 +4,7 @@ import inspect
 import logging
 from pathlib import Path
 
+from minibot.adapters.config.environment import has_secret_references
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.logging.setup import configure_logging
@@ -40,6 +41,11 @@ class AppContainer:
         cls._settings = load_settings(config_path)
         cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
+        cls._vault = cls._unlock_vault_if_needed()
+        if cls._vault is not None and has_secret_references(cls._settings.model_dump(mode="python")):
+            # Second pass: ${secret:NAME} needs an unlocked vault, which needed validated settings
+            # to find. Everything below is built from the resolved settings.
+            cls._settings = load_settings(config_path, cls._vault.as_mapping())
         agent_specs = load_agent_specs(cls._settings.orchestration.directory)
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
@@ -53,13 +59,20 @@ class AppContainer:
         else:
             cls._skill_registry = SkillRegistry([])
         cls._token_autoconfig_applied = False
-        cls._vault = None
-        if cls._settings.vault.enabled:
-            cls._vault = Vault(cls._settings.vault)
-            cls._vault.unlock(read_vault_password(cls._settings.vault, cls._logger))
         # Last, so an extension's register() sees a fully built container even though the
         # context handed to it exposes only settings, the bus and a logger.
         cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger, entrypoint, vault=cls._vault)
+
+    @classmethod
+    def _unlock_vault_if_needed(cls) -> Vault | None:
+        settings = cls.get_settings()
+        if not settings.vault.enabled:
+            if has_secret_references(settings.model_dump(mode="python")):
+                raise ValueError("config uses ${secret:NAME} references but [vault] is not enabled")
+            return None
+        vault = Vault(settings.vault)
+        vault.unlock(read_vault_password(settings.vault, cls.get_logger()))
+        return vault
 
     @classmethod
     def get_settings(cls) -> Settings:

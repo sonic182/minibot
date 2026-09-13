@@ -16,6 +16,11 @@ def register(mb: ExtensionContext) -> None:
         if server.auth_secret:
             if mb.vault is None:
                 raise ValueError(f"mcp server {server.name!r} sets auth_secret but [vault] is not enabled")
+            if any(key.lower() == "authorization" for key in headers):
+                raise ValueError(
+                    f"mcp server {server.name!r} sets both auth_secret and an Authorization header; "
+                    'use one or the other (a header can carry "Bearer ${secret:NAME}")'
+                )
             headers["Authorization"] = f"Bearer {mb.vault.get(server.auth_secret)}"
         client = MCPClient(
             server_name=server.name,

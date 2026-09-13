@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from multiprocessing import Process
@@ -50,11 +50,15 @@ class TaskManager:
         worker_timeout_seconds: float,
         task_repository: TaskRepository | None = None,
         lease_timeout_seconds: int | None = None,
+        secrets: Mapping[str, str] | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._worker_timeout_seconds = worker_timeout_seconds
         self._lease_timeout_seconds = lease_timeout_seconds or max(1, int(worker_timeout_seconds))
         self._task_repository = task_repository
+        # Workers reload config themselves, so they need the vault map to resolve ${secret:NAME}.
+        # It travels over the in-memory pipe only — never the queue row, never the environment.
+        self._secrets = dict(secrets) if secrets else None
         self._tasks: dict[str, Task] = {}
         self._logger = logging.getLogger("minibot.tasks")
 
@@ -332,7 +336,10 @@ class TaskManager:
         grace_seconds = _SUPERVISOR_GRACE_SECONDS if timeout_seconds >= 1 else 0
         deadline = loop.time() + timeout_seconds + grace_seconds
         async with mainpipe.open() as (rx, tx):
-            tx.write(json.dumps(payload).encode() + b"\n")
+            # Added here rather than to `payload` so secrets never enter the dict that status and
+            # result publishing carry around.
+            wire_payload = {**payload, "secrets": self._secrets} if self._secrets else payload
+            tx.write(json.dumps(wire_payload).encode() + b"\n")
             while True:
                 remaining = deadline - loop.time()
                 if remaining <= 0:

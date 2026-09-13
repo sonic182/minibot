@@ -33,6 +33,7 @@ def register(mb: ExtensionContext) -> None:
         settings.tasks.worker_timeout_seconds,
         store,
         settings.tasks.sqlite.lease_timeout_seconds,
+        secrets=mb.vault.as_mapping() if mb.vault else None,
     )
     producer = SQLiteTaskProducer(store)
     consumer = SQLiteTaskConsumerService(

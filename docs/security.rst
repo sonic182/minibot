@@ -42,6 +42,20 @@ configuration and that consumer resolves it itself:
    url = "https://api.githubcopilot.com/mcp/"
    auth_secret = "github"
 
+``${secret:NAME}`` is the general form: it works in any string value in ``config.toml``, so provider
+API keys, the Telegram bot token, and any other credential can live in the vault instead of in the
+file. This is worth doing precisely because ``bash`` can read ``config.toml`` and cannot read the
+vault:
+
+.. code-block:: toml
+
+   [providers.openai]
+   api_key = "${secret:OPENAI_API_KEY}"
+
+See :doc:`config` for the resolution rules. Note the boundary: this protects the credential at rest
+in the file. Once resolved it sits in the daemon's memory exactly as an ``${ENV_VAR}`` value does,
+so the process-memory limits below apply to both equally.
+
 The model's only vault-related capability is ``list_secrets``, which returns names. There is no
 ``get_secret`` tool and no ``secret://`` reference the model can write into a tool argument — that
 would turn the vault into a decryption oracle, letting a prompt-injected

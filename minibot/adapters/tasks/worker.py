@@ -109,7 +109,8 @@ async def run_agent_loop(
     try:
         channel = _require_string(task.get("channel"), "channel")
         prompt = _require_string(task.get("prompt"), "prompt")
-        settings = load_settings()
+        secrets = task.pop("secrets", None)
+        settings = load_settings(secrets=secrets)
         extensions = load_extensions(settings, EventBus(), _LOGGER, entrypoint="worker")
         llm_factory = LLMClientFactory(settings)
         environment_prompt_fragment = build_environment_prompt_fragment(settings)

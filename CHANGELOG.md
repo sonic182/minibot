@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`${secret:NAME}` config references.** Any string value in `config.toml` can now read from the
+  encrypted vault, so provider API keys, the Telegram bot token and anything else no longer have to
+  sit in plain text next to a `bash` tool that can `cat` the file. Resolution happens in a second
+  pass after `${ENV_VAR}` and after the vault is unlocked; `$${secret:NAME}` escapes a literal;
+  `[vault]`'s own settings cannot use it; a reference without `[vault] enabled = true` fails at
+  startup. Task workers receive the vault contents over the in-memory pipe so references resolve
+  there too. `minibot configure` preserves references rather than resolving them. The typed
+  `[[tools.mcp.servers]] auth_secret` field remains supported as the `Authorization: Bearer`
+  shorthand; setting both on one server is now an error.
+
 - **Encrypted credential vault** (`[vault]`, opt-in, needs the new `vault` extra). Secrets live in
   a single AES-256-GCM file whose key is derived from a password with scrypt and never touches
   disk or a subprocess environment. `minibot vault init|edit|list` manages it, ansible-vault

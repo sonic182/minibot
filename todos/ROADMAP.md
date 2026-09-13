@@ -139,10 +139,17 @@ Shipped differently from the sketch above, deliberately:
   The `--password-file` flag exists on `minibot vault`, where scripting
   needs it.
 
-Out of scope for this vault: today's `${ENV_VAR}` config-time secrets
+~~Out of scope for this vault: today's `${ENV_VAR}` config-time secrets
 (`token_env`, static MCP headers). Different threat model — admin-authored,
-live only in `config.toml`, never handled through tool arguments. No
-migration planned; the two coexist.
+live only in `config.toml`, never handled through tool arguments.~~
+
+**Corrected after Phase 1 shipped.** It is *not* a different threat model:
+`bash` has no filesystem jail, so `cat config.toml` reaches every plaintext
+credential in it. A `${secret:NAME}` reference form was therefore added,
+resolvable in any config string from the vault (`adapters/config/environment.py`),
+so the file on disk holds only references. `${ENV_VAR}` still works and the
+two coexist; no migration is forced. The remaining exposure is unchanged for
+both: a resolved value lives in the daemon's memory.
 
 Ceiling: this protects secrets at rest and from the LLM's own tool calls. It
 does not protect against a fully compromised daemon process reading its own

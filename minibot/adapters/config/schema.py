@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tomllib
 import types
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
@@ -19,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-from minibot.adapters.config.environment import expand_environment
+from minibot.adapters.config.environment import expand_environment, expand_secrets, has_secret_references
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
 
@@ -38,6 +39,15 @@ def _coerce_byte_size(value: Any) -> int:
         return int(_BYTE_SIZE_ADAPTER.validate_python(value))
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid byte size value") from exc
+
+
+def _expand_secret_references(data: object, secrets: Mapping[str, str] | None) -> object:
+    if secrets is None:
+        return data
+    if isinstance(data, dict) and has_secret_references(data.get("vault", {})):
+        # The vault cannot resolve its own location, so a reference here could never be satisfied.
+        raise ValueError("[vault] settings cannot use ${secret:} references")
+    return expand_secrets(data, secrets)
 
 
 def _load_file_data(path: Path) -> dict[str, Any]:
@@ -911,12 +921,19 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Settings:
+    def from_dict(cls, data: dict[str, Any], secrets: Mapping[str, str] | None = None) -> Settings:
+        """Expand ``${ENV_VAR}``, then ``${secret:NAME}`` when ``secrets`` is supplied.
+
+        ``secrets=None`` leaves ``${secret:NAME}`` references literal, which is what the
+        configuration wizard wants: it round-trips the document back to disk and must preserve
+        references rather than resolve them.
+        """
         expanded = expand_environment(data, os.environ)
+        expanded = _expand_secret_references(expanded, secrets)
         return cls.model_validate(_normalize_for_annotation(expanded, cls))
 
     @classmethod
-    def from_file(cls, path: Path | None = None) -> Settings:
+    def from_file(cls, path: Path | None = None, secrets: Mapping[str, str] | None = None) -> Settings:
         if path is None:
             raise ValueError("config file path is required")
-        return cls.from_dict(_load_file_data(path))
+        return cls.from_dict(_load_file_data(path), secrets)

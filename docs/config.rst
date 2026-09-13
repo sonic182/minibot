@@ -64,6 +64,49 @@ For Python callers, expansion occurs in ``Settings.from_dict()`` and ``Settings.
 normalization and validation, without mutating the input dictionary. Direct ``Settings(...)`` and
 ``Settings.model_validate(...)`` calls do not expand references.
 
+Vault references
+~~~~~~~~~~~~~~~~
+
+``${secret:NAME}`` resolves to an entry in the encrypted credential vault, so a credential never has
+to sit in plain text on disk. This matters because ``config.toml`` is readable by the ``bash`` tool,
+which has no filesystem jail — the vault file is not.
+
+.. code-block:: toml
+
+   [providers.openai]
+   api_key = "${secret:OPENAI_API_KEY}"
+
+   [channels.telegram]
+   bot_token = "${secret:telegram}"
+
+   [[tools.mcp.servers]]
+   name = "linear"
+   headers = { Authorization = "Bearer ${secret:linear}" }
+
+Names follow ``[A-Za-z_][A-Za-z0-9_.-]*``, matching what the vault document accepts as a key.
+``$${secret:NAME}`` produces a literal ``${secret:NAME}``. The resolved value is injected into the
+in-memory ``Settings`` instance only; nothing is written back to the file.
+
+Resolution happens in a **second pass**, after ``${ENV_VAR}`` expansion and after the vault is
+unlocked at startup — the vault's location comes from configuration, so it cannot be known before
+the first pass. Consequences worth knowing:
+
+- ``[vault]`` settings themselves cannot use ``${secret:}``; doing so is an error.
+- ``[vault] enabled`` must be ``true`` wherever a reference appears, or startup fails naming the
+  reference.
+- A configuration with no references never reads the vault for expansion at all.
+- Task workers reload configuration in their own process and receive the vault contents over the
+  in-memory pipe from the daemon, so references resolve there too.
+- ``minibot configure`` preserves references rather than resolving them, exactly as it does for
+  ``${ENV_VAR}``.
+
+``${secret:NAME}`` and the typed ``[[tools.mcp.servers]] auth_secret`` field both read the vault and
+both remain supported; ``auth_secret`` is the shorthand for the common ``Authorization: Bearer``
+case. Setting both on the same server is an error.
+
+This protects the credential **at rest**. Once resolved, the value lives in the daemon's memory just
+as an ``${ENV_VAR}`` one does; see :doc:`security` for the full threat model.
+
 Runtime
 -------
 

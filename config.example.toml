@@ -18,6 +18,9 @@ owner_id = "primary"
 # verbatim to the extension that owns it (see examples/README.md).
 [channels.telegram]
 enabled = true
+# Any string value here accepts ${ENV_VAR} and, when [vault] is enabled, ${secret:NAME} —
+# the latter keeps the credential out of this file entirely. See docs/config.rst.
+#   bot_token = "${secret:telegram}"
 bot_token = ""
 allowed_chat_ids = []
 allowed_user_ids = []
@@ -78,6 +81,8 @@ system_prompt_file = "./prompts/main_agent_system.md"
 prompts_dir = "./prompts"
 
 [providers.openai]
+# Prefer a reference over a literal key: ${OPENAI_API_KEY} reads the environment, and
+# ${secret:OPENAI_API_KEY} reads the encrypted vault (see [vault] below).
 api_key = ""
 base_url = ""
 # OpenCode Zen (pay-as-you-go, https://opencode.ai/zen) — OpenAI-compatible /chat/completions.

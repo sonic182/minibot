@@ -4,8 +4,10 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from getpass import getpass
 from pathlib import Path
+from types import MappingProxyType
 
 from minibot.adapters.config.schema import VaultConfig
 from minibot.adapters.vault import crypt, secrets_yaml
@@ -47,6 +49,10 @@ class Vault:
 
     def names(self) -> list[str]:
         return sorted(self._require())
+
+    def as_mapping(self) -> Mapping[str, str]:
+        """Read-only view for ``${secret:NAME}`` expansion. Never hand this to LLM-facing code."""
+        return MappingProxyType(self._require())
 
     def get(self, name: str) -> str:
         secrets = self._require()
