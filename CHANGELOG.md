@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MINIBOT_VAULT_PASSWORD`, then an interactive prompt — the prompt being the recommended method.
   See `docs/security.rst` for the threat model and its limits.
 
+### Fixed
+
+- **Console TUI crashed when a link in the transcript was clicked.** `MarkdownViewer` resolves
+  every href as a local file path, so an `https://` link from the assistant raised
+  `FileNotFoundError: .../https:/example.com/...` and tore down the app. External links now open
+  in the browser and everything else is ignored — the transcript is a chat log, not a document
+  browser, so navigating away was never wanted.
+
 ### Changed
 
 - **`tools.bash.pass_parent_env` now defaults to `false`**, matching `tools.python_exec`. The `bash`
