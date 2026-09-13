@@ -23,20 +23,23 @@ async def apply_runtime_token_autoconfig_async(
     agent_specs: list[AgentSpec],
     logger: Logger,
 ) -> list[AgentSpec]:
+    # chatgpt_codex isn't in the models.dev catalog (it queries its own /models endpoint below),
+    # so a models.dev fetch failure must not skip auto-config for it.
     payload = await _fetch_models_catalog(logger)
-    if payload is None:
-        return agent_specs
 
     ratio = settings.memory.context_ratio_before_compact
     configured_llm_max = settings.llm.max_new_tokens
     main_provider = settings.llm.provider
     main_model = settings.llm.model
     main_base_url = _effective_base_url(settings, provider_name=main_provider)
-    main_limits = _resolve_limits(
+    main_auth_path = _effective_auth_path(settings, provider_name=main_provider)
+    main_limits = await _resolve_limits(
         payload=payload,
         provider_name=main_provider,
         model_name=main_model,
         base_url=main_base_url,
+        auth_path=main_auth_path,
+        logger=logger,
     )
     if main_limits is not None:
         derived_budget = max(1, int(main_limits["context"] * ratio))
@@ -80,11 +83,14 @@ async def apply_runtime_token_autoconfig_async(
         provider_name = spec.model_provider or settings.llm.provider
         model_name = spec.model or settings.llm.model
         base_url = _effective_base_url(settings, provider_name=provider_name)
-        limits = _resolve_limits(
+        auth_path = _effective_auth_path(settings, provider_name=provider_name)
+        limits = await _resolve_limits(
             payload=payload,
             provider_name=provider_name,
             model_name=model_name,
             base_url=base_url,
+            auth_path=auth_path,
+            logger=logger,
         )
         if limits is None:
             adjusted_specs.append(spec)
@@ -181,16 +187,24 @@ async def _fetch_models_catalog_async() -> object:
     return json.loads(body.decode("utf-8"))
 
 
-def _resolve_limits(
+async def _resolve_limits(
     *,
-    payload: dict[str, Any],
+    payload: dict[str, Any] | None,
     provider_name: str,
     model_name: str,
     base_url: str | None,
+    auth_path: str | None,
+    logger: Logger,
 ) -> dict[str, Any] | None:
     target_provider = _catalog_provider_key(provider_name=provider_name, base_url=base_url)
-    model_candidates = _candidate_model_ids(model_name=model_name, target_provider=target_provider)
 
+    if target_provider == "chatgpt_codex":
+        return await _resolve_chatgpt_codex_limits(model_name=model_name, auth_path=auth_path, logger=logger)
+
+    if payload is None:
+        return None
+
+    model_candidates = _candidate_model_ids(model_name=model_name, target_provider=target_provider)
     provider_hits = _hits_for_provider(
         payload=payload,
         provider_key=target_provider,
@@ -201,6 +215,34 @@ def _resolve_limits(
         output_limit = min(hit["output"] for hit in provider_hits)
         return {"catalog_provider": target_provider, "context": context_limit, "output": output_limit}
     return None
+
+
+async def _resolve_chatgpt_codex_limits(
+    *,
+    model_name: str,
+    auth_path: str | None,
+    logger: Logger,
+) -> dict[str, Any] | None:
+    """Query Codex's own `/models` endpoint — it isn't in the models.dev catalog."""
+    try:
+        from llm_async_codex import load_credentials
+
+        from minibot.llm.providers.codex import PatchedCodexProvider
+        from minibot.llm.services.client_bootstrap import resolve_codex_auth_path
+    except ImportError:
+        return None
+    try:
+        credentials = load_credentials(resolve_codex_auth_path(auth_path))
+        capabilities = await PatchedCodexProvider(credentials).get_model_capabilities(model_name)
+    except Exception as exc:
+        logger.warning(
+            "chatgpt_codex token auto-config: /models lookup failed",
+            extra={"component": "startup", "model": model_name, "error": str(exc)},
+        )
+        return None
+    if capabilities is None:
+        return None
+    return {"catalog_provider": "chatgpt_codex", "context": capabilities.max_context_window, "output": None}
 
 
 def _catalog_provider_key(*, provider_name: str, base_url: str | None) -> str:
@@ -272,4 +314,14 @@ def _effective_base_url(settings: Settings, *, provider_name: str) -> str | None
         return provider_cfg.base_url
     if settings.llm.provider.strip().lower() == normalized and settings.llm.base_url:
         return settings.llm.base_url
+    return None
+
+
+def _effective_auth_path(settings: Settings, *, provider_name: str) -> str | None:
+    normalized = provider_name.strip().lower()
+    provider_cfg = settings.providers.get(normalized)
+    if provider_cfg is not None and provider_cfg.auth_path:
+        return provider_cfg.auth_path
+    if settings.llm.provider.strip().lower() == normalized and settings.llm.auth_path:
+        return settings.llm.auth_path
     return None
