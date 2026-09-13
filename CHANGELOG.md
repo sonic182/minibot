@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`tools.bash.pass_parent_env` now defaults to `false`**, matching `tools.python_exec`. The `bash`
+  tool previously inherited the daemon's entire process environment, so any `${ENV_VAR}` secret used
+  in `config.toml` (`GITHUB_TOKEN`, MCP header tokens, database URLs) was retrievable by the LLM with
+  a single `env` call. Only keys listed in `env_allowlist` (`PATH`, `HOME`, `USER`, `LANG`, `LC_ALL`,
+  `SHELL` by default) are forwarded now. Configs that omit the key will see commands lose variables
+  they used to inherit — add the ones you need to `env_allowlist`, or set `pass_parent_env = true`
+  explicitly to keep the old behavior.
+
 ## [0.15.0] - 2026-09-13
 
 ### Added

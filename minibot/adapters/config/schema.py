@@ -569,7 +569,7 @@ class BashToolConfig(BaseModel):
     default_timeout_seconds: PositiveInt = 15
     max_timeout_seconds: PositiveInt = 120
     max_output_bytes: ByteSizeValue = 128000
-    pass_parent_env: bool = True
+    pass_parent_env: bool = False
     env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"])
     spill_to_managed_file: bool = False
     spill_after_chars: PositiveInt = 2000

@@ -14,6 +14,10 @@ Recommendations
 
 - Disable ``tools.python_exec`` unless you need it.
 - Disable ``tools.bash`` unless you need direct shell access.
+- Keep ``tools.bash.pass_parent_env = false`` (the default). Setting it to ``true`` makes every
+  variable the daemon runs with — including any ``${ENV_VAR}`` secret used in ``config.toml`` —
+  readable with a single ``env`` call. Add the specific keys a command needs to ``env_allowlist``
+  instead.
 - Keep ``tools.apply_patch.restrict_to_workspace = true`` unless unrestricted edits are required.
 - Keep ``tools.file_storage.allow_outside_root = false`` to prevent path traversal.
 - Prefer explicit sandbox isolation for untrusted code (``sandbox_mode``: ``none``, ``basic``, ``rlimit``, ``cgroup``, or ``jail``; default is ``basic``).

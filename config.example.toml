@@ -385,12 +385,15 @@ pass_parent_env = false
 env_allowlist = ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"]
 
 # Host Bash execution tool.
+# `pass_parent_env = true` hands the LLM every variable the daemon runs with, including any
+# ${ENV_VAR} secret used elsewhere in this file — one `env` call retrieves them all. Widen
+# env_allowlist instead.
 [tools.bash]
 enabled = false
 default_timeout_seconds = 15
 max_timeout_seconds = 120
 max_output_bytes = "128KB"
-pass_parent_env = true
+pass_parent_env = false
 env_allowlist = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"]
 
 # Generic offload of oversized tool results to a managed temp file, so the agent
