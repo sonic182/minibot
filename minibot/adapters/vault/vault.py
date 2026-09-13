@@ -16,7 +16,10 @@ PASSWORD_ENV_VAR = "MINIBOT_VAULT_PASSWORD"
 
 
 def read_vault(path: str | Path, password: str) -> dict[str, str]:
-    raw = Path(path).expanduser().read_text(encoding="utf-8")
+    try:
+        raw = Path(path).expanduser().read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"cannot read the vault at {path}: {exc.strerror or exc}") from exc
     try:
         envelope = json.loads(raw)
     except json.JSONDecodeError as exc:

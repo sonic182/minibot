@@ -34,12 +34,25 @@ def expand_secrets(value: object, secrets: Mapping[str, str], *, path: str = "")
 
 def has_secret_references(value: object) -> bool:
     """Whether any string in ``value`` carries an unescaped ``${secret:NAME}`` reference."""
+    return _any_string(value, lambda text: any(not m.group("escape") for m in _SECRET_REFERENCE.finditer(text)))
+
+
+def has_secret_syntax(value: object) -> bool:
+    """Whether any string in ``value`` mentions ``${secret:NAME}``, escaped or not.
+
+    Wider than :func:`has_secret_references` on purpose: an escaped reference resolves to
+    nothing but still needs the secret pass to run, since that is where ``$$`` is consumed.
+    """
+    return _any_string(value, lambda text: _SECRET_REFERENCE.search(text) is not None)
+
+
+def _any_string(value: object, predicate: Callable[[str], bool]) -> bool:
     if isinstance(value, str):
-        return any(not match.group("escape") for match in _SECRET_REFERENCE.finditer(value))
+        return predicate(value)
     if isinstance(value, dict):
-        return any(has_secret_references(item) for item in value.values())
+        return any(_any_string(item, predicate) for item in value.values())
     if isinstance(value, list):
-        return any(has_secret_references(item) for item in value)
+        return any(_any_string(item, predicate) for item in value)
     return False
 
 

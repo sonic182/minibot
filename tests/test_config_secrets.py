@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from minibot.adapters.config.environment import has_secret_references
+from minibot.adapters.config.environment import has_secret_references, has_secret_syntax
 from minibot.adapters.config.schema import Settings, VaultConfig
 from minibot.adapters.vault import Vault, write_vault
 
@@ -60,3 +60,11 @@ def test_a_config_without_references_never_needs_the_vault() -> None:
     data = {"providers": {"openrouter": {"api_key": "plain"}}, "orchestration": {"directory": "$${secret:x}"}}
 
     assert not has_secret_references(Settings.from_dict(data).model_dump(mode="python"))
+
+
+def test_an_escape_is_consumed_even_with_no_vault_and_nothing_to_resolve() -> None:
+    """`$$` is dropped by the secret pass, so a config of escapes alone still has to run it."""
+    data = {"orchestration": {"directory": "$${secret:x}"}}
+
+    assert has_secret_syntax(Settings.from_dict(data).model_dump(mode="python"))
+    assert Settings.from_dict(data, {}).orchestration.directory == "${secret:x}"

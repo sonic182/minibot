@@ -4,7 +4,7 @@ import inspect
 import logging
 from pathlib import Path
 
-from minibot.adapters.config.environment import has_secret_references
+from minibot.adapters.config.environment import has_secret_references, has_secret_syntax
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.logging.setup import configure_logging
@@ -42,10 +42,12 @@ class AppContainer:
         cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
         cls._vault = cls._unlock_vault_if_needed()
-        if cls._vault is not None and has_secret_references(cls._settings.model_dump(mode="python")):
-            # Second pass: ${secret:NAME} needs an unlocked vault, which needed validated settings
-            # to find. Everything below is built from the resolved settings.
-            cls._settings = load_settings(config_path, cls._vault.as_mapping())
+        # Second pass: ${secret:NAME} needs an unlocked vault, which needed validated settings to
+        # find. It also runs without one, because that pass is where `$${secret:}` loses its `$$`.
+        # The dump only reveals a reference in a field that stays `str` through validation, which
+        # every secret-bearing field in the schema currently is.
+        if has_secret_syntax(cls._settings.model_dump(mode="python")):
+            cls._settings = load_settings(config_path, cls._vault.as_mapping() if cls._vault else {})
         agent_specs = load_agent_specs(cls._settings.orchestration.directory)
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
@@ -70,6 +72,9 @@ class AppContainer:
             if has_secret_references(settings.model_dump(mode="python")):
                 raise ValueError("config uses ${secret:NAME} references but [vault] is not enabled")
             return None
+        # Before unlocking, or a reference in `path` fails as a missing file instead.
+        if has_secret_references(settings.vault.model_dump(mode="python")):
+            raise ValueError("[vault] settings cannot use ${secret:} references")
         vault = Vault(settings.vault)
         vault.unlock(read_vault_password(settings.vault, cls.get_logger()))
         return vault

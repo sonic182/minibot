@@ -9,6 +9,8 @@ _VERSION = 1
 _SCRYPT_N = 2**15
 _SCRYPT_R = 8
 _SCRYPT_P = 1
+_MAX_SCRYPT_N = 2**20
+_MAX_SCRYPT_R = 64
 _KEY_BYTES = 32
 _SALT_BYTES = 16
 _NONCE_BYTES = 12
@@ -48,9 +50,13 @@ def decrypt(envelope: dict[str, Any], password: str) -> bytes:
         salt = base64.b64decode(envelope["salt"])
         nonce = base64.b64decode(envelope["nonce"])
         ciphertext = base64.b64decode(envelope["ciphertext"])
-    except (KeyError, ValueError) as exc:
+        n, r, p = int(envelope["n"]), int(envelope["r"]), int(envelope["p"])
+    except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"malformed vault envelope: {exc}") from exc
-    key = derive_key(password, salt, n=int(envelope["n"]), r=int(envelope["r"]), p=int(envelope["p"]))
+    if not 0 < n <= _MAX_SCRYPT_N or not 0 < r <= _MAX_SCRYPT_R:
+        # scrypt allocates n * r * 128 bytes; the envelope is a file, so cap what it can ask for.
+        raise ValueError(f"vault envelope asks for unreasonable scrypt parameters: n={n}, r={r}")
+    key = derive_key(password, salt, n=n, r=r, p=p)
     try:
         return aesgcm(key).decrypt(nonce, ciphertext, None)
     except Exception as exc:

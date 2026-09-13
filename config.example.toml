@@ -555,10 +555,6 @@ max_attempts = 3
 # How long terminal task rows and compact event history are kept before being purged.
 done_retention_seconds = 2592000
 
-# Broker connection for tasks.backend = "rabbitmq" (requires extras: rabbitmq).
-# Each message body must be a JSON object with at least a "text" field.
-# Optional fields: "user_id" (int), "chat_id" (int).
-# Example body: {"text": "summarise this report", "user_id": 1, "chat_id": 1}
 # Encrypted credential vault. Needs the vault extra: poetry install --extras vault
 # Write secrets with `minibot vault edit`; the LLM can list their names and nothing else.
 # A secret is bound to one destination in config (see auth_secret above), which resolves it
@@ -571,6 +567,10 @@ path = "secrets.vault.yml"
 # works the same way, with the same caveat.
 # password_file = ""
 
+# Broker connection for tasks.backend = "rabbitmq" (requires extras: rabbitmq).
+# Each message body must be a JSON object with at least a "text" field.
+# Optional fields: "user_id" (int), "chat_id" (int).
+# Example body: {"text": "summarise this report", "user_id": 1, "chat_id": 1}
 [rabbitmq]
 broker_url = "amqp://guest:guest@minibot-rabbitmq:5672/"
 queue_name = "minibot.tasks.worker"
