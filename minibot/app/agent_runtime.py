@@ -76,6 +76,7 @@ class AgentRuntime:
         self._logger = logging.getLogger("minibot.agent_runtime")
         self._message_renderer = RuntimeMessageRenderer(
             media_input_mode=llm_client.media_input_mode(),
+            is_responses_provider=llm_client.is_responses_provider(),
             managed_files_root=managed_files_root,
             logger=self._logger,
         )
@@ -112,6 +113,13 @@ class AgentRuntime:
         tool_calls_count = 0
         step = 0
         previous_response_id: str | None = initial_previous_response_id
+        # Some Responses-shaped providers (e.g. codex, which forces store=False on the backend)
+        # can't rely on server-side state, so they never get the delta-only previous_response_id
+        # follow-up path — every step resends the full rendered history instead.
+        use_responses_followup = (
+            self._llm_client.is_responses_provider()
+            and self._llm_client.responses_state_mode() == "previous_response_id"
+        )
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
         input_tokens: int | None = None
@@ -136,7 +144,7 @@ class AgentRuntime:
 
                 call_messages = self._message_renderer.render_messages(state)
                 if (
-                    self._llm_client.is_responses_provider()
+                    use_responses_followup
                     and previous_response_id is not None
                     and responses_followup_messages is not None
                 ):
@@ -158,7 +166,7 @@ class AgentRuntime:
                         messages=call_messages,
                         tools=self._tools,
                         prompt_cache_key=prompt_cache_key,
-                        previous_response_id=previous_response_id,
+                        previous_response_id=previous_response_id if use_responses_followup else None,
                     )
                 except Exception:
                     self._logger.warning(
@@ -344,7 +352,7 @@ class AgentRuntime:
                                     provider_tool_calls=provider_tool_calls,
                                     stop_reason=TaskStopReason.REPEATED_TOOL_FAILURE,
                                 )
-                if self._llm_client.is_responses_provider():
+                if use_responses_followup:
                     responses_followup_messages = [execution.message_payload for execution in executions]
                     if applied_directive_messages:
                         responses_followup_messages.extend(

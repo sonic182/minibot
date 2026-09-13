@@ -13,7 +13,6 @@ from minibot.llm.services.provider_registry import resolve_provider_class
 
 def create_provider(config: LLMMConfig) -> tuple[Any, str]:
     configured_provider = config.provider.lower()
-    provider_cls, provider_name = resolve_provider_class(configured_provider)
     normalized_base_url = config.base_url.rstrip("/") if config.base_url else None
 
     timeouts = aiosonic.Timeouts(
@@ -34,16 +33,23 @@ def create_provider(config: LLMMConfig) -> tuple[Any, str]:
         parsed_base_url = urlparse(normalized_base_url)
         if parsed_base_url.scheme.lower() == "http":
             effective_http2 = False
-    provider_kwargs: dict[str, Any] = {
-        "api_key": config.api_key,
-        "retry_config": retry_config,
-        "client_kwargs": {"connector": connector},
-        "http2": effective_http2,
-    }
-    if normalized_base_url:
-        provider_kwargs["base_url"] = normalized_base_url
 
-    provider = provider_cls(**provider_kwargs)
+    if configured_provider == "chatgpt_codex":
+        provider = _build_codex_provider(config, normalized_base_url, effective_http2, connector)
+        provider.retry_config = retry_config
+        provider_name = "chatgpt_codex"
+    else:
+        provider_cls, provider_name = resolve_provider_class(configured_provider)
+        provider_kwargs: dict[str, Any] = {
+            "api_key": config.api_key,
+            "retry_config": retry_config,
+            "client_kwargs": {"connector": connector},
+            "http2": effective_http2,
+        }
+        if normalized_base_url:
+            provider_kwargs["base_url"] = normalized_base_url
+        provider = provider_cls(**provider_kwargs)
+
     extra_headers = dict(getattr(config, "extra_headers", None) or {})
     if extra_headers:
         # llm_async has no constructor hook for extra headers; overriding the accessor covers
@@ -51,6 +57,41 @@ def create_provider(config: LLMMConfig) -> tuple[Any, str]:
         default_headers = provider._default_headers
         provider._default_headers = lambda: {**default_headers(), **extra_headers}
     return provider, provider_name
+
+
+def resolve_codex_auth_path(auth_path: str | None) -> Path:
+    if auth_path:
+        return Path(auth_path).expanduser()
+    return Path.home() / ".minibot" / "auth_codex.json"
+
+
+def _build_codex_provider(
+    config: LLMMConfig,
+    base_url: str | None,
+    http2: bool,
+    connector: aiosonic.TCPConnector,
+) -> Any:
+    try:
+        from llm_async_codex import CODEX_BASE_URL, CodexAuthError, load_credentials
+
+        from minibot.llm.providers.codex import PatchedCodexProvider
+    except ImportError as exc:
+        raise RuntimeError(
+            'llm-async-codex is required for provider "chatgpt_codex". '
+            "Install with `poetry install --extras codex` or `poetry install --all-extras`."
+        ) from exc
+
+    auth_path = resolve_codex_auth_path(config.auth_path)
+    try:
+        credentials = load_credentials(auth_path)
+    except CodexAuthError as exc:
+        raise CodexAuthError(
+            f"{exc} Run `poetry run minibot codex login` (add --device-code if there's no local browser) to log in."
+        ) from exc
+
+    provider = PatchedCodexProvider(credentials, base_url=base_url or CODEX_BASE_URL, http2=http2, auth_path=auth_path)
+    provider.client = aiosonic.HTTPClient(connector=connector, http2=http2)
+    return provider
 
 
 def load_system_prompt(config: LLMMConfig) -> str:

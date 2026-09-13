@@ -52,7 +52,14 @@ class LLMClient:
         self._prompts_dir = getattr(config, "prompts_dir", "./prompts")
         self._reasoning_effort = getattr(config, "reasoning_effort", "medium")
         self._reasoning_summary = getattr(config, "reasoning_summary", None)
-        self._responses_state_mode = getattr(config, "responses_state_mode", "full_messages")
+        # CodexProvider forces store=False on every request (subscription backend quirk), so the
+        # server never retains a prior turn for `previous_response_id` to reference — always resend
+        # full history for it, regardless of what's configured.
+        self._responses_state_mode = (
+            "full_messages"
+            if self._provider_name == "chatgpt_codex"
+            else getattr(config, "responses_state_mode", "full_messages")
+        )
         self._prompt_cache_enabled = bool(getattr(config, "prompt_cache_enabled", True))
         self._prompt_cache_retention = getattr(config, "prompt_cache_retention", None)
         self._strip_logs = bool(getattr(config, "strip_logs", False))
@@ -69,6 +76,7 @@ class LLMClient:
         self._is_responses_provider = is_responses_provider_instance(self._provider)
         self._supports_responses_compaction = (
             self._is_responses_provider
+            and self._provider_name != "chatgpt_codex"
             and resolve_target_provider(provider_name=config.provider, base_url=config.base_url) != "opencode-go"
         )
         self._logger = logging.getLogger("minibot.llm")
