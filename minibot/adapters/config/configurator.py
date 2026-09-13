@@ -11,7 +11,7 @@ import tomllib
 from datetime import UTC, datetime
 from getpass import getpass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import tomlkit
 from prompt_toolkit import Application, choice
@@ -21,6 +21,7 @@ from prompt_toolkit.layout.containers import HSplit
 from prompt_toolkit.widgets import CheckboxList, Label
 from pydantic import ValidationError
 
+from minibot.adapters.config.environment import expand_environment
 from minibot.adapters.config.loader import resolve_config_path
 from minibot.adapters.config.schema import LLMMConfig, ProviderConfig, Settings, TelegramChannelConfig
 from minibot.llm.services.client_bootstrap import create_provider
@@ -151,6 +152,8 @@ def _configure_llm(document: Any, settings: Settings) -> None:
     ):
         provider = "openai_responses"
     provider_config = settings.providers.get(provider, ProviderConfig())
+    if target == current_target:
+        base_url = provider_config.base_url or base_url
     api_key = _ask_secret("API key", provider_config.api_key)
     _set_value(document, ("llm", "provider"), provider)
     _set_value(document, ("providers", provider, "api_key"), api_key)
@@ -161,7 +164,14 @@ def _configure_llm(document: Any, settings: Settings) -> None:
         _set_value(document, session_header, "minibot")
     else:
         _unset_value(document, session_header)
-    _set_value(document, ("llm", "model"), _ask_model(provider, base_url, api_key, settings.llm.model))
+    resolved_api_key = provider_config.api_key
+    if api_key != resolved_api_key:
+        resolved_api_key = cast(str, expand_environment(api_key, os.environ, path=f"providers.{provider}.api_key"))
+    _set_value(
+        document,
+        ("llm", "model"),
+        _ask_model(provider, base_url, resolved_api_key, settings.llm.model),
+    )
     # Responses providers keep turn state server-side, so a tool loop can send just the delta instead
     # of resending the whole history every step. Chat Completions (openai, openrouter) is stateless and
     # resends regardless, so the setting only means anything for openai_responses.
@@ -458,12 +468,45 @@ def _tool_enabled(settings: Settings, path: tuple[str, ...]) -> bool:
     return bool(getattr(node, "enabled", False))
 
 
+def _preserve_references(original: Any, effective: Any, value: object) -> Any:
+    if effective == value:
+        return original
+    if isinstance(original, list) and isinstance(effective, list) and isinstance(value, list):
+        remaining = list(zip(original, effective, strict=True))
+        preserved = []
+        for item in value:
+            for index, (raw_item, effective_item) in enumerate(remaining):
+                if effective_item == item:
+                    preserved.append(raw_item)
+                    remaining.pop(index)
+                    break
+            else:
+                preserved.append(item)
+        return preserved
+    if isinstance(original, dict) and isinstance(effective, dict) and isinstance(value, dict):
+        return {
+            key: _preserve_references(original[key], effective[key], item)
+            if key in original and key in effective
+            else item
+            for key, item in value.items()
+        }
+    return value
+
+
 def _set_value(document: Any, path: tuple[str, ...], value: object) -> None:
     target = document
     for key in path[:-1]:
         if key not in target:
             target[key] = tomlkit.table()
         target = target[key]
+    if path[-1] in target:
+        effective = _settings_for_document(document).model_dump()
+        for key in path:
+            effective = effective[key]
+        preserved = _preserve_references(target[path[-1]], effective, value)
+        if preserved is target[path[-1]]:
+            return
+        value = preserved
     target[path[-1]] = value
 
 
@@ -490,7 +533,7 @@ def _write_summary(path: Path, profile: str | None, settings: Settings) -> None:
         f"  API key: {'configured' if provider and provider.api_key else 'empty'}\n"
         f"  Telegram: {'enabled' if settings.channels.telegram.enabled else 'disabled'}\n"
         f"  Tools: {', '.join(tools) or 'none'}\n"
-        "  Secrets are stored in plain text.\n\n"
+        "  Literal secrets are stored in plain text; ${VAR} references are preserved.\n\n"
     )
 
 

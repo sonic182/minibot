@@ -831,7 +831,12 @@ async def test_generate_includes_openrouter_reasoning_payload_when_effort_is_set
     assert call["reasoning"] == {"enabled": True, "effort": "high"}
 
 
-def test_media_support_modes() -> None:
+def test_media_support_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "minibot.llm.services.client_bootstrap._build_codex_provider",
+        lambda *_: _FakeProvider(api_key="secret"),
+    )
+
     openrouter_client = LLMClient(LLMMConfig(provider="openrouter", api_key="secret", model="x"))
     openai_client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
     responses_client = LLMClient(LLMMConfig(provider="openai_responses", api_key="secret", model="x"))

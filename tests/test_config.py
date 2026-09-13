@@ -1,8 +1,11 @@
 import logging
+import tomllib
 from pathlib import Path
 
 import pytest
+import tomlkit
 
+from minibot.adapters.config.configurator import _set_value
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import RagToolConfig, Settings, SkillsToolConfig
 from minibot.adapters.container.app_container import AppContainer
@@ -102,6 +105,111 @@ preload_catalog = true
     assert settings.memory.context_ratio_before_compact == 0.9
     assert settings.tools.browser.output_dir == "./data/files/browser"
     assert settings.tools.skills.preload_catalog is True
+
+
+def test_load_settings_expands_environment_variables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_TOKEN", "secret-${MINIBOT_CONFIG_TEST_RECURSIVE}")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_RECURSIVE", "must-not-expand")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_TIMEOUT", "180")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_CHAT_ID", "123")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_BYTES", "5MB")
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[runtime]
+agent_timeout_seconds = "${MINIBOT_CONFIG_TEST_TIMEOUT}"
+
+[llm]
+system_prompt = "$${LITERAL}"
+
+[providers.openai]
+api_key = "${MINIBOT_CONFIG_TEST_TOKEN}"
+
+[providers.openai.headers]
+Authorization = "Bearer ${MINIBOT_CONFIG_TEST_TOKEN}"
+
+[channels.telegram]
+bot_token = "${MINIBOT_CONFIG_TEST_TOKEN}"
+allowed_chat_ids = ["${MINIBOT_CONFIG_TEST_CHAT_ID}"]
+
+[extensions.config.example]
+items = ["${MINIBOT_CONFIG_TEST_TOKEN}"]
+
+[tools.http_client]
+max_bytes = "${MINIBOT_CONFIG_TEST_BYTES}"
+""",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_file)
+
+    assert settings.runtime.agent_timeout_seconds == 180
+    assert settings.llm.system_prompt == "${LITERAL}"
+    assert settings.providers["openai"].api_key == "secret-${MINIBOT_CONFIG_TEST_RECURSIVE}"
+    assert settings.providers["openai"].headers["Authorization"] == "Bearer secret-${MINIBOT_CONFIG_TEST_RECURSIVE}"
+    assert settings.channels.telegram.bot_token == "secret-${MINIBOT_CONFIG_TEST_RECURSIVE}"
+    assert settings.channels.telegram.allowed_chat_ids == [123]
+    assert settings.extensions.config["example"]["items"] == ["secret-${MINIBOT_CONFIG_TEST_RECURSIVE}"]
+    assert settings.tools.http_client.max_bytes == 5_000_000
+
+
+def test_load_settings_rejects_missing_environment_variable_in_disabled_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("MINIBOT_CONFIG_TEST_MISSING", raising=False)
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[tools.http_client]
+enabled = false
+spill_subdir = "${MINIBOT_CONFIG_TEST_MISSING}"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="MINIBOT_CONFIG_TEST_MISSING.*tools.http_client.spill_subdir"):
+        load_settings(config_file)
+
+
+def test_configurator_preserves_existing_environment_references(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_TOKEN", "secret")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_BASE_URL", "https://api.example.test")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_CHAT_ID", "123")
+    document = tomlkit.parse(
+        """
+[providers.openai]
+api_key = "${MINIBOT_CONFIG_TEST_TOKEN}"
+base_url = "${MINIBOT_CONFIG_TEST_BASE_URL}/v1"
+
+[channels.telegram]
+allowed_chat_ids = ["${MINIBOT_CONFIG_TEST_CHAT_ID}", 42]
+"""
+    )
+
+    _set_value(document, ("providers", "openai", "api_key"), "secret")
+    _set_value(document, ("providers", "openai", "base_url"), "https://api.example.test/v1")
+    _set_value(document, ("channels", "telegram", "allowed_chat_ids"), [123, 7])
+
+    raw_config = tomllib.loads(tomlkit.dumps(document))
+    assert raw_config["providers"]["openai"]["api_key"] == "${MINIBOT_CONFIG_TEST_TOKEN}"
+    assert raw_config["providers"]["openai"]["base_url"] == "${MINIBOT_CONFIG_TEST_BASE_URL}/v1"
+    assert raw_config["channels"]["telegram"]["allowed_chat_ids"] == ["${MINIBOT_CONFIG_TEST_CHAT_ID}", 7]
+
+
+def test_configurator_writes_new_environment_references_literally(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_NEW_TOKEN", "new-secret")
+    document = tomlkit.parse(
+        """
+[providers.openai]
+api_key = ""
+"""
+    )
+
+    _set_value(document, ("providers", "openai", "api_key"), "${MINIBOT_CONFIG_TEST_NEW_TOKEN}")
+
+    raw_config = tomllib.loads(tomlkit.dumps(document))
+    assert raw_config["providers"]["openai"]["api_key"] == "${MINIBOT_CONFIG_TEST_NEW_TOKEN}"
+    assert Settings.from_dict(raw_config).providers["openai"].api_key == "new-secret"
 
 
 def test_skills_preload_catalog_defaults_true() -> None:

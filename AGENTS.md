@@ -12,7 +12,6 @@
 
 ## Documentation & Comments
 - **Comments/docstrings** — avoid incidental comments; public documentation docstrings are acceptable when they feed generated docs or clarify public config/tool surfaces.
-- **No automated tests** unless asked — prefer linting or formatting to verify changes.
 - **Linting is welcome** — run `ruff check` or `ruff format`; this repo does not configure `flake8` despite it being available.
 
 ## Output Classification Rule
@@ -35,4 +34,4 @@
 - **Entry point**: `minibot.app.daemon` bootstraps config via `AppContainer`, wires dependencies, starts dispatcher + channel services, and uses graceful shutdown with signal handlers.
 - **Event bus**: `app/event_bus.py` abstracts an `asyncio` queue with async iterators; keep observability (queue depth, latency) in mind for future monitoring.
 - **Memory backend**: SQLite/SQLAlchemy via `aiosqlite` powers Stage 1 conversation history.
-- **Config**: use `config.toml` to configure runtime, channels, logging, scheduler, memory, tools (`kv_memory`, `http_client`, `file_storage`, `audio_transcription`, `mcp`), and tasks. There is no `${ENV_VAR}` interpolation — the loader is plain `tomllib`, and the only environment variable it reads is `MINIBOT_CONFIG`. To pull a secret from the environment, store the variable *name* in config (`token_env = "GITHUB_TOKEN"`) and call `os.environ.get(...)` in the consuming code.
+- **Config**: use `config.toml` to configure runtime, channels, logging, scheduler, memory, tools (`kv_memory`, `http_client`, `file_storage`, `audio_transcription`, `mcp`), and tasks. `Settings.from_dict()` expands `${ENV_VAR}` in string values after TOML parsing and before validation, including nested lists and tables. Unset variables fail loading; `$${ENV_VAR}` escapes a literal reference. Expansion is single-pass, and `.env` files are not loaded. `MINIBOT_CONFIG` selects the config path. Existing `token_env = "GITHUB_TOKEN"` fields still resolve variable names in their consuming code. See `docs/config.rst` for the full contract.

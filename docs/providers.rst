@@ -12,9 +12,21 @@ MiniBot sends every LLM request through the provider selected in ``[llm]``. Set 
 Credentials
 -----------
 
-``config.toml`` is plain TOML: it does not expand ``${ENVIRONMENT_VARIABLE}`` values. Keep the file
-private because API keys are stored as plain text. Every API-key provider needs a non-empty ``api_key``;
-an empty key makes MiniBot use its local echo fallback instead of contacting the provider.
+``config.toml`` supports ``${ENVIRONMENT_VARIABLE}`` references in string values. Supply credentials
+through the environment of the process running MiniBot:
+
+.. code-block:: toml
+
+   [providers.openai]
+   api_key = "${OPENAI_API_KEY}"
+
+An unset variable stops configuration loading with an error naming the variable and setting.
+Every API-key provider needs a non-empty ``api_key``; an explicitly empty environment value or literal
+empty key makes MiniBot use its local echo fallback instead of contacting the provider.
+
+``minibot configure`` preserves references when keeping existing values and accepts new references
+in credential prompts. Literal API keys are still stored as plain text, so keep files containing them
+private. See :ref:`config-environment-variables` for escaping and other supported settings.
 
 Choose a provider
 -----------------
