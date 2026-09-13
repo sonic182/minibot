@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-09-13
+
+### Fixed
+
+- `chatgpt_codex` requests with an attached image (or any multi-part message) no longer fail with an
+  HTTP 400 from the Responses API. The provider was missing from the media-input mode mapping, so
+  text parts serialized as `text` instead of `input_text` once an image part was present.
+
 ## [0.14.2] - 2026-09-13
 
 ### Changed
@@ -739,7 +747,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.14.2...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.14.3...HEAD
+[0.14.3]: https://github.com/sonic182/minibot/compare/0.14.2..0.14.3
 [0.14.2]: https://github.com/sonic182/minibot/compare/0.14.1..0.14.2
 [0.14.1]: https://github.com/sonic182/minibot/compare/0.14.0..0.14.1
 [0.14.0]: https://github.com/sonic182/minibot/compare/0.13.0..0.14.0
