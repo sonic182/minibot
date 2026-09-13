@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-13
+
+### Added
+
+- **Configuration environment expansion.** Any string value in `config.toml` can now reference
+  process environment variables with `${NAME}`, including nested tables and lists. Missing variables
+  fail configuration loading with their path, `$${NAME}` preserves a literal reference, and
+  `minibot configure` retains existing references while using resolved credentials for model discovery.
+
 ## [0.14.3] - 2026-09-13
 
 ### Fixed
@@ -747,7 +756,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.14.3...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.15.0...HEAD
+[0.15.0]: https://github.com/sonic182/minibot/compare/0.14.3..0.15.0
 [0.14.3]: https://github.com/sonic182/minibot/compare/0.14.2..0.14.3
 [0.14.2]: https://github.com/sonic182/minibot/compare/0.14.1..0.14.2
 [0.14.1]: https://github.com/sonic182/minibot/compare/0.14.0..0.14.1
