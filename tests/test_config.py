@@ -1,8 +1,11 @@
 import logging
+import tomllib
 from pathlib import Path
 
 import pytest
+import tomlkit
 
+from minibot.adapters.config.configurator import _set_value
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import RagToolConfig, Settings, SkillsToolConfig
 from minibot.adapters.container.app_container import AppContainer
@@ -166,6 +169,47 @@ spill_subdir = "${MINIBOT_CONFIG_TEST_MISSING}"
 
     with pytest.raises(ValueError, match="MINIBOT_CONFIG_TEST_MISSING.*tools.http_client.spill_subdir"):
         load_settings(config_file)
+
+
+def test_configurator_preserves_existing_environment_references(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_TOKEN", "secret")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_BASE_URL", "https://api.example.test")
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_CHAT_ID", "123")
+    document = tomlkit.parse(
+        """
+[providers.openai]
+api_key = "${MINIBOT_CONFIG_TEST_TOKEN}"
+base_url = "${MINIBOT_CONFIG_TEST_BASE_URL}/v1"
+
+[channels.telegram]
+allowed_chat_ids = ["${MINIBOT_CONFIG_TEST_CHAT_ID}", 42]
+"""
+    )
+
+    _set_value(document, ("providers", "openai", "api_key"), "secret")
+    _set_value(document, ("providers", "openai", "base_url"), "https://api.example.test/v1")
+    _set_value(document, ("channels", "telegram", "allowed_chat_ids"), [123, 7])
+
+    raw_config = tomllib.loads(tomlkit.dumps(document))
+    assert raw_config["providers"]["openai"]["api_key"] == "${MINIBOT_CONFIG_TEST_TOKEN}"
+    assert raw_config["providers"]["openai"]["base_url"] == "${MINIBOT_CONFIG_TEST_BASE_URL}/v1"
+    assert raw_config["channels"]["telegram"]["allowed_chat_ids"] == ["${MINIBOT_CONFIG_TEST_CHAT_ID}", 7]
+
+
+def test_configurator_writes_new_environment_references_literally(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINIBOT_CONFIG_TEST_NEW_TOKEN", "new-secret")
+    document = tomlkit.parse(
+        """
+[providers.openai]
+api_key = ""
+"""
+    )
+
+    _set_value(document, ("providers", "openai", "api_key"), "${MINIBOT_CONFIG_TEST_NEW_TOKEN}")
+
+    raw_config = tomllib.loads(tomlkit.dumps(document))
+    assert raw_config["providers"]["openai"]["api_key"] == "${MINIBOT_CONFIG_TEST_NEW_TOKEN}"
+    assert Settings.from_dict(raw_config).providers["openai"].api_key == "new-secret"
 
 
 def test_skills_preload_catalog_defaults_true() -> None:
