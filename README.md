@@ -100,19 +100,7 @@ only needed if you switch either to `"qdrant"` or `"rabbitmq"`.
 Demo
 ----
 
-<table>
-<tr>
-<td align="center"><b>Understand photos sent in chat</b><br><img src="demo_pics/image_understanding.jpg" width="280" alt="Image understanding"></td>
-<td align="center"><b>Browse the web and summarize a page</b><br><img src="demo_pics/openai_blog_summary.jpg" width="280" alt="Summarize a web page"></td>
-</tr>
-<tr>
-<td align="center"><b>Look up data with <code>http_request</code> and chart it with <code>python_execute</code></b><br><img src="demo_pics/pypi_download_chart_request.jpg" width="280" alt="Request a data comparison chart"></td>
-<td align="center"><b>Chart generated in the reply above</b><br><img src="demo_pics/pypi_download_chart_full.jpg" width="280" alt="Generated chart"></td>
-</tr>
-<tr>
-<td align="center"><b>Transcribe voice messages</b> (requires the <code>stt</code> extra, e.g. <code>pip install "minibot[stt]"</code>)<br><img src="demo_pics/voice_message_transcription.jpg" width="280" alt="Voice message transcription"></td>
-<td></td>
-</tr>
-</table>
+Screenshots of Minibot understanding images, summarizing web pages, generating charts, and
+transcribing voice messages — see the [demo gallery](https://sonic182.github.io/minibot/demo.html).
 
 [llm-async]: https://github.com/sonic182/llm-async
