@@ -6,6 +6,8 @@ from typing import Any
 from llm_async.models import Response
 from llm_async_codex import CodexProvider
 
+from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvider
+
 # The /models endpoint gates which models it returns by this query param, compared as a version
 # string against each model's `minimal_client_version` (verified empirically: low values return
 # an empty or partial list). Track the current Codex CLI release so new models stay unlocked as
@@ -23,10 +25,12 @@ class CodexModelCapabilities:
     auto_compact_token_limit: int | None
 
 
-class PatchedCodexProvider(CodexProvider):
+class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
     """Codex subscriptions reject stream=False; minibot's pipeline only calls the plain,
     non-streaming ``acomplete`` contract. Force streaming and drain it here so callers get a
-    fully-populated ``Response`` like every other provider."""
+    fully-populated ``Response`` like every other provider.
+
+    Base order keeps MiniBot's native tool formatting while retaining Codex-specific behaviour."""
 
     _models_cache: list[dict[str, Any]] | None = None
 
