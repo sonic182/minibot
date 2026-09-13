@@ -13,6 +13,8 @@ not a third-party service.
 
 - Install: `pip install minibot` (extras: `telegram`, `rag`, `stt`, `rabbitmq`, `graph`).
 - Configure: `minibot configure` writes `config.toml`.
+- Providers: see [Providers](https://sonic182.github.io/minibot/providers.html) for OpenAI, Anthropic,
+  Google, OpenRouter, ChatGPT Codex, and compatible endpoints.
 - Run: `minibot` starts the daemon; `minibot console` runs a local terminal channel.
 - Docker: `docker compose up -d` (Qdrant and RabbitMQ are commented out; `[tools.rag]` and
   `[tasks]` both default to SQLite).

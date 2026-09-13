@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **ChatGPT Codex subscription provider** (#67). Use a ChatGPT Codex subscription as the LLM backend
+  without an API key: authenticate with `minibot codex login` (including a device-code flow for headless
+  hosts), select it from `minibot configure`, and configure `provider = "chatgpt_codex"`. Model
+  capabilities are fetched from Codex, and Docker preserves OAuth credentials across restarts.
+- **Richer Telegram conversations** (#66). MiniBot now supplies reply/quoted-message context to the model,
+  replies in Telegram threads, sends a typing indicator while a turn is active, and uses Telegram rich
+  messages when possible with a plain-text fallback.
+- **OpenRouter app attribution.** OpenRouter requests now identify MiniBot by default; set
+  `[llm.openrouter].attribution_enabled = false` to disable those headers.
+
+### Fixed
+
+- Responses API tool loops in full-history mode no longer drop tool outputs, and stateless providers such
+  as ChatGPT Codex no longer rely on `previous_response_id` continuity.
+
 ## [0.13.0] - 2026-09-12
 
 ### Added

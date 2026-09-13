@@ -7,6 +7,7 @@
 ## Docs
 
 - [Getting Started](https://sonic182.github.io/minibot/getting_started.html): install and run
+- [Providers](https://sonic182.github.io/minibot/providers.html): configure LLM providers and compatible endpoints
 - [Extending Minibot](https://sonic182.github.io/minibot/extending.html): the customization ladder
 - [Python extensions](https://sonic182.github.io/minibot/extensions.html): tools, events, services, channels
 - [Extension API reference](https://sonic182.github.io/minibot/extension-api.html): ExtensionContext, ToolBinding, events

@@ -34,6 +34,8 @@ LLM
 Providers
 ---------
 
+See :doc:`providers` for setup examples and compatible endpoint guidance.
+
 .. autoclass:: minibot.adapters.config.schema.ProviderConfig
    :no-members:
 

@@ -2,10 +2,10 @@ CLI Reference
 =============
 
 .. meta::
-   :description: Minibot command-line interface — run the daemon, chat through the console TUI, and run the interactive configuration wizard.
-   :keywords: minibot CLI, self-hosted AI assistant commands, console TUI, config wizard
+   :description: Minibot command-line interface — run the daemon, chat through the console TUI, configure MiniBot, and sign in to ChatGPT Codex.
+   :keywords: minibot CLI, self-hosted AI assistant commands, console TUI, config wizard, ChatGPT Codex
 
-MiniBot installs a single ``minibot`` entry point that dispatches to three commands.
+MiniBot installs a single ``minibot`` entry point that dispatches to four commands.
 
 .. list-table::
    :header-rows: 1
@@ -19,6 +19,8 @@ MiniBot installs a single ``minibot`` entry point that dispatches to three comma
      - Open the local console channel (no Telegram bot required).
    * - ``minibot configure``
      - Run the interactive wizard that writes ``config.toml``.
+   * - ``minibot codex login``
+     - Authenticate a ChatGPT Codex subscription; use ``--device-code`` on a headless host.
 
 Configuration file
 ------------------

@@ -42,6 +42,7 @@ Why self-host
    :caption: Getting started
 
    getting_started
+   providers
 
 .. toctree::
    :maxdepth: 2

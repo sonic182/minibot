@@ -116,43 +116,8 @@ the bottom; Enter sends, Ctrl+J inserts a newline, Ctrl+T toggles model thinking
    # Read from stdin
    echo "hello" | poetry run minibot console --once -
 
-Using Ollama (OpenAI-Compatible API)
--------------------------------------
+Provider setup
+--------------
 
-MiniBot works with Ollama via its OpenAI-compatible endpoints.
-
-1. Start Ollama and pull a model::
-
-    ollama serve
-    ollama pull qwen3.5:35b
-
-2. Configure ``config.toml`` — ``openai`` provider example:
-
-.. code-block:: toml
-
-   [llm]
-   provider = "openai"
-   model = "qwen3.5:35b"
-
-   [providers.openai]
-   api_key = "dummy"
-   base_url = "http://localhost:11434/v1"
-
-``openai_responses`` provider example:
-
-.. code-block:: toml
-
-   [llm]
-   provider = "openai_responses"
-   model = "qwen3.5:35b"
-
-   [providers.openai_responses]
-   api_key = "dummy"
-   base_url = "http://localhost:11434/v1"
-
-Notes:
-
-- Use ``/v1`` as the base path; trailing slash is normalized automatically.
-- When ``base_url`` uses ``http://``, HTTP/2 is disabled automatically.
-- ``api_key`` must be non-empty (use ``"dummy"`` for Ollama); an empty key triggers echo mode.
-- If a model fails under ``openai_responses``, switch to ``openai`` first.
+See :doc:`providers` for OpenAI, Anthropic, Google, OpenRouter, ChatGPT Codex, OpenCode, xAI, Z.AI,
+Ollama, and other OpenAI-compatible endpoint configuration.
