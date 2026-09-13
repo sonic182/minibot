@@ -10,6 +10,12 @@ from llm_async.utils.retry import RetryConfig
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.llm.services.provider_registry import resolve_provider_class
 
+OPENROUTER_ATTRIBUTION_HEADERS = {
+    "HTTP-Referer": "https://github.com/sonic182/minibot",
+    "X-OpenRouter-Title": "MiniBot",
+    "X-OpenRouter-Categories": "personal-agent,cli-agent",
+}
+
 
 def create_provider(config: LLMMConfig) -> tuple[Any, str]:
     configured_provider = config.provider.lower()
@@ -45,6 +51,8 @@ def create_provider(config: LLMMConfig) -> tuple[Any, str]:
 
     provider = provider_cls(**provider_kwargs)
     extra_headers = dict(getattr(config, "extra_headers", None) or {})
+    if provider_name == "openrouter" and config.openrouter.attribution_enabled:
+        extra_headers.update(OPENROUTER_ATTRIBUTION_HEADERS)
     if extra_headers:
         # llm_async has no constructor hook for extra headers; overriding the accessor covers
         # every call path (acomplete, streaming and provider.request) in one place.

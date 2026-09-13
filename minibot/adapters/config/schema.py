@@ -178,6 +178,7 @@ class OpenRouterProviderRoutingConfig(BaseModel):
 
 
 class OpenRouterLLMConfig(BaseModel):
+    attribution_enabled: bool = True
     models: list[str] = Field(default_factory=list)
     provider: OpenRouterProviderRoutingConfig | None = None
     reasoning_enabled: bool | None = None

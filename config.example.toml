@@ -172,6 +172,8 @@ tools_deny = ["mcp*"]
 # Optional OpenRouter-specific routing configuration.
 # Applied only when `llm.provider = "openrouter"`.
 [llm.openrouter]
+# Send MiniBot's default OpenRouter app attribution headers; set false to disable them.
+attribution_enabled = true
 # reasoning_enabled = true
 # Optional model pool for fallback routing.
 # models = ["anthropic/claude-3.5-sonnet", "gryphe/mythomax-l2-13b"]

@@ -64,6 +64,9 @@ class _FakeProvider:
         self.calls: list[dict[str, Any]] = []
         self.requests: list[dict[str, Any]] = []
 
+    def _default_headers(self) -> dict[str, str]:
+        return {}
+
     async def acomplete(self, **kwargs: Any) -> _FakeResponse:
         self.calls.append(kwargs)
         return _FakeResponse(main_response=_FakeMessage(content="ok", tool_calls=None), original={"id": "resp-1"})
