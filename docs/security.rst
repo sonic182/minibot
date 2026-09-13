@@ -53,10 +53,19 @@ Unlocking
 
 The password is read from ``[vault] password_file``, else ``MINIBOT_VAULT_PASSWORD``, else an
 interactive prompt at startup. **The prompt is the recommended method**: it is the only one where
-no password material touches disk or the process environment. The other two are supported for
-unattended deployments, but a file is readable by any tool that can read the filesystem — the
-``bash`` tool has no filesystem jail — and that file or variable then becomes the thing to
-protect instead of the vault.
+no password material touches disk or the process environment. After unlocking, only the decrypted
+map is retained — never the password or the derived key.
+
+The other two are supported for unattended deployments, but both are readable by the ``bash``
+tool, which runs as the same OS user:
+
+- ``password_file`` — ``bash`` has no filesystem jail, so it can simply read the file.
+- ``MINIBOT_VAULT_PASSWORD`` — ``bash`` does not *inherit* it (``pass_parent_env`` defaults to
+  false), but it can read it out of ``/proc/<daemon-pid>/environ``, which holds the environment
+  the daemon was started with. Clearing the variable inside the process does not change that
+  snapshot.
+
+Whichever you choose, that file or variable becomes the thing to protect instead of the vault.
 
 The vault file is excluded from git and the Docker build context by default (``*.vault.yml``).
 
@@ -66,6 +75,11 @@ Limits
 - **This protects secrets at rest and from the LLM's own tool calls.** It does not protect against
   a fully compromised daemon process reading its own memory (``/proc/<pid>/mem``) — the same trust
   boundary as any self-hosted secret manager running as one OS user.
+- Whether a tool process can read the *daemon's* memory depends on the host's
+  ``kernel.yama.ptrace_scope``. At ``1`` (the common desktop default) it cannot: ``bash`` is a
+  descendant of the daemon, not an ancestor, so the attach is refused. At ``0`` — frequently the
+  case inside containers — any same-user process can read that memory, and the unlocked secrets
+  with it. Check ``cat /proc/sys/kernel/yama/ptrace_scope`` on the host you actually deploy to.
 - No rotation, no recovery, no hot-reload: a forgotten password means starting over, and editing
   the vault while the daemon runs needs a restart to take effect.
 - ``${ENV_VAR}`` config secrets (``token_env``, static MCP headers) are a separate, older
