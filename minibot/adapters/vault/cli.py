@@ -102,6 +102,8 @@ def _resolve_password(password_file: str | None, *, confirm: bool = False) -> st
     from_env = os.environ.get(PASSWORD_ENV_VAR)
     if from_env:
         return from_env
+    if not sys.stdin.isatty():
+        raise ValueError(f"no terminal to prompt on; set {PASSWORD_ENV_VAR} or pass --password-file")
     password = getpass("Vault password: ")
     if not password:
         raise ValueError("vault password must not be empty")
