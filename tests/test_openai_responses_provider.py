@@ -2,11 +2,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from llm_async.models import Message, ToolCall
+from llm_async_codex import CodexCredentials
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.llm.provider_factory import LLMClient
+from minibot.llm.providers.codex import PatchedCodexProvider
 from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvider
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
 
@@ -37,6 +38,42 @@ def test_messages_to_input_replays_reasoning_item_before_function_call() -> None
     assert result[2]["call_id"] == "fc_1"
 
 
+def test_codex_parse_response_keeps_raw_reasoning_items() -> None:
+    # Codex only streams, so Response.original stays empty and _parse_response, fed the
+    # accumulated stream items, is the only place the encrypted reasoning item survives.
+    reasoning_item = {"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"}
+    function_call = {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "noop", "arguments": "{}"}
+    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"))
+
+    message = provider._parse_response({"output": [reasoning_item, function_call]})
+
+    assert message.reasoning_details == [reasoning_item]
+    assert [call.function["name"] for call in message.tool_calls] == ["noop"]
+
+
+def test_codex_messages_to_input_replays_reasoning_item_before_function_call() -> None:
+    # chatgpt_codex subclasses OpenAIResponsesProvider directly, bypassing the patched provider's
+    # MRO, so this covers the production path rather than only the openai_responses one.
+    reasoning_item = {"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"}
+    tool_call = {"id": "fc_1", "type": "function", "function": {"name": "current_datetime", "arguments": "{}"}}
+    messages = [
+        {"role": "user", "content": "what time is it?"},
+        {"role": "assistant", "content": "", "reasoning_details": [reasoning_item], "tool_calls": [tool_call]},
+        {"type": "function_call_output", "call_id": "fc_1", "output": "2026-09-13"},
+    ]
+    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"))
+
+    result = provider._messages_to_input(messages)
+
+    assert [item.get("type") or item.get("role") for item in result] == [
+        "user",
+        "reasoning",
+        "function_call",
+        "function_call_output",
+    ]
+    assert result[1] == reasoning_item
+
+
 def test_messages_to_input_matches_base_behavior_without_reasoning_details() -> None:
     messages = [
         {
@@ -60,14 +97,8 @@ async def test_complete_once_replays_raw_reasoning_through_full_history(monkeypa
 
     class _ResponsesProvider(PatchedOpenAIResponsesProvider):
         async def acomplete(self, **_: Any) -> SimpleNamespace:
-            return SimpleNamespace(
-                main_response=Message(
-                    role="assistant",
-                    content="",
-                    tool_calls=[ToolCall.from_responses_api_function_call("fc_1", "call_1", "noop", "{}")],
-                ),
-                original={"id": "resp_1", "output": [reasoning_item, function_call]},
-            )
+            original = {"id": "resp_1", "output": [reasoning_item, function_call]}
+            return SimpleNamespace(main_response=self._parse_response(original), original=original)
 
     monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openai_responses", _ResponsesProvider)
     client = LLMClient(LLMMConfig(provider="openai_responses", api_key="test-key", model="test-model"))

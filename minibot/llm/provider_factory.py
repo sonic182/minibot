@@ -188,12 +188,10 @@ class LLMClient:
             reasoning = extract_reasoning_text_from_responses(response.original)
             output = response.original.get("output")
             reasoning_items = (
-                [dict(item) for item in output if isinstance(item, Mapping) and item.get("type") == "reasoning"]
+                [str(item)[:600] for item in output if isinstance(item, Mapping) and item.get("type") == "reasoning"]
                 if isinstance(output, list)
                 else []
             )
-            if reasoning_items:
-                message.reasoning_details = reasoning_items
             if reasoning:
                 message.reasoning = reasoning
                 self._logger.info(
@@ -208,7 +206,7 @@ class LLMClient:
                 )
                 self._logger.debug(
                     "no reasoning in responses output",
-                    extra={"output_types": output_types, "reasoning_items": [str(i)[:600] for i in reasoning_items]},
+                    extra={"output_types": output_types, "reasoning_items": reasoning_items},
                 )
         usage = extract_usage_from_response(response)
         usage_tokens = usage.total_tokens
