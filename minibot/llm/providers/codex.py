@@ -30,9 +30,7 @@ class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
     non-streaming ``acomplete`` contract. Force streaming and drain it here so callers get a
     fully-populated ``Response`` like every other provider.
 
-    Base order matters: it puts the patched provider between ``CodexProvider`` and the vendored
-    one, so ``CodexProvider``'s own ``super()`` calls land on minibot's fixes (reasoning replay,
-    native tool formatting) while keeping its Codex-specific behaviour on top."""
+    Base order keeps MiniBot's native tool formatting while retaining Codex-specific behaviour."""
 
     _models_cache: list[dict[str, Any]] | None = None
 

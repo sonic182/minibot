@@ -39,8 +39,6 @@ def test_messages_to_input_replays_reasoning_item_before_function_call() -> None
 
 
 def test_codex_parse_response_keeps_raw_reasoning_items() -> None:
-    # Codex only streams, so Response.original stays empty and _parse_response, fed the
-    # accumulated stream items, is the only place the encrypted reasoning item survives.
     reasoning_item = {"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"}
     function_call = {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "noop", "arguments": "{}"}
     provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"))
@@ -52,8 +50,6 @@ def test_codex_parse_response_keeps_raw_reasoning_items() -> None:
 
 
 def test_codex_messages_to_input_replays_reasoning_item_before_function_call() -> None:
-    # chatgpt_codex subclasses OpenAIResponsesProvider directly, bypassing the patched provider's
-    # MRO, so this covers the production path rather than only the openai_responses one.
     reasoning_item = {"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"}
     tool_call = {"id": "fc_1", "type": "function", "function": {"name": "current_datetime", "arguments": "{}"}}
     messages = [
