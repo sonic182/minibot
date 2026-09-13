@@ -567,6 +567,16 @@ path = "secrets.vault.yml"
 # works the same way, with the same caveat.
 # password_file = ""
 
+# Built-in HTTP server. Needs the http extra: poetry install --extras http
+# Serves /health plus whatever routes core features and extensions register. There is no TLS
+# here: put a reverse proxy in front before binding anything but loopback.
+[http]
+enabled = false
+host = "127.0.0.1"
+port = 8080
+# Required on every route except /health, and mandatory when host is not loopback.
+# auth_token = "${secret:http_admin}"
+
 # Broker connection for tasks.backend = "rabbitmq" (requires extras: rabbitmq).
 # Each message body must be a JSON object with at least a "text" field.
 # Optional fields: "user_id" (int), "chat_id" (int).

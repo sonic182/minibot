@@ -37,9 +37,13 @@ async def run() -> None:
     logger.info("booting minibot", extra={"component": "daemon"})
     extensions = AppContainer.get_extensions()
 
+    http_server = _build_http_server(settings, extensions, logger)
+
     services: list[Any] = [dispatcher]
     if not extensions.is_empty():
         services.append(extensions)
+    if http_server is not None:
+        services.append(http_server)
 
     async with _graceful_shutdown(services, logger) as stop_event:
         logger.info("starting dispatcher", extra={"component": "dispatcher"})
@@ -47,9 +51,27 @@ async def run() -> None:
         if not extensions.is_empty():
             logger.info("starting extensions", extra={"component": "extensions", "extensions": extensions.names()})
             await extensions.start()
+        if http_server is not None:
+            await http_server.start()
         await _replay_pending_turns(event_bus, logger)
         logger.info("daemon running in foreground", extra={"component": "daemon"})
         await stop_event.wait()
+
+
+def _build_http_server(settings: Any, extensions: Any, logger: logging.Logger) -> Any:
+    """Build the HTTP server, or warn about the routes nobody will serve when it is off."""
+    routes = extensions.routes
+    if not settings.http.enabled:
+        if routes:
+            logger.warning(
+                "extensions registered http routes but [http] enabled is false",
+                extra={"component": "http", "routes": [path for path, _, _ in routes]},
+            )
+        return None
+    # Imported here so the starlette/uvicorn extra is only required when the server is switched on.
+    from minibot.adapters.http import HttpServer
+
+    return HttpServer(settings.http, routes)
 
 
 async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:

@@ -903,6 +903,29 @@ class VaultConfig(BaseModel):
     password_file: str = ""
 
 
+class HTTPServerConfig(BaseModel):
+    """Built-in HTTP server. TOML section: ``[http]``
+
+    - ``enabled`` — serve HTTP alongside the daemon (default: ``false``). Needs the ``http`` extra.
+    - ``host`` / ``port`` — where to bind (default: ``127.0.0.1:8080``); port ``0`` picks a free one.
+    - ``auth_token`` — required on every route except ``/health``. Accepts ``${secret:NAME}``.
+
+    Routes come from core features and from extensions calling ``mb.add_route``. There is no TLS
+    here: put a reverse proxy in front when this is reachable from outside the host.
+    """
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = Field(default=8080, ge=0, le=65535)
+    auth_token: str = ""
+
+    @model_validator(mode="after")
+    def _require_token_off_loopback(self) -> HTTPServerConfig:
+        if self.enabled and not self.auth_token and self.host not in {"127.0.0.1", "::1", "localhost"}:
+            raise ValueError(f"[http] auth_token is required when host is {self.host!r} rather than loopback")
+        return self
+
+
 class Settings(BaseModel):
     runtime: RuntimeConfig = RuntimeConfig()
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
@@ -916,6 +939,7 @@ class Settings(BaseModel):
     tasks: TasksConfig = TasksConfig()
     rabbitmq: RabbitMQConsumerConfig = RabbitMQConsumerConfig()
     vault: VaultConfig = VaultConfig()
+    http: HTTPServerConfig = HTTPServerConfig()
     extensions: ExtensionsConfig = ExtensionsConfig()
 
     model_config = ConfigDict(extra="forbid")

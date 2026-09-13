@@ -22,6 +22,9 @@ from minibot.shared.errors import ToolInputError
 EventHandler = Callable[[Any], Awaitable[None]]
 ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
 type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
+# Handler and path only; starlette stays out of the signature so declaring a route needs no import
+# of it, and no extension pays for the optional `http` extra unless it actually handles a request.
+type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 
 
 def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
@@ -78,6 +81,7 @@ class ExtensionContext:
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
+    routes: list[RouteSpec] = field(default_factory=list)
 
     def on(self, event_type: type[BaseEvent], handler: EventHandler | None = None) -> Any:
         """Subscribe to ``event_type``. Usable directly or as a decorator."""
@@ -142,6 +146,16 @@ class ExtensionContext:
     def add_service(self, service: ExtensionService) -> None:
         self.services.append(service)
 
+    def add_route(
+        self, path: str, handler: Callable[[Any], Awaitable[Any]], methods: Sequence[str] = ("GET",)
+    ) -> None:
+        """Serve ``handler`` at ``path`` on the built-in HTTP server (``[http] enabled``).
+
+        The handler takes a ``starlette.requests.Request`` and returns a ``Response``. Routes are
+        collected once every extension has registered, so ordering between extensions is irrelevant.
+        """
+        self.routes.append((path, handler, tuple(methods)))
+
 
 class ExtensionRegistry:
     """Everything the loaded extensions contributed, with a service-shaped lifecycle."""
@@ -155,6 +169,10 @@ class ExtensionRegistry:
     @property
     def tools(self) -> list[ToolBinding]:
         return [binding for context in self._contexts for binding in context.tools]
+
+    @property
+    def routes(self) -> list[RouteSpec]:
+        return [route for context in self._contexts for route in context.routes]
 
     def names(self) -> list[str]:
         return [context.name for context in self._contexts]
@@ -243,6 +261,7 @@ def load_extensions(
                 "tools": [binding.tool.name for binding in context.tools],
                 "subscriptions": len(context.subscriptions),
                 "services": len(context.services),
+                "routes": len(context.routes),
             },
         )
     return ExtensionRegistry(contexts, log)
