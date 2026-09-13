@@ -193,9 +193,6 @@ class LLMClient:
                 else []
             )
             if reasoning_items:
-                # A Responses reasoning item (often encrypted, no readable text) must be replayed
-                # verbatim ahead of its function_call on the next request, or the provider rejects
-                # the follow-up as an orphaned tool call. See reasoning_replay.py / _messages_to_input.
                 message.reasoning_details = reasoning_items
             if reasoning:
                 message.reasoning = reasoning

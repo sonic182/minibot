@@ -39,9 +39,6 @@ class PatchedOpenAIResponsesProvider(OpenAIResponsesProvider):
                 responses_messages.append({"role": "assistant", "content": msg.get("content", "")})
                 continue
 
-            # A reasoning item (often encrypted, carrying no readable text) must immediately
-            # precede the function_call it belongs to, or the Responses API rejects the
-            # follow-up as an orphaned tool call. Replay it verbatim, never fabricate one.
             for item in msg.get("reasoning_details") or []:
                 if isinstance(item, Mapping) and item.get("type") == "reasoning":
                     responses_messages.append(dict(item))
