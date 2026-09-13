@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import aiosonic
 import pytest
 import pytest_asyncio
@@ -14,6 +18,22 @@ TOKEN = "s3cret"
 
 async def _pong(_request) -> JSONResponse:
     return JSONResponse({"pong": True})
+
+
+@contextmanager
+def _captured_warnings(name: str) -> Iterator[list[logging.LogRecord]]:
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append  # type: ignore[method-assign]
+    logger = logging.getLogger(name)
+    previous_level = logger.level
+    logger.setLevel(logging.WARNING)
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
 
 
 @pytest_asyncio.fixture()
@@ -66,12 +86,14 @@ async def test_stop_is_idempotent_and_releases_the_port() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_token_configured_leaves_routes_open(caplog: pytest.LogCaptureFixture) -> None:
+async def test_no_token_configured_leaves_routes_open() -> None:
     instance = HttpServer(HTTPServerConfig(enabled=True, host="127.0.0.1", port=0), [("/ping", _pong, ("GET",))])
-    with caplog.at_level("WARNING", logger="minibot.http"):
+    # Captured off the logger itself, not caplog: configure_logging() turns propagation off for the
+    # "minibot" tree, so whether root sees anything depends on which tests ran before this one.
+    with _captured_warnings("minibot.http") as records:
         await instance.start()
     try:
-        assert "auth_token is not configured" in caplog.text
+        assert any("auth_token is not configured" in record.getMessage() for record in records)
         async with aiosonic.HTTPClient() as client:
             response = await client.get(f"http://127.0.0.1:{instance.port}/ping")
             assert response.status_code == 200
