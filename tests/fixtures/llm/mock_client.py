@@ -159,6 +159,9 @@ class ScriptedLLMClient:
     def is_responses_provider(self) -> bool:
         return self._provider == "openai_responses"
 
+    def responses_state_mode(self) -> str:
+        return "previous_response_id" if self._provider == "openai_responses" else "full_messages"
+
     def provider_name(self) -> str:
         return self._provider
 

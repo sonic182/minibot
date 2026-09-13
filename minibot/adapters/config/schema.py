@@ -265,6 +265,9 @@ class LLMMConfig(BaseModel):
     - ``strip_logs`` — shorten selected fields in the provider raw-response debug log (default: ``false``).
     - ``extra_headers`` — extra HTTP headers sent on every provider request (usually inherited from
       ``[providers.<name>.headers]``).
+    - ``auth_path`` — path to an OAuth credentials file, used by the ``chatgpt_codex`` provider
+      (usually inherited from ``[providers.chatgpt_codex.auth_path]``; defaults to
+      ``~/.minibot/auth_codex.json``).
     - ``openrouter`` — OpenRouter-specific routing overrides (``[llm.openrouter]``).
     - ``xai`` — xAI web/X search integration (``[llm.xai]``).
     """
@@ -294,6 +297,7 @@ class LLMMConfig(BaseModel):
     prompt_cache_retention: Literal["in-memory", "24h"] | None = None
     strip_logs: bool = False
     extra_headers: dict[str, str] = Field(default_factory=dict)
+    auth_path: str | None = None
     openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
     xai: XAILLMConfig = XAILLMConfig()
 
@@ -308,6 +312,9 @@ class ProviderConfig(BaseModel):
     - ``base_url`` — optional base URL override (e.g. for proxies or local endpoints).
     - ``headers`` — extra HTTP headers sent on every request to this provider. OpenCode Go
       requires ``x-opencode-session`` and rejects requests without it (``MissingSessionID``).
+    - ``auth_path`` — used only by ``[providers.chatgpt_codex]``: path to the ChatGPT Codex OAuth
+      credentials file written by ``minibot codex login``. Defaults to
+      ``~/.minibot/auth_codex.json`` when unset.
 
     OpenAI-compatible third-party endpoints (set under ``[providers.openai]`` with
     ``[llm].provider = "openai"``, or ``[providers.openai_responses]`` with
@@ -329,6 +336,7 @@ class ProviderConfig(BaseModel):
     api_key: str = ""
     base_url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
+    auth_path: str | None = None
 
 
 class AgentDefinitionConfig(BaseModel):

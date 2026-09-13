@@ -4,9 +4,6 @@ services:
   #   image: rabbitmq:4.2-management
   #   container_name: minibot-rabbit
   #   restart: unless-stopped
-  #   ports:
-  #     - "5672:5672"
-  #     - "15672:15672"
   #   healthcheck:
   #     test: ["CMD", "rabbitmq-diagnostics", "ping"]
   #     interval: 5s
@@ -18,9 +15,6 @@ services:
   #   image: qdrant/qdrant:latest
   #   container_name: minibot-qdrant
   #   restart: unless-stopped
-  #   ports:
-  #     - "6333:6333"
-  #     - "6334:6334"
   #   volumes:
   #     - ./data/qdrant:/qdrant/storage
 
@@ -36,9 +30,17 @@ services:
     #     condition: service_started
     init: true
     volumes:
+      - ./docker-requirements.txt:/app/docker-requirements.txt:ro
       - ./config.toml:/app/config.toml:ro
       - ./logs:/app/logs
       - ./data:/app/data
       - ./minibot:/app/minibot
+      - ./prompts:/app/prompts:ro
+      - ./agents:/app/agents
       - ./skills:/app/skills
+      # Codex OAuth credentials for [llm] provider = "chatgpt_codex". Log in on the host first:
+      # poetry run minibot codex login --device-code
+      # (the container's uid 1000 must be able to write this dir, since the provider rewrites
+      # auth_codex.json on token refresh).
+      - ${HOME}/.minibot:/home/minibot/.minibot
     command: ["minibot"]

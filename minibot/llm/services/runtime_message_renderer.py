@@ -16,10 +16,12 @@ class RuntimeMessageRenderer:
         self,
         *,
         media_input_mode: str,
+        is_responses_provider: bool = False,
         managed_files_root: str | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._media_input_mode = media_input_mode
+        self._is_responses_provider = is_responses_provider
         self._managed_files_root = Path(managed_files_root).resolve() if managed_files_root else None
         self._logger = logger or logging.getLogger("minibot.runtime_message_renderer")
 
@@ -39,7 +41,7 @@ class RuntimeMessageRenderer:
             return AgentMessage(
                 role="assistant",
                 content=[MessagePart(type="text", text=content)],
-                metadata=metadata or None,
+                metadata=metadata,
             )
         if isinstance(content, list):
             parts: list[MessagePart] = []
@@ -57,12 +59,12 @@ class RuntimeMessageRenderer:
             return AgentMessage(
                 role="assistant",
                 content=parts or [MessagePart(type="text", text="")],
-                metadata=metadata or None,
+                metadata=metadata,
             )
         return AgentMessage(
             role="assistant",
             content=[MessagePart(type="text", text=str(content))],
-            metadata=metadata or None,
+            metadata=metadata,
         )
 
     def from_provider_assistant_tool_call_message(self, message: Any) -> AgentMessage:
@@ -96,14 +98,27 @@ class RuntimeMessageRenderer:
         messages: list[dict[str, Any]] = []
         for message in state.messages:
             if message.role == "tool":
-                messages.append(
-                    {
-                        "role": "tool",
-                        "name": message.name or "tool",
-                        "tool_call_id": message.tool_call_id,
-                        "content": self._stringify_parts(message.content),
-                    }
-                )
+                if self._is_responses_provider:
+                    # The Responses API has no `role: tool` message shape; a full resend (used
+                    # whenever a provider can't do delta-only previous_response_id follow-ups,
+                    # e.g. codex) must emit `function_call_output` items instead, or the tool
+                    # output is silently dropped from `input` and the model sees an orphaned call.
+                    messages.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": message.tool_call_id,
+                            "output": self._stringify_parts(message.content),
+                        }
+                    )
+                else:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "name": message.name or "tool",
+                            "tool_call_id": message.tool_call_id,
+                            "content": self._stringify_parts(message.content),
+                        }
+                    )
                 continue
 
             payload: dict[str, Any] = {

@@ -36,6 +36,7 @@ _LLM_TARGETS = {
     "zai": ("z.ai GLM Coding Plan", "openai", "https://api.z.ai/api/coding/paas/v4"),
     "opencode_zen": ("OpenCode Zen", "openai", "https://opencode.ai/zen/v1"),
     "opencode_go": ("OpenCode Go", "openai", "https://opencode.ai/zen/go/v1"),
+    "chatgpt_codex": ("ChatGPT Codex subscription (OAuth)", "chatgpt_codex", ""),
 }
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _ENVIRONMENTS = ("development", "production")
@@ -141,6 +142,9 @@ def _configure_telegram(document: Any, telegram: TelegramChannelConfig) -> None:
 def _configure_llm(document: Any, settings: Settings) -> None:
     current_target = _current_llm_target(settings)
     target = _ask_llm_target(current_target)
+    if target == "chatgpt_codex":
+        _configure_chatgpt_codex(document, settings)
+        return
     _, provider, base_url = _LLM_TARGETS[target]
     if target in {"opencode_zen", "opencode_go"} and _ask_bool(
         "Use Responses API", target == current_target and settings.llm.provider == "openai_responses"
@@ -223,12 +227,68 @@ def _ask_llm_target(default: str) -> str:
 
 def _ask_model(provider: str, base_url: str, api_key: str, current: str) -> str:
     models = asyncio.run(_fetch_models(provider, base_url, api_key))
+    return _choose_model(models, current)
+
+
+def _choose_model(models: list[str], current: str) -> str:
     if not models:
         return _ask_required("Model", current)
     options = [*models, _MANUAL_MODEL]
     default = current if current in models else models[0]
     selected = choice("Model", options=[(value, value) for value in options], default=default)
     return _ask_required("Model", current) if selected == _MANUAL_MODEL else selected
+
+
+def _configure_chatgpt_codex(document: Any, settings: Settings) -> None:
+    from minibot.app.codex_setup import CodexDependencyError
+
+    provider_config = settings.providers.get("chatgpt_codex", ProviderConfig())
+    auth_path = _resolve_codex_auth_path(provider_config.auth_path)
+    try:
+        credentials = _ensure_codex_login(auth_path)
+    except CodexDependencyError:
+        _write(
+            "llm-async-codex is required for this provider. Install with "
+            "`poetry install --extras codex` or `poetry install --all-extras` and rerun.\n"
+        )
+        return
+    _set_value(document, ("llm", "provider"), "chatgpt_codex")
+    _set_value(document, ("llm", "model"), _ask_chatgpt_codex_model(credentials, settings.llm.model))
+    # Codex forces store=False server-side, so it can't do previous_response_id continuity —
+    # see LLMClient.__init__, which forces this regardless of config; set it here too for clarity.
+    _set_value(document, ("llm", "main_responses_state_mode"), "full_messages")
+    _set_value(document, ("llm", "agent_responses_state_mode"), "full_messages")
+
+
+def _ensure_codex_login(auth_path: Path) -> Any:
+    from minibot.app.codex_setup import CodexCredentialsError, load_codex_credentials, login_to_codex
+
+    try:
+        return load_codex_credentials(auth_path)
+    except CodexCredentialsError:
+        pass
+    _write(f"Not logged in to ChatGPT Codex yet (looked for {auth_path}).\n")
+    device_code = _ask_bool("Use device-code login (no local browser needed)", False)
+    _write("Starting Codex login" + (" (device code)...\n" if device_code else " (browser)...\n"))
+    return asyncio.run(login_to_codex(device_code=device_code, auth_path=auth_path))
+
+
+def _ask_chatgpt_codex_model(credentials: Any, current: str) -> str:
+    from minibot.app.codex_setup import list_codex_model_slugs
+
+    try:
+        models = asyncio.run(list_codex_model_slugs(credentials))
+    except Exception:
+        _logger.debug("Could not list Codex models", exc_info=True)
+        _write("Could not fetch the Codex model list; enter the model name manually.\n")
+        models = []
+    return _choose_model(models, current)
+
+
+def _resolve_codex_auth_path(auth_path: str | None) -> Path:
+    from minibot.app.codex_setup import resolve_codex_auth_path
+
+    return resolve_codex_auth_path(auth_path)
 
 
 async def _fetch_models(provider: str, base_url: str, api_key: str) -> list[str]:

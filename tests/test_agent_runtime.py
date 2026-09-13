@@ -19,9 +19,18 @@ from tests.fixtures.llm.fakes import FakeToolCall as _FakeToolCall
 
 
 class _StubRuntimeLLMClient:
-    def __init__(self, steps: list[LLMCompletionStep], executions: list[list[ToolExecutionRecord]]) -> None:
+    def __init__(
+        self,
+        steps: list[LLMCompletionStep],
+        executions: list[list[ToolExecutionRecord]],
+        *,
+        is_responses_provider: bool = False,
+        responses_state_mode: str = "full_messages",
+    ) -> None:
         self._steps = steps
         self._executions = executions
+        self._is_responses_provider = is_responses_provider
+        self._responses_state_mode = responses_state_mode
         self.complete_once_calls = 0
         self.execute_calls = 0
         self.complete_once_kwargs: list[dict[str, Any]] = []
@@ -39,7 +48,10 @@ class _StubRuntimeLLMClient:
         return records
 
     def is_responses_provider(self) -> bool:
-        return False
+        return self._is_responses_provider
+
+    def responses_state_mode(self) -> str:
+        return self._responses_state_mode
 
     def media_input_mode(self) -> str:
         return "responses"
@@ -97,6 +109,15 @@ def _failure_record(*, content: str, signature: str) -> ToolExecutionRecord:
                 "is_repeated_failure_candidate": True,
             }
         ),
+    )
+
+
+def _responses_record() -> ToolExecutionRecord:
+    return ToolExecutionRecord(
+        tool_name="http_request",
+        call_id="call-1",
+        message_payload={"type": "function_call_output", "call_id": "call-1", "output": '{"status": 200}'},
+        result=ToolResult(content={"status": 200}),
     )
 
 
@@ -168,6 +189,42 @@ async def test_runtime_applies_append_message_directive_for_trusted_tool() -> No
     assert result.total_tokens == 10
     assert any(message.metadata.get("synthetic") is True for message in result.state.messages)
     assert any(message.metadata.get("source_tool") == "self_insert_artifact" for message in result.state.messages)
+
+
+@pytest.mark.asyncio
+async def test_runtime_resends_response_tool_history_for_stateless_responses_provider() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[_tool_step(_http_tool_call(), "resp-1"), _final_step("resp-2")],
+        executions=[[_responses_record()]],
+        is_responses_provider=True,
+    )
+
+    result = await _runtime(llm_client).run(state=_ping_state(), tool_context=ToolContext(owner_id="1"))
+
+    assert result.payload == "done"
+    follow_up = llm_client.complete_once_kwargs[1]
+    assert follow_up["previous_response_id"] is None
+    assert any(message.get("tool_calls") for message in follow_up["messages"])
+    assert {"type": "function_call_output", "call_id": "call-1", "output": '{"status": 200}'} in follow_up["messages"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_sends_only_tool_output_for_stateful_responses_provider() -> None:
+    llm_client = _StubRuntimeLLMClient(
+        steps=[_tool_step(_http_tool_call(), "resp-1"), _final_step("resp-2")],
+        executions=[[_responses_record()]],
+        is_responses_provider=True,
+        responses_state_mode="previous_response_id",
+    )
+
+    result = await _runtime(llm_client).run(state=_ping_state(), tool_context=ToolContext(owner_id="1"))
+
+    assert result.payload == "done"
+    follow_up = llm_client.complete_once_kwargs[1]
+    assert follow_up["previous_response_id"] == "resp-1"
+    assert follow_up["messages"] == [
+        {"type": "function_call_output", "call_id": "call-1", "output": '{"status": 200}'}
+    ]
 
 
 @pytest.mark.asyncio

@@ -99,6 +99,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("console", add_help=False, help="Run the console channel.")
     commands.add_parser("configure", add_help=False, help="Configure Minibot interactively.")
+    commands.add_parser("codex", add_help=False, help="Codex subscription utilities (e.g. `minibot codex login`).")
     return parser
 
 
@@ -112,6 +113,13 @@ def main(argv: list[str] | None = None) -> None:
 
         configure_main(args[1:])
         return
+    if args[:1] == ["codex"]:
+        if args[1:2] == ["login"]:
+            from minibot.app.codex_login import main as codex_login_main
+
+            codex_login_main(args[2:])
+            return
+        raise SystemExit("Usage: minibot codex login [--device-code] [--auth-file PATH]")
     if args:
         build_arg_parser().parse_args(args)
     asyncio.run(run())
