@@ -8,6 +8,68 @@ from llm_async.providers.openai_responses import OpenAIResponsesProvider
 
 
 class PatchedOpenAIResponsesProvider(OpenAIResponsesProvider):
+    def _messages_to_input(self, messages: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+        if len(messages) == 1 and messages[0].get("role") == "user" and isinstance(messages[0].get("content"), str):
+            return messages[0]["content"]
+
+        responses_messages: list[dict[str, Any]] = []
+        for msg in messages:
+            msg_type = msg.get("type")
+
+            if msg_type == "function_call_output":
+                responses_messages.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": msg.get("call_id", ""),
+                        "output": msg.get("output", ""),
+                    }
+                )
+                continue
+
+            role = msg.get("role")
+            if role == "user":
+                responses_messages.append({"role": "user", "content": msg.get("content", "")})
+                continue
+
+            if role != "assistant":
+                continue
+
+            tool_calls = msg.get("tool_calls")
+            if not tool_calls:
+                responses_messages.append({"role": "assistant", "content": msg.get("content", "")})
+                continue
+
+            # A reasoning item (often encrypted, carrying no readable text) must immediately
+            # precede the function_call it belongs to, or the Responses API rejects the
+            # follow-up as an orphaned tool call. Replay it verbatim, never fabricate one.
+            for item in msg.get("reasoning_details") or []:
+                if isinstance(item, Mapping) and item.get("type") == "reasoning":
+                    responses_messages.append(dict(item))
+
+            for tc in tool_calls:
+                fc_id = tc.get("id", "")
+                call_id = tc.get("id", "")
+                tc_input = tc.get("input", {})
+                if isinstance(tc_input, dict) and "call_id" in tc_input:
+                    call_id = tc_input["call_id"]
+                responses_messages.append(
+                    {
+                        "type": "function_call",
+                        "id": fc_id,
+                        "call_id": call_id,
+                        "name": (
+                            tc.get("function", {}).get("name")
+                            if isinstance(tc.get("function"), dict)
+                            else tc.get("name", "")
+                        ),
+                        "arguments": (
+                            tc.get("function", {}).get("arguments") if isinstance(tc.get("function"), dict) else ""
+                        ),
+                    }
+                )
+
+        return responses_messages if responses_messages else messages
+
     def _format_tools(self, tools: Sequence[Any]) -> list[dict[str, Any]]:
         if not tools:
             return []

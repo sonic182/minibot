@@ -186,6 +186,17 @@ class LLMClient:
             raise RuntimeError("LLM did not return a completion")
         if self._is_responses_provider and isinstance(response.original, Mapping):
             reasoning = extract_reasoning_text_from_responses(response.original)
+            output = response.original.get("output")
+            reasoning_items = (
+                [dict(item) for item in output if isinstance(item, Mapping) and item.get("type") == "reasoning"]
+                if isinstance(output, list)
+                else []
+            )
+            if reasoning_items:
+                # A Responses reasoning item (often encrypted, no readable text) must be replayed
+                # verbatim ahead of its function_call on the next request, or the provider rejects
+                # the follow-up as an orphaned tool call. See reasoning_replay.py / _messages_to_input.
+                message.reasoning_details = reasoning_items
             if reasoning:
                 message.reasoning = reasoning
                 self._logger.info(
@@ -193,24 +204,14 @@ class LLMClient:
                     extra={"reasoning_length": len(reasoning)},
                 )
             else:
-                output = response.original.get("output")
                 output_types = (
                     [item.get("type") for item in output if isinstance(item, Mapping)]
                     if isinstance(output, list)
                     else None
                 )
-                reasoning_items = (
-                    [
-                        str(item)[:600]
-                        for item in output
-                        if isinstance(item, Mapping) and item.get("type") == "reasoning"
-                    ]
-                    if isinstance(output, list)
-                    else []
-                )
                 self._logger.debug(
                     "no reasoning in responses output",
-                    extra={"output_types": output_types, "reasoning_items": reasoning_items},
+                    extra={"output_types": output_types, "reasoning_items": [str(i)[:600] for i in reasoning_items]},
                 )
         usage = extract_usage_from_response(response)
         usage_tokens = usage.total_tokens
