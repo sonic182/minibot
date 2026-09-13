@@ -62,6 +62,10 @@ def messages_to_responses_input(messages: list[dict[str, Any]]) -> str | list[di
             responses_messages.append({"role": "assistant", "content": msg.get("content", "")})
             continue
 
+        # ponytail: every reasoning item is emitted ahead of the whole tool_calls group, which is
+        # the real shape of a turn (one reasoning, then N parallel calls). A response that
+        # interleaves them (reasoning1, fc_1, reasoning2, fc_2) would replay regrouped; pair each
+        # reasoning with the call index it preceded if a provider ever rejects that.
         for item in msg.get("reasoning_details") or []:
             if isinstance(item, Mapping) and item.get("type") == "reasoning":
                 responses_messages.append(dict(item))

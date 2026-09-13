@@ -186,12 +186,6 @@ class LLMClient:
             raise RuntimeError("LLM did not return a completion")
         if self._is_responses_provider and isinstance(response.original, Mapping):
             reasoning = extract_reasoning_text_from_responses(response.original)
-            output = response.original.get("output")
-            reasoning_items = (
-                [str(item)[:600] for item in output if isinstance(item, Mapping) and item.get("type") == "reasoning"]
-                if isinstance(output, list)
-                else []
-            )
             if reasoning:
                 message.reasoning = reasoning
                 self._logger.info(
@@ -199,10 +193,20 @@ class LLMClient:
                     extra={"reasoning_length": len(reasoning)},
                 )
             else:
+                output = response.original.get("output")
                 output_types = (
                     [item.get("type") for item in output if isinstance(item, Mapping)]
                     if isinstance(output, list)
                     else None
+                )
+                reasoning_items = (
+                    [
+                        str(item)[:600]
+                        for item in output
+                        if isinstance(item, Mapping) and item.get("type") == "reasoning"
+                    ]
+                    if isinstance(output, list)
+                    else []
                 )
                 self._logger.debug(
                     "no reasoning in responses output",

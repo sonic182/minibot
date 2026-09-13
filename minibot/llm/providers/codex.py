@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from llm_async.models import Message, Response
+from llm_async.models import Response
 from llm_async_codex import CodexProvider
 
-from minibot.llm.providers.openai_responses import attach_reasoning_items, messages_to_responses_input
+from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvider
 
 # The /models endpoint gates which models it returns by this query param, compared as a version
 # string against each model's `minimal_client_version` (verified empirically: low values return
@@ -25,10 +25,14 @@ class CodexModelCapabilities:
     auto_compact_token_limit: int | None
 
 
-class PatchedCodexProvider(CodexProvider):
+class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
     """Codex subscriptions reject stream=False; minibot's pipeline only calls the plain,
     non-streaming ``acomplete`` contract. Force streaming and drain it here so callers get a
-    fully-populated ``Response`` like every other provider."""
+    fully-populated ``Response`` like every other provider.
+
+    Base order matters: it puts the patched provider between ``CodexProvider`` and the vendored
+    one, so ``CodexProvider``'s own ``super()`` calls land on minibot's fixes (reasoning replay,
+    native tool formatting) while keeping its Codex-specific behaviour on top."""
 
     _models_cache: list[dict[str, Any]] | None = None
 
@@ -42,28 +46,6 @@ class PatchedCodexProvider(CodexProvider):
             async for _ in response.stream_generator:
                 pass
         return response
-
-    def _parse_response(self, original: dict[str, Any]) -> Message:
-        """Codex only streams, so `Response.original` never gets filled: the accumulated output
-        items reach the pipeline through here alone, encrypted reasoning included."""
-        return attach_reasoning_items(super()._parse_response(original), original)
-
-    def _messages_to_input(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """CodexProvider's content-block normalization, rebuilt on the reasoning-aware expansion —
-        its own `super()._messages_to_input` resolves to the unpatched provider, skipping replay."""
-        input_items = messages_to_responses_input(messages)
-        if isinstance(input_items, str):
-            return [{"role": "user", "content": [{"type": "input_text", "text": input_items}]}]
-
-        normalized: list[dict[str, Any]] = []
-        for item in input_items:
-            if item.get("role") == "user" and isinstance(item.get("content"), str):
-                normalized.append({**item, "content": [{"type": "input_text", "text": item["content"]}]})
-            elif item.get("role") == "assistant" and isinstance(item.get("content"), str):
-                normalized.append({**item, "content": [{"type": "output_text", "text": item["content"]}]})
-            else:
-                normalized.append(item)
-        return normalized
 
     async def _ensure_models_cache(self) -> list[dict[str, Any]]:
         """Fetch (and cache) `GET /models`.
