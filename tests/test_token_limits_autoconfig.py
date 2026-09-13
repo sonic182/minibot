@@ -27,7 +27,8 @@ class _FakeHTTPClient:
         return _FakeResponse(self._payload)
 
 
-def test_resolve_limits_returns_provider_scoped_values() -> None:
+@pytest.mark.asyncio
+async def test_resolve_limits_returns_provider_scoped_values() -> None:
     payload = {
         "openai": {
             "models": {
@@ -51,17 +52,20 @@ def test_resolve_limits_returns_provider_scoped_values() -> None:
         },
     }
 
-    result = token_limits_autoconfig._resolve_limits(
+    result = await token_limits_autoconfig._resolve_limits(
         payload=payload,
         provider_name="openai",
         model_name="gpt-4.1-mini",
         base_url=None,
+        auth_path=None,
+        logger=logging.getLogger("test.token_limits.resolve_limits"),
     )
 
     assert result == {"catalog_provider": "openai", "context": 1047576, "output": 32768}
 
 
-def test_resolve_limits_returns_none_when_provider_misses_even_if_other_providers_have_model() -> None:
+@pytest.mark.asyncio
+async def test_resolve_limits_returns_none_when_provider_misses_even_if_other_providers_have_model() -> None:
     payload = {
         "openai": {
             "models": {
@@ -75,11 +79,13 @@ def test_resolve_limits_returns_none_when_provider_misses_even_if_other_provider
         }
     }
 
-    result = token_limits_autoconfig._resolve_limits(
+    result = await token_limits_autoconfig._resolve_limits(
         payload=payload,
         provider_name="custom_openai_proxy",
         model_name="gpt-4.1-mini",
         base_url="https://proxy.example/v1",
+        auth_path=None,
+        logger=logging.getLogger("test.token_limits.resolve_limits_miss"),
     )
 
     assert result is None

@@ -41,8 +41,8 @@ class PatchedCodexProvider(CodexProvider):
                 pass
         return response
 
-    async def get_model_capabilities(self, model: str) -> CodexModelCapabilities | None:
-        """Fetch (and cache) `GET /models`, returning the entry for `model` if present.
+    async def _ensure_models_cache(self) -> list[dict[str, Any]]:
+        """Fetch (and cache) `GET /models`.
 
         Bypasses `_single_complete`, the only place the automatic token-refresh check normally
         runs, so it's called here explicitly — a stale token would otherwise 401 on this path.
@@ -52,7 +52,11 @@ class PatchedCodexProvider(CodexProvider):
             payload = await self.request("GET", f"/models?client_version={_MODELS_CLIENT_VERSION}")
             models = payload.get("models") if isinstance(payload, dict) else None
             self._models_cache = [entry for entry in models if isinstance(entry, dict)] if models else []
-        for entry in self._models_cache:
+        return self._models_cache
+
+    async def get_model_capabilities(self, model: str) -> CodexModelCapabilities | None:
+        """Return the `/models` entry for `model`, or None if it's not in the catalog."""
+        for entry in await self._ensure_models_cache():
             if entry.get("slug") != model:
                 continue
             context_window = entry.get("context_window")
@@ -67,3 +71,7 @@ class PatchedCodexProvider(CodexProvider):
                 auto_compact_token_limit=auto_compact if isinstance(auto_compact, int) else None,
             )
         return None
+
+    async def list_model_slugs(self) -> list[str]:
+        """Return the available model slugs, for interactive model selection."""
+        return sorted({entry["slug"] for entry in await self._ensure_models_cache() if entry.get("slug")})
