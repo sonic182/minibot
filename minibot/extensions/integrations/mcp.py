@@ -12,6 +12,11 @@ def register(mb: ExtensionContext) -> None:
     settings = mb.settings
     bindings = []
     for server in settings.tools.mcp.servers:
+        headers = dict(server.headers)
+        if server.auth_secret:
+            if mb.vault is None:
+                raise ValueError(f"mcp server {server.name!r} sets auth_secret but [vault] is not enabled")
+            headers["Authorization"] = f"Bearer {mb.vault.get(server.auth_secret)}"
         client = MCPClient(
             server_name=server.name,
             transport=server.transport,
@@ -21,7 +26,7 @@ def register(mb: ExtensionContext) -> None:
             env=server.env or None,
             cwd=server.cwd,
             url=server.url,
-            headers=server.headers,
+            headers=headers,
         )
         try:
             bindings.extend(

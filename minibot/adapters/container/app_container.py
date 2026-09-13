@@ -9,6 +9,7 @@ from minibot.adapters.config.schema import Settings
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.pending_turns import PendingTurnStore
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
+from minibot.adapters.vault import Vault, read_vault_password
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
@@ -31,6 +32,7 @@ class AppContainer:
     _agent_registry: AgentRegistry | None = None
     _skill_registry: SkillRegistry | None = None
     _extensions: ExtensionRegistry | None = None
+    _vault: Vault | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -51,9 +53,13 @@ class AppContainer:
         else:
             cls._skill_registry = SkillRegistry([])
         cls._token_autoconfig_applied = False
+        cls._vault = None
+        if cls._settings.vault.enabled:
+            cls._vault = Vault(cls._settings.vault)
+            cls._vault.unlock(read_vault_password(cls._settings.vault, cls._logger))
         # Last, so an extension's register() sees a fully built container even though the
         # context handed to it exposes only settings, the bus and a logger.
-        cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger, entrypoint)
+        cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger, entrypoint, vault=cls._vault)
 
     @classmethod
     def get_settings(cls) -> Settings:
@@ -133,6 +139,11 @@ class AppContainer:
     def get_kv_memory_backend(cls) -> None:
         """Compatibility placeholder; KV memory is a bundled extension."""
         return None
+
+    @classmethod
+    def get_vault(cls) -> Vault | None:
+        """The unlocked vault, or ``None`` when ``[vault] enabled`` is false."""
+        return cls._vault
 
     @classmethod
     def get_extensions(cls) -> ExtensionRegistry:

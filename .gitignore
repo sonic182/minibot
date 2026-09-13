@@ -73,6 +73,7 @@ coverage.xml
 
 config.toml
 config.*.bckp
+*.vault.yml
 data/
 testdata/
 /skills/

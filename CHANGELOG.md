@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Encrypted credential vault** (`[vault]`, opt-in, needs the new `vault` extra). Secrets live in
+  a single AES-256-GCM file whose key is derived from a password with scrypt and never touches
+  disk or a subprocess environment. `minibot vault init|edit|list` manages it, ansible-vault
+  style: `edit` decrypts into `$EDITOR` via a `0600` temp file and re-encrypts on exit.
+  Secrets are destination-bound — `[[tools.mcp.servers]] auth_secret` names a vault entry that the
+  MCP client sends as its own `Authorization` header. The LLM gets one new tool, `list_secrets`,
+  which returns names only; there is no `get_secret` and no `secret://` reference it can write
+  into a tool argument. The password is read from `[vault] password_file`, then
+  `MINIBOT_VAULT_PASSWORD`, then an interactive prompt — the prompt being the recommended method.
+  See `docs/security.rst` for the threat model and its limits.
+
 ### Changed
 
 - **`tools.bash.pass_parent_env` now defaults to `false`**, matching `tools.python_exec`. The `bash`

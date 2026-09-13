@@ -100,6 +100,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     commands.add_parser("console", add_help=False, help="Run the console channel.")
     commands.add_parser("configure", add_help=False, help="Configure Minibot interactively.")
     commands.add_parser("codex", add_help=False, help="Codex subscription utilities (e.g. `minibot codex login`).")
+    commands.add_parser("vault", add_help=False, help="Manage the encrypted credential vault.")
     return parser
 
 
@@ -112,6 +113,11 @@ def main(argv: list[str] | None = None) -> None:
         from minibot.adapters.config.configurator import main as configure_main
 
         configure_main(args[1:])
+        return
+    if args[:1] == ["vault"]:
+        from minibot.adapters.vault.cli import main as vault_main
+
+        vault_main(args[1:])
         return
     if args[:1] == ["codex"]:
         if args[1:2] == ["login"]:

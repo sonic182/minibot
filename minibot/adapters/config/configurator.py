@@ -98,6 +98,8 @@ def configure(path: Path) -> bool:
     _configure_llm(document, settings)
     settings = _settings_for_document(document)
     _configure_tools(document, settings)
+    settings = _settings_for_document(document)
+    _configure_vault(document, settings)
     text = tomlkit.dumps(document)
     settings = Settings.from_dict(tomllib.loads(text))
     _write_summary(path, profile, settings)
@@ -215,6 +217,23 @@ def _configure_tools(document: Any, settings: Settings) -> None:
         _set_value(document, ("tools", "skills", "preload_catalog"), True)
     # The wizard keeps rerank tied to rag for simplicity; edit config.toml directly to decouple them.
     _set_value(document, ("tools", "rag", "rerank", "enabled"), "rag" in selected)
+
+
+def _configure_vault(document: Any, settings: Settings) -> None:
+    _write("\nThe vault stores credentials encrypted; the assistant can list their names, never read a value.\n")
+    _write("Needs its extra installed: poetry install --extras vault\n")
+    enabled = _ask_bool("Enable the credential vault", settings.vault.enabled)
+    _set_value(document, ("vault", "enabled"), enabled)
+    if not enabled:
+        return
+    path = _ask_required("Vault file", settings.vault.path)
+    _set_value(document, ("vault", "path"), path)
+    if not Path(path).expanduser().exists():
+        _write(f"\nNo vault exists at {path}. Create it before starting minibot:\n")
+        _write(f"  minibot vault init {path}\n")
+        _write(f"  minibot vault edit {path}\n")
+    _write("\nMinibot prompts for the vault password on startup. To run unattended, set\n")
+    _write("[vault] password_file or MINIBOT_VAULT_PASSWORD — both weaker than the prompt.\n")
 
 
 def _configure_graph_module(document: Any, settings: Settings, *, enabled: bool) -> None:
@@ -533,6 +552,7 @@ def _write_summary(path: Path, profile: str | None, settings: Settings) -> None:
         f"  API key: {'configured' if provider and provider.api_key else 'empty'}\n"
         f"  Telegram: {'enabled' if settings.channels.telegram.enabled else 'disabled'}\n"
         f"  Tools: {', '.join(tools) or 'none'}\n"
+        f"  Vault: {settings.vault.path if settings.vault.enabled else 'disabled'}\n"
         "  Literal secrets are stored in plain text; ${VAR} references are preserved.\n\n"
     )
 

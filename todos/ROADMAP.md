@@ -51,7 +51,7 @@ default (`schema.py:560-561`) — `bash` is the outlier, not the norm. Small,
 immediate, and a prerequisite for Phase 1's `MINIBOT_VAULT_PASSWORD` unlock
 option to be trustworthy at all.
 
-## [ ] Phase 1 — Credential vault (reference-only)
+## [x] Phase 1 — Credential vault (reference-only)
 
 Single owner, no per-owner scoping — MiniBot is a personal assistant for one
 person, not multi-tenant. `owner_id` shows up throughout `ToolContext` today
@@ -106,14 +106,38 @@ Ansible-vault-style design, shipped as an optional extension (not core):
   checks against the *actual request host*, attaching the header itself
   when it matches. The LLM never writes or sees a secret reference either
   way.
-- `execute_tool_calls_for_runtime` (`minibot/llm/services/tool_executor.py:
-  279`) is the choke point for the *other* side of this instead: redacting
-  any known secret value out of a `ToolResult` (and logs) before it reaches
-  the LLM, and rejecting a call whose target isn't the destination a bound
-  credential is configured for. It is not where secrets get resolved — a
-  literal containment/redaction check against known vault values, not
-  semantic classification, so it's allowed under the project's
-  output-classification rule either way.
+- **Deferred to Phase 2**, where this is restated concretely:
+  `execute_tool_calls_for_runtime` (`minibot/llm/services/tool_executor.py`)
+  is the choke point for the *other* side of this — redacting any known
+  secret value out of a `ToolResult` (and logs) before it reaches the LLM.
+  Not shipped in Phase 1: the same exfil-via-echo risk already exists
+  un-redacted today for `${ENV_VAR}` static MCP headers, so Phase 1 does not
+  widen it, and threading a redactor through `LLMClientFactory` →
+  `LLMClient` → the executor before Phase 2 knows its shape is premature.
+  The "reject a call whose target isn't the bound destination" half is moot
+  under the destination-bound model — nothing resolves at the executor, so
+  there is no call to reject. It is a literal containment/redaction check
+  against known vault values, not semantic classification, so it's allowed
+  under the project's output-classification rule either way.
+
+Shipped differently from the sketch above, deliberately:
+
+- Lives in `minibot/adapters/vault/` with a `[vault]` config section, not an
+  out-of-tree extension — MCP header binding is core code an extension can't
+  reach. "Optional" is the `vault` poetry extra plus `enabled = false`, the
+  same shape `rag`/`stt` use. Only the `list_secrets` tool is an extension
+  (`minibot/extensions/tools/vault.py`).
+- No PyYAML. The plaintext is a flat `name: value` document parsed by
+  `adapters/vault/secrets_yaml.py` (~50 lines, string-only — never coerces a
+  numeric API key to `int`, which is why `shared/frontmatter.py` could not be
+  reused). Values needing whitespace/newlines are JSON-quoted; no block
+  scalars.
+- The envelope is `{version, kdf, n, r, p, salt, nonce, ciphertext}` JSON;
+  scrypt comes from stdlib `hashlib`, only `AESGCM` from `cryptography`.
+- `--vault-password-file` is `[vault] password_file` for the daemon (the
+  daemon path parses no args, and the field is already `${ENV}`-expandable).
+  The `--password-file` flag exists on `minibot vault`, where scripting
+  needs it.
 
 Out of scope for this vault: today's `${ENV_VAR}` config-time secrets
 (`token_env`, static MCP headers). Different threat model — admin-authored,

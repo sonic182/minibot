@@ -614,6 +614,9 @@ class MCPServerConfig(BaseModel):
     cwd: str | None = None
     url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
+    # Name of a `[vault]` entry whose value is sent as `Authorization: Bearer <value>`. The server
+    # and the secret name both come from config, never from LLM input.
+    auth_secret: str | None = None
     enabled_tools: list[str] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
     catalog_cache_ttl_seconds: Annotated[int, Field(ge=0)] = 60
@@ -870,6 +873,26 @@ class ExtensionsConfig(BaseModel):
     config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
+class VaultConfig(BaseModel):
+    """Encrypted credential vault. TOML section: ``[vault]``
+
+    - ``enabled`` — unlock the vault at startup (default: ``false``).
+    - ``path`` — the encrypted vault file (default: ``"secrets.vault.yml"``). Write it with
+      ``minibot vault edit``; keep it out of git.
+    - ``password_file`` — read the unlock password from this file instead of prompting. Supported,
+      but not on equal footing with the interactive prompt: any tool that can read the filesystem
+      can read this file. Same for the ``MINIBOT_VAULT_PASSWORD`` environment variable.
+
+    Secrets are destination-bound: an admin binds a secret to a consumer in config (for example
+    ``[[tools.mcp.servers]] auth_secret``), and the value is resolved there. The LLM can list
+    secret names and nothing else.
+    """
+
+    enabled: bool = False
+    path: str = "secrets.vault.yml"
+    password_file: str = ""
+
+
 class Settings(BaseModel):
     runtime: RuntimeConfig = RuntimeConfig()
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
@@ -882,6 +905,7 @@ class Settings(BaseModel):
     logging: LoggingConfig = LoggingConfig()
     tasks: TasksConfig = TasksConfig()
     rabbitmq: RabbitMQConsumerConfig = RabbitMQConsumerConfig()
+    vault: VaultConfig = VaultConfig()
     extensions: ExtensionsConfig = ExtensionsConfig()
 
     model_config = ConfigDict(extra="forbid")
