@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `llm-async` upgraded to 0.5.3, which carries the Responses API reasoning replay upstream.
+
 ### Fixed
 
 - Responses API full-history tool follow-ups now replay the required reasoning items before function calls.
