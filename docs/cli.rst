@@ -2,10 +2,10 @@ CLI Reference
 =============
 
 .. meta::
-   :description: Minibot command-line interface — run the daemon, chat through the console TUI, configure MiniBot, and sign in to ChatGPT Codex.
-   :keywords: minibot CLI, self-hosted AI assistant commands, console TUI, config wizard, ChatGPT Codex
+   :description: Minibot command-line interface — run the daemon, chat through the console TUI, configure MiniBot, manage the credential vault, and sign in to ChatGPT Codex.
+   :keywords: minibot CLI, self-hosted AI assistant commands, console TUI, config wizard, credential vault, ChatGPT Codex
 
-MiniBot installs a single ``minibot`` entry point that dispatches to four commands.
+MiniBot installs a single ``minibot`` entry point that dispatches to five commands.
 
 .. list-table::
    :header-rows: 1
@@ -19,6 +19,8 @@ MiniBot installs a single ``minibot`` entry point that dispatches to four comman
      - Open the local console channel (no Telegram bot required).
    * - ``minibot configure``
      - Run the interactive wizard that writes ``config.toml``.
+   * - ``minibot vault``
+     - Create, edit, and list the encrypted credential vault.
    * - ``minibot codex login``
      - Authenticate a ChatGPT Codex subscription; use ``--device-code`` on a headless host.
 
@@ -87,3 +89,32 @@ Walks through Telegram, provider, model, tool selection, and — when tasks are 
 queue backend. New files start from the ``Example`` profile; ``YOLO`` enables broad host execution
 and integrations. Secrets are written in plain text, so keep ``config.toml`` private. The wizard
 also seeds ``prompts/`` next to the config file when that directory does not already exist.
+
+Credential vault
+----------------
+
+.. code-block:: bash
+
+   minibot vault init               # create ./secrets.vault.yml
+   minibot vault edit               # decrypt into $EDITOR, re-encrypt on exit
+   minibot vault list               # print secret names, never values
+
+Each command takes an optional vault path (default ``secrets.vault.yml``) and
+``--password-file PATH``. Without it the password comes from ``MINIBOT_VAULT_PASSWORD``, and
+failing that an interactive prompt — the recommended method, since no password material reaches
+disk or the process environment.
+
+``edit`` decrypts into a ``0600`` temporary file, runs ``$EDITOR`` (falling back to ``$VISUAL``
+then ``vi``), and re-encrypts on exit. The edited document is parsed *before* it is encrypted, so
+a syntax error leaves the existing vault untouched. Its format is one ``name: value`` per line;
+values are never type-coerced, and a value needing whitespace, newlines, or a leading ``#``/``-``
+is written JSON-quoted:
+
+.. code-block:: yaml
+
+   github: ghp_example
+   numeric_key: 12345
+   private_key: "-----BEGIN KEY-----\nabc\n-----END KEY-----"
+
+See :doc:`security` for how a stored secret is bound to a destination, and ``[vault]`` in
+:doc:`config` for the daemon-side settings.

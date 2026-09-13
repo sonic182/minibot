@@ -39,7 +39,7 @@ Worth stating this plainly in the README/docs, roughly:
 > workloads or deployments with sensitive host data, run MiniBot inside an
 > appropriately isolated environment.
 
-## Phase 0 — fix bash's env default now (no dependency on anything else)
+## [x] Phase 0 — fix bash's env default now (no dependency on anything else)
 
 `BashToolConfig.pass_parent_env` defaults to `True`
 (`minibot/adapters/config/schema.py:572`), so `bash` inherits the daemon's
@@ -51,7 +51,7 @@ default (`schema.py:560-561`) — `bash` is the outlier, not the norm. Small,
 immediate, and a prerequisite for Phase 1's `MINIBOT_VAULT_PASSWORD` unlock
 option to be trustworthy at all.
 
-## Phase 1 — Credential vault (reference-only)
+## [x] Phase 1 — Credential vault (reference-only)
 
 Single owner, no per-owner scoping — MiniBot is a personal assistant for one
 person, not multi-tenant. `owner_id` shows up throughout `ToolContext` today
@@ -106,19 +106,50 @@ Ansible-vault-style design, shipped as an optional extension (not core):
   checks against the *actual request host*, attaching the header itself
   when it matches. The LLM never writes or sees a secret reference either
   way.
-- `execute_tool_calls_for_runtime` (`minibot/llm/services/tool_executor.py:
-  279`) is the choke point for the *other* side of this instead: redacting
-  any known secret value out of a `ToolResult` (and logs) before it reaches
-  the LLM, and rejecting a call whose target isn't the destination a bound
-  credential is configured for. It is not where secrets get resolved — a
-  literal containment/redaction check against known vault values, not
-  semantic classification, so it's allowed under the project's
-  output-classification rule either way.
+- **Deferred to Phase 2**, where this is restated concretely:
+  `execute_tool_calls_for_runtime` (`minibot/llm/services/tool_executor.py`)
+  is the choke point for the *other* side of this — redacting any known
+  secret value out of a `ToolResult` (and logs) before it reaches the LLM.
+  Not shipped in Phase 1: the same exfil-via-echo risk already exists
+  un-redacted today for `${ENV_VAR}` static MCP headers, so Phase 1 does not
+  widen it, and threading a redactor through `LLMClientFactory` →
+  `LLMClient` → the executor before Phase 2 knows its shape is premature.
+  The "reject a call whose target isn't the bound destination" half is moot
+  under the destination-bound model — nothing resolves at the executor, so
+  there is no call to reject. It is a literal containment/redaction check
+  against known vault values, not semantic classification, so it's allowed
+  under the project's output-classification rule either way.
 
-Out of scope for this vault: today's `${ENV_VAR}` config-time secrets
+Shipped differently from the sketch above, deliberately:
+
+- Lives in `minibot/adapters/vault/` with a `[vault]` config section, not an
+  out-of-tree extension — MCP header binding is core code an extension can't
+  reach. "Optional" is the `vault` poetry extra plus `enabled = false`, the
+  same shape `rag`/`stt` use. Only the `list_secrets` tool is an extension
+  (`minibot/extensions/tools/vault.py`).
+- No PyYAML. The plaintext is a flat `name: value` document parsed by
+  `adapters/vault/secrets_yaml.py` (~50 lines, string-only — never coerces a
+  numeric API key to `int`, which is why `shared/frontmatter.py` could not be
+  reused). Values needing whitespace/newlines are JSON-quoted; no block
+  scalars.
+- The envelope is `{version, kdf, n, r, p, salt, nonce, ciphertext}` JSON;
+  scrypt comes from stdlib `hashlib`, only `AESGCM` from `cryptography`.
+- `--vault-password-file` is `[vault] password_file` for the daemon (the
+  daemon path parses no args, and the field is already `${ENV}`-expandable).
+  The `--password-file` flag exists on `minibot vault`, where scripting
+  needs it.
+
+~~Out of scope for this vault: today's `${ENV_VAR}` config-time secrets
 (`token_env`, static MCP headers). Different threat model — admin-authored,
-live only in `config.toml`, never handled through tool arguments. No
-migration planned; the two coexist.
+live only in `config.toml`, never handled through tool arguments.~~
+
+**Corrected after Phase 1 shipped.** It is *not* a different threat model:
+`bash` has no filesystem jail, so `cat config.toml` reaches every plaintext
+credential in it. A `${secret:NAME}` reference form was therefore added,
+resolvable in any config string from the vault (`adapters/config/environment.py`),
+so the file on disk holds only references. `${ENV_VAR}` still works and the
+two coexist; no migration is forced. The remaining exposure is unchanged for
+both: a resolved value lives in the daemon's memory.
 
 Ceiling: this protects secrets at rest and from the LLM's own tool calls. It
 does not protect against a fully compromised daemon process reading its own
@@ -126,7 +157,7 @@ memory (e.g. `/proc/<pid>/mem`) — same trust boundary as any self-hosted
 secret manager running as one OS user. Out of scope unless that threat model
 changes.
 
-## Phase 2 — MCP OAuth (issue #65)
+## [ ] Phase 2 — MCP OAuth (issue #65)
 
 Scope: alternative 1 only (auth-code + PKCE + manual callback paste). No HTTP
 callback endpoint, no device flow.
@@ -173,7 +204,7 @@ implementation that happens to work against two test servers:
   editing the vault file while the daemon is running requires a restart to
   pick up the change.
 
-## Phase 3 — SMTP tool
+## [ ] Phase 3 — SMTP tool
 
 - `SMTPToolConfig` next to `HTTPClientToolConfig`.
 - Credentials bound to the SMTP adapter per Phase 1's destination-bound
@@ -186,7 +217,7 @@ implementation that happens to work against two test servers:
   owner-facing Telegram confirmation, or a `dry_run` default) rather than a
   cross-cutting approval framework.
 
-## Phase 4 — Guardrail enhancements
+## [ ] Phase 4 — Guardrail enhancements
 
 Not a duplicate of Phase 1. Under the destination-bound model, the LLM never
 has a `secret://` reference to put in an argument at all, so there's nothing
@@ -203,7 +234,7 @@ call's arguments:
 - `GuardrailDecision` gains a `credential_exposure` field (structured, not
   regex/text classification, per project convention).
 
-## Phase 5 — bash tool hardening (mixed priority — see Trust model)
+## [ ] Phase 5 — bash tool hardening (mixed priority — see Trust model)
 
 Two different things live in this phase, deliberately split by who owns
 them:
@@ -222,13 +253,11 @@ Everything below assumes secrets are safe from `bash` as long as they never
 appear as plaintext arguments or in a file it can read. That assumption
 doesn't hold today:
 
-- `BashToolConfig.pass_parent_env` defaults to `True`
-  (`minibot/adapters/config/schema.py:572`), and `_build_env`
-  (`minibot/llm/tools/bash.py:187-198`) does `env = dict(os.environ)` in that
-  case — the LLM's `bash` tool inherits the daemon's *entire* process
-  environment by default. Any `${ENV_VAR}` secret already used for config
-  today (`GITHUB_TOKEN`, static MCP header tokens, DB URLs) is retrievable
-  right now via `bash` → `env`, no vault involved.
+- ~~`BashToolConfig.pass_parent_env` defaults to `True`, so the LLM's `bash`
+  tool inherits the daemon's *entire* process environment~~ — fixed in Phase 0;
+  the default is now `False` with an `env_allowlist`. An owner who sets
+  `pass_parent_env = true` back (as `config.yolo.toml` does) still exposes every
+  `${ENV_VAR}` config secret to `bash` → `env`.
 - `bash`'s `cwd` (`_coerce_cwd`, `bash.py:176-185`) accepts any existing
   directory on the filesystem — there's no root jail at all, unlike
   `LocalFileStorage` (`adapters/files/local_storage.py:339-348`), which

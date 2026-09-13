@@ -17,6 +17,7 @@ def _reset_container(module) -> None:
     module.AppContainer._agent_registry = None
     module.AppContainer._skill_registry = None
     module.AppContainer._extensions = None
+    module.AppContainer._vault = None
     module.AppContainer._token_autoconfig_applied = False
 
 

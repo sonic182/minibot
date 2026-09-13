@@ -69,6 +69,22 @@ async def test_bash_runs_simple_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bash_does_not_leak_parent_env_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_s3cr3t")
+    binding = _binding(BashToolConfig())
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"command": "env", "timeout_seconds": None, "cwd": None, "env": None},
+            ToolContext(),
+        ),
+    )
+    assert result["ok"] is True
+    assert "ghp_s3cr3t" not in result["stdout"]
+    assert "PATH=" in result["stdout"]
+
+
+@pytest.mark.asyncio
 async def test_bash_supports_pipelines() -> None:
     binding = _binding(BashToolConfig())
     result = cast(

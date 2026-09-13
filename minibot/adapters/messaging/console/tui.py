@@ -10,18 +10,42 @@ import asyncio
 import contextlib
 from collections.abc import Sequence
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.message import Message
-from textual.widgets import Footer, Header, LoadingIndicator, MarkdownViewer, Static, TextArea
+from textual.widgets import Footer, Header, LoadingIndicator, Markdown, MarkdownViewer, Static, TextArea
 
 from minibot.adapters.messaging.console.service import ConsoleResponse, ConsoleService
 from minibot.core.memory import MemoryEntry
 
 _SEPARATOR = "\n\n---\n\n"
+_EXTERNAL_LINK_SCHEMES = {"http", "https", "mailto"}
+
+
+def is_external_link(href: str) -> bool:
+    return urlparse(href).scheme in _EXTERNAL_LINK_SCHEMES
+
+
+class Transcript(MarkdownViewer):
+    """Markdown viewer that never navigates away from the conversation.
+
+    ``MarkdownViewer`` resolves every clicked href as a local file path, so an ``https`` link
+    from the assistant crashes the app with ``FileNotFoundError``. Even for a path that exists,
+    navigating would replace the transcript — this is a chat log, not a document browser.
+
+    ``prevent_default`` is required, not decorative: Textual dispatches a message to the handler
+    of *every* class in the MRO, so overriding alone would still run the base implementation.
+    """
+
+    async def _on_markdown_link_clicked(self, message: Markdown.LinkClicked) -> None:
+        message.prevent_default()
+        message.stop()
+        if is_external_link(message.href):
+            self.app.open_url(message.href)
 
 
 @dataclass(frozen=True)
@@ -126,7 +150,7 @@ class ConsoleTui(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield MarkdownViewer(id="transcript", show_table_of_contents=False)
+        yield Transcript(id="transcript", show_table_of_contents=False)
         with Vertical(id="input-area"):
             yield LoadingIndicator(id="thinking")
             yield Static("", id="thinking-status")
@@ -233,7 +257,7 @@ class ConsoleTui(App[None]):
             blocks.append("**Thinking…**\n\n> " + "\n>\n> ".join(self._live_thinking))
         if self._live_tools:
             blocks.append(_tools_block("Tools…", self._live_tools))
-        viewer = self.query_one("#transcript", MarkdownViewer)
+        viewer = self.query_one("#transcript", Transcript)
         await viewer.document.update(_SEPARATOR.join(blocks))
         viewer.scroll_end(animate=False)
 

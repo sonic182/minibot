@@ -4,11 +4,13 @@ import inspect
 import logging
 from pathlib import Path
 
+from minibot.adapters.config.environment import has_secret_references, has_secret_syntax
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.pending_turns import PendingTurnStore
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
+from minibot.adapters.vault import Vault, read_vault_password
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
@@ -31,6 +33,7 @@ class AppContainer:
     _agent_registry: AgentRegistry | None = None
     _skill_registry: SkillRegistry | None = None
     _extensions: ExtensionRegistry | None = None
+    _vault: Vault | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -38,6 +41,13 @@ class AppContainer:
         cls._settings = load_settings(config_path)
         cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
+        cls._vault = cls._unlock_vault_if_needed()
+        # Second pass: ${secret:NAME} needs an unlocked vault, which needed validated settings to
+        # find. It also runs without one, because that pass is where `$${secret:}` loses its `$$`.
+        # The dump only reveals a reference in a field that stays `str` through validation, which
+        # every secret-bearing field in the schema currently is.
+        if has_secret_syntax(cls._settings.model_dump(mode="python")):
+            cls._settings = load_settings(config_path, cls._vault.as_mapping() if cls._vault else {})
         agent_specs = load_agent_specs(cls._settings.orchestration.directory)
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
@@ -53,7 +63,21 @@ class AppContainer:
         cls._token_autoconfig_applied = False
         # Last, so an extension's register() sees a fully built container even though the
         # context handed to it exposes only settings, the bus and a logger.
-        cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger, entrypoint)
+        cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger, entrypoint, vault=cls._vault)
+
+    @classmethod
+    def _unlock_vault_if_needed(cls) -> Vault | None:
+        settings = cls.get_settings()
+        if not settings.vault.enabled:
+            if has_secret_references(settings.model_dump(mode="python")):
+                raise ValueError("config uses ${secret:NAME} references but [vault] is not enabled")
+            return None
+        # Before unlocking, or a reference in `path` fails as a missing file instead.
+        if has_secret_references(settings.vault.model_dump(mode="python")):
+            raise ValueError("[vault] settings cannot use ${secret:} references")
+        vault = Vault(settings.vault)
+        vault.unlock(read_vault_password(settings.vault, cls.get_logger()))
+        return vault
 
     @classmethod
     def get_settings(cls) -> Settings:
@@ -133,6 +157,11 @@ class AppContainer:
     def get_kv_memory_backend(cls) -> None:
         """Compatibility placeholder; KV memory is a bundled extension."""
         return None
+
+    @classmethod
+    def get_vault(cls) -> Vault | None:
+        """The unlocked vault, or ``None`` when ``[vault] enabled`` is false."""
+        return cls._vault
 
     @classmethod
     def get_extensions(cls) -> ExtensionRegistry:

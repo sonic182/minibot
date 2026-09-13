@@ -191,6 +191,8 @@ artifacts_jail_shared_dir = ""
 pass_parent_env = false
 env_allowlist = ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"]
 
+# Deliberate opt-out: the default is `pass_parent_env = false`. This profile keeps the full parent
+# environment — including any ${ENV_VAR} secret — reachable from `bash`. That is the yolo bargain.
 [tools.bash]
 enabled = true
 default_timeout_seconds = 15

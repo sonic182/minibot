@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from minibot.adapters.config.schema import Settings
@@ -13,10 +14,10 @@ def resolve_config_path(path: Path | None = None) -> Path:
     return path or (Path(env_path) if env_path else DEFAULT_CONFIG_PATHS[0])
 
 
-def load_settings(path: Path | None = None) -> Settings:
+def load_settings(path: Path | None = None, secrets: Mapping[str, str] | None = None) -> Settings:
     resolved = resolve_config_path(path)
     if resolved.is_file():
-        return Settings.from_file(resolved)
+        return Settings.from_file(resolved, secrets)
     if resolved.exists():
         raise ValueError(f"config path must be a file: {resolved}")
     return Settings()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tomllib
 import types
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
@@ -19,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-from minibot.adapters.config.environment import expand_environment
+from minibot.adapters.config.environment import expand_environment, expand_secrets, has_secret_references
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
 
@@ -38,6 +39,15 @@ def _coerce_byte_size(value: Any) -> int:
         return int(_BYTE_SIZE_ADAPTER.validate_python(value))
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid byte size value") from exc
+
+
+def _expand_secret_references(data: object, secrets: Mapping[str, str] | None) -> object:
+    if secrets is None:
+        return data
+    if isinstance(data, dict) and has_secret_references(data.get("vault", {})):
+        # The vault cannot resolve its own location, so a reference here could never be satisfied.
+        raise ValueError("[vault] settings cannot use ${secret:} references")
+    return expand_secrets(data, secrets)
 
 
 def _load_file_data(path: Path) -> dict[str, Any]:
@@ -569,7 +579,7 @@ class BashToolConfig(BaseModel):
     default_timeout_seconds: PositiveInt = 15
     max_timeout_seconds: PositiveInt = 120
     max_output_bytes: ByteSizeValue = 128000
-    pass_parent_env: bool = True
+    pass_parent_env: bool = False
     env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"])
     spill_to_managed_file: bool = False
     spill_after_chars: PositiveInt = 2000
@@ -614,6 +624,9 @@ class MCPServerConfig(BaseModel):
     cwd: str | None = None
     url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
+    # Name of a `[vault]` entry whose value is sent as `Authorization: Bearer <value>`. The server
+    # and the secret name both come from config, never from LLM input.
+    auth_secret: str | None = None
     enabled_tools: list[str] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
     catalog_cache_ttl_seconds: Annotated[int, Field(ge=0)] = 60
@@ -870,6 +883,26 @@ class ExtensionsConfig(BaseModel):
     config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
+class VaultConfig(BaseModel):
+    """Encrypted credential vault. TOML section: ``[vault]``
+
+    - ``enabled`` — unlock the vault at startup (default: ``false``).
+    - ``path`` — the encrypted vault file (default: ``"secrets.vault.yml"``). Write it with
+      ``minibot vault edit``; keep it out of git.
+    - ``password_file`` — read the unlock password from this file instead of prompting. Supported,
+      but not on equal footing with the interactive prompt: any tool that can read the filesystem
+      can read this file. Same for the ``MINIBOT_VAULT_PASSWORD`` environment variable.
+
+    Secrets are destination-bound: an admin binds a secret to a consumer in config (for example
+    ``[[tools.mcp.servers]] auth_secret``), and the value is resolved there. The LLM can list
+    secret names and nothing else.
+    """
+
+    enabled: bool = False
+    path: str = "secrets.vault.yml"
+    password_file: str = ""
+
+
 class Settings(BaseModel):
     runtime: RuntimeConfig = RuntimeConfig()
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
@@ -882,17 +915,25 @@ class Settings(BaseModel):
     logging: LoggingConfig = LoggingConfig()
     tasks: TasksConfig = TasksConfig()
     rabbitmq: RabbitMQConsumerConfig = RabbitMQConsumerConfig()
+    vault: VaultConfig = VaultConfig()
     extensions: ExtensionsConfig = ExtensionsConfig()
 
     model_config = ConfigDict(extra="forbid")
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Settings:
+    def from_dict(cls, data: dict[str, Any], secrets: Mapping[str, str] | None = None) -> Settings:
+        """Expand ``${ENV_VAR}``, then ``${secret:NAME}`` when ``secrets`` is supplied.
+
+        ``secrets=None`` leaves ``${secret:NAME}`` references literal, which is what the
+        configuration wizard wants: it round-trips the document back to disk and must preserve
+        references rather than resolve them.
+        """
         expanded = expand_environment(data, os.environ)
+        expanded = _expand_secret_references(expanded, secrets)
         return cls.model_validate(_normalize_for_annotation(expanded, cls))
 
     @classmethod
-    def from_file(cls, path: Path | None = None) -> Settings:
+    def from_file(cls, path: Path | None = None, secrets: Mapping[str, str] | None = None) -> Settings:
         if path is None:
             raise ValueError("config file path is required")
-        return cls.from_dict(_load_file_data(path))
+        return cls.from_dict(_load_file_data(path), secrets)

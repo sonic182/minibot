@@ -13,6 +13,7 @@ from llm_async.models import Tool
 from pydantic import BaseModel, ValidationError
 
 from minibot.adapters.config.schema import Settings
+from minibot.adapters.vault import Vault
 from minibot.app.event_bus import EventBus, EventSubscription
 from minibot.core.events import BaseEvent
 from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
@@ -35,6 +36,7 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
         "minibot.extensions.tools.memory",
         "minibot.extensions.tools.network",
         "minibot.extensions.tools.utility",
+        "minibot.extensions.tools.vault",
         "minibot.extensions.tools.workspace",
     )
     if entrypoint == "daemon":
@@ -61,6 +63,9 @@ class ExtensionContext:
 
     ``entrypoint`` is ``"daemon"``, ``"console"``, or ``"worker"``. Channel extensions must
     contribute nothing outside the daemon: those entrypoints do not drive channel services.
+
+    ``vault`` is the unlocked credential vault, or ``None`` when ``[vault] enabled`` is false.
+    Resolve a secret only into a destination the admin configured; never expose one to the LLM.
     """
 
     name: str
@@ -69,6 +74,7 @@ class ExtensionContext:
     event_bus: EventBus
     logger: logging.Logger
     entrypoint: ExtensionEntrypoint = "daemon"
+    vault: Vault | None = None
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
@@ -199,6 +205,7 @@ def load_extensions(
     event_bus: EventBus,
     logger: logging.Logger | None = None,
     entrypoint: ExtensionEntrypoint = "daemon",
+    vault: Vault | None = None,
 ) -> ExtensionRegistry:
     """Import and register the bundled extensions, then every ``[extensions] modules`` entry.
 
@@ -222,6 +229,7 @@ def load_extensions(
             event_bus=event_bus,
             logger=logging.getLogger(f"minibot.extensions.{name}"),
             entrypoint=entrypoint,
+            vault=vault,
         )
         try:
             register(context)

@@ -28,8 +28,8 @@ class BashTool:
     Key config options:
 
     - ``default_timeout_seconds`` / ``max_timeout_seconds`` — execution time limits.
-    - ``pass_parent_env`` — pass the full parent environment; when ``false``, only
-      keys in ``env_allowlist`` are forwarded.
+    - ``pass_parent_env`` — pass the full parent environment; defaults to ``false``,
+      so only keys in ``env_allowlist`` are forwarded.
     - ``max_output_bytes`` — combined stdout+stderr cap; excess is truncated.
     - ``spill_to_managed_file`` — when ``true``, output exceeding ``spill_after_chars``
       is saved to a managed temp file instead of being returned inline.

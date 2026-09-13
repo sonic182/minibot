@@ -64,6 +64,49 @@ For Python callers, expansion occurs in ``Settings.from_dict()`` and ``Settings.
 normalization and validation, without mutating the input dictionary. Direct ``Settings(...)`` and
 ``Settings.model_validate(...)`` calls do not expand references.
 
+Vault references
+~~~~~~~~~~~~~~~~
+
+``${secret:NAME}`` resolves to an entry in the encrypted credential vault, so a credential never has
+to sit in plain text on disk. This matters because ``config.toml`` is readable by the ``bash`` tool,
+which has no filesystem jail — the vault file is not.
+
+.. code-block:: toml
+
+   [providers.openai]
+   api_key = "${secret:OPENAI_API_KEY}"
+
+   [channels.telegram]
+   bot_token = "${secret:telegram}"
+
+   [[tools.mcp.servers]]
+   name = "linear"
+   headers = { Authorization = "Bearer ${secret:linear}" }
+
+Names follow ``[A-Za-z_][A-Za-z0-9_.-]*``, matching what the vault document accepts as a key.
+``$${secret:NAME}`` produces a literal ``${secret:NAME}``. The resolved value is injected into the
+in-memory ``Settings`` instance only; nothing is written back to the file.
+
+Resolution happens in a **second pass**, after ``${ENV_VAR}`` expansion and after the vault is
+unlocked at startup — the vault's location comes from configuration, so it cannot be known before
+the first pass. Consequences worth knowing:
+
+- ``[vault]`` settings themselves cannot use ``${secret:}``; doing so is an error.
+- ``[vault] enabled`` must be ``true`` wherever a reference appears, or startup fails naming the
+  reference.
+- A configuration with no references never reads the vault for expansion at all.
+- Task workers reload configuration in their own process and receive the vault contents over the
+  in-memory pipe from the daemon, so references resolve there too.
+- ``minibot configure`` preserves references rather than resolving them, exactly as it does for
+  ``${ENV_VAR}``.
+
+``${secret:NAME}`` and the typed ``[[tools.mcp.servers]] auth_secret`` field both read the vault and
+both remain supported; ``auth_secret`` is the shorthand for the common ``Authorization: Bearer``
+case. Setting both on the same server is an error.
+
+This protects the credential **at rest**. Once resolved, the value lives in the daemon's memory just
+as an ``${ENV_VAR}`` one does; see :doc:`security` for the full threat model.
+
 Runtime
 -------
 
@@ -133,6 +176,19 @@ unset now uses the SQLite queue; set ``backend = "rabbitmq"`` explicitly to keep
 .. autoclass:: minibot.adapters.config.schema.RabbitMQConsumerConfig
    :no-members:
 
+Vault
+-----
+
+An optional encrypted store for credentials, unlocked once at startup. Needs the ``vault`` extra
+(``poetry install --extras vault``). Secrets are written with ``minibot vault edit`` (see
+:doc:`cli`) and bound to a destination in configuration — ``[[tools.mcp.servers]] auth_secret``
+names a vault entry that the MCP client sends as its own ``Authorization`` header. The LLM can
+list secret *names* and nothing more; there is no tool that reads a value and no ``secret://``
+substitution it can write into a tool argument. See :doc:`security` for the threat model.
+
+.. autoclass:: minibot.adapters.config.schema.VaultConfig
+   :no-members:
+
 Extensions
 ----------
 
@@ -186,6 +242,9 @@ Tool Configuration
    * - ``[tools.bash]``
      - ``BashToolConfig``
      - ``enabled``, timeout/output limits, parent environment and allowlist policy
+   * - ``[vault]``
+     - ``VaultConfig``
+     - ``enabled``, ``path``, ``password_file``; see `Vault`_ above
    * - ``[tools.tool_output_spill]``
      - ``ToolOutputSpillConfig``
      - ``enabled``, ``spill_after_chars``, ``preview_chars``, ``subdir``, ``exclude_tools``; applies to every tool result (not just ``http_request``)

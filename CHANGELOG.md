@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`${secret:NAME}` config references.** Any string value in `config.toml` can now read from the
+  encrypted vault, so provider API keys, the Telegram bot token and anything else no longer have to
+  sit in plain text next to a `bash` tool that can `cat` the file. Resolution happens in a second
+  pass after `${ENV_VAR}` and after the vault is unlocked; `$${secret:NAME}` escapes a literal;
+  `[vault]`'s own settings cannot use it; a reference without `[vault] enabled = true` fails at
+  startup. Task workers receive the vault contents over the in-memory pipe so references resolve
+  there too. `minibot configure` preserves references rather than resolving them. The typed
+  `[[tools.mcp.servers]] auth_secret` field remains supported as the `Authorization: Bearer`
+  shorthand; setting both on one server is now an error.
+
+- **Encrypted credential vault** (`[vault]`, opt-in, needs the new `vault` extra). Secrets live in
+  a single AES-256-GCM file whose key is derived from a password with scrypt and never touches
+  disk or a subprocess environment. `minibot vault init|edit|list` manages it, ansible-vault
+  style: `edit` decrypts into `$EDITOR` via a `0600` temp file and re-encrypts on exit.
+  Secrets are destination-bound — `[[tools.mcp.servers]] auth_secret` names a vault entry that the
+  MCP client sends as its own `Authorization` header. The LLM gets one new tool, `list_secrets`,
+  which returns names only; there is no `get_secret` and no `secret://` reference it can write
+  into a tool argument. The password is read from `[vault] password_file`, then
+  `MINIBOT_VAULT_PASSWORD`, then an interactive prompt — the prompt being the recommended method.
+  See `docs/security.rst` for the threat model and its limits.
+
+### Fixed
+
+- **Console TUI crashed when a link in the transcript was clicked.** `MarkdownViewer` resolves
+  every href as a local file path, so an `https://` link from the assistant raised
+  `FileNotFoundError: .../https:/example.com/...` and tore down the app. External links now open
+  in the browser and everything else is ignored — the transcript is a chat log, not a document
+  browser, so navigating away was never wanted.
+
+### Changed
+
+- **`tools.bash.pass_parent_env` now defaults to `false`**, matching `tools.python_exec`. The `bash`
+  tool previously inherited the daemon's entire process environment, so any `${ENV_VAR}` secret used
+  in `config.toml` (`GITHUB_TOKEN`, MCP header tokens, database URLs) was retrievable by the LLM with
+  a single `env` call. Only keys listed in `env_allowlist` (`PATH`, `HOME`, `USER`, `LANG`, `LC_ALL`,
+  `SHELL` by default) are forwarded now. Configs that omit the key will see commands lose variables
+  they used to inherit — add the ones you need to `env_allowlist`, or set `pass_parent_env = true`
+  explicitly to keep the old behavior.
+
 ## [0.15.0] - 2026-09-13
 
 ### Added
