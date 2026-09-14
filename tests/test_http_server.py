@@ -102,7 +102,7 @@ async def test_no_token_configured_leaves_routes_open() -> None:
 
 
 def test_non_loopback_bind_requires_a_token() -> None:
-    with pytest.raises(ValidationError, match="auth_token is required"):
+    with pytest.raises(ValidationError, match="auth_token or basic_auth_user/basic_auth_password is required"):
         HTTPServerConfig(enabled=True, host="0.0.0.0", port=8080)
 
     HTTPServerConfig(enabled=True, host="0.0.0.0", port=8080, auth_token=TOKEN)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hmac
 import logging
 from collections.abc import Awaitable, Callable, Sequence
@@ -9,7 +10,7 @@ from typing import Any
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
 
 from minibot.adapters.config.schema import HTTPServerConfig
@@ -21,6 +22,10 @@ HEALTH_PATH = "/health"
 
 async def _health(_: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
+
+
+async def _homepage(_: Request) -> HTMLResponse:
+    return HTMLResponse("<title>minibot</title><p>minibot is running.</p>")
 
 
 class _BearerAuth:
@@ -43,6 +48,30 @@ class _BearerAuth:
         header = dict(scope["headers"]).get(b"authorization", b"").decode("latin-1")
         prefix = "Bearer "
         return header.startswith(prefix) and hmac.compare_digest(header[len(prefix) :], self._token)
+
+
+class _BasicAuth:
+    """ASGI middleware: every route except ``/health`` needs the configured HTTP Basic credentials.
+
+    Sends ``WWW-Authenticate`` so browsers prompt natively, unlike the bearer token scheme.
+    """
+
+    def __init__(self, app: Any, user: str, password: str) -> None:
+        self._app = app
+        self._expected = base64.b64encode(f"{user}:{password}".encode()).decode()
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http" or scope["path"] == HEALTH_PATH or self._authorized(scope):
+            await self._app(scope, receive, send)
+            return
+        headers = {"WWW-Authenticate": 'Basic realm="minibot"'}
+        response = JSONResponse({"error": "unauthorized"}, status_code=401, headers=headers)
+        await response(scope, receive, send)
+
+    def _authorized(self, scope: Any) -> bool:
+        header = dict(scope["headers"]).get(b"authorization", b"").decode("latin-1")
+        prefix = "Basic "
+        return header.startswith(prefix) and hmac.compare_digest(header[len(prefix) :], self._expected)
 
 
 class HttpServer:
@@ -68,10 +97,13 @@ class HttpServer:
             return
         routes = [
             Route(HEALTH_PATH, _health),
+            Route("/", _homepage),
             *(Route(path, handler, methods=list(methods)) for path, handler, methods in self._routes),
         ]
         app: Any = Starlette(routes=routes)
-        if self._config.auth_token:
+        if self._config.basic_auth_user and self._config.basic_auth_password:
+            app = _BasicAuth(app, self._config.basic_auth_user, self._config.basic_auth_password)
+        elif self._config.auth_token:
             app = _BearerAuth(app, self._config.auth_token)
         else:
             # Allowed on loopback (the schema rejects it anywhere else), but never silently: the

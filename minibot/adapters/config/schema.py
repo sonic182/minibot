@@ -908,7 +908,9 @@ class HTTPServerConfig(BaseModel):
 
     - ``enabled`` — serve HTTP alongside the daemon (default: ``false``). Needs the ``http`` extra.
     - ``host`` / ``port`` — where to bind (default: ``127.0.0.1:8080``); port ``0`` picks a free one.
-    - ``auth_token`` — required on every route except ``/health``. Accepts ``${secret:NAME}``.
+    - ``auth_token`` — bearer token required on every route except ``/health``. Accepts ``${secret:NAME}``.
+    - ``basic_auth_user`` / ``basic_auth_password`` — HTTP Basic credentials, used instead of the bearer
+      token when set (browsers prompt for these natively). Accepts ``${secret:NAME}``.
 
     Routes come from core features and from extensions calling ``mb.add_route``. There is no TLS
     here: put a reverse proxy in front when this is reachable from outside the host.
@@ -918,11 +920,17 @@ class HTTPServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=0, le=65535)
     auth_token: str = ""
+    basic_auth_user: str = ""
+    basic_auth_password: str = ""
 
     @model_validator(mode="after")
-    def _require_token_off_loopback(self) -> HTTPServerConfig:
-        if self.enabled and not self.auth_token and self.host not in {"127.0.0.1", "::1", "localhost"}:
-            raise ValueError(f"[http] auth_token is required when host is {self.host!r} rather than loopback")
+    def _require_auth_off_loopback(self) -> HTTPServerConfig:
+        has_auth = self.auth_token or (self.basic_auth_user and self.basic_auth_password)
+        if self.enabled and not has_auth and self.host not in {"127.0.0.1", "::1", "localhost"}:
+            raise ValueError(
+                f"[http] auth_token or basic_auth_user/basic_auth_password is required when host is "
+                f"{self.host!r} rather than loopback"
+            )
         return self
 
 
