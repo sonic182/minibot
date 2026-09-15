@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from minibot.app.extensions import ExtensionContext
+
+if TYPE_CHECKING:
+    from minibot.adapters.mcp.client import MCPClient
 
 
 def register(mb: ExtensionContext) -> None:
@@ -55,42 +58,31 @@ def register(mb: ExtensionContext) -> None:
             servers.append({**status, "tools": [], "error": str(exc) or type(exc).__name__})
             continue
         bindings.extend(server_bindings)
-        instructions = _server_instructions(client, server.name, mb)
-        servers.append(
-            {
-                **status,
-                "tools": [binding.tool.name for binding in server_bindings],
-                "error": None,
-                "instructions": instructions,
-            }
-        )
+        tool_names = [binding.tool.name for binding in server_bindings]
+        instructions = _server_instructions(client)
+        if instructions and server_bindings:
+            mb.add_prompt_fragment(_instructions_fragment(server.name, instructions), tool_names=tool_names)
+        servers.append({**status, "tools": tool_names, "error": None, "instructions": instructions})
     mb.add_tool(bindings)
-    mb.add_prompt_fragment(_instructions_fragment(servers))
     if settings.http.enabled:
         mb.add_page("/mcp", "MCP", _build_page(servers))
 
 
-def _server_instructions(client: Any, server_name: str, mb: ExtensionContext) -> str:
+def _server_instructions(client: MCPClient) -> str:
     """The server's own ``instructions`` from the initialize handshake.
 
     The spec calls them "instructions describing how to use the server", meant to improve the
     model's understanding of it -- guidance no individual tool description can carry. Cheap here:
     the client caches the metadata from the handshake ``build_mcp_bindings`` just performed.
     """
-    try:
-        return (client.get_server_metadata_blocking().instructions or "").strip()
-    except Exception as exc:  # noqa: BLE001
-        mb.logger.warning("failed to read mcp server instructions", exc_info=exc, extra={"server": server_name})
-        return ""
+    metadata = client.server_metadata
+    return (metadata.instructions or "").strip() if metadata is not None else ""
 
 
-def _instructions_fragment(servers: list[dict[str, Any]]) -> str:
-    sections = [
-        f"### {server['name']}\n\n{server['instructions']}" for server in servers if server.get("instructions")
-    ]
-    if not sections:
+def _instructions_fragment(server_name: str, instructions: str) -> str:
+    if not instructions:
         return ""
-    return "## MCP servers\n\n" + "\n\n".join(sections)
+    return f"## MCP server: {server_name}\n\n{instructions}"
 
 
 def _build_page(servers: list[dict[str, Any]]) -> Any:

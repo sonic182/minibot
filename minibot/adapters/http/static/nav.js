@@ -1,3 +1,7 @@
+import { createIcons, Menu } from "https://cdn.jsdelivr.net/npm/lucide@1.46.0/+esm";
+
+createIcons({ icons: { Menu } });
+
 const toggle = document.querySelector("[data-nav-toggle]");
 const root = document.documentElement;
 

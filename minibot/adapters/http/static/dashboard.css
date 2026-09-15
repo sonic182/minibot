@@ -41,8 +41,6 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* One state class on <html> at every width: the burger toggles it, and the inline script in
-   base.html seeds it open on desktop. The sidebar is never "always visible". */
 .nav-open .sidebar {
   display: block;
 }
@@ -188,8 +186,6 @@ ul {
   gap: var(--gap);
 }
 
-/* Chips, not a grid: node names vary wildly in length, and fixed tracks either overflow their
-   cell or blow out the page width on a phone. */
 .nodes {
   list-style: none;
   margin: 0;
@@ -207,7 +203,6 @@ ul {
   overflow-wrap: anywhere;
 }
 
-/* Mobile-first responsive table: one stacked card per edge, real columns from 640px up. */
 .edges,
 .edges tbody,
 .edges tr,
@@ -293,13 +288,10 @@ pre.error {
   margin-top: var(--gap-sm);
 }
 
-/* Closed, the disclosure sits beside Delete; open, it takes the whole row so the textarea gets the
-   card's full width instead of a flex share of it. */
 .entry-actions details[open] {
   flex: 1 1 100%;
 }
 
-/* While editing, drop the read-only copy above: the same text twice is what made this confusing. */
 .entry:has(.entry-actions details[open]) > pre {
   display: none;
 }
@@ -313,7 +305,6 @@ pre.error {
 .entry-actions textarea {
   display: block;
   width: 100%;
-  /* Grows with its content where supported; `rows` is the fallback everywhere else. */
   field-sizing: content;
   min-height: 6rem;
   max-height: 60vh;
@@ -381,8 +372,6 @@ dialog::backdrop {
     align-items: start;
   }
 
-  /* The sidebar track only exists while the sidebar does; otherwise the closed state would leave
-     a 14rem hole where it used to be. */
   .nav-open .shell {
     grid-template-columns: 14rem minmax(0, 1fr);
   }
@@ -417,14 +406,10 @@ dialog::backdrop {
     display: table-cell;
     padding: 0.25rem var(--gap-sm);
     border-bottom: 1px solid var(--border);
-    /* Undo the mobile break-anywhere: it drops each column's min-content width to one character,
-       so the auto table layout starves every column after the first. The wrapper scrolls instead. */
     overflow-wrap: normal;
     white-space: nowrap;
   }
 
-  /* Hug the content instead of the inherited width:100%, which stretched the table and dumped all
-     the slack into the first column. Needs .table-wrap to outrank `.table-wrap table`. */
   .table-wrap .edges {
     width: auto;
   }

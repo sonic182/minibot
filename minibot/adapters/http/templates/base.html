@@ -5,16 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}minibot{% endblock %}</title>
   <link rel="stylesheet" href="/static/dashboard.css">
-  <script defer src="/static/nav.js"></script>
+  <script type="module" src="/static/nav.js"></script>
   <script>
-    // The sidebar starts open on desktop and closed on a phone. Set on <html> before the first
-    // paint, so the page never renders in the wrong state and flips once nav.js runs.
     if (window.innerWidth >= 640) document.documentElement.classList.add("nav-open");
   </script>
 </head>
 <body>
   <nav class="navbar">
-    <button type="button" class="burger" data-nav-toggle aria-label="Toggle menu" aria-expanded="false">&#9776;</button>
+    <button type="button" class="burger" data-nav-toggle aria-label="Toggle menu" aria-expanded="false">
+      <i data-lucide="menu" aria-hidden="true"></i>
+    </button>
     <span class="brand">minibot</span>
   </nav>
   <div class="shell">
