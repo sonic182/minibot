@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, cast
 
@@ -10,7 +10,7 @@ from sqlalchemy.orm import declarative_base
 
 from minibot.adapters.config.schema import MemoryConfig
 from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
-from minibot.core.memory import MemoryBackend, MemoryEntry
+from minibot.core.memory import MemoryBackend, MemoryEntry, SessionSummary
 from minibot.shared.datetime_utils import utcnow
 
 Base = declarative_base()
@@ -84,6 +84,27 @@ class SQLAlchemyMemoryBackend(MemoryBackend):
             stmt = select(func.count()).select_from(Message).where(Message.session_id == session_id)
             result = await session.execute(stmt)
             return int(result.scalar_one())
+
+    async def list_sessions(self) -> Sequence[SessionSummary]:
+        async with self._session_factory() as session:
+            stmt = (
+                select(
+                    Message.session_id,
+                    func.count().label("message_count"),
+                    func.max(Message.created_at).label("last_activity"),
+                )
+                .group_by(Message.session_id)
+                .order_by(func.max(Message.created_at).desc())
+            )
+            rows = (await session.execute(stmt)).all()
+            return [
+                SessionSummary(
+                    session_id=str(row.session_id),
+                    message_count=int(row.message_count),
+                    last_activity=cast(datetime, row.last_activity),
+                )
+                for row in rows
+            ]
 
     async def trim_history(self, session_id: str, keep_latest: int) -> int:
         async with self._session_factory() as session:

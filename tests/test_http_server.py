@@ -13,8 +13,15 @@ from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from minibot.adapters.config.schema import HTTPServerConfig
-from minibot.adapters.http import DashboardData, HttpServer, build_dashboard_route
+from minibot.adapters.http import (
+    DashboardData,
+    HttpServer,
+    build_dashboard_route,
+    build_history_route,
+    set_nav_entries,
+)
 from minibot.adapters.http.server import _BasicAuth, _BearerAuth
+from tests.fixtures.memory import InMemoryMemoryStore
 
 TOKEN = "s3cret"
 
@@ -134,6 +141,70 @@ async def test_static_css_is_served(dashboard_server: HttpServer) -> None:
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert response.status_code == 200
+
+
+@pytest_asyncio.fixture()
+async def history_server():
+    memory = InMemoryMemoryStore()
+    await memory.append_history("telegram:42", "user", "hola minibot")
+    await memory.append_history("telegram:42", "assistant", "hola, en que ayudo")
+    instance = HttpServer(
+        HTTPServerConfig(enabled=True, host="127.0.0.1", port=0, auth_token=TOKEN),
+        [build_history_route(memory)],
+    )
+    await instance.start()
+    try:
+        yield instance
+    finally:
+        await instance.stop()
+
+
+@pytest.mark.asyncio
+async def test_history_lists_sessions(history_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{history_server.port}/history", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
+        assert response.status_code == 200
+        body = await response.text()
+        assert "telegram:42" in body
+        # The index shows counts, not message bodies.
+        assert "hola minibot" not in body
+
+
+@pytest.mark.asyncio
+async def test_history_shows_one_session(history_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{history_server.port}/history?session=telegram:42",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert response.status_code == 200
+        body = await response.text()
+        assert "hola minibot" in body
+        assert "hola, en que ayudo" in body
+
+
+@pytest.mark.asyncio
+async def test_history_requires_the_token(history_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        assert (await client.get(f"http://127.0.0.1:{history_server.port}/history")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_nav_entries_render_in_the_menu(dashboard_server: HttpServer) -> None:
+    set_nav_entries([("/", "Home"), ("/memory", "Memory")])
+    try:
+        async with aiosonic.HTTPClient() as client:
+            response = await client.get(
+                f"http://127.0.0.1:{dashboard_server.port}/", headers={"Authorization": f"Bearer {TOKEN}"}
+            )
+            body = await response.text()
+            assert 'href="/memory"' in body
+            # Nothing registered a graph page, so it must not show up.
+            assert 'href="/graph"' not in body
+    finally:
+        set_nav_entries([])
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}minibot history{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Conversations</h2>
+  {% if sessions %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Session</th><th>Messages</th><th>Last activity</th></tr>
+      </thead>
+      <tbody>
+        {% for session in sessions %}
+        <tr>
+          <td><a href="/history?session={{ session.session_id | urlencode }}">{{ session.session_id }}</a></td>
+          <td>{{ session.message_count }}</td>
+          <td>{{ session.last_activity.strftime("%Y-%m-%d %H:%M") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>no conversations recorded yet</p>
+  {% endif %}
+</section>
+{% endblock %}
