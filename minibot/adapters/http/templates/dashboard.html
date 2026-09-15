@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}minibot dashboard{% endblock %}
+
+{% block content %}
+<div class="panels">
+  <section class="panel">
+    <h2>Extensions</h2>
+    {% if extension_names %}
+    <ul>
+      {% for name in extension_names %}
+      <li>{{ name }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>none enabled</p>
+    {% endif %}
+  </section>
+  <section class="panel">
+    <h2>Tools</h2>
+    {% if tool_names %}
+    <ul>
+      {% for name in tool_names %}
+      <li>{{ name }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>none enabled</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

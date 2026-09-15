@@ -1580,11 +1580,12 @@ version = "3.1.6"
 description = "A very fast and expressive template engine."
 optional = false
 python-versions = ">=3.7"
-groups = ["docs"]
+groups = ["main", "docs"]
 files = [
     {file = "jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67"},
     {file = "jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d"},
 ]
+markers = {main = "extra == \"http\""}
 
 [package.dependencies]
 MarkupSafe = ">=2.0"
@@ -1738,7 +1739,7 @@ version = "3.0.3"
 description = "Safely add untrusted strings to HTML/XML markup."
 optional = false
 python-versions = ">=3.9"
-groups = ["docs"]
+groups = ["main", "docs"]
 files = [
     {file = "markupsafe-3.0.3-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:2f981d352f04553a7171b8e44369f2af4055f888dfb147d55e42d29e29e74559"},
     {file = "markupsafe-3.0.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:e1c1493fb6e50ab01d20a22826e57520f1284df32f2d8601fdd90b6304601419"},
@@ -1830,6 +1831,7 @@ files = [
     {file = "markupsafe-3.0.3-cp39-cp39-win_arm64.whl", hash = "sha256:38664109c14ffc9e7437e86b4dceb442b0096dfe3541d7864d9cbe1da4cf36c8"},
     {file = "markupsafe-3.0.3.tar.gz", hash = "sha256:722695808f4b6457b320fdc131280796bdceb04ab50fe1795cd540799ebe1698"},
 ]
+markers = {main = "extra == \"http\""}
 
 [[package]]
 name = "mccabe"
@@ -4173,7 +4175,7 @@ propcache = ">=0.2.1"
 [extras]
 codex = ["llm-async-codex"]
 graph = ["networkx"]
-http = ["starlette", "uvicorn"]
+http = ["jinja2", "starlette", "uvicorn"]
 rabbitmq = ["aio-pika"]
 rag = ["numpy", "pypdf"]
 stt = ["faster-whisper"]
@@ -4183,4 +4185,4 @@ vault = ["cryptography"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "deb818ae2f8a65ecd16c0b2634aaf7724b27bad7378bda85e6b6878b62f67451"
+content-hash = "9b708cae9b438f425f34322ba9cefdcada925cf123effe889f4e159330fb9b37"

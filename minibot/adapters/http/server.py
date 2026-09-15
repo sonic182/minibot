@@ -5,13 +5,16 @@ import base64
 import hmac
 import logging
 from collections.abc import Awaitable, Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
-from starlette.routing import Route
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
+from starlette.templating import Jinja2Templates
 
 from minibot.adapters.config.schema import HTTPServerConfig
 
@@ -19,13 +22,24 @@ type RouteSpec = tuple[str, Callable[[Request], Awaitable[Any]], tuple[str, ...]
 
 HEALTH_PATH = "/health"
 
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
+
+_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
 
 async def _health(_: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-async def _homepage(_: Request) -> HTMLResponse:
-    return HTMLResponse("<title>minibot</title><p>minibot is running.</p>")
+def build_dashboard_route(extension_names: Sequence[str], tool_names: Sequence[str]) -> RouteSpec:
+    """Build the ``/`` route: a read-only page listing enabled extensions and tools."""
+
+    async def _dashboard(request: Request) -> Any:
+        context = {"extension_names": list(extension_names), "tool_names": list(tool_names)}
+        return _templates.TemplateResponse(request, "dashboard.html", context)
+
+    return ("/", _dashboard, ("GET",))
 
 
 class _BearerAuth:
@@ -97,7 +111,7 @@ class HttpServer:
             return
         routes = [
             Route(HEALTH_PATH, _health),
-            Route("/", _homepage),
+            Mount("/static", app=StaticFiles(directory=STATIC_DIR), name="static"),
             *(Route(path, handler, methods=list(methods)) for path, handler, methods in self._routes),
         ]
         app: Any = Starlette(routes=routes)

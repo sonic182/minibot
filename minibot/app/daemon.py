@@ -37,7 +37,7 @@ async def run() -> None:
     logger.info("booting minibot", extra={"component": "daemon"})
     extensions = AppContainer.get_extensions()
 
-    http_server = _build_http_server(settings, extensions, logger)
+    http_server = _build_http_server(settings, dispatcher, extensions, logger)
 
     services: list[Any] = [dispatcher]
     if not extensions.is_empty():
@@ -58,7 +58,7 @@ async def run() -> None:
         await stop_event.wait()
 
 
-def _build_http_server(settings: Any, extensions: Any, logger: logging.Logger) -> Any:
+def _build_http_server(settings: Any, dispatcher: Dispatcher, extensions: Any, logger: logging.Logger) -> Any:
     """Build the HTTP server, or warn about the routes nobody will serve when it is off."""
     routes = extensions.routes
     if not settings.http.enabled:
@@ -69,9 +69,10 @@ def _build_http_server(settings: Any, extensions: Any, logger: logging.Logger) -
             )
         return None
     # Imported here so the starlette/uvicorn extra is only required when the server is switched on.
-    from minibot.adapters.http import HttpServer
+    from minibot.adapters.http import HttpServer, build_dashboard_route
 
-    return HttpServer(settings.http, routes)
+    dashboard_route = build_dashboard_route(extensions.names(), dispatcher.main_agent_tool_names)
+    return HttpServer(settings.http, [dashboard_route, *routes])
 
 
 async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:

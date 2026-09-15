@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from minibot.adapters.config.schema import HTTPServerConfig
-from minibot.adapters.http import HttpServer
+from minibot.adapters.http import HttpServer, build_dashboard_route
 
 TOKEN = "s3cret"
 
@@ -47,6 +47,47 @@ async def server():
         yield instance
     finally:
         await instance.stop()
+
+
+@pytest_asyncio.fixture()
+async def dashboard_server():
+    route = build_dashboard_route(["scheduler"], ["send_message", "web_search"])
+    instance = HttpServer(HTTPServerConfig(enabled=True, host="127.0.0.1", port=0, auth_token=TOKEN), [route])
+    await instance.start()
+    try:
+        yield instance
+    finally:
+        await instance.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_lists_enabled_extensions_and_tools(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{dashboard_server.port}/", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
+        assert response.status_code == 200
+        body = await response.text()
+        assert "scheduler" in body
+        assert "send_message" in body
+        assert "web_search" in body
+
+
+@pytest.mark.asyncio
+async def test_dashboard_requires_the_token(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(f"http://127.0.0.1:{dashboard_server.port}/")
+        assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_static_css_is_served(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{dashboard_server.port}/static/dashboard.css",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert response.status_code == 200
 
 
 @pytest.mark.asyncio
