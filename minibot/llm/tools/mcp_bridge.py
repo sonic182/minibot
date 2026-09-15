@@ -346,24 +346,41 @@ def _build_server_summary(server_name: str, metadata: MCPServerMetadata | None) 
 def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if not schema:
         return {"type": "object", "properties": {}, "additionalProperties": True}
-    schema = _wrap_ref_siblings(schema)
+    schema = _inline_ref_siblings(schema, schema)
     if "type" not in schema:
         return {"type": "object", **schema}
     return schema
 
 
-def _wrap_ref_siblings(value: Any) -> Any:
-    """Move ``$ref`` into ``allOf`` so sibling keywords remain valid JSON Schema."""
+def _inline_ref_siblings(value: Any, root: dict[str, Any]) -> Any:
+    """Merge a ``$ref`` that carries sibling keywords into one flat object, instead of wrapping it
+    in ``allOf``: OpenAI's function-calling schema validation rejects ``allOf`` outright, and this
+    sidesteps the question of which providers do or don't support it rather than special-casing one.
+
+    A bare ``$ref`` (no siblings) is left as-is, so a self-referencing ``$defs`` entry (a tree or
+    graph node schema, plausible for a memory-graph MCP server) can't recurse forever here.
+    """
     if isinstance(value, list):
-        return [_wrap_ref_siblings(item) for item in value]
+        return [_inline_ref_siblings(item, root) for item in value]
     if not isinstance(value, dict):
         return value
     if "$ref" in value and len(value) > 1:
-        return {
-            "allOf": [{"$ref": value["$ref"]}],
-            **{key: _wrap_ref_siblings(item) for key, item in value.items() if key != "$ref"},
-        }
-    return {key: _wrap_ref_siblings(item) for key, item in value.items()}
+        target = _inline_ref_siblings(_resolve_ref(value["$ref"], root), root)
+        siblings = {key: _inline_ref_siblings(item, root) for key, item in value.items() if key != "$ref"}
+        return {**target, **siblings}
+    return {key: _inline_ref_siblings(item, root) for key, item in value.items()}
+
+
+def _resolve_ref(ref: str, root: dict[str, Any]) -> dict[str, Any]:
+    if not ref.startswith("#/"):
+        return {}
+    node: Any = root
+    for part in ref[2:].split("/"):
+        part = part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(node, dict) or part not in node:
+            return {}
+        node = node[part]
+    return node if isinstance(node, dict) else {}
 
 
 def _build_tool_description(server_name: str, remote_tool_name: str, base_description: str) -> str:
