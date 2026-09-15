@@ -22,6 +22,7 @@ from minibot.shared.errors import ToolInputError
 EventHandler = Callable[[Any], Awaitable[None]]
 ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
 type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
+type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 
 
 def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
@@ -84,6 +85,7 @@ class ExtensionContext:
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
+    routes: list[RouteSpec] = field(default_factory=list)
     prompt_fragments: list[_PromptFragment] = field(default_factory=list)
 
     def on(self, event_type: type[BaseEvent], handler: EventHandler | None = None) -> Any:
@@ -149,6 +151,16 @@ class ExtensionContext:
     def add_service(self, service: ExtensionService) -> None:
         self.services.append(service)
 
+    def add_route(
+        self, path: str, handler: Callable[[Any], Awaitable[Any]], methods: Sequence[str] = ("GET",)
+    ) -> None:
+        """Serve ``handler`` at ``path`` on the built-in HTTP server (``[http] enabled``).
+
+        The handler takes a ``starlette.requests.Request`` and returns a ``Response``. Routes are
+        collected once every extension has registered, so ordering between extensions is irrelevant.
+        """
+        self.routes.append((path, handler, tuple(methods)))
+
     def add_prompt_fragment(self, text: str, *, tool_names: Sequence[str] = ()) -> None:
         """Append ``text`` to the main agent's system prompt.
 
@@ -174,6 +186,10 @@ class ExtensionRegistry:
     @property
     def tools(self) -> list[ToolBinding]:
         return [binding for context in self._contexts for binding in context.tools]
+
+    @property
+    def routes(self) -> list[RouteSpec]:
+        return [route for context in self._contexts for route in context.routes]
 
     @property
     def prompt_fragments(self) -> list[str]:
@@ -275,6 +291,7 @@ def load_extensions(
                 "tools": [binding.tool.name for binding in context.tools],
                 "subscriptions": len(context.subscriptions),
                 "services": len(context.services),
+                "routes": len(context.routes),
             },
         )
     return ExtensionRegistry(contexts, log)

@@ -42,6 +42,8 @@ async def test_run_starts_and_stops_dispatcher_and_extensions(monkeypatch: pytes
     extensions = _Probe()
 
     class _FakeExtensions:
+        routes: list[tuple] = []
+
         def is_empty(self) -> bool:
             return False
 
@@ -69,7 +71,14 @@ async def test_run_starts_and_stops_dispatcher_and_extensions(monkeypatch: pytes
 
         @classmethod
         def get_settings(cls):
-            return type("Settings", (), {"llm": type("LLM", (), {"strip_logs": False})()})()
+            return type(
+                "Settings",
+                (),
+                {
+                    "llm": type("LLM", (), {"strip_logs": False})(),
+                    "http": type("HTTP", (), {"enabled": False})(),
+                },
+            )()
 
         @classmethod
         def get_event_bus(cls):
