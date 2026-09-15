@@ -31,6 +31,8 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
 _templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+# Overwritten by set_nav_entries() at boot; the default keeps templates renderable without it.
+_templates.env.globals["nav_entries"] = []
 
 try:
     _VERSION = importlib.metadata.version("minibot")
@@ -40,6 +42,21 @@ except importlib.metadata.PackageNotFoundError:
 
 async def _health(_: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
+
+
+def render(request: Request, template_name: str, context: dict[str, Any] | None = None) -> Any:
+    """Render a template from this package's directory. Public so extensions serving a page do
+    not reach into the module-private ``Jinja2Templates``."""
+    return _templates.TemplateResponse(request, template_name, context or {})
+
+
+def set_nav_entries(entries: Sequence[tuple[str, str]]) -> None:
+    """Publish the navigation menu as a Jinja global, once, at daemon boot.
+
+    A global rather than per-handler context: the menu is the same on every page, and an
+    extension's own handler should not have to know it exists in order to render inside it.
+    """
+    _templates.env.globals["nav_entries"] = list(entries)
 
 
 @dataclass(frozen=True)
@@ -117,6 +134,29 @@ def build_dashboard_route(data: DashboardData) -> RouteSpec:
         return _templates.TemplateResponse(request, "dashboard.html", context)
 
     return ("/", _dashboard, ("GET",))
+
+
+HISTORY_PATH = "/history"
+_HISTORY_MESSAGE_LIMIT = 200
+
+
+def build_history_route(memory: Any) -> RouteSpec:
+    """Build the ``/history`` route: sessions index, or one session's messages with ``?session=``.
+
+    The session id goes in a query parameter rather than the path because ids embed a colon
+    (``telegram:12345``, see ``minibot.shared.utils.session_identifier``).
+    """
+
+    async def _history(request: Request) -> Any:
+        session_id = request.query_params.get("session")
+        if not session_id:
+            sessions = await memory.list_sessions()
+            return _templates.TemplateResponse(request, "history.html", {"sessions": sessions})
+        entries = list(await memory.get_history(session_id, limit=_HISTORY_MESSAGE_LIMIT))
+        context = {"session_id": session_id, "entries": entries, "limit": _HISTORY_MESSAGE_LIMIT}
+        return _templates.TemplateResponse(request, "history_detail.html", context)
+
+    return (HISTORY_PATH, _history, ("GET",))
 
 
 class _BearerAuth:

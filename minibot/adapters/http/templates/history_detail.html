@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}minibot history — {{ session_id }}{% endblock %}
+
+{% block content %}
+<section>
+  <p class="crumb"><a href="/history">&larr; all conversations</a></p>
+  <h2>{{ session_id }}</h2>
+  {% if entries %}
+  <p class="muted">showing the latest {{ entries | length }} of at most {{ limit }} messages</p>
+  <ol class="messages">
+    {% for entry in entries %}
+    <li class="message role-{{ entry.role }}">
+      <div class="message-head">
+        <span class="role">{{ entry.role }}</span>
+        <span class="muted">{{ entry.created_at.strftime("%Y-%m-%d %H:%M") }}</span>
+      </div>
+      <pre>{{ entry.content }}</pre>
+      {% if entry.reasoning %}
+      <details>
+        <summary>reasoning</summary>
+        <pre>{{ entry.reasoning }}</pre>
+      </details>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>no messages in this session</p>
+  {% endif %}
+</section>
+{% endblock %}

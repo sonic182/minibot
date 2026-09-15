@@ -10,18 +10,71 @@
 
 body {
   margin: 0;
-  padding: var(--gap);
   font-family: system-ui, sans-serif;
   line-height: 1.4;
 }
 
-header {
-  margin-bottom: var(--gap);
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: bold;
+  font-size: 1.1rem;
+}
+
+.burger {
+  font: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+}
+
+.sidebar {
+  display: none;
+  padding: var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+body.nav-open .sidebar {
+  display: block;
+}
+
+.sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.sidebar a {
+  display: block;
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.4rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.sidebar a.current {
+  font-weight: bold;
+  background: var(--border);
 }
 
 main {
   display: grid;
   gap: var(--gap);
+  padding: var(--gap);
+  min-width: 0;
 }
 
 h1 {
@@ -116,6 +169,114 @@ ul {
   overflow-x: auto;
 }
 
+.muted {
+  opacity: 0.7;
+  font-size: 0.85rem;
+}
+
+.crumb {
+  margin-top: 0;
+}
+
+.messages,
+.entries,
+.nodes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--gap);
+}
+
+/* Chips, not a grid: node names vary wildly in length, and fixed tracks either overflow their
+   cell or blow out the page width on a phone. */
+.nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.nodes li {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+/* Mobile-first responsive table: one stacked card per edge, real columns from 640px up. */
+.edges,
+.edges tbody,
+.edges tr,
+.edges td {
+  display: block;
+  width: 100%;
+}
+
+.edges thead {
+  display: none;
+}
+
+.edges tr {
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.edges td {
+  padding: 0.15rem 0;
+  border: none;
+  overflow-wrap: anywhere;
+}
+
+.edges td::before {
+  content: attr(data-label) ": ";
+  opacity: 0.6;
+  font-size: 0.8rem;
+}
+
+.message,
+.entry {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: var(--gap);
+}
+
+.message-head,
+.entry-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.message .role {
+  font-weight: bold;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+.message pre,
+.entry pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tag {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+}
+
+.pager {
+  display: flex;
+  gap: var(--gap);
+}
+
 @media (min-width: 640px) {
   .panels {
     display: grid;
@@ -125,5 +286,52 @@ ul {
   .status-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .burger {
+    display: none;
+  }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 14rem 1fr;
+    align-items: start;
+  }
+
+  .sidebar {
+    display: block;
+    position: sticky;
+    top: 0;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
+  }
+
+  .edges {
+    display: table;
+  }
+
+  .edges tbody {
+    display: table-row-group;
+  }
+
+  .edges thead {
+    display: table-header-group;
+  }
+
+  .edges tr {
+    display: table-row;
+    padding: 0;
+    margin: 0;
+    border: none;
+  }
+
+  .edges td {
+    display: table-cell;
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .edges td::before {
+    content: none;
   }
 }
