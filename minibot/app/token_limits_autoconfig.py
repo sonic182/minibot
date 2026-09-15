@@ -31,7 +31,7 @@ async def apply_runtime_token_autoconfig_async(
     configured_llm_max = settings.llm.max_new_tokens
     main_provider = settings.llm.provider
     main_model = settings.llm.model
-    main_base_url = _effective_base_url(settings, provider_name=main_provider)
+    main_base_url = effective_base_url(settings, provider_name=main_provider)
     main_auth_path = _effective_auth_path(settings, provider_name=main_provider)
     main_limits = await _resolve_limits(
         payload=payload,
@@ -82,7 +82,7 @@ async def apply_runtime_token_autoconfig_async(
     for spec in agent_specs:
         provider_name = spec.model_provider or settings.llm.provider
         model_name = spec.model or settings.llm.model
-        base_url = _effective_base_url(settings, provider_name=provider_name)
+        base_url = effective_base_url(settings, provider_name=provider_name)
         auth_path = _effective_auth_path(settings, provider_name=provider_name)
         limits = await _resolve_limits(
             payload=payload,
@@ -301,7 +301,7 @@ def _parse_model_limits(model_payload: object) -> dict[str, int] | None:
     return {"context": context, "output": output}
 
 
-def _effective_base_url(settings: Settings, *, provider_name: str) -> str | None:
+def effective_base_url(settings: Settings, *, provider_name: str) -> str | None:
     normalized = provider_name.strip().lower()
     provider_cfg = settings.providers.get(normalized)
     if provider_cfg is not None and provider_cfg.base_url:

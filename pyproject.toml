@@ -34,6 +34,8 @@ include = [
   { path = "config.example.toml", format = ["sdist", "wheel"] },
   { path = "config.yolo.toml", format = ["sdist", "wheel"] },
   { path = "prompts/**/*.md", format = ["sdist", "wheel"] },
+  { path = "minibot/adapters/http/templates/**/*.html", format = ["sdist", "wheel"] },
+  { path = "minibot/adapters/http/static/**/*.css", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.dependencies]
