@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}minibot scheduled{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Scheduled prompts</h2>
+  <p class="muted">
+    {{ jobs | length }} {{ "of up to " ~ limit ~ " " if jobs | length == limit }}
+    {{ "job" if jobs | length == 1 else "jobs" }} &middot; owner {{ owner_id }} &middot;
+    {% if show_all %}<a href="/scheduled">active only</a>{% else %}<a href="/scheduled?status=all">show all</a>{% endif %}
+  </p>
+  {% if jobs %}
+  <ul class="entries">
+    {% for job in jobs %}
+    <li class="entry {{ '' if job.active else 'inactive' }}">
+      <div class="entry-head">
+        <strong>{{ job.run_at.strftime("%Y-%m-%d %H:%M") }}</strong>
+        <span class="tag">{{ job.status }}</span>
+        {% if job.recurrence %}<span class="tag">{{ job.recurrence }}</span>{% endif %}
+        {% if job.attempts %}<span class="tag">retry {{ job.attempts }}</span>{% endif %}
+      </div>
+      <pre>{{ job.text }}</pre>
+      <p class="muted">
+        {{ job.channel }}{% if job.chat_id %}:{{ job.chat_id }}{% endif %}
+        {%- if job.recurrence_end_at %} &middot; until {{ job.recurrence_end_at.strftime("%Y-%m-%d %H:%M") }}{% endif %}
+      </p>
+      {% if job.last_error %}<pre class="error">{{ job.last_error }}</pre>{% endif %}
+      {% if job.active %}
+      <div class="entry-actions">
+        <button type="button" class="danger" data-cancel="{{ job.id }}" data-cancel-when="{{ job.run_at.strftime("%Y-%m-%d %H:%M") }}">
+          Cancel
+        </button>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  <dialog id="confirm-cancel">
+    <form method="post" action="{{ '/scheduled?status=all' if show_all else '/scheduled' }}">
+      <input type="hidden" name="action" value="cancel">
+      <input type="hidden" name="id" data-confirm-id>
+      <p>Cancel the prompt scheduled for <strong data-confirm-title></strong>?</p>
+      <p class="dialog-actions">
+        <button type="button" data-confirm-cancel>Keep it</button>
+        <button type="submit" class="danger">Cancel it</button>
+      </p>
+    </form>
+  </dialog>
+  {% else %}
+  <p>{{ "nothing scheduled" if show_all else "nothing scheduled right now" }}</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if jobs %}
+<script>
+  const dialog = document.getElementById("confirm-cancel");
+  for (const button of document.querySelectorAll("[data-cancel]")) {
+    button.addEventListener("click", () => {
+      dialog.querySelector("[data-confirm-id]").value = button.dataset.cancel;
+      dialog.querySelector("[data-confirm-title]").textContent = button.dataset.cancelWhen;
+      dialog.showModal();
+    });
+  }
+  dialog.querySelector("[data-confirm-cancel]").addEventListener("click", () => dialog.close());
+</script>
+{% endif %}
+{% endblock %}

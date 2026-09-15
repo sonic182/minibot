@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}minibot mcp{% endblock %}
+
+{% block content %}
+<section>
+  <h2>MCP servers</h2>
+  <p class="muted">As of the last boot &mdash; this page never calls the servers.</p>
+  {% if servers %}
+  <div class="panels">
+    {% for server in servers %}
+    <section class="panel {{ 'inactive' if server.error else '' }}">
+      <div class="entry-head">
+        <strong>{{ server.name }}</strong>
+        <span class="tag">{{ server.transport }}</span>
+        <span class="tag">{{ server.mode }}</span>
+      </div>
+      {% if server.error %}
+      <p class="muted">failed to load</p>
+      <pre class="error">{{ server.error }}</pre>
+      {% else %}
+      <p class="muted">
+        {{ server.tools | length }} {{ "tool" if server.tools | length == 1 else "tools" }}
+        {%- if server.mode == "lazy" %} &middot; meta-tools only, the real catalog is fetched on demand{% endif %}
+      </p>
+      <ul class="nodes">
+        {% for name in server.tools %}
+        <li>{{ name }}</li>
+        {% endfor %}
+      </ul>
+        {% if server.instructions %}
+        <details class="entry-actions">
+          <summary>Server instructions (in the system prompt)</summary>
+          <pre>{{ server.instructions }}</pre>
+        </details>
+        {% endif %}
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>no servers configured</p>
+  {% endif %}
+</section>
+{% endblock %}

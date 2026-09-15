@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from minibot.app.extensions import ExtensionContext
 
 
@@ -11,6 +13,10 @@ def register(mb: ExtensionContext) -> None:
 
     settings = mb.settings
     bindings = []
+    # What each server actually contributed at boot. Nothing else keeps this: bridge mode throws the
+    # MCPToolDefinition list away once it has built the bindings, and a failed server only ever
+    # reached the log. Collecting it here costs nothing and is the only view without re-querying.
+    servers: list[dict[str, Any]] = []
     for server in settings.tools.mcp.servers:
         headers = dict(server.headers)
         if server.auth_secret:
@@ -33,18 +39,66 @@ def register(mb: ExtensionContext) -> None:
             url=server.url,
             headers=headers,
         )
+        status: dict[str, Any] = {"name": server.name, "transport": server.transport, "mode": server.mode}
         try:
-            bindings.extend(
-                build_mcp_bindings(
-                    mode=server.mode,
-                    server_name=server.name,
-                    client=client,
-                    name_prefix=settings.tools.mcp.name_prefix,
-                    enabled_tools=server.enabled_tools,
-                    disabled_tools=server.disabled_tools,
-                    catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
-                )
+            server_bindings = build_mcp_bindings(
+                mode=server.mode,
+                server_name=server.name,
+                client=client,
+                name_prefix=settings.tools.mcp.name_prefix,
+                enabled_tools=server.enabled_tools,
+                disabled_tools=server.disabled_tools,
+                catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
             )
         except Exception as exc:  # noqa: BLE001
             mb.logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
+            servers.append({**status, "tools": [], "error": str(exc) or type(exc).__name__})
+            continue
+        bindings.extend(server_bindings)
+        instructions = _server_instructions(client, server.name, mb)
+        servers.append(
+            {
+                **status,
+                "tools": [binding.tool.name for binding in server_bindings],
+                "error": None,
+                "instructions": instructions,
+            }
+        )
     mb.add_tool(bindings)
+    mb.add_prompt_fragment(_instructions_fragment(servers))
+    if settings.http.enabled:
+        mb.add_page("/mcp", "MCP", _build_page(servers))
+
+
+def _server_instructions(client: Any, server_name: str, mb: ExtensionContext) -> str:
+    """The server's own ``instructions`` from the initialize handshake.
+
+    The spec calls them "instructions describing how to use the server", meant to improve the
+    model's understanding of it -- guidance no individual tool description can carry. Cheap here:
+    the client caches the metadata from the handshake ``build_mcp_bindings`` just performed.
+    """
+    try:
+        return (client.get_server_metadata_blocking().instructions or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        mb.logger.warning("failed to read mcp server instructions", exc_info=exc, extra={"server": server_name})
+        return ""
+
+
+def _instructions_fragment(servers: list[dict[str, Any]]) -> str:
+    sections = [
+        f"### {server['name']}\n\n{server['instructions']}" for server in servers if server.get("instructions")
+    ]
+    if not sections:
+        return ""
+    return "## MCP servers\n\n" + "\n\n".join(sections)
+
+
+def _build_page(servers: list[dict[str, Any]]) -> Any:
+    # Imported here so the starlette/jinja extra is only required when the server is switched on.
+    from minibot.adapters.http import render
+
+    async def _page(request: Any) -> Any:
+        # Deliberately no live call: a dead stdio server would hang the request until the timeout.
+        return render(request, "mcp.html", {"servers": servers})
+
+    return _page
