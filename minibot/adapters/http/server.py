@@ -36,7 +36,7 @@ class _BearerAuth:
 
     def __init__(self, app: Any, token: str) -> None:
         self._app = app
-        self._token = token
+        self._token = token.encode()
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http" or scope["path"] == HEALTH_PATH or self._authorized(scope):
@@ -45,8 +45,8 @@ class _BearerAuth:
         await JSONResponse({"error": "unauthorized"}, status_code=401)(scope, receive, send)
 
     def _authorized(self, scope: Any) -> bool:
-        header = dict(scope["headers"]).get(b"authorization", b"").decode("latin-1")
-        prefix = "Bearer "
+        header = dict(scope["headers"]).get(b"authorization", b"")
+        prefix = b"Bearer "
         return header.startswith(prefix) and hmac.compare_digest(header[len(prefix) :], self._token)
 
 
@@ -58,7 +58,7 @@ class _BasicAuth:
 
     def __init__(self, app: Any, user: str, password: str) -> None:
         self._app = app
-        self._expected = base64.b64encode(f"{user}:{password}".encode()).decode()
+        self._expected = base64.b64encode(f"{user}:{password}".encode())
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http" or scope["path"] == HEALTH_PATH or self._authorized(scope):
@@ -69,8 +69,8 @@ class _BasicAuth:
         await response(scope, receive, send)
 
     def _authorized(self, scope: Any) -> bool:
-        header = dict(scope["headers"]).get(b"authorization", b"").decode("latin-1")
-        prefix = "Basic "
+        header = dict(scope["headers"]).get(b"authorization", b"")
+        prefix = b"Basic "
         return header.startswith(prefix) and hmac.compare_digest(header[len(prefix) :], self._expected)
 
 
@@ -106,8 +106,6 @@ class HttpServer:
         elif self._config.auth_token:
             app = _BearerAuth(app, self._config.auth_token)
         else:
-            # Allowed on loopback (the schema rejects it anywhere else), but never silently: the
-            # next route someone registers is served to anything that can reach this port.
             self._logger.warning(
                 "[http] auth_token is not configured, every route is served without authentication",
                 extra={"component": "http", "host": self._config.host, "routes": len(self._routes)},
@@ -122,7 +120,6 @@ class HttpServer:
                 access_log=False,
             )
         )
-        # The daemon already owns SIGINT/SIGTERM; uvicorn installing its own would hijack shutdown.
         server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
         self._server = server
         self._task = asyncio.create_task(server.serve())
@@ -130,7 +127,6 @@ class HttpServer:
         while not server.started and not self._task.done():
             await asyncio.sleep(0.01)
         if self._task.done():
-            # A bind failure lives in the task, so awaiting it turns a silent dead server into a boot crash.
             await self._task
         self._logger.info(
             "http server listening",

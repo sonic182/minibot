@@ -196,8 +196,8 @@ An optional HTTP server running on the daemon's own event loop. Needs the ``http
 (``poetry install --extras http``). It serves ``/health`` — open, so a container healthcheck needs
 no credential — plus every route an extension contributes through ``mb.add_route`` (see
 :doc:`extensions`). All other routes require ``Authorization: Bearer <auth_token>``, and
-``auth_token`` is mandatory whenever ``host`` is not loopback. TLS is out of scope: run it behind a
-reverse proxy when it is reachable from outside the host.
+``auth_token`` is mandatory unless ``host`` is the literal ``127.0.0.1`` or ``::1``. TLS is out of
+scope: run it behind a reverse proxy when it is reachable from outside the host.
 
 .. autoclass:: minibot.adapters.config.schema.HTTPServerConfig
    :no-members:

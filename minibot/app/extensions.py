@@ -22,8 +22,6 @@ from minibot.shared.errors import ToolInputError
 EventHandler = Callable[[Any], Awaitable[None]]
 ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
 type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
-# Handler and path only; starlette stays out of the signature so declaring a route needs no import
-# of it, and no extension pays for the optional `http` extra unless it actually handles a request.
 type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 
 

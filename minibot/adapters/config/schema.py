@@ -908,6 +908,7 @@ class HTTPServerConfig(BaseModel):
 
     - ``enabled`` — serve HTTP alongside the daemon (default: ``false``). Needs the ``http`` extra.
     - ``host`` / ``port`` — where to bind (default: ``127.0.0.1:8080``); port ``0`` picks a free one.
+      Only literal ``127.0.0.1`` and ``::1`` can run without credentials.
     - ``auth_token`` — bearer token required on every route except ``/health``. Accepts ``${secret:NAME}``.
     - ``basic_auth_user`` / ``basic_auth_password`` — HTTP Basic credentials, used instead of the bearer
       token when set (browsers prompt for these natively). Accepts ``${secret:NAME}``.
@@ -926,10 +927,10 @@ class HTTPServerConfig(BaseModel):
     @model_validator(mode="after")
     def _require_auth_off_loopback(self) -> HTTPServerConfig:
         has_auth = self.auth_token or (self.basic_auth_user and self.basic_auth_password)
-        if self.enabled and not has_auth and self.host not in {"127.0.0.1", "::1", "localhost"}:
+        if self.enabled and not has_auth and self.host not in {"127.0.0.1", "::1"}:
             raise ValueError(
                 f"[http] auth_token or basic_auth_user/basic_auth_password is required when host is "
-                f"{self.host!r} rather than loopback"
+                f"{self.host!r} rather than a literal loopback address"
             )
         return self
 
