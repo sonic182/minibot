@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from minibot.core.memory import MemoryEntry
+from minibot.core.memory import MemoryEntry, SessionSummary
 
 
 class InMemoryMemoryStore:
@@ -22,6 +22,18 @@ class InMemoryMemoryStore:
 
     async def count_history(self, session_id: str) -> int:
         return len(self._store.get(session_id, []))
+
+    async def list_sessions(self) -> list[SessionSummary]:
+        summaries = [
+            SessionSummary(
+                session_id=session_id,
+                message_count=len(entries),
+                last_activity=entries[-1].created_at,
+            )
+            for session_id, entries in self._store.items()
+            if entries
+        ]
+        return sorted(summaries, key=lambda summary: summary.last_activity, reverse=True)
 
     async def trim_history(self, session_id: str, keep_latest: int) -> int:
         self.trim_calls.append((session_id, keep_latest))
