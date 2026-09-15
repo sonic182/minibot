@@ -4,6 +4,9 @@ import base64
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import aiosonic
 import pytest
@@ -12,7 +15,7 @@ from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from minibot.adapters.config.schema import HTTPServerConfig
-from minibot.adapters.http import HttpServer
+from minibot.adapters.http import DashboardData, HttpServer, build_dashboard_route
 from minibot.adapters.http.server import _BasicAuth, _BearerAuth
 
 TOKEN = "s3cret"
@@ -49,6 +52,136 @@ async def server():
         yield instance
     finally:
         await instance.stop()
+
+
+async def _no_pending_turns() -> int:
+    return 0
+
+
+@pytest.mark.asyncio
+async def test_build_http_server_populates_dashboard_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.adapters import http as http_module
+    from minibot.app import daemon as daemon_module
+
+    pending_turn_store = SimpleNamespace(list_pending=AsyncMock(return_value=[("pending-turn", "{}")]))
+    extensions = SimpleNamespace(
+        routes=[("/ping", _pong, ("GET",))],
+        summaries=Mock(
+            return_value=[{"name": "scheduler", "tools": 1, "services": 0, "subscriptions": 0, "routes": 0}]
+        ),
+    )
+    build_dashboard_route = Mock(return_value=("/", _pong, ("GET",)))
+
+    settings = SimpleNamespace(
+        http=HTTPServerConfig(enabled=True, host="127.0.0.1", port=0, auth_token=TOKEN),
+        providers={},
+        llm=SimpleNamespace(
+            provider="openai_responses",
+            base_url="https://opencode.ai/zen/go/v1",
+            model="minimax",
+        ),
+        channels=SimpleNamespace(telegram=SimpleNamespace(enabled=True)),
+    )
+    dispatcher = SimpleNamespace(main_agent_tool_names=["web_search"])
+
+    monkeypatch.setattr(daemon_module.AppContainer, "get_pending_turn_store", lambda: pending_turn_store)
+    monkeypatch.setattr(http_module, "build_dashboard_route", build_dashboard_route)
+
+    daemon_module._build_http_server(
+        settings,
+        dispatcher,
+        extensions,
+        datetime.now(UTC),
+        logging.getLogger(__name__),
+    )
+
+    dashboard_data = build_dashboard_route.call_args.args[0]
+    assert dashboard_data.llm_provider == "opencode-go"
+    assert dashboard_data.tool_names == ["web_search"]
+    assert dashboard_data.extensions == [
+        {"name": "scheduler", "tools": 1, "services": 0, "subscriptions": 0, "routes": 0}
+    ]
+    assert await dashboard_data.pending_turns() == 1
+
+
+@pytest_asyncio.fixture()
+async def dashboard_server():
+    data = DashboardData(
+        extensions=[
+            {"name": "scheduler", "tools": 2, "services": 1, "subscriptions": 0, "routes": 0},
+            {"name": "rabbitmq", "tools": 0, "services": 0, "subscriptions": 0, "routes": 0},
+        ],
+        tool_names=["send_message", "web_search"],
+        routes=[("/ping", _pong, ("GET",))],
+        started_at=datetime.now(UTC),
+        llm_provider="openai",
+        llm_model="gpt-4o-mini",
+        telegram_enabled=True,
+        pending_turns=_no_pending_turns,
+    )
+    route = build_dashboard_route(data)
+    instance = HttpServer(HTTPServerConfig(enabled=True, host="127.0.0.1", port=0, auth_token=TOKEN), [route])
+    await instance.start()
+    try:
+        yield instance
+    finally:
+        await instance.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_lists_enabled_extensions_and_tools(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{dashboard_server.port}/", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
+        assert response.status_code == 200
+        body = await response.text()
+        assert "scheduler" in body
+        assert "send_message" in body
+        assert "web_search" in body
+
+
+@pytest.mark.asyncio
+async def test_dashboard_marks_extensions_that_contributed_nothing(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{dashboard_server.port}/", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
+        body = await response.text()
+        # scheduler registered things, rabbitmq bailed out of register() -- loaded but idle.
+        assert "2 tools &middot; 1 service" in body or "2 tools · 1 service" in body
+        assert "inactive" in body
+
+
+@pytest.mark.asyncio
+async def test_dashboard_shows_status_and_routes(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{dashboard_server.port}/", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
+        body = await response.text()
+        assert "openai / gpt-4o-mini" in body
+        assert "0 pending turns" in body
+        assert "Telegram" in body
+        assert "/ping" in body
+        assert "/health" in body
+
+
+@pytest.mark.asyncio
+async def test_dashboard_requires_the_token(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(f"http://127.0.0.1:{dashboard_server.port}/")
+        assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_static_css_is_served(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{dashboard_server.port}/static/dashboard.css",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert response.status_code == 200
 
 
 @pytest.mark.asyncio

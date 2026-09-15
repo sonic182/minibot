@@ -207,6 +207,21 @@ class ExtensionRegistry:
     def names(self) -> list[str]:
         return [context.name for context in self._contexts]
 
+    def summaries(self) -> list[dict[str, Any]]:
+        """What each extension actually contributed. A disabled extension still imports and runs
+        ``register()``, so being loaded says nothing: only these counts tell active from idle.
+        """
+        return [
+            {
+                "name": context.name,
+                "tools": len(context.tools),
+                "services": len(context.services),
+                "subscriptions": len(context.subscriptions),
+                "routes": len(context.routes),
+            }
+            for context in self._contexts
+        ]
+
     def is_empty(self) -> bool:
         return not self._contexts
 

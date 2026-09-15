@@ -1,0 +1,132 @@
+:root {
+  color-scheme: light dark;
+  --gap: 1rem;
+  --gap-sm: 0.5rem;
+  --radius: 0.5rem;
+  --radius-sm: 0.4rem;
+  --border: #8886;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  line-height: 1.4;
+}
+
+main {
+  display: grid;
+  gap: var(--gap);
+  padding: var(--gap);
+  min-width: 0;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.panels {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/* min-width:0 on every box that holds text: a grid/flex item defaults to min-width:auto, which
+   refuses to shrink below its content, and one long unbreakable token then widens the whole page. */
+.panel,
+.status-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap);
+}
+
+ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.extensions li {
+  margin-bottom: 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+/* Loaded but idle: an extension that registered nothing, a cancelled job, a server that failed. */
+.inactive {
+  opacity: 0.45;
+}
+
+.extensions .detail {
+  display: block;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm) var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.badge {
+  color: #2a2;
+  font-weight: bold;
+}
+
+.status-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.status-card h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.status-card p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table-wrap th,
+.table-wrap td {
+  text-align: left;
+  padding: 0.25rem var(--gap-sm);
+  border-bottom: 1px solid var(--border);
+}
+
+@media (min-width: 640px) {
+  /* minmax(0, 1fr), never a bare 1fr: 1fr means minmax(auto, 1fr), and that auto minimum is the
+     same refuse-to-shrink default that lets one long token stretch a column past the viewport. */
+  .panels {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

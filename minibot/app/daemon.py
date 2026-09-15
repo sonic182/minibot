@@ -4,6 +4,7 @@ import logging
 import signal
 import sys
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from minibot.adapters.container import AppContainer
@@ -16,6 +17,7 @@ from minibot.shared.utils import summarize_items
 
 
 async def run() -> None:
+    started_at = datetime.now(UTC)
     AppContainer.configure()
     await AppContainer.initialize_storage()
     logger = AppContainer.get_logger()
@@ -37,7 +39,7 @@ async def run() -> None:
     logger.info("booting minibot", extra={"component": "daemon"})
     extensions = AppContainer.get_extensions()
 
-    http_server = _build_http_server(settings, extensions, logger)
+    http_server = _build_http_server(settings, dispatcher, extensions, started_at, logger)
 
     services: list[Any] = [dispatcher]
     if not extensions.is_empty():
@@ -58,7 +60,9 @@ async def run() -> None:
         await stop_event.wait()
 
 
-def _build_http_server(settings: Any, extensions: Any, logger: logging.Logger) -> Any:
+def _build_http_server(
+    settings: Any, dispatcher: Dispatcher, extensions: Any, started_at: datetime, logger: logging.Logger
+) -> Any:
     """Build the HTTP server, or warn about the routes nobody will serve when it is off."""
     routes = extensions.routes
     if not settings.http.enabled:
@@ -69,9 +73,35 @@ def _build_http_server(settings: Any, extensions: Any, logger: logging.Logger) -
             )
         return None
     # Imported here so the starlette/uvicorn extra is only required when the server is switched on.
-    from minibot.adapters.http import HttpServer
+    from minibot.adapters.http import DashboardData, HttpServer, build_dashboard_route
+    from minibot.app.token_limits_autoconfig import effective_base_url
+    from minibot.llm.services.provider_target import resolve_target_provider
 
-    return HttpServer(settings.http, routes)
+    pending_turn_store = AppContainer.get_pending_turn_store()
+
+    async def _count_pending_turns() -> int:
+        return len(await pending_turn_store.list_pending())
+
+    # settings.llm.provider is the wire protocol (e.g. "openai_responses"), not the backend
+    # actually serving the model when a custom base_url routes through it (e.g. opencode-go) --
+    # resolve_target_provider is the same lookup the token auto-config uses to hit the right
+    # models.dev catalog entry, so it doubles as the honest answer to "who's really serving this".
+    base_url = effective_base_url(settings, provider_name=settings.llm.provider)
+    real_provider = resolve_target_provider(provider_name=settings.llm.provider, base_url=base_url)
+
+    dashboard_route = build_dashboard_route(
+        DashboardData(
+            extensions=extensions.summaries(),
+            tool_names=dispatcher.main_agent_tool_names,
+            routes=routes,
+            started_at=started_at,
+            llm_provider=real_provider,
+            llm_model=settings.llm.model,
+            telegram_enabled=settings.channels.telegram.enabled,
+            pending_turns=_count_pending_turns,
+        )
+    )
+    return HttpServer(settings.http, [dashboard_route, *routes])
 
 
 async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:
