@@ -54,6 +54,12 @@ class ExtensionService(Protocol):
     async def stop(self) -> None: ...
 
 
+@dataclass(frozen=True)
+class _PromptFragment:
+    text: str
+    tool_names: frozenset[str] = frozenset()
+
+
 @dataclass
 class ExtensionContext:
     """Handed to an extension's ``register(mb)`` function.
@@ -78,6 +84,7 @@ class ExtensionContext:
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
+    prompt_fragments: list[_PromptFragment] = field(default_factory=list)
 
     def on(self, event_type: type[BaseEvent], handler: EventHandler | None = None) -> Any:
         """Subscribe to ``event_type``. Usable directly or as a decorator."""
@@ -142,6 +149,18 @@ class ExtensionContext:
     def add_service(self, service: ExtensionService) -> None:
         self.services.append(service)
 
+    def add_prompt_fragment(self, text: str, *, tool_names: Sequence[str] = ()) -> None:
+        """Append ``text`` to the main agent's system prompt.
+
+        For guidance the model needs before it picks a tool and that no single tool description can
+        carry -- an MCP server's ``instructions``, a backend's conventions. Tool-specific wording
+        belongs in that tool's description, not here: this is paid for on every single turn. When
+        ``tool_names`` is set, the fragment is included only if one of those tools is attached.
+        """
+        text = text.strip()
+        if text:
+            self.prompt_fragments.append(_PromptFragment(text=text, tool_names=frozenset(tool_names)))
+
 
 class ExtensionRegistry:
     """Everything the loaded extensions contributed, with a service-shaped lifecycle."""
@@ -155,6 +174,19 @@ class ExtensionRegistry:
     @property
     def tools(self) -> list[ToolBinding]:
         return [binding for context in self._contexts for binding in context.tools]
+
+    @property
+    def prompt_fragments(self) -> list[str]:
+        return [fragment.text for context in self._contexts for fragment in context.prompt_fragments]
+
+    def prompt_fragments_for(self, tools: Sequence[ToolBinding]) -> list[str]:
+        tool_names = {binding.tool.name for binding in tools}
+        return [
+            fragment.text
+            for context in self._contexts
+            for fragment in context.prompt_fragments
+            if not fragment.tool_names or fragment.tool_names & tool_names
+        ]
 
     def names(self) -> list[str]:
         return [context.name for context in self._contexts]

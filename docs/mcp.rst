@@ -26,10 +26,12 @@ Lazy mode exposes two bindings per server instead::
     <name_prefix>_<server_name>__list_tools
     <name_prefix>_<server_name>__call_tool
 
-The lazy binding descriptions include the server's MCP initialization instructions when available.
-Call ``list_tools`` to retrieve the remote names, descriptions, and complete input schemas, then
-call ``call_tool`` with the selected remote name and arguments. MiniBot initializes lazy servers at
-startup to obtain that metadata, but defers ``tools/list`` until the catalog is requested.
+When available, server initialization instructions are included in the main agent's system prompt
+while that server has an attached tool; they are omitted when tool policy hides the server. Lazy
+binding descriptions also include the instructions. Call ``list_tools`` to retrieve the remote
+names, descriptions, and complete input schemas, then call ``call_tool`` with the selected remote
+name and arguments. MiniBot initializes lazy servers at startup to obtain that metadata, but
+defers ``tools/list`` until the catalog is requested.
 
 Configuration
 -------------
