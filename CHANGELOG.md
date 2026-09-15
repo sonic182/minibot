@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Optional built-in HTTP server** with an authenticated dashboard, conversation history, and memory/graph review pages.
+- **Scheduled prompt and MCP server pages** in the built-in HTTP UI.
 - **Extension system-prompt fragments**, including MCP server instructions when its tools are attached.
 
 - **`${secret:NAME}` config references.** Any string value in `config.toml` can now read from the
@@ -37,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MCP tool schemas with `$ref` siblings no longer fail request validation.
 - Memory and graph review pages now validate mutations and cap graph listings.
+- Basic Auth rejects cross-site state-changing requests, and MCP errors redact resolved credentials.
 
 - **Console TUI crashed when a link in the transcript was clicked.** `MarkdownViewer` resolves
   every href as a local file path, so an `https://` link from the assistant raised
