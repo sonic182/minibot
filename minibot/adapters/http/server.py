@@ -3,8 +3,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import hmac
+import importlib.metadata
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+import platform
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -21,22 +25,95 @@ from minibot.adapters.config.schema import HTTPServerConfig
 type RouteSpec = tuple[str, Callable[[Request], Awaitable[Any]], tuple[str, ...]]
 
 HEALTH_PATH = "/health"
+STATIC_PATH = "/static"
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
 _templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+try:
+    _VERSION = importlib.metadata.version("minibot")
+except importlib.metadata.PackageNotFoundError:
+    _VERSION = "unknown"
+
 
 async def _health(_: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-def build_dashboard_route(extension_names: Sequence[str], tool_names: Sequence[str]) -> RouteSpec:
-    """Build the ``/`` route: a read-only page listing enabled extensions and tools."""
+@dataclass(frozen=True)
+class DashboardData:
+    """What the ``/`` dashboard needs, gathered at daemon boot (mostly static; ``pending_turns``
+    is a live lookup since that count changes while the process runs)."""
+
+    extensions: Sequence[Mapping[str, Any]]
+    tool_names: Sequence[str]
+    routes: Sequence[RouteSpec]
+    started_at: datetime
+    llm_provider: str
+    llm_model: str
+    telegram_enabled: bool
+    pending_turns: Callable[[], Awaitable[int]]
+
+
+def _format_uptime(delta: timedelta) -> str:
+    total_seconds = int(delta.total_seconds())
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, _ = divmod(remainder, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+_CONTRIBUTIONS = (("tools", "tool"), ("services", "service"), ("subscriptions", "subscription"), ("routes", "route"))
+
+
+def _describe_extensions(summaries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Turn contribution counts into display rows. Nothing contributed means the module loaded
+    but its ``register()`` bailed out — disabled in config, not broken."""
+    described = []
+    for summary in summaries:
+        parts = [
+            f"{summary[key]} {noun}{'' if summary[key] == 1 else 's'}"
+            for key, noun in _CONTRIBUTIONS
+            if summary.get(key)
+        ]
+        described.append({"name": summary["name"], "detail": " · ".join(parts) or "inactive", "active": bool(parts)})
+    return described
+
+
+def _describe_routes(routes: Sequence[RouteSpec]) -> list[dict[str, str]]:
+    described = [
+        {"method": "GET", "path": "/", "note": ""},
+        {"method": "GET", "path": HEALTH_PATH, "note": "public"},
+        {"method": "GET", "path": f"{STATIC_PATH}/*", "note": ""},
+    ]
+    described.extend(
+        {"method": method, "path": path, "note": ""} for path, _handler, methods in routes for method in methods
+    )
+    return sorted(described, key=lambda route: route["path"])
+
+
+def build_dashboard_route(data: DashboardData) -> RouteSpec:
+    """Build the ``/`` route: a read-only status page for this MiniBot instance."""
 
     async def _dashboard(request: Request) -> Any:
-        context = {"extension_names": list(extension_names), "tool_names": list(tool_names)}
+        context = {
+            "version": _VERSION,
+            "python_version": platform.python_version(),
+            "uptime": _format_uptime(datetime.now(UTC) - data.started_at),
+            "llm_provider": data.llm_provider,
+            "llm_model": data.llm_model,
+            "telegram_enabled": data.telegram_enabled,
+            "pending_turns": await data.pending_turns(),
+            "extensions": _describe_extensions(data.extensions),
+            "tool_names": list(data.tool_names),
+            "routes": _describe_routes(data.routes),
+        }
         return _templates.TemplateResponse(request, "dashboard.html", context)
 
     return ("/", _dashboard, ("GET",))
@@ -111,7 +188,7 @@ class HttpServer:
             return
         routes = [
             Route(HEALTH_PATH, _health),
-            Mount("/static", app=StaticFiles(directory=STATIC_DIR), name="static"),
+            Mount(STATIC_PATH, app=StaticFiles(directory=STATIC_DIR), name="static"),
             *(Route(path, handler, methods=list(methods)) for path, handler, methods in self._routes),
         ]
         app: Any = Starlette(routes=routes)

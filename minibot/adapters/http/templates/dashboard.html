@@ -3,17 +3,42 @@
 {% block title %}minibot dashboard{% endblock %}
 
 {% block content %}
+<section class="status">
+  <div class="status-line">
+    <span class="badge">&#9679; running</span>
+    <span>uptime {{ uptime }}</span>
+    <span>v{{ version }} &middot; Python {{ python_version }}</span>
+  </div>
+  <div class="status-grid">
+    <div class="status-card">
+      <h3>Model</h3>
+      <p>{{ llm_provider }} / {{ llm_model }}</p>
+    </div>
+    <div class="status-card">
+      <h3>Channels</h3>
+      <p>Telegram {{ "✓" if telegram_enabled else "✗" }}</p>
+    </div>
+    <div class="status-card">
+      <h3>Runtime</h3>
+      <p>{{ pending_turns }} pending turn{{ "" if pending_turns == 1 else "s" }}</p>
+    </div>
+  </div>
+</section>
+
 <div class="panels">
   <section class="panel">
     <h2>Extensions</h2>
-    {% if extension_names %}
-    <ul>
-      {% for name in extension_names %}
-      <li>{{ name }}</li>
+    {% if extensions %}
+    <ul class="extensions">
+      {% for extension in extensions %}
+      <li class="{{ 'active' if extension.active else 'inactive' }}">
+        {{ extension.name }}
+        <span class="detail">{{ extension.detail }}</span>
+      </li>
       {% endfor %}
     </ul>
     {% else %}
-    <p>none enabled</p>
+    <p>none loaded</p>
     {% endif %}
   </section>
   <section class="panel">
@@ -29,4 +54,20 @@
     {% endif %}
   </section>
 </div>
+
+<section class="routes">
+  <h2>HTTP Routes</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Method</th><th>Path</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for route in routes %}
+        <tr><td>{{ route.method }}</td><td>{{ route.path }}</td><td>{{ route.note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 
 import aiosonic
 import pytest
@@ -11,7 +12,7 @@ from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from minibot.adapters.config.schema import HTTPServerConfig
-from minibot.adapters.http import HttpServer, build_dashboard_route
+from minibot.adapters.http import DashboardData, HttpServer, build_dashboard_route
 
 TOKEN = "s3cret"
 
@@ -49,9 +50,26 @@ async def server():
         await instance.stop()
 
 
+async def _no_pending_turns() -> int:
+    return 0
+
+
 @pytest_asyncio.fixture()
 async def dashboard_server():
-    route = build_dashboard_route(["scheduler"], ["send_message", "web_search"])
+    data = DashboardData(
+        extensions=[
+            {"name": "scheduler", "tools": 2, "services": 1, "subscriptions": 0, "routes": 0},
+            {"name": "rabbitmq", "tools": 0, "services": 0, "subscriptions": 0, "routes": 0},
+        ],
+        tool_names=["send_message", "web_search"],
+        routes=[("/ping", _pong, ("GET",))],
+        started_at=datetime.now(UTC),
+        llm_provider="openai",
+        llm_model="gpt-4o-mini",
+        telegram_enabled=True,
+        pending_turns=_no_pending_turns,
+    )
+    route = build_dashboard_route(data)
     instance = HttpServer(HTTPServerConfig(enabled=True, host="127.0.0.1", port=0, auth_token=TOKEN), [route])
     await instance.start()
     try:
@@ -71,6 +89,32 @@ async def test_dashboard_lists_enabled_extensions_and_tools(dashboard_server: Ht
         assert "scheduler" in body
         assert "send_message" in body
         assert "web_search" in body
+
+
+@pytest.mark.asyncio
+async def test_dashboard_marks_extensions_that_contributed_nothing(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{dashboard_server.port}/", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
+        body = await response.text()
+        # scheduler registered things, rabbitmq bailed out of register() -- loaded but idle.
+        assert "2 tools &middot; 1 service" in body or "2 tools · 1 service" in body
+        assert "inactive" in body
+
+
+@pytest.mark.asyncio
+async def test_dashboard_shows_status_and_routes(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{dashboard_server.port}/", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
+        body = await response.text()
+        assert "openai / gpt-4o-mini" in body
+        assert "0 pending turns" in body
+        assert "Telegram" in body
+        assert "/ping" in body
+        assert "/health" in body
 
 
 @pytest.mark.asyncio
