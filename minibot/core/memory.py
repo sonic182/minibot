@@ -14,6 +14,13 @@ class MemoryEntry:
     reasoning: str | None = None
 
 
+@dataclass(frozen=True)
+class SessionSummary:
+    session_id: str
+    message_count: int
+    last_activity: datetime
+
+
 class MemoryBackend(Protocol):
     async def append_history(
         self, session_id: str, role: str, content: str, *, reasoning: str | None = None
@@ -24,6 +31,8 @@ class MemoryBackend(Protocol):
     async def count_history(self, session_id: str) -> int: ...
 
     async def trim_history(self, session_id: str, keep_latest: int) -> int: ...
+
+    async def list_sessions(self) -> Sequence[SessionSummary]: ...
 
 
 @dataclass(frozen=True)

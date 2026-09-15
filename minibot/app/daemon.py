@@ -73,7 +73,13 @@ def _build_http_server(
             )
         return None
     # Imported here so the starlette/uvicorn extra is only required when the server is switched on.
-    from minibot.adapters.http import DashboardData, HttpServer, build_dashboard_route
+    from minibot.adapters.http import (
+        DashboardData,
+        HttpServer,
+        build_dashboard_route,
+        build_history_route,
+        set_nav_entries,
+    )
     from minibot.app.token_limits_autoconfig import effective_base_url
     from minibot.llm.services.provider_target import resolve_target_provider
 
@@ -89,11 +95,15 @@ def _build_http_server(
     base_url = effective_base_url(settings, provider_name=settings.llm.provider)
     real_provider = resolve_target_provider(provider_name=settings.llm.provider, base_url=base_url)
 
+    history_route = build_history_route(AppContainer.get_memory_backend())
+    extra_routes = [history_route, *routes]
+    set_nav_entries([("/", "Home"), ("/history", "History"), *extensions.pages()])
+
     dashboard_route = build_dashboard_route(
         DashboardData(
             extensions=extensions.summaries(),
             tool_names=dispatcher.main_agent_tool_names,
-            routes=routes,
+            routes=extra_routes,
             started_at=started_at,
             llm_provider=real_provider,
             llm_model=settings.llm.model,
@@ -101,7 +111,7 @@ def _build_http_server(
             pending_turns=_count_pending_turns,
         )
     )
-    return HttpServer(settings.http, [dashboard_route, *routes])
+    return HttpServer(settings.http, [dashboard_route, *extra_routes])
 
 
 async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:

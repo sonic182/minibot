@@ -87,6 +87,7 @@ class ExtensionContext:
     services: list[ExtensionService] = field(default_factory=list)
     routes: list[RouteSpec] = field(default_factory=list)
     prompt_fragments: list[_PromptFragment] = field(default_factory=list)
+    pages: list[tuple[str, str]] = field(default_factory=list)
 
     def on(self, event_type: type[BaseEvent], handler: EventHandler | None = None) -> Any:
         """Subscribe to ``event_type``. Usable directly or as a decorator."""
@@ -173,6 +174,17 @@ class ExtensionContext:
         if text:
             self.prompt_fragments.append(_PromptFragment(text=text, tool_names=frozenset(tool_names)))
 
+    def add_page(
+        self, path: str, label: str, handler: Callable[[Any], Awaitable[Any]], methods: Sequence[str] = ("GET",)
+    ) -> None:
+        """Like ``add_route``, plus an entry in the web UI's navigation menu under ``label``.
+
+        An extension that bails out of ``register()`` never calls this, so a disabled extension
+        drops out of the menu on its own — the menu needs no separate notion of what is enabled.
+        """
+        self.add_route(path, handler, methods)
+        self.pages.append((path, label))
+
 
 class ExtensionRegistry:
     """Everything the loaded extensions contributed, with a service-shaped lifecycle."""
@@ -203,6 +215,9 @@ class ExtensionRegistry:
             for fragment in context.prompt_fragments
             if not fragment.tool_names or fragment.tool_names & tool_names
         ]
+
+    def pages(self) -> list[tuple[str, str]]:
+        return [page for context in self._contexts for page in context.pages]
 
     def names(self) -> list[str]:
         return [context.name for context in self._contexts]

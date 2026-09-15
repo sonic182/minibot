@@ -17,6 +17,62 @@ body {
   line-height: 1.4;
 }
 
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: bold;
+  font-size: 1.1rem;
+}
+
+.burger {
+  font: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0.2rem var(--gap-sm);
+  cursor: pointer;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.sidebar {
+  display: none;
+  padding: var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-open .sidebar {
+  display: block;
+}
+
+.sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--gap-sm);
+}
+
+.sidebar a {
+  display: block;
+  padding: 0.4rem var(--gap-sm);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: inherit;
+}
+
+.sidebar a.current {
+  font-weight: bold;
+  background: var(--border);
+}
+
 main {
   display: grid;
   gap: var(--gap);
@@ -117,6 +173,51 @@ ul {
   border-bottom: 1px solid var(--border);
 }
 
+.message {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap);
+}
+
+.muted {
+  opacity: 0.7;
+  font-size: 0.85rem;
+}
+
+.crumb {
+  margin-top: 0;
+}
+
+.messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--gap);
+}
+
+.message-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  margin-bottom: 0.4rem;
+  min-width: 0;
+}
+
+.message .role {
+  font-weight: bold;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+.message pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (min-width: 640px) {
   /* minmax(0, 1fr), never a bare 1fr: 1fr means minmax(auto, 1fr), and that auto minimum is the
      same refuse-to-shrink default that lets one long token stretch a column past the viewport. */
@@ -128,5 +229,22 @@ ul {
   .status-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .nav-open .shell {
+    grid-template-columns: 14rem minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
   }
 }
