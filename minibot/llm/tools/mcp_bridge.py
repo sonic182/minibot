@@ -346,9 +346,24 @@ def _build_server_summary(server_name: str, metadata: MCPServerMetadata | None) 
 def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if not schema:
         return {"type": "object", "properties": {}, "additionalProperties": True}
+    schema = _wrap_ref_siblings(schema)
     if "type" not in schema:
         return {"type": "object", **schema}
     return schema
+
+
+def _wrap_ref_siblings(value: Any) -> Any:
+    """Move ``$ref`` into ``allOf`` so sibling keywords remain valid JSON Schema."""
+    if isinstance(value, list):
+        return [_wrap_ref_siblings(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if "$ref" in value and len(value) > 1:
+        return {
+            "allOf": [{"$ref": value["$ref"]}],
+            **{key: _wrap_ref_siblings(item) for key, item in value.items() if key != "$ref"},
+        }
+    return {key: _wrap_ref_siblings(item) for key, item in value.items()}
 
 
 def _build_tool_description(server_name: str, remote_tool_name: str, base_description: str) -> str:
