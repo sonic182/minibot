@@ -9,6 +9,8 @@ worker. The store creates its schema on first use instead.
 
 from __future__ import annotations
 
+from typing import Any
+
 from minibot.adapters.graph.sqlite import DEFAULT_SQLITE_URL, SqliteGraphStore
 from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.graph import build_graph_tools
@@ -33,3 +35,21 @@ def register(mb: ExtensionContext) -> None:
     mb.add_tool(build_graph_tools(store))
     if mb.entrypoint != "worker":
         mb.add_service(_GraphStoreService(store))
+    if mb.entrypoint != "worker" and mb.settings.http.enabled:
+        mb.add_page("/graph", "Graph", _build_page(store, mb.settings.runtime.owner_id))
+
+
+def _build_page(store: SqliteGraphStore, owner_id: str) -> Any:
+    # Imported here so the starlette/jinja extra is only required when the server is switched on.
+    from minibot.adapters.http import render
+
+    async def _page(request: Any) -> Any:
+        edges = await store.list_edges(owner_id=owner_id)
+        namespaces: dict[str, list[dict[str, Any]]] = {}
+        for edge in edges:
+            namespaces.setdefault(edge["graph"], []).append(edge)
+        nodes = sorted({edge["source"] for edge in edges} | {edge["target"] for edge in edges})
+        context = {"owner_id": owner_id, "namespaces": namespaces, "nodes": nodes, "edge_count": len(edges)}
+        return render(request, "graph.html", context)
+
+    return _page

@@ -31,15 +31,8 @@ body {
 }
 
 .burger {
-  font: inherit;
   font-size: 1.2rem;
   line-height: 1;
-  padding: 0.2rem var(--gap-sm);
-  cursor: pointer;
-  color: inherit;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
 }
 
 .sidebar {
@@ -99,7 +92,9 @@ h2 {
 /* min-width:0 on every box that holds text: a grid/flex item defaults to min-width:auto, which
    refuses to shrink below its content, and one long unbreakable token then widens the whole page. */
 .panel,
-.status-card {
+.status-card,
+.message,
+.entry {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -173,13 +168,6 @@ ul {
   border-bottom: 1px solid var(--border);
 }
 
-.message {
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--gap);
-}
-
 .muted {
   opacity: 0.7;
   font-size: 0.85rem;
@@ -189,7 +177,8 @@ ul {
   margin-top: 0;
 }
 
-.messages {
+.messages,
+.entries {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -197,7 +186,56 @@ ul {
   gap: var(--gap);
 }
 
-.message-head {
+.nodes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.nodes li {
+  padding: 0.15rem var(--gap-sm);
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.edges,
+.edges tbody,
+.edges tr,
+.edges td {
+  display: block;
+  width: 100%;
+}
+
+.edges thead {
+  display: none;
+}
+
+.edges tr {
+  padding: var(--gap-sm);
+  margin-bottom: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.edges td {
+  padding: 0.15rem 0;
+  border: none;
+  overflow-wrap: anywhere;
+}
+
+.edges td::before {
+  content: attr(data-label) ": ";
+  opacity: 0.6;
+  font-size: 0.8rem;
+}
+
+.message-head,
+.entry-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -206,16 +244,106 @@ ul {
   min-width: 0;
 }
 
+.entry-head strong {
+  overflow-wrap: anywhere;
+}
+
 .message .role {
   font-weight: bold;
   text-transform: uppercase;
   font-size: 0.8rem;
 }
 
-.message pre {
+.message pre,
+.entry pre {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.tag {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pager {
+  display: flex;
+  gap: var(--gap);
+}
+
+.entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-sm);
+}
+
+.entry-actions details[open] {
+  flex: 1 1 100%;
+}
+
+.entry:has(.entry-actions details[open]) > pre {
+  display: none;
+}
+
+.entry-actions summary {
+  width: max-content;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.entry-actions textarea {
+  display: block;
+  width: 100%;
+  field-sizing: content;
+  min-height: 6rem;
+  max-height: 60vh;
+  margin: var(--gap-sm) 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm);
+  resize: vertical;
+}
+
+button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.2rem var(--gap-sm);
+  cursor: pointer;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+button.danger {
+  color: #c33;
+}
+
+dialog {
+  max-width: min(24rem, calc(100vw - 2 * var(--gap)));
+  color: inherit;
+  background: Canvas;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap);
+}
+
+dialog::backdrop {
+  background: #0008;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
+  margin-bottom: 0;
 }
 
 @media (min-width: 640px) {
@@ -246,5 +374,40 @@ ul {
     top: 0;
     border-bottom: none;
     border-right: 1px solid var(--border);
+  }
+
+  .edges {
+    display: table;
+  }
+
+  .edges tbody {
+    display: table-row-group;
+  }
+
+  .edges thead {
+    display: table-header-group;
+  }
+
+  .edges tr {
+    display: table-row;
+    padding: 0;
+    margin: 0;
+    border: none;
+  }
+
+  .edges td {
+    display: table-cell;
+    padding: 0.25rem var(--gap-sm);
+    border-bottom: 1px solid var(--border);
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  .table-wrap .edges {
+    width: auto;
+  }
+
+  .edges td::before {
+    content: none;
   }
 }

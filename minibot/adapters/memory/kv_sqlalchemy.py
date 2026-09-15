@@ -191,7 +191,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             stmt = delete(KVEntry).where(KVEntry.owner_id == owner_id, KVEntry.id == entry_id)
             result = await session.execute(stmt)
             await session.commit()
-            return bool(result)
+            return result.rowcount > 0
 
     async def search_entries(
         self,

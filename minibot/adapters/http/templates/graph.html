@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}minibot graph{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Graph memory</h2>
+  {% if namespaces %}
+  <p class="muted">{{ edge_count }} live edge{{ "" if edge_count == 1 else "s" }} &middot; owner {{ owner_id }}</p>
+  {% for namespace, edges in namespaces.items() %}
+  <h3>{{ namespace }}</h3>
+  <div class="table-wrap">
+    <table class="edges">
+      <thead>
+        <tr><th>Source</th><th>Relation</th><th>Target</th><th>Since</th></tr>
+      </thead>
+      <tbody>
+        {% for edge in edges %}
+        <tr>
+          <td data-label="Source">{{ edge.source }}</td>
+          <td data-label="Relation">{{ edge.rel }}</td>
+          <td data-label="Target">{{ edge.target }}</td>
+          <td data-label="Since" class="muted">{{ (edge.valid_from or "")[:16] | replace("T", " ") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+  <h3>Nodes ({{ nodes | length }})</h3>
+  <ul class="nodes">
+    {% for node in nodes %}
+    <li>{{ node }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>no edges stored yet</p>
+  {% endif %}
+</section>
+{% endblock %}

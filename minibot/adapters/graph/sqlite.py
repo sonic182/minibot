@@ -224,6 +224,24 @@ class SqliteGraphStore:
             rows = (await session.execute(stmt)).mappings().all()
         return {"query": query, "edges": [_edge_payload(**_row_to_edge(row)) for row in rows]}
 
+    async def list_edges(self, *, owner_id: str, graph: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        """Live edges for ``owner_id``, newest first, each tagged with its ``graph`` namespace.
+
+        ``graph=None`` spans every namespace on purpose: nothing enumerates them, so narrowing to
+        the tools' default would silently hide whatever lives elsewhere.
+        """
+        await self._ensure_schema()
+        stmt = select(GRAPH_EDGES).where(
+            GRAPH_EDGES.c.owner_id == owner_id,
+            GRAPH_EDGES.c.valid_to.is_(None),
+        )
+        if graph:
+            stmt = stmt.where(GRAPH_EDGES.c.graph == graph)
+        stmt = stmt.order_by(GRAPH_EDGES.c.valid_from.desc()).limit(limit)
+        async with self._session_factory() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+        return [{"graph": row["graph"], **_edge_payload(**_row_to_edge(row))} for row in rows]
+
     async def merge(self, *, graph: str, owner_id: str, source: str, target: str) -> dict[str, Any]:
         """Rewrite every edge mentioning ``source`` to ``target``.
 
