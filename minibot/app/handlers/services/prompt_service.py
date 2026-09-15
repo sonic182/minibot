@@ -21,10 +21,12 @@ class PromptService:
         agent_registry: AgentRegistry | None = None,
         skill_registry: SkillRegistry | None = None,
         preload_skill_catalog: bool = False,
+        extension_prompt_fragments: Sequence[str] = (),
     ) -> None:
         self._profile = LLMExecutionProfile.from_client(llm_client)
         self._tools = list(tools)
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
+        self._extension_prompt_fragments = [text.strip() for text in extension_prompt_fragments if text.strip()]
         self._logger = logger
         self._prompts_dir = self._profile.prompts_dir
         self._agent_registry = agent_registry
@@ -47,6 +49,7 @@ class PromptService:
         capability_status = self._capability_status_fragment()
         if capability_status:
             fragments.append(capability_status)
+        fragments.extend(self._extension_prompt_fragments)
         channel_prompt = load_channel_prompt(self._prompts_dir, channel)
         if channel_prompt:
             fragments.append(channel_prompt)

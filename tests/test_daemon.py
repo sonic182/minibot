@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
+
+from minibot.adapters.config.schema import HTTPServerConfig
 
 
 class _Probe:
@@ -32,6 +35,44 @@ class _Logger:
 class _EmptyPendingTurnStore:
     async def list_pending(self) -> list[tuple[str, str]]:
         return []
+
+
+def test_build_http_server_includes_extension_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app import daemon as daemon_module
+
+    async def extension_page(request: object) -> object:
+        return request
+
+    class _Extensions:
+        routes = [("/extension", extension_page, ("GET",))]
+
+        def pages(self) -> list[tuple[str, str]]:
+            return [("/extension", "Extension")]
+
+        def summaries(self) -> list[dict[str, object]]:
+            return []
+
+    class _Container:
+        @classmethod
+        def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
+            return _EmptyPendingTurnStore()
+
+        @classmethod
+        def get_memory_backend(cls) -> object:
+            return object()
+
+    settings = SimpleNamespace(
+        http=HTTPServerConfig(enabled=True),
+        llm=SimpleNamespace(provider="openai", base_url=None, model="gpt-4o-mini"),
+        providers={},
+        channels=SimpleNamespace(telegram=SimpleNamespace(enabled=False)),
+    )
+    dispatcher = SimpleNamespace(main_agent_tool_names=[])
+    monkeypatch.setattr(daemon_module, "AppContainer", _Container)
+
+    server = daemon_module._build_http_server(settings, dispatcher, _Extensions(), None, _Logger())
+
+    assert [path for path, _, _ in server._routes] == ["/", "/history", "/extension"]
 
 
 @pytest.mark.asyncio
