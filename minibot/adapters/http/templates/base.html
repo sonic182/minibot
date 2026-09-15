@@ -7,8 +7,6 @@
   <link rel="stylesheet" href="/static/dashboard.css">
   <script defer src="/static/nav.js"></script>
   <script>
-    // The sidebar starts open on desktop and closed on a phone. Set on <html> before the first
-    // paint, so the page never renders in the wrong state and flips once nav.js runs.
     if (window.innerWidth >= 640) document.documentElement.classList.add("nav-open");
   </script>
 </head>

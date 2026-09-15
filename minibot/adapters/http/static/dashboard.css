@@ -48,8 +48,6 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* One state class on <html> at every width: the burger toggles it, and the inline script in
-   base.html seeds it open on desktop. The sidebar is never "always visible". */
 .nav-open .sidebar {
   display: block;
 }
@@ -239,8 +237,6 @@ ul {
     align-items: start;
   }
 
-  /* The sidebar track only exists while the sidebar does; otherwise the closed state would leave
-     a 14rem hole where it used to be. */
   .nav-open .shell {
     grid-template-columns: 14rem minmax(0, 1fr);
   }
