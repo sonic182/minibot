@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Optional built-in HTTP server** with an authenticated dashboard, conversation history, and memory/graph review pages.
+- **Extension system-prompt fragments**, including MCP server instructions when its tools are attached.
+
 - **`${secret:NAME}` config references.** Any string value in `config.toml` can now read from the
   encrypted vault, so provider API keys, the Telegram bot token and anything else no longer have to
   sit in plain text next to a `bash` tool that can `cat` the file. Resolution happens in a second
@@ -31,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   See `docs/security.rst` for the threat model and its limits.
 
 ### Fixed
+
+- MCP tool schemas with `$ref` siblings no longer fail request validation.
+- Memory and graph review pages now validate mutations and cap graph listings.
 
 - **Console TUI crashed when a link in the transcript was clicked.** `MarkdownViewer` resolves
   every href as a local file path, so an `https://` link from the assistant raised
