@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from minibot.app.extensions import ExtensionContext
 
 
@@ -11,6 +13,10 @@ def register(mb: ExtensionContext) -> None:
 
     settings = mb.settings
     bindings = []
+    # What each server actually contributed at boot. Nothing else keeps this: bridge mode throws the
+    # MCPToolDefinition list away once it has built the bindings, and a failed server only ever
+    # reached the log. Collecting it here costs nothing and is the only view without re-querying.
+    servers: list[dict[str, Any]] = []
     for server in settings.tools.mcp.servers:
         headers = dict(server.headers)
         if server.auth_secret:
@@ -33,18 +39,34 @@ def register(mb: ExtensionContext) -> None:
             url=server.url,
             headers=headers,
         )
+        status: dict[str, Any] = {"name": server.name, "transport": server.transport, "mode": server.mode}
         try:
-            bindings.extend(
-                build_mcp_bindings(
-                    mode=server.mode,
-                    server_name=server.name,
-                    client=client,
-                    name_prefix=settings.tools.mcp.name_prefix,
-                    enabled_tools=server.enabled_tools,
-                    disabled_tools=server.disabled_tools,
-                    catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
-                )
+            server_bindings = build_mcp_bindings(
+                mode=server.mode,
+                server_name=server.name,
+                client=client,
+                name_prefix=settings.tools.mcp.name_prefix,
+                enabled_tools=server.enabled_tools,
+                disabled_tools=server.disabled_tools,
+                catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
             )
         except Exception as exc:  # noqa: BLE001
             mb.logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
+            servers.append({**status, "tools": [], "error": str(exc) or type(exc).__name__})
+            continue
+        bindings.extend(server_bindings)
+        servers.append({**status, "tools": [binding.tool.name for binding in server_bindings], "error": None})
     mb.add_tool(bindings)
+    if settings.http.enabled:
+        mb.add_page("/mcp", "MCP", _build_page(servers))
+
+
+def _build_page(servers: list[dict[str, Any]]) -> Any:
+    # Imported here so the starlette/jinja extra is only required when the server is switched on.
+    from minibot.adapters.http import render
+
+    async def _page(request: Any) -> Any:
+        # Deliberately no live call: a dead stdio server would hang the request until the timeout.
+        return render(request, "mcp.html", {"servers": servers})
+
+    return _page
