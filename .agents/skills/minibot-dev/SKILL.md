@@ -6,7 +6,7 @@ description: Orientation and change-routing for developing MiniBot itself. Use b
 # MiniBot Dev
 
 Start here before adding or changing anything in MiniBot. This skill routes a change to the
-right files; it does not restate `ARCHITECTURE.md`, it points into it.
+right files; it does not restate the architecture, it points into it.
 
 ## Orientation
 
@@ -25,7 +25,7 @@ Dependencies point inward: `adapters` and `llm` may import `core`; `core` import
 Two entrypoints boot the same spine — `app/daemon.py` (Telegram) and `app/console.py` (CLI) —
 plus a third, deliberately narrower one: the forked task worker (`adapters/tasks/worker.py`).
 
-Long-form reference: `ARCHITECTURE.md`. Build/lint/test commands: `AGENTS.md`.
+Architecture overview: `docs/architecture.md`. Build/lint/test commands: `AGENTS.md`.
 
 ## Routing table
 

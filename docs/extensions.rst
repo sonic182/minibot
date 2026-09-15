@@ -120,6 +120,14 @@ Extension API
    Register an object with async ``start()`` and ``stop()`` methods for work that belongs to
    the daemon or console lifecycle.
 
+``mb.add_route(path, handler)`` / ``mb.add_page(path, label, handler)``
+   Serve a Starlette request handler on the built-in HTTP server (``[http] enabled``).
+   ``add_page`` also adds a navigation entry under ``label``. Requires the ``http`` extra.
+
+``mb.add_prompt_fragment(text, tool_names=())``
+   Append a fragment to the main agent's system prompt, optionally gated on the listed tools
+   being attached. Use it for guidance no single tool description can carry.
+
 Operational rules
 -----------------
 

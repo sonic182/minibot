@@ -10,8 +10,7 @@ poetry run python -m minibot.app.daemon
 ```
 
 `AGENTS.md` has the full build/lint/test command list, the code style rules, and the
-architecture summary. `ARCHITECTURE.md` is the long-form map. Read `AGENTS.md` before your
-first change — it is short.
+architecture summary. Read `AGENTS.md` before your first change — it is short.
 
 ## Before you open a pull request
 
@@ -85,8 +84,8 @@ The full rules are in `AGENTS.md`. The ones worth repeating here:
   deterministic protocol parsing only (markdown fences, SSE framing).
 
 Keep changes inside the existing layer boundaries — `core` (domain contracts), `app`
-(orchestration), `adapters` (integrations), `llm` (provider and tool wiring). `ARCHITECTURE.md`
-explains which is which.
+(orchestration), `adapters` (integrations), `llm` (provider and tool wiring).
+`docs/architecture.md` explains which is which.
 
 ## Tests
 
@@ -108,7 +107,7 @@ If you change behavior, update the docs in the same PR:
 
 - `docs/*.rst` — user-facing reference, built with Sphinx
 - `config.example.toml` — any new or changed configuration
-- `ARCHITECTURE.md` — new modules or changed wiring
+- `docs/architecture.md` — new modules or changed wiring
 - `AGENTS.md` — only when a rule for working in the repo actually changes
 
 `docs/llms.txt` and `docs/llms-full.txt` are not produced by the docs build — nothing

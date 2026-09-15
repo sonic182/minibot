@@ -37,7 +37,7 @@ extensions = [
     "sphinx_sitemap",
 ]
 
-# reStructuredText for authored pages, Markdown for mirrored repo docs (ARCHITECTURE.md).
+# reStructuredText for most pages; Markdown (MyST) for the architecture page.
 source_suffix = {
     ".rst": "restructuredtext",
     ".md": "markdown",
@@ -46,10 +46,10 @@ source_suffix = {
 # Mermaid renders client-side in the browser; no node/mermaid-cli needed for HTML builds.
 mermaid_output_format = "raw"
 
-# MyST: colon fences, definition lists, and stable heading anchors in mirrored Markdown.
+# MyST: colon fences, definition lists, and stable heading anchors in Markdown pages.
 myst_enable_extensions = ["colon_fence", "deflist"]
 myst_heading_anchors = 2
-# Render ```mermaid fences in mirrored Markdown through sphinxcontrib-mermaid.
+# Render ```mermaid fences in Markdown pages through sphinxcontrib-mermaid.
 myst_fence_as_directive = ["mermaid"]
 
 intersphinx_mapping = {

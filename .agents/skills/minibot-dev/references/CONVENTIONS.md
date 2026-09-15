@@ -19,7 +19,7 @@ from `AGENTS.md` — run it anyway (`poetry run ruff check --fix minibot tests`,
 `poetry run ruff format .`), but know it will not block a merge.
 
 `.github/workflows/docs.yml` adds a docs gate on main, path-filtered to `docs/**`, `minibot/**`,
-`ARCHITECTURE.md`, `README.md`, `config.example.toml`, `poetry.lock`, `pyproject.toml`. It runs
+`README.md`, `config.example.toml`, `poetry.lock`, `pyproject.toml`. It runs
 `sphinx-build -W`, so **any new Sphinx warning fails the deploy** — including an RST heading
 without a preceding blank line.
 
