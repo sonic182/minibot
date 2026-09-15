@@ -5,6 +5,8 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import aiosonic
 import pytest
@@ -54,6 +56,52 @@ async def server():
 
 async def _no_pending_turns() -> int:
     return 0
+
+
+@pytest.mark.asyncio
+async def test_build_http_server_populates_dashboard_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.adapters import http as http_module
+    from minibot.app import daemon as daemon_module
+
+    pending_turn_store = SimpleNamespace(list_pending=AsyncMock(return_value=[("pending-turn", "{}")]))
+    extensions = SimpleNamespace(
+        routes=[("/ping", _pong, ("GET",))],
+        summaries=Mock(
+            return_value=[{"name": "scheduler", "tools": 1, "services": 0, "subscriptions": 0, "routes": 0}]
+        ),
+    )
+    build_dashboard_route = Mock(return_value=("/", _pong, ("GET",)))
+
+    settings = SimpleNamespace(
+        http=HTTPServerConfig(enabled=True, host="127.0.0.1", port=0, auth_token=TOKEN),
+        providers={},
+        llm=SimpleNamespace(
+            provider="openai_responses",
+            base_url="https://opencode.ai/zen/go/v1",
+            model="minimax",
+        ),
+        channels=SimpleNamespace(telegram=SimpleNamespace(enabled=True)),
+    )
+    dispatcher = SimpleNamespace(main_agent_tool_names=["web_search"])
+
+    monkeypatch.setattr(daemon_module.AppContainer, "get_pending_turn_store", lambda: pending_turn_store)
+    monkeypatch.setattr(http_module, "build_dashboard_route", build_dashboard_route)
+
+    daemon_module._build_http_server(
+        settings,
+        dispatcher,
+        extensions,
+        datetime.now(UTC),
+        logging.getLogger(__name__),
+    )
+
+    dashboard_data = build_dashboard_route.call_args.args[0]
+    assert dashboard_data.llm_provider == "opencode-go"
+    assert dashboard_data.tool_names == ["web_search"]
+    assert dashboard_data.extensions == [
+        {"name": "scheduler", "tools": 1, "services": 0, "subscriptions": 0, "routes": 0}
+    ]
+    assert await dashboard_data.pending_turns() == 1
 
 
 @pytest_asyncio.fixture()
