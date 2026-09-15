@@ -70,4 +70,5 @@ Why self-host
    audio
    rag
    graph
+   vault
    security
