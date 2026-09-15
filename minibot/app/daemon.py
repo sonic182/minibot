@@ -96,11 +96,8 @@ def _build_http_server(
     real_provider = resolve_target_provider(provider_name=settings.llm.provider, base_url=base_url)
 
     history_route = build_history_route(AppContainer.get_memory_backend())
-    # Everything the dashboard's route table should list beyond the paths HttpServer hardcodes.
     extra_routes = [history_route, *routes]
-    # Core pages first, then whatever each active extension registered: an extension that bailed
-    # out of register() contributes no page, so the menu tracks what is actually enabled.
-    set_nav_entries([("/", "Home"), ("/history", "History"), *extensions.pages])
+    set_nav_entries([("/", "Home"), ("/history", "History"), *extensions.pages()])
 
     dashboard_route = build_dashboard_route(
         DashboardData(
