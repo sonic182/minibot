@@ -1,6 +1,9 @@
 :root {
   color-scheme: light dark;
   --gap: 1rem;
+  --gap-sm: 0.5rem;
+  --radius: 0.5rem;
+  --radius-sm: 0.4rem;
   --border: #8886;
 }
 
@@ -28,15 +31,8 @@ body {
 }
 
 .burger {
-  font: inherit;
   font-size: 1.2rem;
   line-height: 1;
-  padding: 0.2rem 0.5rem;
-  cursor: pointer;
-  color: inherit;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 0.4rem;
 }
 
 .sidebar {
@@ -45,7 +41,9 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-body.nav-open .sidebar {
+/* One state class on <html> at every width: the burger toggles it, and the inline script in
+   base.html seeds it open on desktop. The sidebar is never "always visible". */
+.nav-open .sidebar {
   display: block;
 }
 
@@ -54,13 +52,13 @@ body.nav-open .sidebar {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.5rem;
+  gap: var(--gap-sm);
 }
 
 .sidebar a {
   display: block;
-  padding: 0.4rem 0.5rem;
-  border-radius: 0.4rem;
+  padding: 0.4rem var(--gap-sm);
+  border-radius: var(--radius-sm);
   text-decoration: none;
   color: inherit;
 }
@@ -93,9 +91,15 @@ h2 {
   gap: var(--gap);
 }
 
-.panel {
+/* min-width:0 on every box that holds text: a grid/flex item defaults to min-width:auto, which
+   refuses to shrink below its content, and one long unbreakable token then widens the whole page. */
+.panel,
+.status-card,
+.message,
+.entry {
+  min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   padding: var(--gap);
 }
 
@@ -106,6 +110,7 @@ ul {
 
 .extensions li {
   margin-bottom: 0.4rem;
+  overflow-wrap: anywhere;
 }
 
 .extensions li.inactive {
@@ -121,7 +126,7 @@ ul {
 .status-line {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
+  gap: var(--gap-sm) var(--gap);
   margin-bottom: var(--gap);
 }
 
@@ -136,12 +141,6 @@ ul {
   gap: var(--gap);
 }
 
-.status-card {
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: var(--gap);
-}
-
 .status-card h3 {
   margin: 0 0 0.25rem;
   font-size: 0.85rem;
@@ -151,22 +150,23 @@ ul {
 
 .status-card p {
   margin: 0;
-}
-
-.routes table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.routes th,
-.routes td {
-  text-align: left;
-  padding: 0.25rem 0.5rem;
-  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
 }
 
 .table-wrap {
   overflow-x: auto;
+}
+
+.table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table-wrap th,
+.table-wrap td {
+  text-align: left;
+  padding: 0.25rem var(--gap-sm);
+  border-bottom: 1px solid var(--border);
 }
 
 .muted {
@@ -179,8 +179,7 @@ ul {
 }
 
 .messages,
-.entries,
-.nodes {
+.entries {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -191,16 +190,19 @@ ul {
 /* Chips, not a grid: node names vary wildly in length, and fixed tracks either overflow their
    cell or blow out the page width on a phone. */
 .nodes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
 }
 
 .nodes li {
-  padding: 0.15rem 0.5rem;
+  padding: 0.15rem var(--gap-sm);
   font-size: 0.85rem;
   border: 1px solid var(--border);
-  border-radius: 0.4rem;
+  border-radius: var(--radius-sm);
   overflow-wrap: anywhere;
 }
 
@@ -218,10 +220,10 @@ ul {
 }
 
 .edges tr {
-  padding: 0.5rem;
-  margin-bottom: 0.5rem;
+  padding: var(--gap-sm);
+  margin-bottom: var(--gap-sm);
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
 }
 
 .edges td {
@@ -236,20 +238,18 @@ ul {
   font-size: 0.8rem;
 }
 
-.message,
-.entry {
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: var(--gap);
-}
-
 .message-head,
 .entry-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.5rem;
+  gap: var(--gap-sm);
   margin-bottom: 0.4rem;
+  min-width: 0;
+}
+
+.entry-head strong {
+  overflow-wrap: anywhere;
 }
 
 .message .role {
@@ -269,7 +269,7 @@ ul {
   font-size: 0.75rem;
   padding: 0.1rem 0.4rem;
   border: 1px solid var(--border);
-  border-radius: 0.4rem;
+  border-radius: var(--radius-sm);
 }
 
 .pager {
@@ -277,29 +277,109 @@ ul {
   gap: var(--gap);
 }
 
+.entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-sm);
+}
+
+/* Closed, the disclosure sits beside Delete; open, it takes the whole row so the textarea gets the
+   card's full width instead of a flex share of it. */
+.entry-actions details[open] {
+  flex: 1 1 100%;
+}
+
+/* While editing, drop the read-only copy above: the same text twice is what made this confusing. */
+.entry:has(.entry-actions details[open]) > pre {
+  display: none;
+}
+
+.entry-actions summary {
+  width: max-content;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.entry-actions textarea {
+  display: block;
+  width: 100%;
+  /* Grows with its content where supported; `rows` is the fallback everywhere else. */
+  field-sizing: content;
+  min-height: 6rem;
+  max-height: 60vh;
+  margin: var(--gap-sm) 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm);
+  resize: vertical;
+}
+
+button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.2rem var(--gap-sm);
+  cursor: pointer;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+button.danger {
+  color: #c33;
+}
+
+dialog {
+  max-width: min(24rem, calc(100vw - 2 * var(--gap)));
+  color: inherit;
+  background: Canvas;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap);
+}
+
+dialog::backdrop {
+  background: #0008;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
+  margin-bottom: 0;
+}
+
 @media (min-width: 640px) {
+  /* minmax(0, 1fr), never a bare 1fr: 1fr means minmax(auto, 1fr), and that auto minimum is the
+     same refuse-to-shrink default that lets one long token stretch a column past the viewport. */
   .panels {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .status-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-  }
-
-  .burger {
-    display: none;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .shell {
     display: grid;
-    grid-template-columns: 14rem 1fr;
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
   }
 
+  /* The sidebar track only exists while the sidebar does; otherwise the closed state would leave
+     a 14rem hole where it used to be. */
+  .nav-open .shell {
+    grid-template-columns: 14rem minmax(0, 1fr);
+  }
+
   .sidebar {
-    display: block;
     position: sticky;
     top: 0;
     border-bottom: none;
@@ -327,8 +407,18 @@ ul {
 
   .edges td {
     display: table-cell;
-    padding: 0.25rem 0.5rem;
+    padding: 0.25rem var(--gap-sm);
     border-bottom: 1px solid var(--border);
+    /* Undo the mobile break-anywhere: it drops each column's min-content width to one character,
+       so the auto table layout starves every column after the first. The wrapper scrolls instead. */
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  /* Hug the content instead of the inherited width:100%, which stretched the table and dumped all
+     the slack into the first column. Needs .table-wrap to outrank `.table-wrap table`. */
+  .table-wrap .edges {
+    width: auto;
   }
 
   .edges td::before {

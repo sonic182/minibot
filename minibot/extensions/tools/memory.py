@@ -25,15 +25,27 @@ def register(mb: ExtensionContext) -> None:
     mb.add_tool(build_kv_tools(memory))
     mb.add_service(_MemoryService(memory))
     if mb.settings.http.enabled:
-        mb.add_page("/memory", "Memory", _build_page(memory, mb.settings.runtime.owner_id))
+        mb.add_page("/memory", "Memory", _build_page(memory, mb.settings.runtime.owner_id), ("GET", "POST"))
 
 
 def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
     # Imported here so the starlette/jinja extra is only required when the server is switched on.
+    from starlette.responses import RedirectResponse
+
     from minibot.adapters.http import render
 
     async def _page(request: Any) -> Any:
         offset = max(0, int(request.query_params.get("offset", 0) or 0))
+        if request.method == "POST":
+            form = await request.form()
+            entry_id = str(form.get("id") or "")
+            data = str(form.get("data") or "")
+            if form.get("action") == "delete" and entry_id:
+                await memory.delete_entry(owner_id, entry_id)
+            elif entry_id and data:
+                await memory.update_entry(owner_id, entry_id, data=data)
+            # Redirect so a reload does not resubmit the edit or the delete.
+            return RedirectResponse(f"/memory?offset={offset}", status_code=303)
         result = await memory.list_entries(owner_id, offset=offset)
         shown = offset + len(result.entries)
         context = {
@@ -51,6 +63,7 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
 
 def _row(entry: Any) -> dict[str, Any]:
     return {
+        "id": entry.id,
         "title": entry.title,
         "data": entry.data,
         "category": entry.metadata.get("category") if entry.metadata else None,

@@ -20,6 +20,20 @@
         {%- if entry.source %} &middot; source {{ entry.source }}{% endif %}
         {%- if entry.expires_at %} &middot; expires {{ entry.expires_at.strftime("%Y-%m-%d %H:%M") }}{% endif %}
       </p>
+      <div class="entry-actions">
+        <details>
+          <summary>Edit</summary>
+          <form method="post" action="/memory?offset={{ offset }}">
+            <input type="hidden" name="action" value="update">
+            <input type="hidden" name="id" value="{{ entry.id }}">
+            <textarea name="data" rows="5" required>{{ entry.data }}</textarea>
+            <button type="submit">Save</button>
+          </form>
+        </details>
+        <button type="button" class="danger" data-delete="{{ entry.id }}" data-delete-title="{{ entry.title }}">
+          Delete
+        </button>
+      </div>
     </li>
     {% endfor %}
   </ul>
@@ -27,8 +41,36 @@
     {% if offset > 0 %}<a href="/memory?offset={{ previous_offset }}">&larr; newer</a>{% endif %}
     {% if next_offset is not none %}<a href="/memory?offset={{ next_offset }}">older &rarr;</a>{% endif %}
   </p>
+
+  <dialog id="confirm-delete">
+    <form method="post" action="/memory?offset={{ offset }}">
+      <input type="hidden" name="action" value="delete">
+      <input type="hidden" name="id" data-confirm-id>
+      <p>Delete <strong data-confirm-title></strong>? This cannot be undone.</p>
+      <p class="dialog-actions">
+        <button type="button" data-confirm-cancel>Cancel</button>
+        <button type="submit" class="danger">Delete</button>
+      </p>
+    </form>
+  </dialog>
   {% else %}
   <p>nothing stored yet</p>
   {% endif %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+{% if entries %}
+<script>
+  const dialog = document.getElementById("confirm-delete");
+  for (const button of document.querySelectorAll("[data-delete]")) {
+    button.addEventListener("click", () => {
+      dialog.querySelector("[data-confirm-id]").value = button.dataset.delete;
+      dialog.querySelector("[data-confirm-title]").textContent = button.dataset.deleteTitle;
+      dialog.showModal();
+    });
+  }
+  dialog.querySelector("[data-confirm-cancel]").addEventListener("click", () => dialog.close());
+</script>
+{% endif %}
 {% endblock %}
