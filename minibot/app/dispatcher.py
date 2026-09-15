@@ -109,6 +109,7 @@ class Dispatcher:
             preload_skill_catalog=settings.tools.skills.preload_catalog,
             event_bus=event_bus,
             task_handoff_callback=task_handoff_callback,
+            extension_prompt_fragments=AppContainer.get_extensions().prompt_fragments_for(main_agent_tools_view.tools),
         )
         self._handler = LLMMessageHandler(turn_service)
         self._logger = logging.getLogger("minibot.dispatcher")

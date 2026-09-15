@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from minibot.app.extensions import ExtensionContext
+
+if TYPE_CHECKING:
+    from minibot.adapters.mcp.client import MCPClient
 
 
 def register(mb: ExtensionContext) -> None:
@@ -34,17 +39,40 @@ def register(mb: ExtensionContext) -> None:
             headers=headers,
         )
         try:
-            bindings.extend(
-                build_mcp_bindings(
-                    mode=server.mode,
-                    server_name=server.name,
-                    client=client,
-                    name_prefix=settings.tools.mcp.name_prefix,
-                    enabled_tools=server.enabled_tools,
-                    disabled_tools=server.disabled_tools,
-                    catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
-                )
+            server_bindings = build_mcp_bindings(
+                mode=server.mode,
+                server_name=server.name,
+                client=client,
+                name_prefix=settings.tools.mcp.name_prefix,
+                enabled_tools=server.enabled_tools,
+                disabled_tools=server.disabled_tools,
+                catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
             )
         except Exception as exc:  # noqa: BLE001
             mb.logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
+            continue
+        bindings.extend(server_bindings)
+        instructions = _server_instructions(client)
+        if instructions and server_bindings:
+            mb.add_prompt_fragment(
+                _instructions_fragment(server.name, instructions),
+                tool_names=[binding.tool.name for binding in server_bindings],
+            )
     mb.add_tool(bindings)
+
+
+def _server_instructions(client: MCPClient) -> str:
+    """The server's own ``instructions`` from the initialize handshake.
+
+    The spec calls them "instructions describing how to use the server", meant to improve the
+    model's understanding of it -- guidance no individual tool description can carry. Cheap here:
+    the client caches the metadata from the handshake ``build_mcp_bindings`` just performed.
+    """
+    metadata = client.server_metadata
+    return (metadata.instructions or "").strip() if metadata is not None else ""
+
+
+def _instructions_fragment(server_name: str, instructions: str) -> str:
+    if not instructions:
+        return ""
+    return f"## MCP server: {server_name}\n\n{instructions}"
