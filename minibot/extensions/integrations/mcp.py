@@ -55,7 +55,11 @@ def register(mb: ExtensionContext) -> None:
             )
         except Exception as exc:  # noqa: BLE001
             mb.logger.exception("failed to load mcp tools", exc_info=exc, extra={"server": server.name})
-            servers.append({**status, "tools": [], "error": str(exc) or type(exc).__name__})
+            message = str(exc) or type(exc).__name__
+            secret = headers.get("Authorization")
+            if secret:
+                message = message.replace(secret, "***")
+            servers.append({**status, "tools": [], "error": message})
             continue
         bindings.extend(server_bindings)
         tool_names = [binding.tool.name for binding in server_bindings]

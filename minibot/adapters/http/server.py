@@ -181,10 +181,18 @@ class _BearerAuth:
         return header.startswith(prefix) and hmac.compare_digest(header[len(prefix) :], self._token)
 
 
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
 class _BasicAuth:
     """ASGI middleware: every route except ``/health`` needs the configured HTTP Basic credentials.
 
-    Sends ``WWW-Authenticate`` so browsers prompt natively, unlike the bearer token scheme.
+    Sends ``WWW-Authenticate`` so browsers prompt natively, unlike the bearer token scheme. Also
+    refuses cross-site state-changing requests: browsers cache Basic credentials per origin and
+    re-attach them automatically, even to a plain ``<form>`` a malicious page submits -- unlike
+    bearer auth, there is no custom header standing in the way. ``Sec-Fetch-Site`` is set by the
+    browser itself, not by page script, so a ``cross-site`` value is trustworthy here; a missing
+    header (non-browser clients) is let through unchanged.
     """
 
     def __init__(self, app: Any, user: str, password: str) -> None:
@@ -192,7 +200,13 @@ class _BasicAuth:
         self._expected = base64.b64encode(f"{user}:{password}".encode())
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] != "http" or scope["path"] == HEALTH_PATH or self._authorized(scope):
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        if scope["method"] in _UNSAFE_METHODS and dict(scope["headers"]).get(b"sec-fetch-site") == b"cross-site":
+            await JSONResponse({"error": "cross-site request rejected"}, status_code=403)(scope, receive, send)
+            return
+        if scope["path"] == HEALTH_PATH or self._authorized(scope):
             await self._app(scope, receive, send)
             return
         headers = {"WWW-Authenticate": 'Basic realm="minibot"'}
