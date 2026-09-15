@@ -189,6 +189,19 @@ substitution it can write into a tool argument. See :doc:`security` for the thre
 .. autoclass:: minibot.adapters.config.schema.VaultConfig
    :no-members:
 
+HTTP server
+-----------
+
+An optional HTTP server running on the daemon's own event loop. Needs the ``http`` extra
+(``poetry install --extras http``). It serves ``/health`` — open, so a container healthcheck needs
+no credential — plus every route an extension contributes through ``mb.add_route`` (see
+:doc:`extensions`). All other routes require ``Authorization: Bearer <auth_token>``, and
+``auth_token`` is mandatory whenever ``host`` is not loopback. TLS is out of scope: run it behind a
+reverse proxy when it is reachable from outside the host.
+
+.. autoclass:: minibot.adapters.config.schema.HTTPServerConfig
+   :no-members:
+
 Extensions
 ----------
 
@@ -245,6 +258,9 @@ Tool Configuration
    * - ``[vault]``
      - ``VaultConfig``
      - ``enabled``, ``path``, ``password_file``; see `Vault`_ above
+   * - ``[http]``
+     - ``HTTPServerConfig``
+     - ``enabled``, ``host``, ``port``, ``auth_token``; see `HTTP server`_ above
    * - ``[tools.tool_output_spill]``
      - ``ToolOutputSpillConfig``
      - ``enabled``, ``spill_after_chars``, ``preview_chars``, ``subdir``, ``exclude_tools``; applies to every tool result (not just ``http_request``)
