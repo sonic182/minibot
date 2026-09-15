@@ -346,9 +346,28 @@ def _build_server_summary(server_name: str, metadata: MCPServerMetadata | None) 
 def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if not schema:
         return {"type": "object", "properties": {}, "additionalProperties": True}
+    schema = _strip_ref_siblings(schema)
     if "type" not in schema:
         return {"type": "object", **schema}
     return schema
+
+
+def _strip_ref_siblings(value: Any) -> Any:
+    """Drop the keywords sitting next to a ``$ref`` anywhere in the schema.
+
+    JSON Schema 2020-12 allows them and MCP servers do emit them (gmem annotates every ``$ref``
+    with a ``description``), but the OpenAI-compatible function-schema validators reject the pair
+    outright -- ``$ref cannot have keywords {'description'}`` -- and the whole request 400s, taking
+    down every turn rather than just that tool. Draft-07 ignored those siblings anyway, so no
+    meaning a consumer honoured is lost.
+    """
+    if isinstance(value, list):
+        return [_strip_ref_siblings(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if "$ref" in value and len(value) > 1:
+        return {"$ref": value["$ref"]}
+    return {key: _strip_ref_siblings(item) for key, item in value.items()}
 
 
 def _build_tool_description(server_name: str, remote_tool_name: str, base_description: str) -> str:
