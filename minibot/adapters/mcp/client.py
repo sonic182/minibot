@@ -104,6 +104,10 @@ class MCPClient:
         await self._initialize()
         return self._server_metadata or MCPServerMetadata(name=self._server_name)
 
+    @property
+    def server_metadata(self) -> MCPServerMetadata | None:
+        return self._server_metadata
+
     async def call_tool(self, tool_name: str, payload: dict[str, Any]) -> MCPToolCallResult:
         await self._initialize()
         response = await self._request("tools/call", params={"name": tool_name, "arguments": payload})
