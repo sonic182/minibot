@@ -15,6 +15,8 @@ from minibot.adapters.graph.sqlite import DEFAULT_SQLITE_URL, SqliteGraphStore
 from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.graph import build_graph_tools
 
+_PAGE_LIMIT = 200
+
 
 class _GraphStoreService:
     def __init__(self, store: SqliteGraphStore) -> None:
@@ -44,12 +46,20 @@ def _build_page(store: SqliteGraphStore, owner_id: str) -> Any:
     from minibot.adapters.http import render
 
     async def _page(request: Any) -> Any:
-        edges = await store.list_edges(owner_id=owner_id)
+        edges = await store.list_edges(owner_id=owner_id, limit=_PAGE_LIMIT + 1)
+        truncated = len(edges) > _PAGE_LIMIT
+        edges = edges[:_PAGE_LIMIT]
         namespaces: dict[str, list[dict[str, Any]]] = {}
         for edge in edges:
             namespaces.setdefault(edge["graph"], []).append(edge)
         nodes = sorted({edge["source"] for edge in edges} | {edge["target"] for edge in edges})
-        context = {"owner_id": owner_id, "namespaces": namespaces, "nodes": nodes, "edge_count": len(edges)}
+        context = {
+            "owner_id": owner_id,
+            "namespaces": namespaces,
+            "nodes": nodes,
+            "edge_count": len(edges),
+            "truncated": truncated,
+        }
         return render(request, "graph.html", context)
 
     return _page

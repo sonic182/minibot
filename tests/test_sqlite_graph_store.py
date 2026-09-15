@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 
+from minibot.adapters import http as http_module
 from minibot.adapters.graph.sqlite import SqliteGraphStore
-from minibot.extensions.tools.graph import _GraphStoreService
+from minibot.extensions.tools.graph import _build_page, _GraphStoreService
 
 
 @pytest_asyncio.fixture
@@ -158,3 +161,36 @@ async def test_graph_store_service_closes_store() -> None:
     await service.stop()
 
     assert store.closed is True
+
+
+@pytest.mark.asyncio
+async def test_list_edges_respects_limit_and_owner(graph_store: SqliteGraphStore) -> None:
+    for index in range(3):
+        await graph_store.link(
+            graph="memory",
+            owner_id="owner-a",
+            source=f"node:{index}",
+            rel="connects",
+            target=f"node:{index + 1}",
+        )
+    await graph_store.link(graph="memory", owner_id="owner-b", source="node:x", rel="connects", target="node:y")
+
+    edges = await graph_store.list_edges(owner_id="owner-a", limit=2)
+
+    assert len(edges) == 2
+    assert all(edge["source"].startswith("node:") for edge in edges)
+
+
+@pytest.mark.asyncio
+async def test_graph_page_discloses_truncated_edges(monkeypatch: pytest.MonkeyPatch) -> None:
+    edges = [
+        {"graph": "memory", "source": f"node:{index}", "rel": "connects", "target": f"node:{index + 1}"}
+        for index in range(201)
+    ]
+    store = SimpleNamespace(list_edges=AsyncMock(return_value=edges))
+    monkeypatch.setattr(http_module, "render", lambda _request, _template, context: context)
+
+    context = await _build_page(store, "owner")(None)
+
+    assert context["truncated"] is True
+    assert len(context["namespaces"]["memory"]) == 200

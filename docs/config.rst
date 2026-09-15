@@ -199,8 +199,9 @@ extensions, tools, routes, uptime, and pending turns. Its stylesheet is served b
 Conversation history is available at ``/history`` and can contain sensitive data. Extensions can
 also contribute routes through ``mb.add_route`` (see :doc:`extensions`). All routes except
 ``/health`` require a bearer token or HTTP Basic credentials; one is mandatory unless ``host`` is
-the literal ``127.0.0.1`` or ``::1``. TLS is out of scope: run it behind a reverse proxy when it is
-reachable from outside the host.
+the literal ``127.0.0.1`` or ``::1``. When the key-value memory and graph extensions are enabled,
+their review pages are available at ``/memory`` and ``/graph``. TLS is out of scope: run it behind
+a reverse proxy when it is reachable from outside the host.
 
 .. autoclass:: minibot.adapters.config.schema.HTTPServerConfig
    :no-members:

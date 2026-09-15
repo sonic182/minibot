@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from typing import Any
 
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
@@ -30,20 +31,33 @@ def register(mb: ExtensionContext) -> None:
 
 def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
     # Imported here so the starlette/jinja extra is only required when the server is switched on.
-    from starlette.responses import RedirectResponse
+    from secrets import token_urlsafe
+
+    from starlette.responses import PlainTextResponse, RedirectResponse
 
     from minibot.adapters.http import render
 
+    csrf_token = token_urlsafe()
+
     async def _page(request: Any) -> Any:
-        offset = max(0, int(request.query_params.get("offset", 0) or 0))
+        try:
+            offset = max(0, int(request.query_params.get("offset", 0) or 0))
+        except ValueError:
+            return PlainTextResponse("offset must be an integer", status_code=400)
         if request.method == "POST":
             form = await request.form()
+            submitted_token = str(form.get("csrf_token") or "")
+            if not hmac.compare_digest(submitted_token, csrf_token):
+                return PlainTextResponse("invalid csrf token", status_code=403)
             entry_id = str(form.get("id") or "")
             data = str(form.get("data") or "")
-            if form.get("action") == "delete" and entry_id:
+            action = form.get("action")
+            if action == "delete" and entry_id:
                 await memory.delete_entry(owner_id, entry_id)
-            elif entry_id and data:
+            elif action == "update" and entry_id and data:
                 await memory.update_entry(owner_id, entry_id, data=data)
+            else:
+                return PlainTextResponse("invalid memory action", status_code=400)
             # Redirect so a reload does not resubmit the edit or the delete.
             return RedirectResponse(f"/memory?offset={offset}", status_code=303)
         result = await memory.list_entries(owner_id, offset=offset)
@@ -55,6 +69,7 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
             "offset": offset,
             "previous_offset": max(0, offset - result.limit),
             "next_offset": shown if shown < result.total else None,
+            "csrf_token": csrf_token,
         }
         return render(request, "memory.html", context)
 
