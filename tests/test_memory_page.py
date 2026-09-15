@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import aiosonic
 import pytest
 import pytest_asyncio
@@ -12,6 +14,12 @@ from minibot.extensions.tools.memory import _build_page
 TOKEN = "s3cret"
 OWNER = "primary"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
+
+
+def _csrf_token(body: str) -> str:
+    match = re.search(r'name="csrf_token" value="([^"]+)"', body)
+    assert match is not None
+    return match.group(1)
 
 
 @pytest_asyncio.fixture()
@@ -46,9 +54,11 @@ async def test_edit_replaces_data_and_bumps_updated_at(server: HttpServer, memor
     before = (await memory.get_entry(OWNER, entry_id)).updated_at
 
     async with aiosonic.HTTPClient() as client:
+        page = await client.get(f"http://127.0.0.1:{server.port}/memory", headers=AUTH)
+        csrf_token = _csrf_token(await page.text())
         response = await client.post(
             f"http://127.0.0.1:{server.port}/memory",
-            data={"action": "update", "id": entry_id, "data": "with milk"},
+            data={"action": "update", "id": entry_id, "data": "with milk", "csrf_token": csrf_token},
             headers=AUTH,
         )
         assert response.status_code == 303
@@ -63,9 +73,11 @@ async def test_delete_removes_the_entry(server: HttpServer, memory) -> None:
     entry_id = await _entry(memory, "coffee", "black")
 
     async with aiosonic.HTTPClient() as client:
+        page = await client.get(f"http://127.0.0.1:{server.port}/memory", headers=AUTH)
+        csrf_token = _csrf_token(await page.text())
         response = await client.post(
             f"http://127.0.0.1:{server.port}/memory",
-            data={"action": "delete", "id": entry_id},
+            data={"action": "delete", "id": entry_id, "csrf_token": csrf_token},
             headers=AUTH,
         )
         assert response.status_code == 303
@@ -97,3 +109,25 @@ async def test_writes_require_auth(server: HttpServer, memory) -> None:
         assert response.status_code == 401
 
     assert await memory.get_entry(OWNER, entry_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_writes_require_csrf_token(server: HttpServer, memory) -> None:
+    entry_id = await _entry(memory, "coffee", "black")
+
+    async with aiosonic.HTTPClient() as client:
+        response = await client.post(
+            f"http://127.0.0.1:{server.port}/memory",
+            data={"action": "delete", "id": entry_id},
+            headers=AUTH,
+        )
+        assert response.status_code == 403
+
+    assert await memory.get_entry(OWNER, entry_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_invalid_offset_is_rejected(server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(f"http://127.0.0.1:{server.port}/memory?offset=invalid", headers=AUTH)
+        assert response.status_code == 400

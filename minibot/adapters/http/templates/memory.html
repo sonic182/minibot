@@ -26,6 +26,7 @@
           <form method="post" action="/memory?offset={{ offset }}">
             <input type="hidden" name="action" value="update">
             <input type="hidden" name="id" value="{{ entry.id }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <textarea name="data" rows="5" required>{{ entry.data }}</textarea>
             <button type="submit">Save</button>
           </form>
@@ -46,6 +47,7 @@
     <form method="post" action="/memory?offset={{ offset }}">
       <input type="hidden" name="action" value="delete">
       <input type="hidden" name="id" data-confirm-id>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <p>Delete <strong data-confirm-title></strong>? This cannot be undone.</p>
       <p class="dialog-actions">
         <button type="button" data-confirm-cancel>Cancel</button>

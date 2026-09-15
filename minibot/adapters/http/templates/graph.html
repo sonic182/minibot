@@ -6,7 +6,11 @@
 <section>
   <h2>Graph memory</h2>
   {% if namespaces %}
-  <p class="muted">{{ edge_count }} live edge{{ "" if edge_count == 1 else "s" }} &middot; owner {{ owner_id }}</p>
+  <p class="muted">
+    {% if truncated %}Showing newest {{ edge_count }} live edges; additional edges are not shown
+    {% else %}{{ edge_count }} live edge{{ "" if edge_count == 1 else "s" }}{% endif %}
+    &middot; owner {{ owner_id }}
+  </p>
   {% for namespace, edges in namespaces.items() %}
   <h3>{{ namespace }}</h3>
   <div class="table-wrap">
