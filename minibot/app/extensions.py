@@ -78,6 +78,7 @@ class ExtensionContext:
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
+    prompt_fragments: list[str] = field(default_factory=list)
 
     def on(self, event_type: type[BaseEvent], handler: EventHandler | None = None) -> Any:
         """Subscribe to ``event_type``. Usable directly or as a decorator."""
@@ -142,6 +143,17 @@ class ExtensionContext:
     def add_service(self, service: ExtensionService) -> None:
         self.services.append(service)
 
+    def add_prompt_fragment(self, text: str) -> None:
+        """Append ``text`` to the main agent's system prompt.
+
+        For guidance the model needs before it picks a tool and that no single tool description can
+        carry -- an MCP server's ``instructions``, a backend's conventions. Tool-specific wording
+        belongs in that tool's description, not here: this is paid for on every single turn.
+        """
+        text = text.strip()
+        if text:
+            self.prompt_fragments.append(text)
+
 
 class ExtensionRegistry:
     """Everything the loaded extensions contributed, with a service-shaped lifecycle."""
@@ -155,6 +167,10 @@ class ExtensionRegistry:
     @property
     def tools(self) -> list[ToolBinding]:
         return [binding for context in self._contexts for binding in context.tools]
+
+    @property
+    def prompt_fragments(self) -> list[str]:
+        return [fragment for context in self._contexts for fragment in context.prompt_fragments]
 
     def names(self) -> list[str]:
         return [context.name for context in self._contexts]
