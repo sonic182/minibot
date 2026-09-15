@@ -255,10 +255,17 @@ ul {
 }
 
 .message pre,
-.entry pre {
+.entry pre,
+.panel pre {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+pre.error {
+  margin-top: var(--gap-sm);
+  font-size: 0.85rem;
+  color: #c33;
 }
 
 .tag {

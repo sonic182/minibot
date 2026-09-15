@@ -301,6 +301,31 @@ async def test_extension_route_accepts_basic_auth() -> None:
         await instance.stop()
 
 
+@pytest.mark.asyncio
+async def test_basic_auth_rejects_a_cross_site_post() -> None:
+    # A browser auto-attaches cached Basic credentials to any request to this origin, including
+    # one a malicious page triggers via a plain <form> post; Sec-Fetch-Site: cross-site is the
+    # browser-set signal that tells the two apart from a same-origin form submission.
+    instance = HttpServer(
+        HTTPServerConfig(enabled=True, host="127.0.0.1", port=0, basic_auth_user="user", basic_auth_password="pw"),
+        [("/ping", _pong, ("GET", "POST"))],
+    )
+    await instance.start()
+    try:
+        async with aiosonic.HTTPClient() as client:
+            url = f"http://127.0.0.1:{instance.port}/ping"
+            credentials = base64.b64encode(b"user:pw").decode()
+            headers = {"Authorization": f"Basic {credentials}"}
+            cross_site = await client.post(url, headers={**headers, "Sec-Fetch-Site": "cross-site"})
+            assert cross_site.status_code == 403
+            same_origin = await client.post(url, headers={**headers, "Sec-Fetch-Site": "same-origin"})
+            assert same_origin.status_code == 200
+            no_header = await client.post(url, headers=headers)
+            assert no_header.status_code == 200
+    finally:
+        await instance.stop()
+
+
 @pytest.mark.parametrize(
     ("middleware", "header"),
     [
