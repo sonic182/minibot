@@ -72,3 +72,13 @@ Why self-host
    graph
    vault
    security
+
+For AI agents
+-------------
+
+Machine-readable versions of these docs are published alongside the site:
+
+- `llms.txt <https://sonic182.github.io/minibot/llms.txt>`_ — a concise, curated index for LLM
+  and AI-agent consumers.
+- `llms-full.txt <https://sonic182.github.io/minibot/llms-full.txt>`_ — a single-file dump of the
+  complete documentation.

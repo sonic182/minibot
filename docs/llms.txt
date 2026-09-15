@@ -7,6 +7,7 @@
 ## Docs
 
 - [Getting Started](https://sonic182.github.io/minibot/getting_started.html): install and run
+- [Demo](https://sonic182.github.io/minibot/demo.html): screenshots of images, browsing, charts, and voice
 - [Providers](https://sonic182.github.io/minibot/providers.html): configure LLM providers and compatible endpoints
 - [Extending Minibot](https://sonic182.github.io/minibot/extending.html): the customization ladder
 - [Python extensions](https://sonic182.github.io/minibot/extensions.html): tools, events, services, channels
@@ -24,6 +25,7 @@
 - [Audio transcription](https://sonic182.github.io/minibot/audio.html)
 - [RAG & persistent knowledge](https://sonic182.github.io/minibot/rag.html)
 - [Relation graph](https://sonic182.github.io/minibot/graph.html)
+- [Credential vault](https://sonic182.github.io/minibot/vault.html): encrypted secrets and secret references
 - [Security & sandboxing](https://sonic182.github.io/minibot/security.html)
 
 ## Features

@@ -12,7 +12,7 @@ author = "sonic182"
 release = _pyproject["tool"]["poetry"]["version"]
 
 # SEO: the site <title> (the index page uses this verbatim; subpages become "<Page> - <this>").
-html_title = "Minibot — Self-Hosted AI Assistant for Telegram"
+html_title = "Minibot AI Assistant"
 html_short_title = "Minibot"
 
 # Canonical base URL: used by sphinx-sitemap and for absolute links.
@@ -22,6 +22,8 @@ html_baseurl = "https://sonic182.github.io/minibot/"
 # from sitemap URLs and keep generated index/search pages out of it.
 sitemap_url_scheme = "{link}"
 sitemap_excludes = ["genindex.html", "py-modindex.html", "search.html", "_modules/*"]
+# Requires the git history (CI checks out with fetch-depth: 0); emits a warning on a shallow clone.
+sitemap_show_lastmod = True
 
 # Machine-readable LLM index, copied to the built site root (llms.txt / llms-full.txt).
 html_extra_path = ["llms.txt", "llms-full.txt"]

@@ -19,6 +19,21 @@ not a third-party service.
 - Docker: `docker compose up -d` (Qdrant and RabbitMQ are commented out; `[tools.rag]` and
   `[tasks]` both default to SQLite).
 
+## Configuration
+
+`config.toml` (selected by `MINIBOT_CONFIG`, or an explicit `--config` where accepted) covers
+runtime, channels, `[llm]` and `[providers.<name>]`, `[orchestration]`, `[memory]`, `[tasks]`,
+`[scheduler.prompts]`, `[tools.*]`, `[logging]`, `[extensions]`, and the optional `[vault]` and
+`[http]` servers. String values expand `${ENV_VAR}` (single pass, unset fails, `$$` escapes) and,
+once the vault is unlocked, `${secret:NAME}`. `config.example.toml` is the reference;
+`config.yolo.toml` is a full-capability profile.
+
+## CLI
+
+`minibot` starts the daemon, `minibot console` runs the local terminal channel, and
+`minibot configure` is the interactive setup wizard. `minibot vault init|edit|list` manages the
+encrypted credential store, and `minibot codex login` signs in to the ChatGPT Codex provider.
+
 ## Extending Minibot
 
 Minibot is built to be extended, and most changes need no Python:
@@ -102,6 +117,14 @@ MiniBot is a lightweight hexagonal app: `core` (domain contracts), `app` (orches
 `adapters` (infrastructure), `llm` (provider/tool wiring), plus optional `rag` and `extensions`.
 Dependency direction points inward, and both the daemon and console entrypoints publish to an
 in-process asyncio event bus.
+
+## Credential vault
+
+`[vault]` (the `vault` extra) keeps secrets encrypted at rest in `secrets.vault.yml`
+(AES-256-GCM, scrypt-derived key) and out of the LLM's reach. Reference a secret from config with
+`${secret:NAME}`; each secret resolves only at the destination named in config, and the model's
+only vault capability is `list_secrets` (names, never values). Write secrets with
+`minibot vault edit`.
 
 ## Security
 

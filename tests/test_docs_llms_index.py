@@ -54,6 +54,13 @@ def test_llms_index_only_links_existing_pages() -> None:
     assert not missing, f"llms.txt links pages with no source file: {missing}"
 
 
+def test_every_page_is_in_llms_index() -> None:
+    """``llms.txt`` is hand-written; keep every docs page covered so omissions are caught."""
+    pages = set(PAGE_URL.findall((DOCS_DIR / "llms.txt").read_text()))
+    missing = sorted(_page_stems() - pages)
+    assert not missing, f"docs pages missing from llms.txt: {missing}"
+
+
 def test_toctree_entries_have_source_files() -> None:
     missing = [entry for entry in _toctree_entries() if not _page_source_exists(entry)]
     assert not missing, f"index.rst toctree references missing pages: {missing}"

@@ -112,8 +112,8 @@ If you change behavior, update the docs in the same PR:
 
 `docs/llms.txt` and `docs/llms-full.txt` are not produced by the docs build — nothing
 regenerates them automatically, so they need updating deliberately when you add or rename a
-docs page. `tests/test_docs_llms_index.py` only checks that their links resolve, not that
-pages are covered.
+docs page. `tests/test_docs_llms_index.py` checks that `llms.txt` links resolve and that every
+docs page is listed there; `llms-full.txt` is not covered by a test.
 
 ## Commits and PR hygiene
 
