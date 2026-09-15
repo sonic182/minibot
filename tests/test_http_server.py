@@ -73,6 +73,7 @@ async def test_build_http_server_populates_dashboard_data(monkeypatch: pytest.Mo
     pending_turn_store = SimpleNamespace(list_pending=AsyncMock(return_value=[("pending-turn", "{}")]))
     extensions = SimpleNamespace(
         routes=[("/ping", _pong, ("GET",))],
+        pages=Mock(return_value=[]),
         summaries=Mock(
             return_value=[{"name": "scheduler", "tools": 1, "services": 0, "subscriptions": 0, "routes": 0}]
         ),
@@ -92,6 +93,7 @@ async def test_build_http_server_populates_dashboard_data(monkeypatch: pytest.Mo
     dispatcher = SimpleNamespace(main_agent_tool_names=["web_search"])
 
     monkeypatch.setattr(daemon_module.AppContainer, "get_pending_turn_store", lambda: pending_turn_store)
+    monkeypatch.setattr(daemon_module.AppContainer, "get_memory_backend", InMemoryMemoryStore)
     monkeypatch.setattr(http_module, "build_dashboard_route", build_dashboard_route)
 
     daemon_module._build_http_server(
