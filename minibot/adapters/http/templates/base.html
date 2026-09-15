@@ -5,13 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}minibot{% endblock %}</title>
   <link rel="stylesheet" href="/static/dashboard.css">
+  <script defer src="/static/nav.js"></script>
+  <script>
+    // The sidebar starts open on desktop and closed on a phone. Set on <html> before the first
+    // paint, so the page never renders in the wrong state and flips once nav.js runs.
+    if (window.innerWidth >= 640) document.documentElement.classList.add("nav-open");
+  </script>
 </head>
 <body>
-  <header>
-    <h1>minibot</h1>
-  </header>
-  <main>
-    {% block content %}{% endblock %}
-  </main>
+  <nav class="navbar">
+    <button type="button" class="burger" data-nav-toggle aria-label="Toggle menu" aria-expanded="false">&#9776;</button>
+    <span class="brand">minibot</span>
+  </nav>
+  <div class="shell">
+    <aside class="sidebar" data-nav-panel>
+      <ul>
+        {% for path, label in nav_entries %}
+        <li><a href="{{ path }}"{% if path == request.url.path %} class="current"{% endif %}>{{ label }}</a></li>
+        {% endfor %}
+      </ul>
+    </aside>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </body>
 </html>
