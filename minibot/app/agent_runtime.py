@@ -19,6 +19,7 @@ from minibot.core.events import ReasoningEvent
 from minibot.core.tasks import TaskStopReason
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.reasoning_replay import reasoning_text_from_message
+from minibot.llm.services.runtime_compaction import RuntimeCompactor
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
 from minibot.llm.services.tool_loop_guard import (
     MAX_REPEATED_TOOL_ITERATIONS,
@@ -42,6 +43,13 @@ _TRUNCATED_PATCH = (
     "Your previous response was truncated. Please resend your complete tool call with all required arguments."
 )
 _PSEUDO_TOOL_PATCH = "Please use the tool calling interface instead of embedding tool calls in text."
+_CONTINUE_AFTER_COMPACTION = "Continue the task from the summary above. Do not repeat completed steps."
+_REPEATED_FAILURE_NUDGE_AT = 2
+_REPEATED_FAILURE_NUDGE = (
+    "The tool `{tool}` just failed again with the same arguments and the same error, so that call "
+    "cannot succeed. Do not retry it. Carry on with whatever else the task needs, and state this "
+    "unresolved failure plainly in your final answer so the person can decide what to do about it."
+)
 
 
 @dataclass(frozen=True)
@@ -66,10 +74,14 @@ class AgentRuntime:
         allow_system_inserts: bool = False,
         managed_files_root: str | None = None,
         event_bus: EventBus | None = None,
+        compactor: RuntimeCompactor | None = None,
     ) -> None:
         self._llm_client = llm_client
         self._tools = [pre_response_binding(), *list(tools or [])]
         self._limits = limits or RuntimeLimits()
+        # Only delegated runs pass one: the main turn compacts its own persisted history between
+        # turns, in HistoryCompactionService, and never loops here long enough to need this.
+        self._compactor = compactor
         self._allow_system_inserts = allow_system_inserts
         self._allowed_append_message_tools = set(allowed_append_message_tools or [])
         self._event_bus = event_bus
@@ -141,6 +153,48 @@ class AgentRuntime:
                         provider_tool_calls=provider_tool_calls,
                         stop_reason=TaskStopReason.MAX_STEPS,
                     )
+
+                # Top of the loop on purpose: every tool call from the previous step already has
+                # its result appended, so the transcript is consistent and rewriting it can't
+                # orphan a tool_call the provider is still expecting an answer for.
+                if self._compactor is not None and self._compactor.should_compact(input_tokens):
+                    outcome = await self._compactor.compact(
+                        state,
+                        previous_response_id=previous_response_id,
+                        prompt_cache_key=prompt_cache_key,
+                    )
+                    if outcome.performed:
+                        self._logger.info(
+                            "agent runtime compacted context mid-run",
+                            extra={
+                                "step": step,
+                                "input_tokens_before": input_tokens,
+                                "threshold_tokens": self._compactor.threshold_tokens,
+                                "message_count": len(state.messages),
+                                "native": outcome.response_id is not None,
+                            },
+                        )
+                        previous_response_id = outcome.response_id
+                        if use_responses_followup and previous_response_id is not None:
+                            # The compacted response already holds this state server-side, the
+                            # same reason build_continue_call_kwargs sends a minimal nudge rather
+                            # than full history to continue a previous_response_id: resending the
+                            # local render here would duplicate it right after compacting
+                            # specifically to shrink it.
+                            responses_followup_messages = self._message_renderer.render_messages(
+                                AgentState(
+                                    messages=[
+                                        AgentMessage(
+                                            role="user",
+                                            content=[MessagePart(type="text", text=_CONTINUE_AFTER_COMPACTION)],
+                                        )
+                                    ]
+                                )
+                            )
+                        else:
+                            responses_followup_messages = None
+                    # Either way, wait for a fresh measurement before considering it again.
+                    input_tokens = None
 
                 call_messages = self._message_renderer.render_messages(state)
                 if (
@@ -329,9 +383,14 @@ class AgentRuntime:
                         if failure_signature:
                             count = repeated_failure_counts.get(failure_signature, 0) + 1
                             repeated_failure_counts[failure_signature] = count
-                            if count >= 2:
+                            # Nudge once per distinct failure, then let the run continue. Killing it
+                            # here used to throw away everything the run had already produced over a
+                            # call that simply cannot succeed -- an unreachable host is a finding to
+                            # report, not a reason to lose the work. max_steps, max_tool_calls and
+                            # the timeout are still the ceilings that stop a genuine loop.
+                            if count == _REPEATED_FAILURE_NUDGE_AT:
                                 self._logger.warning(
-                                    "agent runtime repeated identical tool failure; returning fallback",
+                                    "agent runtime repeated identical tool failure; telling the agent to move on",
                                     extra={
                                         "tool": execution.tool_name,
                                         "call_id": execution.call_id,
@@ -339,19 +398,20 @@ class AgentRuntime:
                                         "failure_signature": failure_signature[:16],
                                     },
                                 )
-                                return RuntimeResult(
-                                    payload=(
-                                        "I hit the same tool error repeatedly with the same parameters before "
-                                        f"finishing. Tool: {execution.tool_name}. "
-                                        "Please adjust parameters or ask for a different approach."
-                                    ),
-                                    response_id=completion.response_id,
-                                    state=state,
-                                    total_tokens=total_tokens,
-                                    input_tokens=input_tokens,
-                                    provider_tool_calls=provider_tool_calls,
-                                    stop_reason=TaskStopReason.REPEATED_TOOL_FAILURE,
+                                nudge = AgentMessage(
+                                    role="user",
+                                    content=[
+                                        MessagePart(
+                                            type="text",
+                                            text=_REPEATED_FAILURE_NUDGE.format(tool=execution.tool_name),
+                                        )
+                                    ],
                                 )
+                                state.messages.append(nudge)
+                                # Also through the directive list: in previous_response_id mode only
+                                # these get rendered into the follow-up, so appending to state alone
+                                # would leave the model never seeing it.
+                                applied_directive_messages.append(nudge)
                 if use_responses_followup:
                     responses_followup_messages = [execution.message_payload for execution in executions]
                     if applied_directive_messages:

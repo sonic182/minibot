@@ -20,6 +20,7 @@ from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.services import LLMExecutionProfile
+from minibot.llm.services.runtime_compaction import build_compactor, threshold_from_context_limit
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
@@ -49,9 +50,11 @@ class AgentDelegateTool:
         environment_prompt_fragment: str = "",
         managed_storage: LocalFileStorage | None = None,
         spill_config: ToolOutputSpillConfig | None = None,
+        context_ratio_before_compact: float = 0.0,
     ) -> None:
         self._registry = registry
         self._llm_factory = llm_factory
+        self._context_ratio_before_compact = context_ratio_before_compact
         self._tools = list(tools)
         self._managed_storage = managed_storage
         self._spill_config = spill_config or ToolOutputSpillConfig()
@@ -146,6 +149,11 @@ class AgentDelegateTool:
             allowed_append_message_tools=["self_insert_artifact", "artifact_insert"],
             allow_system_inserts=False,
             managed_files_root=None,
+            compactor=build_compactor(
+                llm_client=llm_client,
+                threshold_tokens=threshold_from_context_limit(spec.context_limit, self._context_ratio_before_compact),
+                logger=self._logger,
+            ),
         )
         tool_required = self._delegated_tool_call_required(spec)
         attempts = 1

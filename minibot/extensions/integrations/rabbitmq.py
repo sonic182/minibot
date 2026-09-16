@@ -12,17 +12,19 @@ def register(mb: ExtensionContext) -> None:
         return
     from minibot.adapters.messaging.rabbitmq.producer import RabbitMQTaskProducer
     from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
-    from minibot.adapters.tasks.manager import TaskManager
+    from minibot.adapters.tasks.manager import TaskManager, compact_threshold_for_agent
     from minibot.llm.tools.tasks import TaskTools
 
     settings = mb.settings
     store = SQLiteTaskStore(settings.tasks.sqlite)
+    agent_registry = mb.agent_registry or AgentRegistry(load_agent_specs(settings.orchestration.directory))
     manager = TaskManager(
         mb.event_bus,
         settings.tasks.worker_timeout_seconds,
         store,
         settings.tasks.sqlite.lease_timeout_seconds,
         secrets=mb.vault.as_mapping() if mb.vault else None,
+        compact_threshold_for=lambda name: compact_threshold_for_agent(agent_registry, settings, name),
     )
     producer = RabbitMQTaskProducer(settings.rabbitmq, store)
     consumer = RabbitMQConsumerService(
@@ -39,7 +41,7 @@ def register(mb: ExtensionContext) -> None:
             task_manager=manager,
             task_repository=store,
             config=settings.tasks,
-            agent_registry=AgentRegistry(load_agent_specs(settings.orchestration.directory)),
+            agent_registry=agent_registry,
         ).bindings()
     )
     mb.add_service(consumer)

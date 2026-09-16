@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
-from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.agent_runtime import _CONTINUE_AFTER_COMPACTION, AgentRuntime
 from minibot.core.agent_runtime import (
     AgentMessage,
     AgentState,
@@ -12,6 +13,7 @@ from minibot.core.agent_runtime import (
     MessagePart,
     ToolResult,
 )
+from minibot.core.tasks import TaskStopReason
 from minibot.llm.provider_factory import LLMClient, LLMCompletionStep, ToolExecutionRecord
 from minibot.llm.tools.base import ToolContext
 from tests.fixtures.llm.fakes import FakeMessage as _FakeMessage
@@ -254,7 +256,10 @@ async def test_runtime_recovers_pseudo_tool_call_from_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_stops_on_repeated_identical_tool_failure_signatures() -> None:
+async def test_runtime_nudges_and_continues_on_repeated_identical_tool_failures() -> None:
+    # A call that cannot succeed (an unreachable host, say) is a finding to report, not a reason
+    # to throw away everything the run already produced. The runtime tells the agent to stop
+    # retrying and keeps going; the step limits remain the ceiling for a genuine loop.
     tool_call = _http_tool_call()
     steps = [_tool_step(tool_call, "resp-1"), _tool_step(tool_call, "resp-2"), _final_step("resp-3")]
     executions = [
@@ -266,9 +271,16 @@ async def test_runtime_stops_on_repeated_identical_tool_failure_signatures() -> 
 
     result = await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="1"))
 
-    assert llm_client.complete_once_calls == 2
-    assert isinstance(result.payload, str)
-    assert "same tool error repeatedly" in result.payload
+    assert llm_client.complete_once_calls == 3
+    assert result.payload == "done"
+    assert result.stop_reason is TaskStopReason.COMPLETED
+    nudges = [
+        message
+        for message in result.state.messages
+        if message.role == "user" and "Do not retry it" in (message.content[0].text or "")
+    ]
+    assert len(nudges) == 1, "the agent should be told once per distinct failure, not on every repeat"
+    assert "http_request" in (nudges[0].content[0].text or "")
 
 
 @pytest.mark.asyncio
@@ -329,3 +341,123 @@ async def test_runtime_does_not_stop_when_failure_signatures_differ() -> None:
 
     assert llm_client.complete_once_calls == 3
     assert result.payload == "done"
+
+
+class _RecordingCompactor:
+    """Stands in for RuntimeCompactor: the runtime only depends on this shape."""
+
+    threshold_tokens = 100
+
+    def __init__(self, *, response_id: str | None = "compacted-1") -> None:
+        self._response_id = response_id
+        self.calls: list[int] = []
+
+    def should_compact(self, input_tokens: int | None) -> bool:
+        return isinstance(input_tokens, int) and input_tokens >= self.threshold_tokens
+
+    async def compact(self, state: AgentState, **_: Any) -> Any:
+        self.calls.append(len(state.messages))
+        state.messages[:] = [AgentMessage(role="user", content=[MessagePart(type="text", text="summary")])]
+        return SimpleNamespace(performed=True, response_id=self._response_id, summary="summary")
+
+
+@pytest.mark.asyncio
+async def test_runtime_compacts_once_the_provider_reports_pressure() -> None:
+    # The pressure signal is the provider's own input_tokens for the previous step, and the check
+    # runs at the top of the loop so every tool call already has its result appended.
+    tool_call = _http_tool_call()
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="r1",
+            total_tokens=3,
+            input_tokens=150,
+        ),
+        _final_step("r2"),
+    ]
+    llm_client = _StubRuntimeLLMClient(steps, [[_http_record(content="ok")]])
+    compactor = _RecordingCompactor()
+    runtime = _runtime(llm_client, compactor=compactor)
+
+    result = await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="primary"))
+
+    assert compactor.calls, "compaction never ran despite input_tokens above the threshold"
+    assert result.payload == "done"
+
+
+@pytest.mark.asyncio
+async def test_runtime_sends_a_minimal_nudge_after_native_compaction_not_the_full_render() -> None:
+    # Regression: chaining off previous_response_id normally sends only new content, relying on
+    # the provider to hold the rest server-side. Right after a native compaction, the new
+    # previous_response_id already IS that state, so falling back to a full local render here
+    # would resend system+task+summary on top of a response that already holds them.
+    tool_call = _http_tool_call()
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="r1",
+            total_tokens=3,
+            input_tokens=150,
+        ),
+        _final_step("r2"),
+    ]
+    llm_client = _StubRuntimeLLMClient(
+        steps,
+        [[_http_record(content="ok")]],
+        is_responses_provider=True,
+        responses_state_mode="previous_response_id",
+    )
+    compactor = _RecordingCompactor(response_id="compacted-1")
+    runtime = _runtime(llm_client, compactor=compactor)
+
+    result = await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="primary"))
+
+    assert compactor.calls
+    assert result.payload == "done"
+    second_call_messages = llm_client.complete_once_kwargs[1]["messages"]
+    assert second_call_messages == [{"role": "user", "content": _CONTINUE_AFTER_COMPACTION}]
+    assert llm_client.complete_once_kwargs[1]["previous_response_id"] == "compacted-1"
+
+
+@pytest.mark.asyncio
+async def test_runtime_leaves_the_loop_alone_below_the_threshold() -> None:
+    tool_call = _http_tool_call()
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="r1",
+            total_tokens=3,
+            input_tokens=10,
+        ),
+        _final_step("r2"),
+    ]
+    llm_client = _StubRuntimeLLMClient(steps, [[_http_record(content="ok")]])
+    compactor = _RecordingCompactor()
+    runtime = _runtime(llm_client, compactor=compactor)
+
+    result = await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="primary"))
+
+    assert compactor.calls == []
+    assert result.payload == "done"
+
+
+@pytest.mark.asyncio
+async def test_runtime_without_a_compactor_is_unchanged() -> None:
+    # The main turn passes no compactor; it must keep behaving exactly as before.
+    tool_call = _http_tool_call()
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="r1",
+            total_tokens=3,
+            input_tokens=10_000_000,
+        ),
+        _final_step("r2"),
+    ]
+    llm_client = _StubRuntimeLLMClient(steps, [[_http_record(content="ok")]])
+    runtime = _runtime(llm_client)
+
+    result = await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="primary"))
+
+    assert result.payload == "done"
+    assert llm_client.complete_once_calls == 2

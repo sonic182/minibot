@@ -496,3 +496,45 @@ async def test_reader_retryable_worker_error_retries_then_succeeds(monkeypatch: 
     ack_cb.assert_called_once()
     nack_cb.assert_not_called()
     await sub.close()
+
+
+@pytest.mark.asyncio
+async def test_spawn_sends_the_compaction_threshold_to_the_worker() -> None:
+    # The worker reloads agent specs from disk and never sees what token auto-config derived at
+    # boot, so the daemon has to resolve the budget and ship it with the task.
+    bus = EventBus()
+    manager = TaskManager(bus, 5.0, compact_threshold_for=lambda name: 4321 if name == "prospector" else None)
+    pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
+
+    seen: list[dict] = []
+    original = manager._read_worker_result
+
+    async def _capture(mainpipe, payload, *args):
+        seen.append(payload)
+        return await original(mainpipe, payload, *args)
+
+    manager._read_worker_result = _capture  # type: ignore[method-assign]
+    _, _, _, _, reader_task = await _spawn(manager, pipe, task_id="t1", agent_name="prospector")
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    assert seen[0]["compact_threshold_tokens"] == 4321
+
+
+@pytest.mark.asyncio
+async def test_spawn_works_without_a_threshold_resolver() -> None:
+    bus = EventBus()
+    manager = _make_manager(bus)
+    pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
+
+    seen: list[dict] = []
+    original = manager._read_worker_result
+
+    async def _capture(mainpipe, payload, *args):
+        seen.append(payload)
+        return await original(mainpipe, payload, *args)
+
+    manager._read_worker_result = _capture  # type: ignore[method-assign]
+    _, _, _, _, reader_task = await _spawn(manager, pipe, task_id="t1")
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    assert seen[0]["compact_threshold_tokens"] is None

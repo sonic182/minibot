@@ -10,6 +10,14 @@ class AgentRegistry:
             by_name[spec.name] = spec
         self._by_name = by_name
 
+    def replace_all(self, specs: list[AgentSpec]) -> None:
+        """Swap the specs in place, keeping this object's identity.
+
+        Token auto-config runs after extensions have registered, so anything already holding the
+        registry has to see the updated specs rather than a stale snapshot.
+        """
+        self._by_name = {spec.name: spec for spec in specs}
+
     def all(self) -> list[AgentSpec]:
         return list(self._by_name.values())
 

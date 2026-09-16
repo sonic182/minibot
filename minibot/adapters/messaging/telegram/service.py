@@ -74,6 +74,7 @@ class TelegramService:
         self._logger.info("starting telegram polling")
         self._poll_task = asyncio.create_task(self._dp.start_polling(self._bot, handle_signals=False))
         self._outgoing_task = asyncio.create_task(self._publish_outgoing())
+        self._outgoing_task.add_done_callback(self._log_outgoing_task_end)
 
     async def _handle_message(self, message: TelegramMessage) -> None:
         if not is_authorized(self._config, message):
@@ -141,15 +142,33 @@ class TelegramService:
         await self._event_bus.publish(MessageEvent(message=channel_message))
 
     async def _publish_outgoing(self) -> None:
+        # One failed send must never end the loop. This is the only consumer of a bounded,
+        # non-lossy subscription, so an exception escaping here orphans the queue: the channel
+        # goes mute, and once the queue fills every publisher blocks on it forever.
         async for event in self._outgoing_subscription:
-            if isinstance(event, TurnStartedEvent) and event.channel == "telegram" and event.chat_id is not None:
-                self._start_typing(event.turn_id, event.chat_id)
-            if isinstance(event, (TurnCompletedEvent, TurnFailedEvent)) and event.channel == "telegram":
-                self._stop_typing(event.turn_id)
-            if isinstance(event, OutboundEvent) and event.response.channel == "telegram":
-                await self._outbound_sender.send_text_response(event.response)
-            if isinstance(event, OutboundFileEvent) and event.response.channel == "telegram":
-                await self._outbound_sender.send_file_response(event)
+            try:
+                if isinstance(event, TurnStartedEvent) and event.channel == "telegram" and event.chat_id is not None:
+                    self._start_typing(event.turn_id, event.chat_id)
+                if isinstance(event, (TurnCompletedEvent, TurnFailedEvent)) and event.channel == "telegram":
+                    self._stop_typing(event.turn_id)
+                if isinstance(event, OutboundEvent) and event.response.channel == "telegram":
+                    await self._outbound_sender.send_text_response(event.response)
+                if isinstance(event, OutboundFileEvent) and event.response.channel == "telegram":
+                    await self._outbound_sender.send_file_response(event)
+            except Exception:
+                self._logger.exception(
+                    "telegram outbound event failed",
+                    extra={"event_type": event.event_type},
+                )
+
+    def _log_outgoing_task_end(self, task: asyncio.Task[None]) -> None:
+        """A dead outgoing loop is invisible otherwise: the task is held on an attribute, so
+        asyncio never reports its unretrieved exception."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            self._logger.error("telegram outgoing loop stopped unexpectedly", exc_info=exc)
 
     def _start_typing(self, turn_id: str, chat_id: int) -> None:
         self._stop_typing(turn_id)

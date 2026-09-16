@@ -8,7 +8,6 @@ from typing import Any
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, InputRichMessage, ReplyParameters
 
 from minibot.adapters.config.schema import TelegramChannelConfig
@@ -91,7 +90,7 @@ class TelegramOutboundSender:
                 document=FSInputFile(path=str(file_path)),
                 caption=event.response.caption,
             )
-        except TelegramBadRequest as exc:
+        except Exception as exc:
             self._logger.exception(
                 "failed to send telegram file",
                 exc_info=exc,
@@ -128,7 +127,9 @@ class TelegramOutboundSender:
             send_kwargs["reply_parameters"] = reply_parameters
         try:
             await self._bot.send_rich_message(**send_kwargs)
-        except TelegramBadRequest as exc:
+        except Exception as exc:
+            # Anything that isn't a TelegramBadRequest (rate limits, network, timeouts) still has
+            # to stay inside this call: letting it propagate kills the whole outbound loop.
             self._logger.exception(
                 "failed to send rich telegram response",
                 exc_info=exc,
@@ -169,7 +170,9 @@ class TelegramOutboundSender:
                     if reply_parameters is not None:
                         send_kwargs["reply_parameters"] = reply_parameters
                 await self._bot.send_message(**send_kwargs)
-            except TelegramBadRequest as exc:
+            except Exception as exc:
+                # Same reasoning as _send_rich_message: a transient network failure on chunk 3 of
+                # 9 must cost this message, not every message the process would ever send.
                 self._logger.exception(
                     "failed to send telegram response chunk",
                     exc_info=exc,

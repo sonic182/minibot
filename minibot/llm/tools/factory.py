@@ -69,6 +69,7 @@ def build_enabled_tools(
                 environment_prompt_fragment=build_environment_prompt_fragment(settings),
                 managed_storage=managed_storage,
                 spill_config=settings.tools.tool_output_spill,
+                context_ratio_before_compact=settings.memory.context_ratio_before_compact,
             ).bindings()
         )
     if extension_tools:

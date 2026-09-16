@@ -63,7 +63,14 @@ class AppContainer:
         cls._token_autoconfig_applied = False
         # Last, so an extension's register() sees a fully built container even though the
         # context handed to it exposes only settings, the bus and a logger.
-        cls._extensions = load_extensions(cls._settings, cls._event_bus, cls._logger, entrypoint, vault=cls._vault)
+        cls._extensions = load_extensions(
+            cls._settings,
+            cls._event_bus,
+            cls._logger,
+            entrypoint,
+            vault=cls._vault,
+            agent_registry=cls._agent_registry,
+        )
 
     @classmethod
     def _unlock_vault_if_needed(cls) -> Vault | None:
@@ -202,7 +209,8 @@ class AppContainer:
         )
         cls._llm_factory = LLMClientFactory(settings)
         cls._llm_client = cls._llm_factory.create_default()
-        cls._agent_registry = AgentRegistry(agent_specs)
+        # In place: extensions registered before this ran and already hold this registry.
+        cls._agent_registry.replace_all(agent_specs)
         cls._token_autoconfig_applied = True
 
     @classmethod
