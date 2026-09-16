@@ -171,6 +171,10 @@ async def run_agent_loop(
             "managed_files_root": settings.tools.file_storage.root_dir
             if settings.tools.file_storage.enabled
             else None,
+            # So the manager can rebuild a RenderableResponse for Telegram instead of forcing
+            # plain text: extract_answer() already resolved the right kind above, don't lose it.
+            "render_kind": render.kind,
+            "render_meta": render.meta,
         }
         attachments = validate_attachments((generation.pre_response_meta or {}).get("attachments"))
         stop_reason = getattr(generation, "stop_reason", TaskStopReason.COMPLETED)

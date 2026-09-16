@@ -15,7 +15,7 @@ from aiopipe import aioduplex
 
 from minibot.adapters.tasks.worker import worker_entry
 from minibot.app.event_bus import EventBus
-from minibot.core.channels import ChannelFileResponse, ChannelResponse
+from minibot.core.channels import ChannelFileResponse, ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundEvent, OutboundFileEvent
 from minibot.core.tasks import TaskLimits, TaskRepository, TaskResult, TaskStatus, TaskStopReason
 from minibot.shared.utils import validate_attachments
@@ -380,7 +380,14 @@ class TaskManager:
         self._tasks.pop(task_id, None)
         task.semaphore.release()
 
-    async def _publish_status(self, *, payload: dict[str, Any], text: str, metadata: dict[str, Any]) -> None:
+    async def _publish_status(
+        self,
+        *,
+        payload: dict[str, Any],
+        text: str,
+        metadata: dict[str, Any],
+        render: RenderableResponse | None = None,
+    ) -> None:
         chat_id = payload.get("chat_id")
         if not isinstance(chat_id, int):
             return
@@ -390,20 +397,31 @@ class TaskManager:
                     channel=str(payload.get("channel") or "rabbitmq"),
                     chat_id=chat_id,
                     text=text,
+                    render=render,
                     metadata=metadata,
                 )
             )
         )
 
     async def _publish_result(self, payload: dict[str, Any], result: TaskResult) -> None:
+        text = _append_attachment_paths(
+            text=result.text,
+            channel=str(payload.get("channel") or "rabbitmq"),
+            attachments=result.attachments,
+        )
+        # worker.py stashes what extract_answer() already resolved (markdown vs plain text) in
+        # here; without it every task result would render as forced plain text on Telegram.
+        render_kind = result.metadata.get("render_kind")
+        render = (
+            RenderableResponse(kind=render_kind, text=text, meta=result.metadata.get("render_meta") or {})
+            if render_kind in {"text", "html", "markdown"}
+            else None
+        )
         await self._publish_status(
             payload=payload,
-            text=_append_attachment_paths(
-                text=result.text,
-                channel=str(payload.get("channel") or "rabbitmq"),
-                attachments=result.attachments,
-            ),
+            text=text,
             metadata={"task_id": payload.get("task_id"), "source": "task_worker", **result.metadata},
+            render=render,
         )
 
     async def _publish_attachments(

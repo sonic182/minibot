@@ -184,6 +184,52 @@ async def test_reader_success_publishes_direct_outbound_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reader_success_carries_render_kind_from_worker_metadata() -> None:
+    # Regression: the worker resolves markdown vs. plain text through extract_answer() (see
+    # worker.py), but the manager used to build ChannelResponse without a `render`, so Telegram
+    # fell back to forced plain text and a task's markdown reply showed up as raw `**bold**`.
+    bus = EventBus()
+    sub = bus.subscribe()
+    manager = _make_manager(bus)
+    pipe = _PipeSuccess(
+        {
+            "task_id": "t1",
+            "text": "# Informe\n\n**Ocupado:** sí",
+            "metadata": {"render_kind": "markdown", "render_meta": {"disable_link_preview": True}},
+        }
+    )
+
+    _, _, _, _, reader_task = await _spawn(manager, pipe, task_id="t1", channel="telegram")
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    assert isinstance(event, OutboundEvent)
+    assert event.response.render is not None
+    assert event.response.render.kind == "markdown"
+    assert event.response.render.text == "# Informe\n\n**Ocupado:** sí"
+    assert event.response.render.meta == {"disable_link_preview": True}
+    await sub.close()
+
+
+@pytest.mark.asyncio
+async def test_reader_success_without_render_kind_falls_back_to_plain_text() -> None:
+    # Older worker payloads (or a legacy protocol event) carry no render_kind at all: no render
+    # is attached, and the outbound sender's own None-render fallback still applies.
+    bus = EventBus()
+    sub = bus.subscribe()
+    manager = _make_manager(bus)
+    pipe = _PipeSuccess({"task_id": "t1", "text": "the answer"})
+
+    _, _, _, _, reader_task = await _spawn(manager, pipe, task_id="t1", channel="telegram")
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    assert isinstance(event, OutboundEvent)
+    assert event.response.render is None
+    await sub.close()
+
+
+@pytest.mark.asyncio
 async def test_reader_success_publishes_telegram_attachments_before_result() -> None:
     bus = EventBus()
     sub = bus.subscribe()

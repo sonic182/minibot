@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`spawn_task` results rendered as raw Markdown on Telegram** (literal `**bold**`, `# headings`,
+  `|table|` pipes instead of formatted text). The worker already resolved the right `kind`
+  (markdown/html/text) through the same `extract_answer()` path a normal turn uses, but only kept
+  the resolved text and dropped the kind; the task manager then built the outbound response with
+  no `render`, which falls back to forced plain text. The worker now carries `render_kind`/
+  `render_meta` through its result metadata, and the manager reattaches them.
+
 ## [0.16.0] - 2026-09-16
 
 ### Added
