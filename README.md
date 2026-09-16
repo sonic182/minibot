@@ -87,8 +87,8 @@ No Telegram bot yet? Run `minibot console` instead of `minibot` to chat with it 
 ### Docker
 
 ```bash
-cp config.example.toml config.toml
-# edit config.toml (or run `minibot configure` in a venv first)
+pipx run minibot configure   # writes config.toml — must run on the host, docker-compose.yml mounts it read-only
+# no pipx? `pip install minibot` into a throwaway venv and run `minibot configure` there instead.
 
 docker compose up -d
 ```

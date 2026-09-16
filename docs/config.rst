@@ -5,8 +5,12 @@ Configuration Reference
    :description: Complete Minibot config.toml reference — runtime, channels, LLM providers, memory, orchestration, scheduler, logging, tasks, tools, and extensions.
    :keywords: minibot config, config.toml, AI assistant configuration, self-hosted Telegram bot config
 
-MiniBot is configured via a ``config.toml`` file.
-Start from the provided example::
+MiniBot is configured via a ``config.toml`` file, most easily created with the interactive
+wizard (see :doc:`getting_started`)::
+
+    minibot configure
+
+To hand-write or inspect the file directly instead, start from the provided example::
 
     cp config.example.toml config.toml
 

@@ -8,14 +8,24 @@ Getting Started
 Quickstart (Docker)
 -------------------
 
-1. ``cp config.example.toml config.toml``
-2. Populate secrets: ``channels.telegram.bot_token``, allowlists, and provider credentials under ``[providers.<name>]``.
-3. ``mkdir -p logs data``
-4. ``docker compose up --build -d``
-5. ``docker compose logs -f minibot``
+1. Create ``config.toml`` with the interactive wizard. It has to run on the host, not in the
+   container: ``docker-compose.yml`` bind-mounts ``config.toml`` read-only, so the file must
+   already exist before ``docker compose up`` starts.
 
-``docker-compose.yml`` mounts ``config.toml`` by default.
-``config.yolo.toml`` is a reference template with all tools enabled (file storage, STT, HTTP/KV tools, MCP bridge, unrestricted Python runtime, unrestricted Bash, and patch-based file editing).
+   .. code-block:: bash
+
+      pipx run minibot configure
+      # no pipx? pip install minibot into a throwaway venv and run `minibot configure` there instead.
+
+   Same wizard as `Quickstart (pip)`_ / `Quickstart (Poetry)`_ below — Telegram token and
+   allowlists, provider/model, and tool selection.
+2. ``mkdir -p logs data``
+3. ``docker compose up --build -d``
+4. ``docker compose logs -f minibot``
+
+``config.yolo.toml`` is a reference template with all tools enabled (file storage, STT, HTTP/KV
+tools, MCP bridge, unrestricted Python runtime, unrestricted Bash, and patch-based file editing) —
+useful only if you ever need to hand-edit ``config.toml`` instead of rerunning the wizard.
 
 The Docker image includes:
 
