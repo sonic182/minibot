@@ -102,6 +102,14 @@ class EventBus:
                 )
         if not blocking:
             return
+        for queue in blocking:
+            if queue.full():
+                # The put below is about to park until someone drains this queue. A consumer that
+                # died takes the whole bus down this way, silently, so say so before we block.
+                _logger.warning(
+                    "event bus publish is blocking on a full subscriber queue",
+                    extra={"event_type": event.event_type, "maxsize": self._maxsize},
+                )
         await asyncio.gather(*(queue.put(event) for queue in blocking))
 
     async def stop(self) -> None:

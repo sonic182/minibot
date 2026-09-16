@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One failed Telegram send left the bot permanently mute.** `_publish_outgoing` consumed its
+  subscription with an unguarded `async for`, and only `TelegramBadRequest` was caught around the
+  actual send calls. Any other failure — a rate limit, a network blip mid-way through a chunked
+  message — escaped and ended the loop, killing the task for the rest of the process's life: the
+  daemon kept receiving messages and generating answers, and silently delivered none of them. It
+  was invisible too, since the task is held on an attribute and asyncio never reports an
+  unretrieved exception for it. Worse, that subscription is bounded and non-lossy, so once 128
+  events piled up in the orphaned queue every `EventBus.publish` would block forever and hang the
+  daemon outright. Each event is now handled in isolation, the send paths catch everything, a
+  dead loop is logged at ERROR, and the bus warns before blocking on a full queue. The console
+  channel's identical loop got the same treatment.
+
 - **`spawn_task` results rendered as raw Markdown on Telegram** (literal `**bold**`, `# headings`,
   `|table|` pipes instead of formatted text). The worker already resolved the right `kind`
   (markdown/html/text) through the same `extract_answer()` path a normal turn uses, but only kept

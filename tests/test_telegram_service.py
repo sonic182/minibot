@@ -8,8 +8,9 @@ import pytest
 
 from minibot.adapters.config.schema import TelegramChannelConfig
 from minibot.adapters.messaging.telegram.service import TelegramService
-from minibot.core.channels import IncomingFileRef
-from minibot.core.events import MessageEvent
+from minibot.app.event_bus import EventBus
+from minibot.core.channels import ChannelResponse, IncomingFileRef
+from minibot.core.events import MessageEvent, OutboundEvent
 
 
 @dataclass
@@ -118,3 +119,44 @@ async def test_handle_message_sends_denied_response_when_unauthorized() -> None:
     assert not event_bus.events
     assert len(bot.calls) == 1
     assert "Access denied" in bot.calls[0]["text"]
+
+
+class _FailingOnceSender:
+    """Fails the first send the way the real bot would on a network blip: with something that is
+    not a TelegramBadRequest, so nothing downstream catches it."""
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+        self.failed: list[str] = []
+
+    async def send_text_response(self, response: Any) -> None:
+        if response.text == "boom":
+            self.failed.append(response.text)
+            raise RuntimeError("connection reset by peer")
+        self.sent.append(response.text)
+
+
+def _outbound(text: str) -> OutboundEvent:
+    return OutboundEvent(response=ChannelResponse(channel="telegram", chat_id=1, text=text))
+
+
+@pytest.mark.asyncio
+async def test_outgoing_loop_survives_a_failing_send() -> None:
+    # Regression: an exception escaping send_text_response ended the async-for and killed outbound
+    # delivery for the rest of the process. The daemon kept receiving and answering messages and
+    # silently sent none of them, then deadlocked once the 128-slot queue filled up.
+    bus = EventBus()
+    service = TelegramService.__new__(TelegramService)
+    service._logger = logging.getLogger("test.telegram.outgoing")
+    service._outgoing_subscription = bus.subscribe(types=(OutboundEvent,))
+    sender = _FailingOnceSender()
+    service._outbound_sender = sender
+
+    await bus.publish(_outbound("boom"))
+    await bus.publish(_outbound("delivered"))
+    await service._outgoing_subscription.close()
+
+    await service._publish_outgoing()
+
+    assert sender.failed == ["boom"]
+    assert sender.sent == ["delivered"]

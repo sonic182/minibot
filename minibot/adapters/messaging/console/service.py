@@ -147,14 +147,19 @@ class ConsoleService:
                 _offer(self._reasoning, event.text)
 
     async def _consume_outgoing(self) -> None:
+        # Guarded for the same reason as the telegram loop: an exception escaping here ends the
+        # only consumer of a bounded, non-lossy subscription and strands every later event.
         async for event in self._subscription:
-            if not isinstance(event, OutboundEvent):
-                continue
-            response = event.response
-            if response.channel != "console":
-                continue
-            rendered = self._render_response(response)
-            self._responses.put_nowait(ConsoleResponse(response=response, rendered_text=rendered))
+            try:
+                if not isinstance(event, OutboundEvent):
+                    continue
+                response = event.response
+                if response.channel != "console":
+                    continue
+                rendered = self._render_response(response)
+                self._responses.put_nowait(ConsoleResponse(response=response, rendered_text=rendered))
+            except Exception:
+                self._logger.exception("console outbound event failed", extra={"event_type": event.event_type})
 
     def _render_response(self, response: ChannelResponse) -> str:
         render = response.render or RenderableResponse(kind="text", text=response.text)
