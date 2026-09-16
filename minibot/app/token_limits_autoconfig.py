@@ -113,7 +113,7 @@ async def apply_runtime_token_autoconfig_async(
             or limits["output"] != first_output_limit
         ):
             had_mixed_agent_targets = True
-        adjusted_specs.append(replace(spec, max_new_tokens=derived_max_new_tokens))
+        adjusted_specs.append(replace(spec, max_new_tokens=derived_max_new_tokens, context_limit=limits["context"]))
     if updated_agent_names:
         summary = summarize_items(updated_agent_names, preview_limit=5)
         extra: dict[str, Any] = {

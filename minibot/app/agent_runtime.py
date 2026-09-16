@@ -19,6 +19,7 @@ from minibot.core.events import ReasoningEvent
 from minibot.core.tasks import TaskStopReason
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.reasoning_replay import reasoning_text_from_message
+from minibot.llm.services.runtime_compaction import RuntimeCompactor
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
 from minibot.llm.services.tool_loop_guard import (
     MAX_REPEATED_TOOL_ITERATIONS,
@@ -66,10 +67,14 @@ class AgentRuntime:
         allow_system_inserts: bool = False,
         managed_files_root: str | None = None,
         event_bus: EventBus | None = None,
+        compactor: RuntimeCompactor | None = None,
     ) -> None:
         self._llm_client = llm_client
         self._tools = [pre_response_binding(), *list(tools or [])]
         self._limits = limits or RuntimeLimits()
+        # Only delegated runs pass one: the main turn compacts its own persisted history between
+        # turns, in HistoryCompactionService, and never loops here long enough to need this.
+        self._compactor = compactor
         self._allow_system_inserts = allow_system_inserts
         self._allowed_append_message_tools = set(allowed_append_message_tools or [])
         self._event_bus = event_bus
@@ -141,6 +146,31 @@ class AgentRuntime:
                         provider_tool_calls=provider_tool_calls,
                         stop_reason=TaskStopReason.MAX_STEPS,
                     )
+
+                # Top of the loop on purpose: every tool call from the previous step already has
+                # its result appended, so the transcript is consistent and rewriting it can't
+                # orphan a tool_call the provider is still expecting an answer for.
+                if self._compactor is not None and self._compactor.should_compact(input_tokens):
+                    outcome = await self._compactor.compact(
+                        state,
+                        previous_response_id=previous_response_id,
+                        prompt_cache_key=prompt_cache_key,
+                    )
+                    if outcome.performed:
+                        self._logger.info(
+                            "agent runtime compacted context mid-run",
+                            extra={
+                                "step": step,
+                                "input_tokens_before": input_tokens,
+                                "threshold_tokens": self._compactor.threshold_tokens,
+                                "message_count": len(state.messages),
+                                "native": outcome.response_id is not None,
+                            },
+                        )
+                        previous_response_id = outcome.response_id
+                        responses_followup_messages = None
+                    # Either way, wait for a fresh measurement before considering it again.
+                    input_tokens = None
 
                 call_messages = self._message_renderer.render_messages(state)
                 if (

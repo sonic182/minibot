@@ -5,6 +5,7 @@ import json
 import logging
 import signal
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, Ru
 from minibot.core.agents import AgentSpec
 from minibot.core.tasks import TaskLimits, TaskStopReason
 from minibot.llm.errors import ProviderHTTPError
+from minibot.llm.services.runtime_compaction import build_compactor
 from minibot.llm.tools.apply_patch import ApplyPatchTool
 from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -138,6 +140,11 @@ async def run_agent_loop(
             allowed_append_message_tools=[],
             allow_system_inserts=False,
             managed_files_root=settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
+            compactor=build_compactor(
+                llm_client=llm_client,
+                threshold_tokens=_coerce_int(task.get("compact_threshold_tokens")),
+                logger=logging.getLogger("minibot.agent_runtime"),
+            ),
         )
         state = _build_worker_state(
             spec=spec,
@@ -321,23 +328,9 @@ def _resolve_task_spec(
             raise ValueError(f"agent '{agent_name.strip()}' is not available for async task execution")
         if not environment_prompt_fragment.strip():
             return spec
-        return AgentSpec(
-            name=spec.name,
-            description=spec.description,
-            system_prompt=f"{spec.system_prompt}\n\n{environment_prompt_fragment.strip()}",
-            source_path=spec.source_path,
-            model_provider=spec.model_provider,
-            model=spec.model,
-            temperature=spec.temperature,
-            max_new_tokens=spec.max_new_tokens,
-            reasoning_effort=spec.reasoning_effort,
-            max_tool_iterations=spec.max_tool_iterations,
-            tools_allow=list(spec.tools_allow),
-            tools_deny=list(spec.tools_deny),
-            mcp_servers=list(spec.mcp_servers),
-            openrouter_provider_overrides=dict(spec.openrouter_provider_overrides),
-            openrouter_reasoning_enabled=spec.openrouter_reasoning_enabled,
-        )
+        # replace() rather than a field-by-field copy: the hand-written version silently dropped
+        # omit_temperature, and would drop every field added after it too.
+        return replace(spec, system_prompt=f"{spec.system_prompt}\n\n{environment_prompt_fragment.strip()}")
     return _build_worker_spec(
         system_prompt=llm_factory.create_default().system_prompt(),
         environment_prompt_fragment=environment_prompt_fragment,

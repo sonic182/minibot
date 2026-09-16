@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.vault import Vault
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus, EventSubscription
 from minibot.core.events import BaseEvent
 from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
@@ -82,6 +83,9 @@ class ExtensionContext:
     logger: logging.Logger
     entrypoint: ExtensionEntrypoint = "daemon"
     vault: Vault | None = None
+    # The container's own registry, updated in place by token auto-config after registration —
+    # so read specs off it when they are needed, not at register() time.
+    agent_registry: AgentRegistry | None = None
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
@@ -284,6 +288,7 @@ def load_extensions(
     logger: logging.Logger | None = None,
     entrypoint: ExtensionEntrypoint = "daemon",
     vault: Vault | None = None,
+    agent_registry: AgentRegistry | None = None,
 ) -> ExtensionRegistry:
     """Import and register the bundled extensions, then every ``[extensions] modules`` entry.
 
@@ -308,6 +313,7 @@ def load_extensions(
             logger=logging.getLogger(f"minibot.extensions.{name}"),
             entrypoint=entrypoint,
             vault=vault,
+            agent_registry=agent_registry,
         )
         try:
             register(context)

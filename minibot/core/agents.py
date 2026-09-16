@@ -16,6 +16,9 @@ class AgentSpec:
     temperature: float | None = None
     omit_temperature: bool = False
     max_new_tokens: int | None = None
+    # The model's total context window, resolved at boot by token_limits_autoconfig. Drives
+    # mid-run compaction; None just means no catalog entry, so no compaction.
+    context_limit: int | None = None
     reasoning_effort: str | None = None
     max_tool_iterations: int | None = None
     timeout_seconds: int | None = None

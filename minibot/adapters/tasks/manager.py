@@ -13,15 +13,33 @@ from typing import Any
 
 from aiopipe import aioduplex
 
+from minibot.adapters.config.schema import Settings
 from minibot.adapters.tasks.worker import worker_entry
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelFileResponse, ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundEvent, OutboundFileEvent
 from minibot.core.tasks import TaskLimits, TaskRepository, TaskResult, TaskStatus, TaskStopReason
+from minibot.llm.services.runtime_compaction import threshold_from_context_limit
 from minibot.shared.utils import validate_attachments
 
 _MAX_RETRYABLE_ATTEMPTS = 2
 _SUPERVISOR_GRACE_SECONDS = 10
+
+
+def compact_threshold_for_agent(registry: AgentRegistry, settings: Settings, agent_name: str | None) -> int | None:
+    """Token budget a worker may reach before compacting its own transcript.
+
+    Resolved on the daemon side rather than in the worker: the subprocess reloads specs from disk
+    and never sees what token auto-config derived at boot. A task with no agent runs the default
+    worker on the main model, whose budget auto-config already wrote to ``memory.max_history_tokens``.
+    """
+    if not agent_name:
+        return settings.memory.max_history_tokens
+    spec = registry.get(agent_name)
+    if spec is None:
+        return None
+    return threshold_from_context_limit(spec.context_limit, settings.memory.context_ratio_before_compact)
 
 
 class _LeaseLostError(Exception):
@@ -51,11 +69,15 @@ class TaskManager:
         task_repository: TaskRepository | None = None,
         lease_timeout_seconds: int | None = None,
         secrets: Mapping[str, str] | None = None,
+        compact_threshold_for: Callable[[str | None], int | None] | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._worker_timeout_seconds = worker_timeout_seconds
         self._lease_timeout_seconds = lease_timeout_seconds or max(1, int(worker_timeout_seconds))
         self._task_repository = task_repository
+        # Workers reload agent specs from disk, so the context budget derived at daemon boot
+        # never reaches them. Resolve it here and send it along with the task.
+        self._compact_threshold_for = compact_threshold_for
         # Workers reload config themselves, so they need the vault map to resolve ${secret:NAME}.
         # It travels over the in-memory pipe only — never the queue row, never the environment.
         self._secrets = dict(secrets) if secrets else None
@@ -109,6 +131,9 @@ class TaskManager:
             "user_id": user_id,
             "owner_id": owner_id,
             "limits": asdict(resolved_limits),
+            "compact_threshold_tokens": (
+                self._compact_threshold_for(agent_name) if self._compact_threshold_for else None
+            ),
         }
         mainpipe, proc = self._start_worker_process()
         reader = asyncio.create_task(
