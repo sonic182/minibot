@@ -48,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dead loop is logged at ERROR, and the bus warns before blocking on a full queue. The console
   channel's identical loop got the same treatment.
 
+- **Mid-run compaction resent the whole transcript it had just shrunk.** For providers chained
+  through `previous_response_id`, the step right after a native compaction fell back to
+  rendering the full local state (system prompt, task, summary) instead of the delta-only
+  follow-up every other step in that mode sends — duplicating content the newly compacted
+  response already held server-side, right when compaction exists specifically to cut tokens.
+  It now sends the same minimal continuation nudge `build_continue_call_kwargs` already uses to
+  resume a `previous_response_id` without replaying history.
+
 - **`spawn_task` results rendered as raw Markdown on Telegram** (literal `**bold**`, `# headings`,
   `|table|` pipes instead of formatted text). The worker already resolved the right `kind`
   (markdown/html/text) through the same `extract_answer()` path a normal turn uses, but only kept

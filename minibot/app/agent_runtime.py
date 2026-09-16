@@ -43,6 +43,7 @@ _TRUNCATED_PATCH = (
     "Your previous response was truncated. Please resend your complete tool call with all required arguments."
 )
 _PSEUDO_TOOL_PATCH = "Please use the tool calling interface instead of embedding tool calls in text."
+_CONTINUE_AFTER_COMPACTION = "Continue the task from the summary above. Do not repeat completed steps."
 _REPEATED_FAILURE_NUDGE_AT = 2
 _REPEATED_FAILURE_NUDGE = (
     "The tool `{tool}` just failed again with the same arguments and the same error, so that call "
@@ -174,7 +175,24 @@ class AgentRuntime:
                             },
                         )
                         previous_response_id = outcome.response_id
-                        responses_followup_messages = None
+                        if use_responses_followup and previous_response_id is not None:
+                            # The compacted response already holds this state server-side, the
+                            # same reason build_continue_call_kwargs sends a minimal nudge rather
+                            # than full history to continue a previous_response_id: resending the
+                            # local render here would duplicate it right after compacting
+                            # specifically to shrink it.
+                            responses_followup_messages = self._message_renderer.render_messages(
+                                AgentState(
+                                    messages=[
+                                        AgentMessage(
+                                            role="user",
+                                            content=[MessagePart(type="text", text=_CONTINUE_AFTER_COMPACTION)],
+                                        )
+                                    ]
+                                )
+                            )
+                        else:
+                            responses_followup_messages = None
                     # Either way, wait for a fresh measurement before considering it again.
                     input_tokens = None
 

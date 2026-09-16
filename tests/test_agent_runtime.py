@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-from minibot.app.agent_runtime import AgentRuntime
+from minibot.app.agent_runtime import _CONTINUE_AFTER_COMPACTION, AgentRuntime
 from minibot.core.agent_runtime import (
     AgentMessage,
     AgentState,
@@ -383,6 +383,40 @@ async def test_runtime_compacts_once_the_provider_reports_pressure() -> None:
 
     assert compactor.calls, "compaction never ran despite input_tokens above the threshold"
     assert result.payload == "done"
+
+
+@pytest.mark.asyncio
+async def test_runtime_sends_a_minimal_nudge_after_native_compaction_not_the_full_render() -> None:
+    # Regression: chaining off previous_response_id normally sends only new content, relying on
+    # the provider to hold the rest server-side. Right after a native compaction, the new
+    # previous_response_id already IS that state, so falling back to a full local render here
+    # would resend system+task+summary on top of a response that already holds them.
+    tool_call = _http_tool_call()
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="r1",
+            total_tokens=3,
+            input_tokens=150,
+        ),
+        _final_step("r2"),
+    ]
+    llm_client = _StubRuntimeLLMClient(
+        steps,
+        [[_http_record(content="ok")]],
+        is_responses_provider=True,
+        responses_state_mode="previous_response_id",
+    )
+    compactor = _RecordingCompactor(response_id="compacted-1")
+    runtime = _runtime(llm_client, compactor=compactor)
+
+    result = await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="primary"))
+
+    assert compactor.calls
+    assert result.payload == "done"
+    second_call_messages = llm_client.complete_once_kwargs[1]["messages"]
+    assert second_call_messages == [{"role": "user", "content": _CONTINUE_AFTER_COMPACTION}]
+    assert llm_client.complete_once_kwargs[1]["previous_response_id"] == "compacted-1"
 
 
 @pytest.mark.asyncio
