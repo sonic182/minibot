@@ -87,8 +87,18 @@ Configuration wizard
 
 Walks through Telegram, provider, model, tool selection, and — when tasks are enabled — the task
 queue backend. New files start from the ``Example`` profile; ``YOLO`` enables broad host execution
-and integrations. Secrets are written in plain text, so keep ``config.toml`` private. The wizard
-also seeds ``prompts/`` next to the config file when that directory does not already exist.
+and integrations — file storage, HTTP/KV tools, MCP bridge, unrestricted Python and Bash, and
+patch-based file editing, all on with nothing gated behind a confirmation step.
+
+What makes ``YOLO`` a good idea isn't whether MiniBot can reach personal accounts — email,
+social media, whatever else — it's the model behind it. Point it at something you'd actually
+trust to act on those accounts unsupervised: a capable local model through Ollama, or a frontier
+provider under a zero-data-retention agreement, or one you otherwise trust with that level of
+access (OpenAI, Anthropic, Google, ...). A weak or untrusted model with the full toolset is the
+combination to avoid, not personal data as such.
+
+Secrets are written in plain text, so keep ``config.toml`` private. The wizard also seeds
+``prompts/`` next to the config file when that directory does not already exist.
 
 Credential vault
 ----------------

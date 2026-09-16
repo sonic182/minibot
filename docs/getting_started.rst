@@ -23,9 +23,11 @@ Quickstart (Docker)
 3. ``docker compose up --build -d``
 4. ``docker compose logs -f minibot``
 
-``config.yolo.toml`` is a reference template with all tools enabled (file storage, STT, HTTP/KV
-tools, MCP bridge, unrestricted Python runtime, unrestricted Bash, and patch-based file editing) —
-useful only if you ever need to hand-edit ``config.toml`` instead of rerunning the wizard.
+``config.yolo.toml`` is the all-capabilities-enabled reference template — file storage, STT,
+HTTP/KV tools, MCP bridge, unrestricted Python runtime, unrestricted Bash, and patch-based file
+editing, all on with nothing gated behind a confirmation step. ``minibot configure`` offers the
+same profile interactively when creating a new file; see :doc:`cli` for what it actually takes to
+run it safely. The static file itself is there if you'd rather copy or hand-edit it directly.
 
 The Docker image includes:
 
