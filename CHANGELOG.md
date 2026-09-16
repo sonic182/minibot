@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on uncompacted. The main chat turn is unaffected — it still compacts its persisted history
   between turns instead.
 
+### Changed
+
+- **A tool call that cannot succeed no longer kills the whole run.** Two identical tool failures
+  used to abort immediately with `repeated_tool_failure`, throwing away everything produced so
+  far — a background task doing RDAP lookups died 35 seconds in because it retried one hostname
+  that does not resolve. An unreachable host is a finding to report, not a reason to lose the
+  work: the runtime now tells the agent once that the call cannot succeed and to surface it in
+  its final answer, then lets it carry on. `max_steps`, `max_tool_calls` and the timeout remain
+  the ceilings, and the separate guard for genuinely stuck loops (identical calls producing
+  identical outputs) still stops those.
+
 ### Fixed
 
 - Agent specs no longer lose `omit_temperature` (and now `context_limit`) when a task runs them

@@ -13,6 +13,7 @@ from minibot.core.agent_runtime import (
     MessagePart,
     ToolResult,
 )
+from minibot.core.tasks import TaskStopReason
 from minibot.llm.provider_factory import LLMClient, LLMCompletionStep, ToolExecutionRecord
 from minibot.llm.tools.base import ToolContext
 from tests.fixtures.llm.fakes import FakeMessage as _FakeMessage
@@ -255,7 +256,10 @@ async def test_runtime_recovers_pseudo_tool_call_from_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_stops_on_repeated_identical_tool_failure_signatures() -> None:
+async def test_runtime_nudges_and_continues_on_repeated_identical_tool_failures() -> None:
+    # A call that cannot succeed (an unreachable host, say) is a finding to report, not a reason
+    # to throw away everything the run already produced. The runtime tells the agent to stop
+    # retrying and keeps going; the step limits remain the ceiling for a genuine loop.
     tool_call = _http_tool_call()
     steps = [_tool_step(tool_call, "resp-1"), _tool_step(tool_call, "resp-2"), _final_step("resp-3")]
     executions = [
@@ -267,9 +271,16 @@ async def test_runtime_stops_on_repeated_identical_tool_failure_signatures() -> 
 
     result = await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="1"))
 
-    assert llm_client.complete_once_calls == 2
-    assert isinstance(result.payload, str)
-    assert "same tool error repeatedly" in result.payload
+    assert llm_client.complete_once_calls == 3
+    assert result.payload == "done"
+    assert result.stop_reason is TaskStopReason.COMPLETED
+    nudges = [
+        message
+        for message in result.state.messages
+        if message.role == "user" and "Do not retry it" in (message.content[0].text or "")
+    ]
+    assert len(nudges) == 1, "the agent should be told once per distinct failure, not on every repeat"
+    assert "http_request" in (nudges[0].content[0].text or "")
 
 
 @pytest.mark.asyncio

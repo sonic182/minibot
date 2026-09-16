@@ -43,6 +43,12 @@ _TRUNCATED_PATCH = (
     "Your previous response was truncated. Please resend your complete tool call with all required arguments."
 )
 _PSEUDO_TOOL_PATCH = "Please use the tool calling interface instead of embedding tool calls in text."
+_REPEATED_FAILURE_NUDGE_AT = 2
+_REPEATED_FAILURE_NUDGE = (
+    "The tool `{tool}` just failed again with the same arguments and the same error, so that call "
+    "cannot succeed. Do not retry it. Carry on with whatever else the task needs, and state this "
+    "unresolved failure plainly in your final answer so the person can decide what to do about it."
+)
 
 
 @dataclass(frozen=True)
@@ -359,9 +365,14 @@ class AgentRuntime:
                         if failure_signature:
                             count = repeated_failure_counts.get(failure_signature, 0) + 1
                             repeated_failure_counts[failure_signature] = count
-                            if count >= 2:
+                            # Nudge once per distinct failure, then let the run continue. Killing it
+                            # here used to throw away everything the run had already produced over a
+                            # call that simply cannot succeed -- an unreachable host is a finding to
+                            # report, not a reason to lose the work. max_steps, max_tool_calls and
+                            # the timeout are still the ceilings that stop a genuine loop.
+                            if count == _REPEATED_FAILURE_NUDGE_AT:
                                 self._logger.warning(
-                                    "agent runtime repeated identical tool failure; returning fallback",
+                                    "agent runtime repeated identical tool failure; telling the agent to move on",
                                     extra={
                                         "tool": execution.tool_name,
                                         "call_id": execution.call_id,
@@ -369,19 +380,20 @@ class AgentRuntime:
                                         "failure_signature": failure_signature[:16],
                                     },
                                 )
-                                return RuntimeResult(
-                                    payload=(
-                                        "I hit the same tool error repeatedly with the same parameters before "
-                                        f"finishing. Tool: {execution.tool_name}. "
-                                        "Please adjust parameters or ask for a different approach."
-                                    ),
-                                    response_id=completion.response_id,
-                                    state=state,
-                                    total_tokens=total_tokens,
-                                    input_tokens=input_tokens,
-                                    provider_tool_calls=provider_tool_calls,
-                                    stop_reason=TaskStopReason.REPEATED_TOOL_FAILURE,
+                                nudge = AgentMessage(
+                                    role="user",
+                                    content=[
+                                        MessagePart(
+                                            type="text",
+                                            text=_REPEATED_FAILURE_NUDGE.format(tool=execution.tool_name),
+                                        )
+                                    ],
                                 )
+                                state.messages.append(nudge)
+                                # Also through the directive list: in previous_response_id mode only
+                                # these get rendered into the follow-up, so appending to state alone
+                                # would leave the model never seeing it.
+                                applied_directive_messages.append(nudge)
                 if use_responses_followup:
                     responses_followup_messages = [execution.message_payload for execution in executions]
                     if applied_directive_messages:
