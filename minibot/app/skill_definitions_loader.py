@@ -13,6 +13,8 @@ from minibot.shared.frontmatter import parse_scalar, split_frontmatter
 logger = logging.getLogger("minibot.skill_definitions_loader")
 _NAME_RE = re.compile(r"^[^\r\n/\\]{2,60}$")
 _DESCRIPTION_MAX_CHARS = 300
+_SKILL_DIR_NAMES = (".minibot", ".agents")
+NATIVE_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
 
 class SkillDefinitionConfig(BaseModel):
@@ -21,9 +23,6 @@ class SkillDefinitionConfig(BaseModel):
     name: str
     description: str = ""
     enabled: bool = True
-
-
-NATIVE_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
 
 def load_skill_specs(
@@ -74,9 +73,6 @@ def _deduplicate_paths(resolved: list[tuple[Path, SkillSource]]) -> list[tuple[P
         seen.add(base_path)
         unique.append((base_path, source))
     return unique
-
-
-_SKILL_DIR_NAMES = (".minibot", ".agents")
 
 
 def _default_discovery_paths() -> list[tuple[Path, SkillSource]]:

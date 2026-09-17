@@ -189,8 +189,9 @@ Then place one subdirectory per skill::
      another-skill/
        SKILL.md
 
-Setting ``paths`` to a non-empty list **replaces** all default locations entirely.
-To disable skill support: ``enabled = false``.
+Setting ``paths`` to a non-empty list **replaces** the project and user locations above.
+``write_path`` and the bundled skills are unaffected; turn those off with ``native = false``
+or ``native_disabled``. To disable skill support entirely: ``enabled = false``.
 
 OpenRouter Custom Params per Agent
 -----------------------------------

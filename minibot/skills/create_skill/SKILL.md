@@ -13,12 +13,21 @@ write is usable in the same conversation — no restart.
 
 Call `list_skills` first. Its result carries everything you need:
 
-- `write_dir` — the directory new skills belong in.
-- `write_dir_access` — which tool can write there: `filesystem` or `bash`.
+- `write_dir` — the absolute path of the directory new skills belong in.
+- `write_dir_access` — which tool can actually write there: `filesystem`, `bash`, or
+  `unavailable`.
+- `write_dir_filesystem_path` — when access is `filesystem`, the path to pass to that tool,
+  already in the form it expects. Use it verbatim.
 - `discovery_paths` — every directory skills are read from.
 - each match's `source` — `project`, `user`, or `native` (bundled with MiniBot).
 
-Do not guess these paths. They are configuration and they differ per install.
+Do not guess these paths, and do not assume a writer is available. They are configuration and
+they differ per install.
+
+If `write_dir_access` is `unavailable`, stop and tell the user: neither `[tools.file_storage]`
+nor `[tools.bash]` can reach `write_dir`. They can enable `[tools.bash]`, or point
+`[tools.skills] write_path` at a directory inside the `[tools.file_storage] root_dir`. Do not
+try to write anyway.
 
 ## 2. Check the name is free
 
@@ -34,9 +43,10 @@ overrides a bundled one is supported — just do it knowingly, and tell the user
 
 The directory name must equal the frontmatter `name`.
 
-When `write_dir_access` is `filesystem`, write with the `filesystem` tool using a path relative
-to its managed root. When it is `bash`, the directory sits outside that root and `filesystem`
-will refuse it — use `bash` with a heredoc instead.
+When `write_dir_access` is `filesystem`, write with the `filesystem` tool, building the path
+from `write_dir_filesystem_path` rather than from `write_dir` — the tool is confined to its
+managed root and takes a root-relative path there. When access is `bash`, the directory is out
+of the `filesystem` tool's reach; use `bash` with a heredoc and the absolute `write_dir`.
 
 ### Frontmatter
 
