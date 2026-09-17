@@ -528,12 +528,12 @@ enabled = false
 preload_catalog = true
 # Recommended: create a ./skills directory and set paths to load only your own skills.
 # paths = ["./skills"]
-# Skills shipped inside the minibot package (create_skill today). Deliberately independent of
+# Skills shipped inside the minibot package (create-skill today). Deliberately independent of
 # `paths`, so configuring `paths` above never silently drops them.
 native = true
 # Opt out of individual bundled skills by name. To change one instead of losing it, write a
 # skill of the same name in a project or user path — it takes precedence over the bundled one.
-# native_disabled = ["create_skill"]
+# native_disabled = ["create-skill"]
 # Where the agent creates or imports skills. Added as the highest-priority discovery path, so a
 # skill written at runtime is picked up without a restart. Keep it inside
 # [tools.file_storage] root_dir if you want the agent to write it with `filesystem`; otherwise

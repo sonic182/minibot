@@ -181,17 +181,17 @@ needs no config and turning one off is one line.
 
 v1 set, chosen for self-improvement and self-knowledge:
 
-- `create_skill` — authoring, including the places MiniBot's parser is
+- `create-skill` — authoring, including the places MiniBot's parser is
   stricter than the agentskills.io spec (flat `key: value` frontmatter, not
   real YAML; an empty body is a silent drop).
-- `import_skill` — fetch from GitHub and generic archives through a
+- `import-skill` — fetch from GitHub and generic archives through a
   stdlib-only Python helper. No node, no new Poetry dependency. Maintains a
   `skills-lock.json` in the shape the npm `skills` tool already writes.
-- `minibot_docs` — answers "how does MiniBot work" from the published
+- `minibot-docs` — answers "how does MiniBot work" from the published
   `llms.txt` (2.7 KB) and the Sphinx `_sources/*.rst.txt` RST, which beats
   scraping rendered HTML. It must never answer a configuration-*state*
   question from documentation; that is what `get_settings` is for.
-- `create_agent` — specialist authoring, where the tool-scoping rules are
+- `create-agent` — specialist authoring, where the tool-scoping rules are
   counterintuitive enough to be worth writing down: with neither
   `tools_allow` nor `tools_deny` set an agent gets **zero** non-MCP tools
   (`app/agent_policies.py:48`), and `tools_allow` is never consulted for an
@@ -223,7 +223,7 @@ Trust model, for the two new surfaces:
   denylist built for log sanitizing; wrong shape for a surface the model
   reads. The test that matters is a sentinel-leak test, not a field list
   review.
-- `import_skill` installs instructions the agent will later follow, which is
+- `import-skill` installs instructions the agent will later follow, which is
   a prompt-injection surface by construction. Never auto-activate after
   import; show the parsed name, description and resolved source URL; require
   explicit owner confirmation for a source the owner did not name.

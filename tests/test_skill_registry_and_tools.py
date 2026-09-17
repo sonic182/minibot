@@ -37,8 +37,8 @@ def _bindings_by_name(tool: SkillLoaderTool) -> dict[str, object]:
 def native_skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Stand in for the skills bundled inside the package."""
     bundled = tmp_path / "bundled"
-    _write_skill(bundled, "create_skill", name="create_skill", description="Author a new skill.")
-    _write_skill(bundled, "import_skill", name="import_skill", description="Import a skill.")
+    _write_skill(bundled, "create-skill", name="create-skill", description="Author a new skill.")
+    _write_skill(bundled, "import-skill", name="import-skill", description="Import a skill.")
     monkeypatch.setattr(skill_definitions_loader, "NATIVE_SKILLS_DIR", bundled)
     return bundled
 
@@ -156,23 +156,23 @@ def test_native_skills_load_only_when_enabled(tmp_path: Path, native_skills_dir:
     with_native = SkillRegistry(paths=[str(skills_dir)], native=True)
 
     assert without_native.names() == ["python-review"]
-    assert with_native.names() == ["create_skill", "import_skill", "python-review"]
-    assert with_native.get("create_skill").source is SkillSource.NATIVE
+    assert with_native.names() == ["create-skill", "import-skill", "python-review"]
+    assert with_native.get("create-skill").source is SkillSource.NATIVE
     assert with_native.get("python-review").source is SkillSource.PROJECT
 
 
 def test_native_disabled_drops_only_the_named_bundled_skill(tmp_path: Path, native_skills_dir: Path) -> None:
-    registry = SkillRegistry(paths=[str(tmp_path / "skills")], native=True, native_disabled=["import_skill"])
+    registry = SkillRegistry(paths=[str(tmp_path / "skills")], native=True, native_disabled=["import-skill"])
 
-    assert registry.names() == ["create_skill"]
+    assert registry.names() == ["create-skill"]
 
 
 def test_project_skill_shadows_a_bundled_skill_of_the_same_name(tmp_path: Path, native_skills_dir: Path) -> None:
     skills_dir = tmp_path / "skills"
-    _write_skill(skills_dir, "create_skill", name="create_skill", description="Mine.", body="Local override.")
+    _write_skill(skills_dir, "create-skill", name="create-skill", description="Mine.", body="Local override.")
 
     registry = SkillRegistry(paths=[str(skills_dir)], native=True)
-    spec = registry.get("create_skill")
+    spec = registry.get("create-skill")
 
     assert spec.source is SkillSource.PROJECT
     assert spec.body == "Local override."
@@ -184,7 +184,7 @@ def test_native_skills_survive_configured_paths_and_write_path_is_discovered(
     write_dir = tmp_path / "written"
     registry = SkillRegistry(paths=[str(tmp_path / "configured")], native=True, write_path=str(write_dir))
 
-    assert registry.names() == ["create_skill", "import_skill"]
+    assert registry.names() == ["create-skill", "import-skill"]
     assert registry.write_dir() == write_dir.resolve()
 
     _write_skill(write_dir, "fresh", name="fresh", description="Written at runtime.")
