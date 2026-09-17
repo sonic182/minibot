@@ -88,9 +88,9 @@ exists there). If you hand-write ``config.toml`` instead of running the wizard, 
 yourself — from the repo, or from wherever ``pip`` installed the package (the same place
 ``config.example.toml`` lands).
 
-``orchestration.directory`` (default ``./agents``) and skill directories (``.agents/skills``,
-``.claude/skills``) are optional in the other direction: if missing, minibot just runs with no
-custom agents or skills — no error, nothing to create.
+``orchestration.directory`` (default ``./agents``) and skill directories (``.minibot/skills``,
+``.agents/skills``) are optional in the other direction: if missing, minibot just runs with no
+custom agents — and with only the skills bundled in the package.
 
 Up & Running with Telegram
 --------------------------

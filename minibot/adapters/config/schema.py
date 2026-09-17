@@ -677,11 +677,28 @@ class SkillsToolConfig(BaseModel):
     prompt only tells the model to call ``list_skills``, so it cannot tell whether a relevant skill
     exists — while the specialist roster *is* in the prompt, which makes delegating look like the
     obvious route even for work a skill covers.
+
+    Skills are discovered from three sources, in precedence order: project (``./.minibot/skills``
+    and ``./.agents/skills``, or ``paths`` when set), user (the same directory names under
+    ``$HOME``), and native — the skills bundled inside the MiniBot package. Setting
+    ``paths`` replaces the project and user lists; ``native`` is independent of it, so configuring
+    ``paths`` never silently drops the bundled skills.
+
+    ``native_disabled`` opts out of individual bundled skills by name, and is the only way to
+    switch one off: bundled skills carry no ``enabled`` frontmatter, because nobody edits files
+    inside an installed package. A project- or user-level skill of the same name always wins over
+    a bundled one, which is the supported way to override one rather than disable it.
+
+    ``write_path`` is where the agent creates or imports skills, and is added as the
+    highest-priority discovery path so a skill written at runtime is found without a restart.
     """
 
     enabled: bool = True
     paths: list[str] = Field(default_factory=list)
     preload_catalog: bool = True
+    native: bool = True
+    native_disabled: list[str] = Field(default_factory=list)
+    write_path: str = "./.minibot/skills"
 
 
 class RagEmbeddingConfig(BaseModel):

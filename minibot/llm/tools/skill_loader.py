@@ -32,10 +32,14 @@ class SkillLoaderTool:
 
     Skills are markdown files (``SKILL.md``) discovered from the configured
     paths; the registry refreshes automatically when files change.
+
+    ``managed_root`` is the file-storage root, when that tool is enabled. It decides
+    whether the skill write directory is reachable with ``filesystem`` or needs ``bash``.
     """
 
-    def __init__(self, registry: SkillRegistry) -> None:
+    def __init__(self, registry: SkillRegistry, managed_root: Path | None = None) -> None:
         self._registry = registry
+        self._managed_root = managed_root
 
     def bindings(self) -> list[ToolBinding]:
         return [
@@ -78,20 +82,30 @@ class SkillLoaderTool:
         query = optional_str(payload.get("query"), error_message="query must be a string")
         skills = self._registry.all()
         matches, used_fuzzy = _match_skills(skills, query)
+        write_dir = self._registry.write_dir()
         return {
             "ok": True,
             "query": query,
             "total_available": len(skills),
             "returned": len(matches),
             "used_fuzzy_fallback": used_fuzzy,
+            "write_dir": write_dir.as_posix(),
+            "write_dir_access": self._write_dir_access(write_dir),
+            "discovery_paths": [path.as_posix() for path in self._registry.discovery_paths()],
             "matches": [
                 {
                     "name": spec.name,
                     "description": spec.description.strip() or "No description provided.",
+                    "source": str(spec.source),
                 }
                 for spec in matches
             ],
         }
+
+    def _write_dir_access(self, write_dir: Path) -> str:
+        if self._managed_root is not None and write_dir.is_relative_to(self._managed_root):
+            return "filesystem"
+        return "bash"
 
     async def _handle(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         self._registry.refresh_if_stale()
@@ -110,6 +124,7 @@ class SkillLoaderTool:
             "skill": name,
             "instructions": f"<skill-instructions>\n{spec.body}\n</skill-instructions>",
             "skill_dir": spec.skill_dir.as_posix(),
+            "source": str(spec.source),
             "resources": resources,
         }
 

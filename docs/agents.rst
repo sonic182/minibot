@@ -155,13 +155,21 @@ When ``tools.skills.paths`` is empty (the default), MiniBot scans these location
    * - Priority
      - Path
    * - 1 (highest)
-     - ``./.agents/skills/``
+     - ``tools.skills.write_path`` (default ``./.minibot/skills/``)
    * - 2
-     - ``./.claude/skills/``
+     - ``./.minibot/skills/``
    * - 3
+     - ``./.agents/skills/``
+   * - 4
+     - ``~/.minibot/skills/``
+   * - 5
      - ``~/.agents/skills/``
-   * - 4 (lowest)
-     - ``~/.claude/skills/``
+   * - 6 (lowest)
+     - skills bundled inside the MiniBot package, unless ``native = false``
+
+Setting ``paths`` replaces entries 2 to 5; ``write_path`` and the bundled skills are
+independent of it. Skills kept anywhere else — ``~/.claude/skills``, say — are picked up by
+listing that directory in ``paths``.
 
 Recommended setup: ``./skills``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -295,7 +295,7 @@ Tool Configuration
      - ``name``, ``transport``, stdio command fields, HTTP fields, tool allow/deny filters
    * - ``[tools.skills]``
      - ``SkillsToolConfig``
-     - ``enabled``, ``paths``, ``preload_catalog``
+     - ``enabled``, ``paths``, ``preload_catalog``, ``native``, ``native_disabled``, ``write_path``
    * - ``[tools.rag]``
      - ``RagToolConfig``
      - ``enabled``, ``backend``, ``sqlite_url``/``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`

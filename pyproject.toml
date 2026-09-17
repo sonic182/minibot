@@ -31,6 +31,8 @@ packages = [
 include = [
   # Tool descriptions live next to the module that builds the tool, wherever that module is.
   { path = "minibot/**/*.txt", format = ["sdist", "wheel"] },
+  # Skills bundled with the package ([tools.skills] native).
+  { path = "minibot/skills/**/*.md", format = ["sdist", "wheel"] },
   { path = "config.example.toml", format = ["sdist", "wheel"] },
   { path = "config.yolo.toml", format = ["sdist", "wheel"] },
   { path = "prompts/**/*.md", format = ["sdist", "wheel"] },

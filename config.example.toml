@@ -509,10 +509,14 @@ timeout_seconds = 30
 # Each skill is a subdirectory containing a SKILL.md file.
 #
 # Default discovery paths (used when `paths` is empty), in priority order:
-#   Project-level (higher): ./.agents/skills/, ./.claude/skills/
-#   User-level   (lower):   ~/.agents/skills/, ~/.claude/skills/
+#   Project (higher): ./.minibot/skills/, ./.agents/skills/
+#   User    (lower):  ~/.minibot/skills/, ~/.agents/skills/
+#   Native  (lowest): skills bundled inside the minibot package
 #
-# Setting `paths` to a non-empty list REPLACES the defaults entirely.
+# Skills kept elsewhere (for example ~/.claude/skills) are picked up by listing that
+# directory in `paths` below.
+#
+# Setting `paths` to a non-empty list REPLACES the project and user defaults entirely.
 # Use this when you want to load only your own skills and avoid picking up
 # development skills bundled with the MiniBot project directory.
 [tools.skills]
@@ -524,6 +528,17 @@ enabled = false
 preload_catalog = true
 # Recommended: create a ./skills directory and set paths to load only your own skills.
 # paths = ["./skills"]
+# Skills shipped inside the minibot package (create_skill today). Deliberately independent of
+# `paths`, so configuring `paths` above never silently drops them.
+native = true
+# Opt out of individual bundled skills by name. To change one instead of losing it, write a
+# skill of the same name in a project or user path — it takes precedence over the bundled one.
+# native_disabled = ["create_skill"]
+# Where the agent creates or imports skills. Added as the highest-priority discovery path, so a
+# skill written at runtime is picked up without a restart. Keep it inside
+# [tools.file_storage] root_dir if you want the agent to write it with `filesystem`; otherwise
+# it needs `bash`, and list_skills reports which one applies.
+# write_path = "./.minibot/skills"
 
 # Optional async task system. Gates both the task consumer and the
 # spawn_task / cancel_task / list_tasks / get_task tools.
