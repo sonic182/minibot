@@ -55,6 +55,17 @@ The in-process asyncio event bus publishes `MessageEvent`, `TurnStartedEvent`,
 `OutboundFileEvent`, and `OutboundFormatRepairEvent`. Extensions subscribe with `@mb.on`.
 Handlers are async and lossy: slow handlers drop events rather than blocking the pipeline.
 
+## Agent skills
+
+A skill is a directory holding a `SKILL.md` file: flat `key: value` frontmatter (`name`,
+`description`, `enabled`) plus Markdown instructions, following the agentskills.io format.
+Only names and descriptions reach the prompt; `activate_skill` loads the body on demand.
+Discovery runs project (`./.minibot/skills`, `./.agents/skills`, or `tools.skills.paths`),
+then user (the same names under `$HOME`), then native — skills bundled in the package, toggled
+with `native` / `native_disabled`. Higher priority shadows lower, which is how a bundled skill
+is overridden. `tools.skills.write_path` is where the agent writes new skills and is the
+top-priority discovery path; files are re-read on an mtime/size fingerprint, so no restart.
+
 ## Multi-agent orchestration
 
 Specialist agents are Markdown files in `./agents` with YAML frontmatter (name, description,

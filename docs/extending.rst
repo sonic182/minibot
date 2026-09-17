@@ -27,9 +27,9 @@ Work top-down: use the least powerful layer that does the job.
      - ``config.toml``
      - No
    * - 1. Content
-     - Rewrite the system prompt, add policy/channel prompt packs, add skills
-       (or override a bundled one by reusing its name), add specialist agent
-       definitions.
+     - Rewrite the system prompt, add policy/channel prompt packs, add
+       :doc:`skills` (or override a bundled one by reusing its name), add
+       specialist agent definitions.
      - ``prompts/``, ``skills/``, ``agents/*.md``
      - No
    * - 2. External tools
@@ -154,6 +154,7 @@ Next steps
 ----------
 
 - Write a full extension with config and an event subscriber: :doc:`extensions`.
+- Teach the agent a reusable procedure in Markdown: :doc:`skills`.
 - Define specialist agents in Markdown: :doc:`agents`.
 - Override the prompt packs: :doc:`prompts`.
 - Point MiniBot at an MCP server: :doc:`mcp`.

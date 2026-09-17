@@ -64,6 +64,7 @@ Why self-host
    extending
    extensions
    events
+   skills
    agents
    prompts
    mcp

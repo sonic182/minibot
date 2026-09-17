@@ -13,6 +13,7 @@
 - [Python extensions](https://sonic182.github.io/minibot/extensions.html): tools, events, services, channels
 - [Extension API reference](https://sonic182.github.io/minibot/extension-api.html): ExtensionContext, ToolBinding, events
 - [Events](https://sonic182.github.io/minibot/events.html): event-bus reference
+- [Agent skills](https://sonic182.github.io/minibot/skills.html): SKILL.md format, discovery order, bundled skills
 - [Multi-agent orchestration](https://sonic182.github.io/minibot/agents.html)
 - [Prompt packs](https://sonic182.github.io/minibot/prompts.html)
 - [MCP integration](https://sonic182.github.io/minibot/mcp.html)

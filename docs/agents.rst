@@ -116,82 +116,12 @@ MCP server. See ``agents/browser_agent.md`` for the canonical setup — its
 Agent Skills
 ------------
 
-Skills are reusable instruction packs the model loads on demand via ``list_skills`` /
-``activate_skill``. Each skill is a directory containing a ``SKILL.md`` file.
+Skills are reusable instruction packs the model loads on demand, and they are shared with the
+main agent rather than being an orchestration feature. A specialist can be pointed at one the
+same way the main agent is — the ``browser_agent`` above is driven by a skill rather than an
+MCP server.
 
-Skill file format
-~~~~~~~~~~~~~~~~~
-
-.. code-block:: markdown
-
-   ---
-   name: my-skill
-   description: One-line summary shown in the catalog.
-   enabled: true
-   ---
-
-   # My Skill
-
-   Full instructions here...
-
-Frontmatter fields: ``name`` (required), ``description`` (optional), ``enabled`` (default ``true``).
-
-Runtime behavior
-~~~~~~~~~~~~~~~~
-
-- ``list_skills`` rescans skill directories on demand — new skills are picked up without restarting.
-- ``activate_skill`` requires the exact name returned by ``list_skills``.
-- Set ``tools.skills.preload_catalog`` (default ``true``) to embed a names/descriptions snapshot
-  in the system prompt; set it to ``false`` to render the catalog only on demand.
-
-Discovery paths
-~~~~~~~~~~~~~~~
-
-When ``tools.skills.paths`` is empty (the default), MiniBot scans these locations in priority order:
-
-.. list-table::
-   :header-rows: 1
-
-   * - Priority
-     - Path
-   * - 1 (highest)
-     - ``tools.skills.write_path`` (default ``./.minibot/skills/``)
-   * - 2
-     - ``./.minibot/skills/``
-   * - 3
-     - ``./.agents/skills/``
-   * - 4
-     - ``~/.minibot/skills/``
-   * - 5
-     - ``~/.agents/skills/``
-   * - 6 (lowest)
-     - skills bundled inside the MiniBot package, unless ``native = false``
-
-Setting ``paths`` replaces entries 2 to 5; ``write_path`` and the bundled skills are
-independent of it. Skills kept anywhere else — ``~/.claude/skills``, say — are picked up by
-listing that directory in ``paths``.
-
-Recommended setup: ``./skills``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: toml
-
-   [tools.skills]
-   enabled = true
-   preload_catalog = true
-   paths = ["./skills"]
-
-Then place one subdirectory per skill::
-
-   skills/
-     my-skill/
-       SKILL.md
-     another-skill/
-       SKILL.md
-
-Setting ``paths`` to a non-empty list **replaces** the project and user locations above.
-``write_path`` and the bundled skills are unaffected; turn those off with ``native = false``
-or ``native_disabled``. To disable skill support entirely: ``enabled = false``.
+See :doc:`skills` for the format, discovery order, and configuration.
 
 OpenRouter Custom Params per Agent
 -----------------------------------
