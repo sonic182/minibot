@@ -9,60 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Delegated runs compact their own context.** `spawn_task` and `invoke_agent` can loop for
-  dozens of tool-calling steps inside a single `AgentRuntime.run()`, and nothing was watching the
-  context window along the way — one research task finished at 1,035k tokens against a 1,050k
-  limit. The runtime now measures the provider's reported input tokens each step and, past
-  `memory.context_ratio_before_compact` of the model's window, compacts the working transcript
-  down to the system prompt, the original task, and a summary, then keeps going. It reuses the
-  strategy `HistoryCompactionService` already applies between turns: the provider's native
-  compaction endpoint when available, an LLM summary otherwise, and on failure it simply carries
-  on uncompacted. The main chat turn is unaffected — it still compacts its persisted history
-  between turns instead.
+- **Delegated runs compact their own context.** `spawn_task` and `invoke_agent` can loop for dozens of tool-calling steps inside a single `AgentRuntime.run()`, and nothing was watching the context window along the way — one research task finished at 1,035k tokens against a 1,050k limit. The runtime now measures the provider's reported input tokens each step and, past `memory.context_ratio_before_compact` of the model's window, compacts the working transcript down to the system prompt, the original task, and a summary, then keeps going. It reuses the strategy `HistoryCompactionService` already applies between turns: the provider's native compaction endpoint when available, an LLM summary otherwise, and on failure it simply carries on uncompacted. The main chat turn is unaffected — it still compacts its persisted history between turns instead.
+
+- **The agent knows which version it is running and which config file it loaded.** Both are now in the environment context alongside the working directory, using the path actually loaded — so `minibot console --config other.toml` reports that file, not the default. `minibot --version` prints the version from the CLI, which had no version flag before.
 
 ### Changed
 
-- **A tool call that cannot succeed no longer kills the whole run.** Two identical tool failures
-  used to abort immediately with `repeated_tool_failure`, throwing away everything produced so
-  far — a background task doing RDAP lookups died 35 seconds in because it retried one hostname
-  that does not resolve. An unreachable host is a finding to report, not a reason to lose the
-  work: the runtime now tells the agent once that the call cannot succeed and to surface it in
-  its final answer, then lets it carry on. `max_steps`, `max_tool_calls` and the timeout remain
-  the ceilings, and the separate guard for genuinely stuck loops (identical calls producing
-  identical outputs) still stops those.
+- **A tool call that cannot succeed no longer kills the whole run.** Two identical tool failures used to abort immediately with `repeated_tool_failure`, throwing away everything produced so far — a background task doing RDAP lookups died 35 seconds in because it retried one hostname that does not resolve. An unreachable host is a finding to report, not a reason to lose the work: the runtime now tells the agent once that the call cannot succeed and to surface it in its final answer, then lets it carry on. `max_steps`, `max_tool_calls` and the timeout remain the ceilings, and the separate guard for genuinely stuck loops (identical calls producing identical outputs) still stops those.
 
 ### Fixed
 
-- Agent specs no longer lose `omit_temperature` (and now `context_limit`) when a task runs them
-  through `spawn_task`; the field-by-field copy became a `dataclasses.replace`.
+- **`minibot.__version__` reported `0.1.0` no matter which release was installed.** Hardcoded and referenced nowhere else, it had drifted fifteen minor versions behind `pyproject.toml`. It now reads installed distribution metadata, falling back to `0.0.0`.
 
-- **One failed Telegram send left the bot permanently mute.** `_publish_outgoing` consumed its
-  subscription with an unguarded `async for`, and only `TelegramBadRequest` was caught around the
-  actual send calls. Any other failure — a rate limit, a network blip mid-way through a chunked
-  message — escaped and ended the loop, killing the task for the rest of the process's life: the
-  daemon kept receiving messages and generating answers, and silently delivered none of them. It
-  was invisible too, since the task is held on an attribute and asyncio never reports an
-  unretrieved exception for it. Worse, that subscription is bounded and non-lossy, so once 128
-  events piled up in the orphaned queue every `EventBus.publish` would block forever and hang the
-  daemon outright. Each event is now handled in isolation, the send paths catch everything, a
-  dead loop is logged at ERROR, and the bus warns before blocking on a full queue. The console
-  channel's identical loop got the same treatment.
+- Agent specs no longer lose `omit_temperature` (and now `context_limit`) when a task runs them through `spawn_task`; the field-by-field copy became a `dataclasses.replace`.
 
-- **Mid-run compaction resent the whole transcript it had just shrunk.** For providers chained
-  through `previous_response_id`, the step right after a native compaction fell back to
-  rendering the full local state (system prompt, task, summary) instead of the delta-only
-  follow-up every other step in that mode sends — duplicating content the newly compacted
-  response already held server-side, right when compaction exists specifically to cut tokens.
-  It now sends the same minimal continuation nudge `build_continue_call_kwargs` already uses to
-  resume a `previous_response_id` without replaying history.
+- **One failed Telegram send left the bot permanently mute.** `_publish_outgoing` consumed its subscription with an unguarded `async for`, and only `TelegramBadRequest` was caught around the actual send calls. Any other failure — a rate limit, a network blip mid-way through a chunked message — escaped and ended the loop, killing the task for the rest of the process's life: the daemon kept receiving messages and generating answers, and silently delivered none of them. It was invisible too, since the task is held on an attribute and asyncio never reports an unretrieved exception for it. Worse, that subscription is bounded and non-lossy, so once 128 events piled up in the orphaned queue every `EventBus.publish` would block forever and hang the daemon outright. Each event is now handled in isolation, the send paths catch everything, a dead loop is logged at ERROR, and the bus warns before blocking on a full queue. The console channel's identical loop got the same treatment.
 
-- **`spawn_task` results rendered as raw Markdown on Telegram** (literal `**bold**`, `# headings`,
-  `|table|` pipes instead of formatted text). The worker already resolved the right `kind`
-  (markdown/html/text) through the same `extract_answer()` path a normal turn uses, but only kept
-  the resolved text and dropped the kind; the task manager then built the outbound response with
-  no `render`, which falls back to forced plain text. The worker now carries `render_kind`/
-  `render_meta` through its result metadata, and the manager reattaches them.
+- **Mid-run compaction resent the whole transcript it had just shrunk.** For providers chained through `previous_response_id`, the step right after a native compaction fell back to rendering the full local state (system prompt, task, summary) instead of the delta-only follow-up every other step in that mode sends — duplicating content the newly compacted response already held server-side, right when compaction exists specifically to cut tokens. It now sends the same minimal continuation nudge `build_continue_call_kwargs` already uses to resume a `previous_response_id` without replaying history.
 
+- **`spawn_task` results rendered as raw Markdown on Telegram** (literal `**bold**`, `# headings`, `|table|` pipes instead of formatted text). The worker already resolved the right `kind` (markdown/html/text) through the same `extract_answer()` path a normal turn uses, but only kept the resolved text and dropped the kind; the task manager then built the outbound response with no `render`, which falls back to forced plain text. The worker now carries `render_kind`/`render_meta` through its result metadata, and the manager reattaches them.
 ## [0.16.0] - 2026-09-16
 
 ### Added
