@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.app import skill_definitions_loader
 from minibot.app.skill_registry import SkillRegistry
+from minibot.core.skills import SkillSource
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.skill_loader import SkillLoaderTool
 
@@ -28,6 +31,16 @@ def _write_skill(
 
 def _bindings_by_name(tool: SkillLoaderTool) -> dict[str, object]:
     return {binding.tool.name: binding for binding in tool.bindings()}
+
+
+@pytest.fixture
+def native_skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Stand in for the skills bundled inside the package."""
+    bundled = tmp_path / "bundled"
+    _write_skill(bundled, "create-skill", name="create-skill", description="Author a new skill.")
+    _write_skill(bundled, "import-skill", name="import-skill", description="Import a skill.")
+    monkeypatch.setattr(skill_definitions_loader, "NATIVE_SKILLS_DIR", bundled)
+    return bundled
 
 
 def test_skill_registry_refreshes_when_new_skill_appears(tmp_path: Path) -> None:
@@ -133,3 +146,96 @@ async def test_activate_skill_uses_live_registry_state(tmp_path: Path) -> None:
 
     assert missing["ok"] is False
     assert missing["error_code"] == "skill_not_found"
+
+
+def test_native_skills_load_only_when_enabled(tmp_path: Path, native_skills_dir: Path) -> None:
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "python-review", name="python-review", description="Review Python changes.")
+
+    without_native = SkillRegistry(paths=[str(skills_dir)])
+    with_native = SkillRegistry(paths=[str(skills_dir)], native=True)
+
+    assert without_native.names() == ["python-review"]
+    assert with_native.names() == ["create-skill", "import-skill", "python-review"]
+    assert with_native.get("create-skill").source is SkillSource.NATIVE
+    assert with_native.get("python-review").source is SkillSource.PROJECT
+
+
+def test_native_disabled_drops_only_the_named_bundled_skill(tmp_path: Path, native_skills_dir: Path) -> None:
+    registry = SkillRegistry(paths=[str(tmp_path / "skills")], native=True, native_disabled=["import-skill"])
+
+    assert registry.names() == ["create-skill"]
+
+
+def test_project_skill_shadows_a_bundled_skill_of_the_same_name(tmp_path: Path, native_skills_dir: Path) -> None:
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "create-skill", name="create-skill", description="Mine.", body="Local override.")
+
+    registry = SkillRegistry(paths=[str(skills_dir)], native=True)
+    spec = registry.get("create-skill")
+
+    assert spec.source is SkillSource.PROJECT
+    assert spec.body == "Local override."
+
+
+def test_native_skills_survive_configured_paths_and_write_path_is_discovered(
+    tmp_path: Path, native_skills_dir: Path
+) -> None:
+    write_dir = tmp_path / "written"
+    registry = SkillRegistry(paths=[str(tmp_path / "configured")], native=True, write_path=str(write_dir))
+
+    assert registry.names() == ["create-skill", "import-skill"]
+    assert registry.write_dir() == write_dir.resolve()
+
+    _write_skill(write_dir, "fresh", name="fresh", description="Written at runtime.")
+
+    assert registry.refresh_if_stale() is True
+    assert "fresh" in registry.names()
+
+
+async def _list_skills(registry: SkillRegistry, storage: LocalFileStorage | None, bash_enabled: bool) -> dict:
+    tool = SkillLoaderTool(registry, storage, bash_enabled)
+    return await _bindings_by_name(tool)["list_skills"].handler({}, ToolContext())
+
+
+def _storage(root: Path, *, allow_outside_root: bool = False) -> LocalFileStorage:
+    return LocalFileStorage(str(root), max_write_bytes=64000, allow_outside_root=allow_outside_root)
+
+
+@pytest.mark.asyncio
+async def test_list_skills_reports_write_dir_and_source(tmp_path: Path, native_skills_dir: Path) -> None:
+    managed_root = tmp_path / "managed"
+    write_dir = managed_root / "skills"
+    registry = SkillRegistry(paths=[str(tmp_path / "configured")], native=True, write_path=str(write_dir))
+
+    result = await _list_skills(registry, _storage(managed_root), False)
+
+    assert result["write_dir"] == write_dir.resolve().as_posix()
+    assert {match["source"] for match in result["matches"]} == {"native"}
+    assert write_dir.resolve().as_posix() in result["discovery_paths"]
+
+
+@pytest.mark.asyncio
+async def test_write_dir_access_reflects_the_writers_actually_available(
+    tmp_path: Path, native_skills_dir: Path
+) -> None:
+    managed_root = tmp_path / "managed"
+    inside_root = SkillRegistry(native=True, write_path=str(managed_root / "skills"))
+    outside_root = SkillRegistry(native=True, write_path=str(tmp_path / "elsewhere"))
+
+    confined = await _list_skills(inside_root, _storage(managed_root), False)
+    escaped_confined = await _list_skills(outside_root, _storage(managed_root), False)
+    escaped_with_bash = await _list_skills(outside_root, _storage(managed_root), True)
+    yolo = await _list_skills(outside_root, _storage(managed_root, allow_outside_root=True), False)
+    no_storage = await _list_skills(outside_root, None, False)
+
+    assert confined["write_dir_access"] == "filesystem"
+    assert confined["write_dir_filesystem_path"] == "skills"
+    # Out of the filesystem tool's reach and bash is off: say so rather than name a missing tool.
+    assert escaped_confined["write_dir_access"] == "unavailable"
+    assert escaped_confined["write_dir_filesystem_path"] is None
+    assert escaped_with_bash["write_dir_access"] == "bash"
+    # allow_outside_root lets the filesystem tool take an absolute path anywhere.
+    assert yolo["write_dir_access"] == "filesystem"
+    assert yolo["write_dir_filesystem_path"] == (tmp_path / "elsewhere").resolve().as_posix()
+    assert no_storage["write_dir_access"] == "unavailable"

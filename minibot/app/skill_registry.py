@@ -1,25 +1,57 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from minibot.app.skill_definitions_loader import (
     fingerprint_skill_paths,
     load_skill_specs,
     resolve_skill_discovery_paths,
+    resolve_skill_write_dir,
 )
-from minibot.core.skills import SkillSpec
+from minibot.core.skills import SkillSource, SkillSpec
 
 
 class SkillRegistry:
-    def __init__(self, specs: Sequence[SkillSpec] | None = None, paths: list[str] | None = None) -> None:
+    """Discovered skills, refreshed from disk on an mtime/size fingerprint.
+
+    ``native`` opts into the skills bundled inside the package. It defaults to ``False`` so that
+    constructing a registry over explicit ``paths`` stays exactly that; the daemon turns it on
+    from ``[tools.skills] native``.
+    """
+
+    def __init__(
+        self,
+        specs: Sequence[SkillSpec] | None = None,
+        paths: list[str] | None = None,
+        *,
+        native: bool = False,
+        native_disabled: Iterable[str] = (),
+        write_path: str | None = None,
+    ) -> None:
         self._paths = list(paths) if paths is not None else None
-        self._resolved_paths = (
-            resolve_skill_discovery_paths(self._paths) if self._paths is not None or specs is None else []
-        )
+        self._native = native
+        self._native_disabled = frozenset(native_disabled)
+        self._write_path = write_path
+        discovers_from_disk = self._paths is not None or specs is None
+        self._resolved_paths = self._resolve_paths() if discovers_from_disk else []
         self._fingerprint = fingerprint_skill_paths(self._resolved_paths)
         self._by_name: dict[str, SkillSpec] = {}
-        self._replace_specs(specs if specs is not None else load_skill_specs(self._paths))
+        self._replace_specs(specs if specs is not None else self._load_specs())
+
+    def _resolve_paths(self) -> list[tuple[Path, SkillSource]]:
+        return resolve_skill_discovery_paths(self._paths, native=self._native, write_path=self._write_path)
+
+    def _load_specs(self) -> list[SkillSpec]:
+        return load_skill_specs(
+            self._paths,
+            native=self._native,
+            native_disabled=self._native_disabled,
+            write_path=self._write_path,
+        )
+
+    def write_dir(self) -> Path:
+        return resolve_skill_write_dir(self._paths, self._write_path)
 
     def all(self) -> list[SkillSpec]:
         self.refresh_if_stale()
@@ -50,7 +82,7 @@ class SkillRegistry:
         return "\n".join(lines)
 
     def discovery_paths(self) -> list[Path]:
-        return [base_path for base_path, _is_project_level in self._resolved_paths]
+        return [base_path for base_path, _source in self._resolved_paths]
 
     def refresh_if_stale(self) -> bool:
         if not self._resolved_paths:
@@ -58,7 +90,7 @@ class SkillRegistry:
         fingerprint = fingerprint_skill_paths(self._resolved_paths)
         if fingerprint == self._fingerprint:
             return False
-        self._replace_specs(load_skill_specs(self._paths))
+        self._replace_specs(self._load_specs())
         self._fingerprint = fingerprint
         return True
 

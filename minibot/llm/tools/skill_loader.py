@@ -6,6 +6,7 @@ from typing import Any
 
 from llm_async.models import Tool
 
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app.skill_registry import SkillRegistry
 from minibot.core.skills import SkillSpec
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
@@ -32,10 +33,23 @@ class SkillLoaderTool:
 
     Skills are markdown files (``SKILL.md``) discovered from the configured
     paths; the registry refreshes automatically when files change.
+
+    ``managed_storage`` and ``bash_enabled`` describe which writer can actually reach the
+    skill write directory, reported as ``write_dir_access``. Both are needed: ``filesystem``
+    is confined to its root unless ``allow_outside_root`` is set, and ``bash`` is absent
+    unless ``[tools.bash]`` is enabled — so "not reachable by filesystem" does not imply
+    "reachable by bash".
     """
 
-    def __init__(self, registry: SkillRegistry) -> None:
+    def __init__(
+        self,
+        registry: SkillRegistry,
+        managed_storage: LocalFileStorage | None = None,
+        bash_enabled: bool = False,
+    ) -> None:
         self._registry = registry
+        self._managed_storage = managed_storage
+        self._bash_enabled = bash_enabled
 
     def bindings(self) -> list[ToolBinding]:
         return [
@@ -78,20 +92,37 @@ class SkillLoaderTool:
         query = optional_str(payload.get("query"), error_message="query must be a string")
         skills = self._registry.all()
         matches, used_fuzzy = _match_skills(skills, query)
+        write_dir = self._registry.write_dir()
+        access, filesystem_path = self._write_dir_access(write_dir)
         return {
             "ok": True,
             "query": query,
             "total_available": len(skills),
             "returned": len(matches),
             "used_fuzzy_fallback": used_fuzzy,
+            "write_dir": write_dir.as_posix(),
+            "write_dir_access": access,
+            "write_dir_filesystem_path": filesystem_path,
+            "discovery_paths": [path.as_posix() for path in self._registry.discovery_paths()],
             "matches": [
                 {
                     "name": spec.name,
                     "description": spec.description.strip() or "No description provided.",
+                    "source": str(spec.source),
                 }
                 for spec in matches
             ],
         }
+
+    def _write_dir_access(self, write_dir: Path) -> tuple[str, str | None]:
+        storage = self._managed_storage
+        if storage is not None and (storage.allow_outside_root or write_dir.is_relative_to(storage.root_dir)):
+            # display_path yields a root-relative path inside the root and an absolute one
+            # outside it, which is exactly what the filesystem tool accepts in each mode.
+            return "filesystem", storage.display_path(write_dir)
+        if self._bash_enabled:
+            return "bash", None
+        return "unavailable", None
 
     async def _handle(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         self._registry.refresh_if_stale()
@@ -110,6 +141,7 @@ class SkillLoaderTool:
             "skill": name,
             "instructions": f"<skill-instructions>\n{spec.body}\n</skill-instructions>",
             "skill_dir": spec.skill_dir.as_posix(),
+            "source": str(spec.source),
             "resources": resources,
         }
 

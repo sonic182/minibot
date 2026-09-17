@@ -58,8 +58,13 @@ class AppContainer:
         cls._llm_client = cls._llm_factory.create_default()
         cls._agent_registry = AgentRegistry(agent_specs)
         if cls._settings.tools.skills.enabled:
-            skill_paths = list(cls._settings.tools.skills.paths) or None
-            cls._skill_registry = SkillRegistry(paths=skill_paths)
+            skills_config = cls._settings.tools.skills
+            cls._skill_registry = SkillRegistry(
+                paths=list(skills_config.paths) or None,
+                native=skills_config.native,
+                native_disabled=skills_config.native_disabled,
+                write_path=skills_config.write_path,
+            )
         else:
             cls._skill_registry = SkillRegistry([])
         cls._token_autoconfig_applied = False

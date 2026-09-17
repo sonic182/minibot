@@ -59,7 +59,7 @@ def build_enabled_tools(
     if settings.tools.skills.enabled and skill_registry is not None:
         from minibot.llm.tools.skill_loader import SkillLoaderTool
 
-        tools.extend(SkillLoaderTool(skill_registry).bindings())
+        tools.extend(SkillLoaderTool(skill_registry, managed_storage, settings.tools.bash.enabled).bindings())
     if agent_registry is not None and llm_factory is not None and not agent_registry.is_empty():
         tools.extend(
             AgentDelegateTool(

@@ -13,7 +13,7 @@ returns the `skill_dir` of an existing skill, nothing else.
 
 Goal: ship a small set of skills inside the package (`minibot/skills/`), gated by
 `[tools.skills] enabled` and individually switchable. The v1 set is four skills:
-`create_skill`, `import_skill`, `minibot_docs`, `create_agent`.
+`create-skill`, `import-skill`, `minibot-docs`, `create-agent`.
 
 ## Current wiring (what we are extending)
 
@@ -52,11 +52,11 @@ than trailing behind it.
 | # | PR | Impact | Depends on |
 |---|---|---|---|
 | ~~1~~ | ~~Single-source the package version~~ | **Done — merged in #82** | — |
-| 2 | Native skill tier + `create_skill` | Turns an empty feature on for every install | 1 |
+| 2 | Native skill tier + `create-skill` | Turns an empty feature on for every install | 1 |
 | 3 | `get_settings` tool | Stops the agent guessing its own configuration | 1, 2 |
-| 4 | `minibot_docs` skill | The bot can answer questions about itself | 3 |
-| 5 | `import_skill` skill | Growth path for skills; riskiest surface | 2 |
-| 6 | `create_agent` skill + agent hot reload | Narrowest audience; one real code change | 2 |
+| 4 | `minibot-docs` skill | The bot can answer questions about itself | 3 |
+| 5 | `import-skill` skill | Growth path for skills; riskiest surface | 2 |
+| 6 | `create-agent` skill + agent hot reload | Narrowest audience; one real code change | 2 |
 
 PRs 4, 5 and 6 are independent of each other and can land in any order once 2 and 3 are in.
 
@@ -124,19 +124,19 @@ metadata is absent.
 
 ---
 
-## PR 2 — Native skill tier + `create_skill`  ← next
+## PR 2 — Native skill tier + `create-skill`  ← in review (#83)
 
 **Impact:** the load-bearing PR. Everything else in this document is a file drop on top of it,
 and on its own it turns `[tools.skills]` from an empty feature into one that ships something.
 
-`create_skill` rides along rather than waiting for its own PR: it is the first inhabitant of
+`create-skill` rides along rather than waiting for its own PR: it is the first inhabitant of
 the new tier and the thing that proves the tier works end to end.
 
 ### 2a. Where the files live
 
 ```
 minibot/skills/
-  create_skill/
+  create-skill/
     SKILL.md
 ```
 
@@ -160,7 +160,7 @@ becomes `(Path, SkillSource)`. This replaces a bool that already could not expre
 | 1 | `user` | `~/.agents/skills`, `~/.claude/skills` (skipped when `paths` is set) |
 | 2 | `native` | `minibot/skills/` — appended last, **always**, independent of `paths` |
 
-Precedence stays "lower rank wins", so a user-authored `create_skill` shadows the bundled one —
+Precedence stays "lower rank wins", so a user-authored `create-skill` shadows the bundled one —
 that is the intended override path, and it deserves its own log line
 (`skill_definitions_loader.py:64-84` already has the collision-warning block).
 
@@ -177,7 +177,7 @@ preload_catalog = true
 # Bundled skills shipped inside the minibot package. Independent of `paths`.
 native = true
 # Opt out of individual bundled skills by name.
-native_disabled = ["import_skill"]
+native_disabled = ["import-skill"]
 # Where the agent creates or imports new skills. Auto-added as the top-priority
 # discovery path. Default: first `paths` entry, else "./.agents/skills".
 # write_path = "./skills"
@@ -213,7 +213,7 @@ once, deterministically, beats letting the model discover it by failing a tool c
 (`skill_registry.py:52`) so the tool does not re-resolve config — and so PR 3 can read the same
 value rather than computing it twice.
 
-### 2e. `create_skill` (SKILL.md, no code)
+### 2e. `create-skill` (SKILL.md, no code)
 
 Body covers, in this order:
 
@@ -241,7 +241,7 @@ name shadows the native one; `list_skills` reports `write_dir` and `source`.
 "skills" means there. The docs CI gate runs `sphinx-build -W`, so a new warning fails the deploy.
 
 **Done when** a fresh install with `[tools.skills] enabled = true` and no other config shows
-`create_skill` in `list_skills`, and a skill written to `write_dir` at runtime appears on the
+`create-skill` in `list_skills`, and a skill written to `write_dir` at runtime appears on the
 next call without a restart.
 
 ---
@@ -310,10 +310,10 @@ be chosen field by field.
 | `llm.provider`, `llm.model` | `LLMMConfig.provider/model` | self-description, cost/capability questions |
 | `llm.prompts_dir` | `LLMMConfig.prompts_dir` | where prompt packs live |
 | `memory.backend`, `max_history_messages`, `max_history_tokens` | `MemoryConfig` | history/compaction questions |
-| `agents.directory`, `agents.names` | `OrchestrationConfig.directory`, `AgentRegistry.names()` | required by `create_agent` (PR 6) |
+| `agents.directory`, `agents.names` | `OrchestrationConfig.directory`, `AgentRegistry.names()` | required by `create-agent` (PR 6) |
 | `tools.<name>` present-or-absent | `ToolsConfig` | which capabilities exist this turn |
 | `tools.file_storage.root_dir`, `.mode`, `.max_write_bytes` | `FileStorageToolConfig` | already in the prompt fragment; here in structured form |
-| `tools.skills.paths`, `.write_dir`, `.write_dir_access`, `.native`, `.count` | `SkillRegistry` (PR 2d) | required by `create_skill` / `import_skill` |
+| `tools.skills.paths`, `.write_dir`, `.write_dir_access`, `.native`, `.count` | `SkillRegistry` (PR 2d) | required by `create-skill` / `import-skill` |
 | `tools.bash.default_timeout_seconds`, `.max_timeout_seconds`, `.env_allowlist` | `BashToolConfig` | timeouts it will otherwise guess; env var **names** (not values) that survive into a command |
 | `tools.mcp.servers` | **names only** | which remote toolsets exist |
 | `tasks.backend` | `TasksConfig.backend` | async delegation questions |
@@ -368,7 +368,7 @@ sentinel test passes with every secret field populated.
 
 ---
 
-## PR 4 — `minibot_docs`
+## PR 4 — `minibot-docs`
 
 **Impact:** the most user-visible of the remaining skills — "ask the bot how the bot works" —
 and pure markdown, so the risk is in the wording, not the code.
@@ -402,7 +402,7 @@ question routes to `get_settings` instead.
 
 ---
 
-## PR 5 — `import_skill`
+## PR 5 — `import-skill`
 
 **Impact:** the growth path — it is how a user gets skills without writing them. Sequenced late
 because it is the only PR that pulls remote content into the agent's instruction set.
@@ -440,7 +440,7 @@ up in `list_skills` without a restart, and `skills-lock.json` records it.
 
 ---
 
-## PR 6 — `create_agent` + agent hot reload
+## PR 6 — `create-agent` + agent hot reload
 
 **Impact:** narrowest audience of the four skills — specialists are an advanced feature — but it
 carries the one genuine code change left, so it is worth its own PR rather than being tacked on.
