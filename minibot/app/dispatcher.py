@@ -55,6 +55,7 @@ class Dispatcher:
         agent_registry = AppContainer.get_agent_registry()
         llm_factory = AppContainer.get_llm_factory()
         skill_registry = AppContainer.get_skill_registry()
+        config_path = AppContainer.get_config_path()
         tools = build_enabled_tools(
             settings,
             memory_backend,
@@ -63,6 +64,7 @@ class Dispatcher:
             llm_factory=llm_factory,
             skill_registry=skill_registry,
             extension_tools=AppContainer.get_extensions().tools,
+            config_path=config_path,
         )
         main_agent_tools_view = main_agent_tool_view(
             tools=tools,
@@ -100,7 +102,7 @@ class Dispatcher:
             max_history_tokens=settings.memory.max_history_tokens,
             notify_compaction_updates=settings.memory.notify_compaction_updates,
             agent_timeout_seconds=settings.runtime.agent_timeout_seconds,
-            environment_prompt_fragment=build_environment_prompt_fragment(settings),
+            environment_prompt_fragment=build_environment_prompt_fragment(settings, config_path),
             tool_use_guardrail=tool_use_guardrail,
             managed_files_root=settings.tools.file_storage.root_dir if settings.tools.file_storage.enabled else None,
             audio_auto_transcription_service=audio_auto_transcription_service,
