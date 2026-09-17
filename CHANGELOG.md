@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-18
+
 ### Added
 
 - **Delegated runs compact their own context.** `spawn_task` and `invoke_agent` can loop for dozens of tool-calling steps inside a single `AgentRuntime.run()`, and nothing was watching the context window along the way — one research task finished at 1,035k tokens against a 1,050k limit. The runtime now measures the provider's reported input tokens each step and, past `memory.context_ratio_before_compact` of the model's window, compacts the working transcript down to the system prompt, the original task, and a summary, then keeps going. It reuses the strategy `HistoryCompactionService` already applies between turns: the provider's native compaction endpoint when available, an LLM summary otherwise, and on failure it simply carries on uncompacted. The main chat turn is unaffected — it still compacts its persisted history between turns instead.
@@ -836,7 +838,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.16.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.17.0...HEAD
+[0.17.0]: https://github.com/sonic182/minibot/compare/0.16.0..0.17.0
 [0.16.0]: https://github.com/sonic182/minibot/compare/0.15.0..0.16.0
 [0.15.0]: https://github.com/sonic182/minibot/compare/0.14.3..0.15.0
 [0.14.3]: https://github.com/sonic182/minibot/compare/0.14.2..0.14.3
