@@ -535,10 +535,16 @@ native = true
 # skill of the same name in a project or user path — it takes precedence over the bundled one.
 # native_disabled = ["create-skill"]
 # Where the agent creates or imports skills. Added as the highest-priority discovery path, so a
-# skill written at runtime is picked up without a restart. Keep it inside
-# [tools.file_storage] root_dir if you want the agent to write it with `filesystem`; otherwise
-# it needs `bash`, and list_skills reports which one applies.
-# write_path = "./.minibot/skills"
+# skill written at runtime is picked up without a restart.
+# Which tool can write there is reported by list_skills as write_dir_access:
+#   "filesystem"  — inside [tools.file_storage] root_dir, or allow_outside_root is on
+#   "bash"        — outside that root, with [tools.bash] enabled
+#   "unavailable" — neither applies, and the agent will say so instead of trying
+# The default is "./.minibot/skills", which is outside the managed root: with the settings
+# shipped here (file_storage and bash both off) skills are read-only, which is fine until you
+# want the agent to write one. Enable [tools.file_storage] and point write_path inside its
+# root_dir for the simplest writable setup:
+# write_path = "./data/files/skills"
 
 # Optional async task system. Gates both the task consumer and the
 # spawn_task / cancel_task / list_tasks / get_task tools.

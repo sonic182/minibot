@@ -253,18 +253,15 @@ timeout_seconds = 30
 # enabled_tools = []
 # disabled_tools = []
 
-# Agent Skills support (agentskills.io spec).
-# Setting `paths` to a non-empty list REPLACES the defaults entirely.
-# Use this when you want to load only your own skills and avoid picking up
-# development skills bundled with the MiniBot project directory.
+# Agent Skills (agentskills.io spec). `paths` REPLACES the project and user defaults;
+# `native` and `write_path` are independent of it. See config.example.toml for the full contract.
 [tools.skills]
 enabled = true
-# Embed skill names/descriptions in the main prompt. With this off the model is only told to call
-# list_skills, so it cannot tell whether a relevant skill exists — and delegating to a specialist
-# (whose roster IS in the prompt) wins by default. list_skills still refreshes from disk either way.
 preload_catalog = true
-# Recommended: create a ./skills directory and set paths to load only your own skills.
+native = true
+write_path = "./data/files/skills"
 # paths = ["./skills"]
+# native_disabled = []
 
 [tools.rag]
 enabled = true
