@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+from minibot import __version__
 from minibot.adapters.container import AppContainer
 from minibot.app.console import main as console_main
 from minibot.app.dispatcher import Dispatcher
@@ -158,6 +159,7 @@ async def _graceful_shutdown(services: list, logger: logging.Logger):
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="minibot")
+    parser.add_argument("--version", action="version", version=f"minibot {__version__}")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("console", add_help=False, help="Run the console channel.")
     commands.add_parser("configure", add_help=False, help="Configure Minibot interactively.")

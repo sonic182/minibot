@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from minibot.adapters.config.schema import Settings
@@ -37,6 +38,7 @@ def build_enabled_tools(
     task_manager: TaskManager | None = None,
     task_producer: TaskProducer | None = None,
     extension_tools: Sequence[ToolBinding] | None = None,
+    config_path: Path | None = None,
 ) -> list[ToolBinding]:
     """Build core tools, then merge contributions from loaded extensions.
 
@@ -66,7 +68,7 @@ def build_enabled_tools(
                 tools=tools,
                 default_timeout_seconds=settings.orchestration.default_timeout_seconds,
                 delegated_tool_call_policy=settings.orchestration.delegated_tool_call_policy,
-                environment_prompt_fragment=build_environment_prompt_fragment(settings),
+                environment_prompt_fragment=build_environment_prompt_fragment(settings, config_path),
                 managed_storage=managed_storage,
                 spill_config=settings.tools.tool_output_spill,
                 context_ratio_before_compact=settings.memory.context_ratio_before_compact,

@@ -8,7 +8,7 @@
 - **Run daemon**: `poetry run python -m minibot.app.daemon` (or `python main.py` for quick checks)
 - **Lint**: `poetry run ruff check --fix minibot tests` (or `poetry run ruff check .` to scan everything); `flake8` is not configured here.
 - **Format**: `poetry run ruff format .`
-- **Tests**: `poetry run pytest` (single test via `poetry run pytest <file>::<TestClass>::<test_method>` or `poetry run pytest <file> -k <test_name>`)
+- **Tests**: run only the files your change touches — `poetry run pytest <file>` (single test via `poetry run pytest <file>::<TestClass>::<test_method>` or `poetry run pytest <file> -k <test_name>`). Leave the full `poetry run pytest` sweep to CI; do not run it locally.
 
 ## Documentation & Comments
 - **Comments/docstrings** — avoid incidental comments; public documentation docstrings are acceptable when they feed generated docs or clarify public config/tool surfaces.

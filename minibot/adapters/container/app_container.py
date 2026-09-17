@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from minibot.adapters.config.environment import has_secret_references, has_secret_syntax
-from minibot.adapters.config.loader import load_settings
+from minibot.adapters.config.loader import load_settings, resolve_config_path
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.pending_turns import PendingTurnStore
@@ -24,6 +24,7 @@ from minibot.llm.provider_factory import LLMClient
 
 class AppContainer:
     _settings: Settings | None = None
+    _config_path: Path | None = None
     _logger: logging.Logger | None = None
     _event_bus: EventBus | None = None
     _memory_backend: MemoryBackend | None = None
@@ -38,6 +39,7 @@ class AppContainer:
 
     @classmethod
     def configure(cls, config_path: Path | None = None, *, entrypoint: str = "daemon") -> None:
+        cls._config_path = resolve_config_path(config_path)
         cls._settings = load_settings(config_path)
         cls._settings.logging.log_level = cls._settings.runtime.log_level
         cls._logger = configure_logging(cls._settings.logging)
@@ -91,6 +93,10 @@ class AppContainer:
         if cls._settings is None:
             raise RuntimeError("container not configured")
         return cls._settings
+
+    @classmethod
+    def get_config_path(cls) -> Path | None:
+        return cls._config_path
 
     @classmethod
     def get_logger(cls) -> logging.Logger:

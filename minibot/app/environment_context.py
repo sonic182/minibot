@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from minibot import __version__
+from minibot.adapters.config.loader import resolve_config_path
 from minibot.adapters.config.schema import Settings
 
 
-def build_environment_prompt_fragment(settings: Settings) -> str:
+def build_environment_prompt_fragment(settings: Settings, config_path: Path | None = None) -> str:
     lines: list[str] = []
+    lines.append(f"- MiniBot version: {__version__}")
     lines.append(f"- Process working directory (cwd): {Path('.').resolve().as_posix()}")
+    config_file = (config_path or resolve_config_path()).expanduser()
+    if config_file.is_file():
+        lines.append(f"- Config file: {config_file.resolve().as_posix()}")
+    else:
+        lines.append(f"- Config file: none at {config_file.resolve().as_posix()} (built-in defaults in use)")
     file_storage = getattr(settings.tools, "file_storage", None)
     if getattr(file_storage, "enabled", False):
         root_dir = getattr(file_storage, "root_dir", "")
