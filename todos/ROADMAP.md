@@ -159,7 +159,8 @@ changes.
 
 ## [ ] Phase 2 — Native skills & runtime self-knowledge
 
-Detailed design: [`native_skills.md`](native_skills.md).
+Detailed design, broken into six PRs: [`native_skills.md`](native_skills.md).
+**In progress** — PR 1 (version single-sourcing) merged in #82.
 
 Different theme from the phases around it — capability, not containment —
 but it lands two new LLM-facing surfaces, so the Trust model above still
@@ -207,11 +208,13 @@ Three supporting changes, each small:
   a freshly written specialist is invisible until restart. Mirror the skill
   registry's `refresh_if_stale()`; `replace_all()` already proves the
   registry keeps its identity across a swap.
-- **Single-source the version** — `minibot/__init__.py:1` says `0.1.0` while
-  `pyproject.toml` says `0.16.0`; the constant is referenced nowhere else,
-  which is how the drift survived. Read it from installed distribution
-  metadata (`importlib.metadata.version`), then surface version and resolved
-  config path in `build_environment_prompt_fragment`.
+- ~~**Single-source the version**~~ — **done, merged in #82.** `__version__`
+  was hardcoded at `0.1.0`, fifteen minor versions behind `pyproject.toml`,
+  and referenced nowhere else, which is how the drift survived. It now reads
+  installed distribution metadata; version and the resolved config path are
+  in `build_environment_prompt_fragment`, and `minibot --version` exists.
+  `AppContainer.get_config_path()` came with it, which `get_settings` should
+  reuse.
 
 Trust model, for the two new surfaces:
 

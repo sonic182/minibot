@@ -1,7 +1,7 @@
 # Native skills — working proposal
 
 Detail document for **Phase 2** of [`ROADMAP.md`](ROADMAP.md).
-Status: concrete proposal, ready to refine and implement.
+Status: PR 1 shipped (#82); PR 2 is next.
 
 ## Context
 
@@ -51,7 +51,7 @@ than trailing behind it.
 
 | # | PR | Impact | Depends on |
 |---|---|---|---|
-| 1 | Single-source the package version | Fixes a live bug; unblocks 3 | — |
+| ~~1~~ | ~~Single-source the package version~~ | **Done — merged in #82** | — |
 | 2 | Native skill tier + `create-skill` | Turns an empty feature on for every install | 1 |
 | 3 | `get_settings` tool | Stops the agent guessing its own configuration | 1, 2 |
 | 4 | `minibot-docs` skill | The bot can answer questions about itself | 3 |
@@ -62,7 +62,30 @@ PRs 4, 5 and 6 are independent of each other and can land in any order once 2 an
 
 ---
 
-## PR 1 — Single-source the package version
+## PR 1 — Single-source the package version ✅ DONE (#82)
+
+Merged. Kept here because PR 3 builds directly on what it added.
+
+**What shipped**
+
+- `minibot/__init__.py` reads `importlib.metadata.version("minibot")`, falling back to `0.0.0`.
+- `build_environment_prompt_fragment` (`app/environment_context.py:10`) now emits
+  `- MiniBot version:` and `- Config file:`, the latter saying `(built-in defaults in use)` when
+  no file was found. It gained an optional `config_path` argument.
+- **Beyond the original plan:** `AppContainer.get_config_path()` records the path
+  `configure()` actually resolved, and `Dispatcher` / `build_enabled_tools` thread it into the
+  fragment. Without it `minibot console --config other.toml` would report the recomputed default
+  instead of the file really loaded. **PR 3 should read `config_path` from this getter rather
+  than calling `resolve_config_path()` again.**
+- `minibot --version` (`app/daemon.py:161`); there was no version flag before.
+- `tests/test_environment_context.py` covers the reported version/path and the missing-file case.
+
+**One caveat to remember:** `importlib.metadata` reads *installed* distribution metadata, so in
+an editable checkout the version lags a `pyproject.toml` bump until the next `poetry install`.
+Correct for real installs; `docs/conf.py:12` still reads `pyproject.toml` directly and is exact.
+
+<details>
+<summary>Original plan</summary>
 
 **Impact:** small diff, real bug, no dependencies, and everything in PR 3 and 4 that reports
 "what am I running" is wrong until it lands. Hence first.
@@ -97,9 +120,11 @@ except PackageNotFoundError:
 in an editable install, and falls back to `0.0.0` rather than raising when the distribution
 metadata is absent.
 
+</details>
+
 ---
 
-## PR 2 — Native skill tier + `create-skill`
+## PR 2 — Native skill tier + `create-skill`  ← in review (#83)
 
 **Impact:** the load-bearing PR. Everything else in this document is a file drop on top of it,
 and on its own it turns `[tools.skills]` from an empty feature into one that ships something.
@@ -280,7 +305,7 @@ be chosen field by field.
 
 | emitted | source | why the agent needs it |
 |---|---|---|
-| `version`, `config_path`, `cwd` | `minibot.__version__`, `resolve_config_path`, `Path.cwd()` | "what am I running / where from" |
+| `version`, `config_path`, `cwd` | `minibot.__version__`, `AppContainer.get_config_path()`, `Path.cwd()` | "what am I running / where from" (all three landed in PR 1) |
 | `channels` | **names only** of enabled channels | which surface it is talking on |
 | `llm.provider`, `llm.model` | `LLMMConfig.provider/model` | self-description, cost/capability questions |
 | `llm.prompts_dir` | `LLMMConfig.prompts_dir` | where prompt packs live |
