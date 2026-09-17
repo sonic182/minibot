@@ -47,6 +47,18 @@ Why self-host
 
 .. toctree::
    :maxdepth: 2
+   :caption: Features
+
+   security
+   scheduler
+   tasks
+   audio
+   rag
+   graph
+   vault
+
+.. toctree::
+   :maxdepth: 2
    :caption: Extending MiniBot
 
    extending
@@ -65,13 +77,6 @@ Why self-host
    cli
    extension-api
    tools
-   tasks
-   scheduler
-   audio
-   rag
-   graph
-   vault
-   security
 
 For AI agents
 -------------
