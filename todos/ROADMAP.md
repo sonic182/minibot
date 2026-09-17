@@ -20,7 +20,7 @@ guarantee the software can't actually make.
 
 - **MiniBot's own responsibility**: safe-by-default config
   (`bash.pass_parent_env = false`), secrets never reaching the LLM (Phase 1),
-  guardrails on consequential actions (Phase 3's SMTP gate, Phase 4). These
+  guardrails on consequential actions (Phase 4's SMTP gate, Phase 5). These
   matter *regardless of deployment*, because the LLM provider itself — the
   remote API — sees whatever ends up in tool-call arguments and context, no
   matter how isolated the host is. No amount of sandboxing the process
@@ -28,7 +28,7 @@ guarantee the software can't actually make.
   place does. This is why the vault stays high priority even for an owner
   who already runs MiniBot in a throwaway VM.
 - **Deployment's responsibility**: OS/filesystem/process isolation for
-  `bash`/`python_exec` (Phase 5's jail/container options). An owner who
+  `bash`/`python_exec` (Phase 6's jail/container options). An owner who
   already isolates the host can reasonably set `sandbox_mode = "none"` and
   accept the ambient risk — that's a valid choice, not a bug to prevent.
 
@@ -80,8 +80,8 @@ Ansible-vault-style design, shipped as an optional extension (not core):
   on equal footing — ship with an explicit warning: Phase 0 only fixes env
   inheritance, it says nothing about `--vault-password-file`, which stays
   exposed to `bash` reading it directly off disk (no cwd jail at all — see
-  Phase 5) regardless of Phase 0. Both alternate methods stay a real risk
-  until Phase 5's filesystem isolation lands, not just the env-var one.
+  Phase 6) regardless of Phase 0. Both alternate methods stay a real risk
+  until Phase 6's filesystem isolation lands, not just the env-var one.
   Whichever method is used, that password/file becomes the thing to protect
   instead.
 - CLI helper `minibot vault edit <path>` — like `ansible-vault edit`:
@@ -106,14 +106,14 @@ Ansible-vault-style design, shipped as an optional extension (not core):
   checks against the *actual request host*, attaching the header itself
   when it matches. The LLM never writes or sees a secret reference either
   way.
-- **Deferred to Phase 2**, where this is restated concretely:
+- **Deferred to Phase 3**, where this is restated concretely:
   `execute_tool_calls_for_runtime` (`minibot/llm/services/tool_executor.py`)
   is the choke point for the *other* side of this — redacting any known
   secret value out of a `ToolResult` (and logs) before it reaches the LLM.
   Not shipped in Phase 1: the same exfil-via-echo risk already exists
   un-redacted today for `${ENV_VAR}` static MCP headers, so Phase 1 does not
   widen it, and threading a redactor through `LLMClientFactory` →
-  `LLMClient` → the executor before Phase 2 knows its shape is premature.
+  `LLMClient` → the executor before Phase 3 knows its shape is premature.
   The "reject a call whose target isn't the bound destination" half is moot
   under the destination-bound model — nothing resolves at the executor, so
   there is no call to reject. It is a literal containment/redaction check
@@ -157,7 +157,78 @@ memory (e.g. `/proc/<pid>/mem`) — same trust boundary as any self-hosted
 secret manager running as one OS user. Out of scope unless that threat model
 changes.
 
-## [ ] Phase 2 — MCP OAuth (issue #65)
+## [ ] Phase 2 — Native skills & runtime self-knowledge
+
+Detailed design: [`native_skills.md`](native_skills.md).
+
+Different theme from the phases around it — capability, not containment —
+but it lands two new LLM-facing surfaces, so the Trust model above still
+applies (see the end of this section).
+
+A fresh install ships **zero** skills, so `[tools.skills]` looks empty until
+the owner hand-authors one, and the agent has no in-band way to learn where
+it may write a new skill: `activate_skill` returns the `skill_dir` of an
+existing skill and nothing else.
+
+Ship a small set of skills inside the package (`minibot/skills/`) on a third
+discovery tier, ranked below project- and user-level so a hand-written skill
+of the same name always wins. It must be independent of `[tools.skills]
+paths`, which *replaces* the default discovery list today
+(`app/skill_definitions_loader.py:31`) and would otherwise delete the bundled
+skills silently. Gated by the existing `[tools.skills] enabled`, plus a
+`native` master switch and a `native_disabled` opt-out list, so the default
+needs no config and turning one off is one line.
+
+v1 set, chosen for self-improvement and self-knowledge:
+
+- `create_skill` — authoring, including the places MiniBot's parser is
+  stricter than the agentskills.io spec (flat `key: value` frontmatter, not
+  real YAML; an empty body is a silent drop).
+- `import_skill` — fetch from GitHub and generic archives through a
+  stdlib-only Python helper. No node, no new Poetry dependency. Maintains a
+  `skills-lock.json` in the shape the npm `skills` tool already writes.
+- `minibot_docs` — answers "how does MiniBot work" from the published
+  `llms.txt` (2.7 KB) and the Sphinx `_sources/*.rst.txt` RST, which beats
+  scraping rendered HTML. It must never answer a configuration-*state*
+  question from documentation; that is what `get_settings` is for.
+- `create_agent` — specialist authoring, where the tool-scoping rules are
+  counterintuitive enough to be worth writing down: with neither
+  `tools_allow` nor `tools_deny` set an agent gets **zero** non-MCP tools
+  (`app/agent_policies.py:48`), and `tools_allow` is never consulted for an
+  MCP name.
+
+Three supporting changes, each small:
+
+- **`get_settings`** — a read-only core tool answering "what am I actually
+  running?", sibling to `chat_history_info`. Emits only sections that are
+  enabled, so absence is itself the answer.
+- **`AgentRegistry` hot reload** — skills re-read on an mtime/size
+  fingerprint (`app/skill_registry.py:55`); agents do not re-read at all, so
+  a freshly written specialist is invisible until restart. Mirror the skill
+  registry's `refresh_if_stale()`; `replace_all()` already proves the
+  registry keeps its identity across a swap.
+- **Single-source the version** — `minibot/__init__.py:1` says `0.1.0` while
+  `pyproject.toml` says `0.16.0`; the constant is referenced nowhere else,
+  which is how the drift survived. Read it from installed distribution
+  metadata (`importlib.metadata.version`), then surface version and resolved
+  config path in `build_environment_prompt_fragment`.
+
+Trust model, for the two new surfaces:
+
+- `get_settings` reads `Settings`, which holds `bot_token`, `api_key`,
+  `auth_secret`, `basic_auth_password` and credential-bearing URLs. It must
+  use an explicit **field allowlist**, never a denylist — a denylist leaks
+  whatever secret field is added to `schema.py` next. `is_sensitive_argument_key`
+  (`llm/services/tool_executor.py:138`) exists but is a key-substring
+  denylist built for log sanitizing; wrong shape for a surface the model
+  reads. The test that matters is a sentinel-leak test, not a field list
+  review.
+- `import_skill` installs instructions the agent will later follow, which is
+  a prompt-injection surface by construction. Never auto-activate after
+  import; show the parsed name, description and resolved source URL; require
+  explicit owner confirmation for a source the owner did not name.
+
+## [ ] Phase 3 — MCP OAuth (issue #65)
 
 Scope: alternative 1 only (auth-code + PKCE + manual callback paste). No HTTP
 callback endpoint, no device flow.
@@ -204,7 +275,7 @@ implementation that happens to work against two test servers:
   editing the vault file while the daemon is running requires a restart to
   pick up the change.
 
-## [ ] Phase 3 — SMTP tool
+## [ ] Phase 4 — SMTP tool
 
 - `SMTPToolConfig` next to `HTTPClientToolConfig`.
 - Credentials bound to the SMTP adapter per Phase 1's destination-bound
@@ -217,7 +288,7 @@ implementation that happens to work against two test servers:
   owner-facing Telegram confirmation, or a `dry_run` default) rather than a
   cross-cutting approval framework.
 
-## [ ] Phase 4 — Guardrail enhancements
+## [ ] Phase 5 — Guardrail enhancements
 
 Not a duplicate of Phase 1. Under the destination-bound model, the LLM never
 has a `secret://` reference to put in an argument at all, so there's nothing
@@ -234,15 +305,15 @@ call's arguments:
 - `GuardrailDecision` gains a `credential_exposure` field (structured, not
   regex/text classification, per project convention).
 
-## [ ] Phase 5 — bash tool hardening (mixed priority — see Trust model)
+## [ ] Phase 6 — bash tool hardening (mixed priority — see Trust model)
 
 Two different things live in this phase, deliberately split by who owns
 them:
 
 - **The AST pre-filter below**: MiniBot's job, worth doing on a similar
-  timeline to Phases 1-4. It's cheap, deterministic, and catches accidental
-  destructive commands too, not just adversarial ones — useful even inside
-  a fully-isolated deployment.
+  timeline to the other security phases. It's cheap, deterministic, and
+  catches accidental destructive commands too, not just adversarial ones —
+  useful even inside a fully-isolated deployment.
 - **The OS-level containment options at the end (1-3)**: per the Trust
   model above, this is the deployment's job, not something MiniBot's
   roadmap should try to fully solve by building a sandbox platform into the
