@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal
+from uuid import uuid4
 
 from minibot.core.events import ToolCallEvent
 from minibot.llm.services.tool_executor import canonical_tool_name
@@ -37,13 +38,14 @@ def _wrap(binding: ToolBinding, *, event_bus: EventBus) -> ToolBinding:
     async def handler(payload: ToolPayload, context: ToolContext) -> Any:
         # Copied because the handler may mutate the payload, and the event must record what was sent.
         arguments = {str(key): value for key, value in payload.items()} if isinstance(payload, dict) else {}
-        await _publish(event_bus, tool_name, "started", context, arguments)
+        call_id = uuid4().hex
+        await _publish(event_bus, tool_name, "started", call_id, context, arguments)
         try:
             result = await binding.handler(payload, context)
         except Exception as exc:
-            await _publish(event_bus, tool_name, "failed", context, arguments, error=str(exc))
+            await _publish(event_bus, tool_name, "failed", call_id, context, arguments, error=str(exc))
             raise
-        await _publish(event_bus, tool_name, "completed", context, arguments)
+        await _publish(event_bus, tool_name, "completed", call_id, context, arguments)
         return result
 
     return ToolBinding(tool=binding.tool, handler=handler)
@@ -53,6 +55,7 @@ async def _publish(
     event_bus: EventBus,
     tool_name: str,
     phase: Literal["started", "completed", "failed"],
+    call_id: str,
     context: ToolContext,
     arguments: dict[str, Any],
     error: str | None = None,
@@ -70,6 +73,7 @@ async def _publish(
         await event_bus.publish(
             ToolCallEvent(
                 phase=phase,
+                call_id=call_id,
                 tool_name=tool_name,
                 turn_id=context.turn_id,
                 owner_id=context.owner_id,
