@@ -57,9 +57,9 @@ The SKILL.md format
        and the model is told to report a missing tool instead of improvising around it.
 
 Other fields in the spec — ``license``, ``metadata``, ``allowed-tools`` — are accepted and
-ignored, so they are safe to keep for portability but do nothing here. There is no ``enabled``
-field: a skill is on while its directory is in a discovery path, and off once it is removed
-(bundled skills are switched off with ``native_disabled``).
+ignored, so they are safe to keep for portability but do nothing here. A skill is on while its
+directory is in a discovery path, and off once it is removed (bundled skills are switched off
+with ``native_disabled``).
 
 .. warning::
 

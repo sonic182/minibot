@@ -68,8 +68,7 @@ Read these before writing, not after something silently fails:
 - If the skill needs a particular tool or program (`bash`, `git`, an HTTP tool), say so on one
   line in `compatibility`: `activate_skill` returns it, so a bot without that tool can tell the
   user instead of improvising.
-- There is no `enabled` switch. A skill is on while its directory exists; to turn one off, remove
-  or move the directory. A bundled `native` skill is switched off with `[tools.skills]
+- A skill is on while its directory exists; to turn one off, remove or move the directory. A bundled `native` skill is switched off with `[tools.skills]
   native_disabled` in `config.toml`.
 
 ## 5. Write the files
