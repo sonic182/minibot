@@ -16,13 +16,15 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
+from starlette.websockets import WebSocket
 
 from minibot.adapters.config.schema import HTTPServerConfig
 
 type RouteSpec = tuple[str, Callable[[Request], Awaitable[Any]], tuple[str, ...]]
+type WebSocketSpec = tuple[str, Callable[[WebSocket], Awaitable[None]]]
 
 HEALTH_PATH = "/health"
 STATIC_PATH = "/static"
@@ -222,9 +224,15 @@ class _BasicAuth:
 class HttpServer:
     """Serves ``routes`` next to the daemon, on the daemon's own event loop."""
 
-    def __init__(self, config: HTTPServerConfig, routes: Sequence[RouteSpec] = ()) -> None:
+    def __init__(
+        self,
+        config: HTTPServerConfig,
+        routes: Sequence[RouteSpec] = (),
+        websockets: Sequence[WebSocketSpec] = (),
+    ) -> None:
         self._config = config
         self._routes = list(routes)
+        self._websockets = list(websockets)
         self._logger = logging.getLogger("minibot.http")
         self._server: uvicorn.Server | None = None
         self._task: asyncio.Task[None] | None = None
@@ -244,6 +252,7 @@ class HttpServer:
             Route(HEALTH_PATH, _health),
             Mount(STATIC_PATH, app=StaticFiles(directory=STATIC_DIR), name="static"),
             *(Route(path, handler, methods=list(methods)) for path, handler, methods in self._routes),
+            *(WebSocketRoute(path, handler) for path, handler in self._websockets),
         ]
         app: Any = Starlette(routes=routes)
         if self._config.basic_auth_user and self._config.basic_auth_password:
