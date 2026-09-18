@@ -9,6 +9,7 @@ from minibot.core.channels import ChannelMessage
 from minibot.core.events import (
     MessageEvent,
     OutboundEvent,
+    ToolCallEvent,
     TurnCompletedEvent,
     TurnFailedEvent,
     TurnStartedEvent,
@@ -40,20 +41,27 @@ class WebChannelService:
         self._subscription: EventSubscription = event_bus.subscribe(
             types=(OutboundEvent, TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent)
         )
+        self._tool_call_subscription: EventSubscription = event_bus.subscribe(types=(ToolCallEvent,), lossy=True)
         self._outgoing_task: asyncio.Task[None] | None = None
+        self._tool_call_task: asyncio.Task[None] | None = None
         self._subscribers: set[asyncio.Queue[ChatEvent]] = set()
 
     async def start(self) -> None:
         if self._outgoing_task is None or self._outgoing_task.done():
             self._outgoing_task = asyncio.create_task(self._consume_outgoing())
+        if self._tool_call_task is None or self._tool_call_task.done():
+            self._tool_call_task = asyncio.create_task(self._consume_tool_calls())
 
     async def stop(self) -> None:
         await self._subscription.close()
-        if self._outgoing_task is not None:
-            self._outgoing_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._outgoing_task
+        await self._tool_call_subscription.close()
+        for task in (self._outgoing_task, self._tool_call_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         self._outgoing_task = None
+        self._tool_call_task = None
         self._subscribers.clear()
 
     async def publish_user_message(self, text: str) -> None:
@@ -84,13 +92,30 @@ class WebChannelService:
                     text = render.text if render is not None else event.response.text
                     self._broadcast({"role": "assistant", "text": text})
                 elif isinstance(event, TurnStartedEvent) and event.channel == "web":
-                    self._broadcast({"busy": True})
+                    self._broadcast({"kind": "turn_started", "turn_id": event.turn_id, "busy": True})
                 elif isinstance(event, TurnCompletedEvent) and event.channel == "web":
-                    self._broadcast({"busy": False})
+                    self._broadcast({"kind": "turn_completed", "turn_id": event.turn_id, "busy": False})
                 elif isinstance(event, TurnFailedEvent) and event.channel == "web":
                     self._broadcast({"busy": False, "error": event.error})
             except Exception:
                 self._logger.exception("web outbound event failed", extra={"event_type": event.event_type})
+
+    async def _consume_tool_calls(self) -> None:
+        async for event in self._tool_call_subscription:
+            try:
+                if not isinstance(event, ToolCallEvent) or event.channel != "web" or event.turn_id is None:
+                    continue
+                self._broadcast(
+                    {
+                        "kind": "tool",
+                        "turn_id": event.turn_id,
+                        "call_id": event.call_id,
+                        "tool_name": event.tool_name,
+                        "phase": event.phase,
+                    }
+                )
+            except Exception:
+                self._logger.exception("web tool call event failed", extra={"event_type": event.event_type})
 
     def _broadcast(self, event: ChatEvent) -> None:
         for queue in tuple(self._subscribers):
