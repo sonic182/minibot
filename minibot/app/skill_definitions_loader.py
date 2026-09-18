@@ -222,7 +222,7 @@ def parse_skill_frontmatter(frontmatter: str) -> dict[str, object]:
                 block.append(lines[index].strip())
                 index += 1
             if key in _FRONTMATTER_KEYS:
-                result[key] = "\n".join(block).strip() if value[0] == "|" else " ".join(p for p in block if p)
+                result[key] = "\n".join(block).strip() if value[0] == "|" else " ".join(part for part in block if part)
             continue
         if key in _FRONTMATTER_KEYS:
             result[key] = parse_scalar(value)
