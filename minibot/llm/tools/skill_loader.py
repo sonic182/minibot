@@ -136,7 +136,7 @@ class SkillLoaderTool:
                 "error": f"skill '{name}' is not available",
             }
         resources = _list_resources(spec.skill_dir)
-        return {
+        result = {
             "ok": True,
             "skill": name,
             "instructions": f"<skill-instructions>\n{spec.body}\n</skill-instructions>",
@@ -144,6 +144,9 @@ class SkillLoaderTool:
             "source": str(spec.source),
             "resources": resources,
         }
+        if spec.compatibility:
+            result["compatibility"] = spec.compatibility
+        return result
 
 
 def _match_skills(skills: list[SkillSpec], query: str | None) -> tuple[list[SkillSpec], bool]:

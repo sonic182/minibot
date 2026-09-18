@@ -689,8 +689,14 @@ class SkillsToolConfig(BaseModel):
     inside an installed package. A project- or user-level skill of the same name always wins over
     a bundled one, which is the supported way to override one rather than disable it.
 
-    ``write_path`` is where the agent creates or imports skills, and is added as the
-    highest-priority discovery path so a skill written at runtime is found without a restart.
+    ``write_path`` is where the agent creates or installs skills, and is added as the
+    highest-priority discovery path so a skill written at runtime is found without a restart. It
+    defaults to ``~/.minibot/skills``, so it outranks the project-level ``./.minibot/skills``.
+
+    ``install`` attaches the ``install_skill`` tool, which downloads skills from GitHub or an
+    archive URL into ``write_path``. It is off by default because an installed skill is
+    third-party instructions the agent will later follow; while it is off, the bundled
+    ``install-skill`` skill is hidden as well.
     """
 
     enabled: bool = True
@@ -698,7 +704,12 @@ class SkillsToolConfig(BaseModel):
     preload_catalog: bool = True
     native: bool = True
     native_disabled: list[str] = Field(default_factory=list)
-    write_path: str = "./.minibot/skills"
+    write_path: str = "~/.minibot/skills"
+    install: bool = False
+
+    @property
+    def disabled_native_skills(self) -> list[str]:
+        return [*self.native_disabled, *([] if self.install else ["install-skill"])]
 
 
 class RagEmbeddingConfig(BaseModel):

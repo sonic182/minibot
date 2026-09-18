@@ -159,8 +159,10 @@ changes.
 
 ## [ ] Phase 2 — Native skills & runtime self-knowledge
 
-Detailed design, broken into six PRs: [`native_skills.md`](native_skills.md).
-**In progress** — PR 1 (version single-sourcing) merged in #82.
+Detailed design, broken into seven PRs: [`native_skills.md`](native_skills.md).
+**In progress** — PR 1 (version single-sourcing) merged in #82; PR 2 (native
+tier + `create-skill`) in review as #83. Next: `reload_agents` (PR 3), ahead
+of `get_settings` and the remaining skills.
 
 Different theme from the phases around it — capability, not containment —
 but it lands two new LLM-facing surfaces, so the Trust model above still
@@ -185,9 +187,11 @@ v1 set, chosen for self-improvement and self-knowledge:
 - `create-skill` — authoring, including the places MiniBot's parser is
   stricter than the agentskills.io spec (flat `key: value` frontmatter, not
   real YAML; an empty body is a silent drop).
-- `import-skill` — fetch from GitHub and generic archives through a
-  stdlib-only Python helper. No node, no new Poetry dependency. Maintains a
-  `skills-lock.json` in the shape the npm `skills` tool already writes.
+- `install-skill` — fetch from GitHub and generic archives through the
+  native `install_skill` tool (a Python `npx skills add`; works without
+  bash). No node, no new Poetry dependency. Maintains a `skills-lock.json`
+  in the shape the npm `skills` tool already writes. Off by default
+  (`[tools.skills] install`).
 - `minibot-docs` — answers "how does MiniBot work" from the published
   `llms.txt` (2.7 KB) and the Sphinx `_sources/*.rst.txt` RST, which beats
   scraping rendered HTML. It must never answer a configuration-*state*
@@ -196,18 +200,23 @@ v1 set, chosen for self-improvement and self-knowledge:
   counterintuitive enough to be worth writing down: with neither
   `tools_allow` nor `tools_deny` set an agent gets **zero** non-MCP tools
   (`app/agent_policies.py:48`), and `tools_allow` is never consulted for an
-  MCP name.
+  MCP name. Ships last: it needs `reload_agents` below to be useful.
 
-Three supporting changes, each small:
+Three supporting changes, each small, in delivery order:
 
+- **`reload_agents` tool** — lands first after the native tier. Skills
+  re-read on an mtime/size fingerprint (`app/skill_registry.py:55`); agents
+  do not re-read at all, so a freshly written specialist is invisible until
+  restart. An explicit tool rather than a fingerprint hot reload: it re-runs
+  `load_agent_specs` and swaps via `replace_all()` (which keeps the
+  registry's identity), and because the loader *raises* on a bad file, the
+  error comes back to the agent that just wrote it instead of being
+  swallowed — the old roster is kept on failure. Must also drop the
+  `is_empty()` gate on `invoke_agent` (`llm/tools/factory.py:67`), or a
+  first specialist reloaded into an empty roster has no way to be called.
 - **`get_settings`** — a read-only core tool answering "what am I actually
   running?", sibling to `chat_history_info`. Emits only sections that are
   enabled, so absence is itself the answer.
-- **`AgentRegistry` hot reload** — skills re-read on an mtime/size
-  fingerprint (`app/skill_registry.py:55`); agents do not re-read at all, so
-  a freshly written specialist is invisible until restart. Mirror the skill
-  registry's `refresh_if_stale()`; `replace_all()` already proves the
-  registry keeps its identity across a swap.
 - ~~**Single-source the version**~~ — **done, merged in #82.** `__version__`
   was hardcoded at `0.1.0`, fifteen minor versions behind `pyproject.toml`,
   and referenced nowhere else, which is how the drift survived. It now reads
@@ -226,7 +235,7 @@ Trust model, for the two new surfaces:
   denylist built for log sanitizing; wrong shape for a surface the model
   reads. The test that matters is a sentinel-leak test, not a field list
   review.
-- `import-skill` installs instructions the agent will later follow, which is
+- `install-skill` installs instructions the agent will later follow, which is
   a prompt-injection surface by construction. Never auto-activate after
   import; show the parsed name, description and resolved source URL; require
   explicit owner confirmation for a source the owner did not name.

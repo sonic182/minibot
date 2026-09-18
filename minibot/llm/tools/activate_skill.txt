@@ -5,4 +5,6 @@ Use this after calling `list_skills` when a user request matches one of the disc
 Provide:
 - name: exact skill name returned by `list_skills`.
 
-The response includes the full skill instructions wrapped in <skill-instructions> tags, the skill directory path, and a list of supporting resource files. Load resource files on demand using available file tools when the skill instructions reference them.
+The response includes the full skill instructions wrapped in <skill-instructions> tags, the skill directory path, a list of supporting resource files, and `compatibility` when the skill declares its requirements. Load resource files on demand using available file tools when the skill instructions reference them.
+
+If the instructions or `compatibility` need a tool or program you do not have this turn (for example `bash`, `npx`, or an HTTP tool), tell the user exactly what is missing and stop. Do not substitute a different tool to imitate the missing one.

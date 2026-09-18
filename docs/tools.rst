@@ -138,6 +138,10 @@ Tool Surface
      - ``activate_skill``
      - ``[tools.skills]``
      - Load full instructions for a discovered skill.
+   * - Skills
+     - ``install_skill``
+     - ``[tools.skills] install = true``
+     - Preview or install a published skill from GitHub or an archive URL.
    * - Async tasks
      - ``spawn_task``
      - ``[tasks]``
@@ -218,4 +222,7 @@ Implementation Reference
    :no-members:
 
 .. autoclass:: minibot.llm.tools.skill_loader.SkillLoaderTool
+   :no-members:
+
+.. autoclass:: minibot.llm.tools.skill_installer.SkillInstallerTool
    :no-members:

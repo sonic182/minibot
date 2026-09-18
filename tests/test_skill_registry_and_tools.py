@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import io
+import json
+import tarfile
 from pathlib import Path
+from unittest.mock import ANY
 
 import pytest
 
+from minibot.adapters.config.schema import SkillsToolConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app import skill_definitions_loader
 from minibot.app.skill_registry import SkillRegistry
 from minibot.core.skills import SkillSource
+from minibot.llm.tools import skill_installer
 from minibot.llm.tools.base import ToolContext
+from minibot.llm.tools.skill_installer import SkillInstallerTool, folder_hash, parse_source
 from minibot.llm.tools.skill_loader import SkillLoaderTool
 
 
@@ -24,7 +31,7 @@ def _write_skill(
     skill_dir = base_dir / slug
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
-        (f"---\nname: {name}\ndescription: {description}\nenabled: true\n{extra_frontmatter}---\n\n{body}\n"),
+        (f"---\nname: {name}\ndescription: {description}\n{extra_frontmatter}---\n\n{body}\n"),
         encoding="utf-8",
     )
 
@@ -38,7 +45,7 @@ def native_skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Stand in for the skills bundled inside the package."""
     bundled = tmp_path / "bundled"
     _write_skill(bundled, "create-skill", name="create-skill", description="Author a new skill.")
-    _write_skill(bundled, "import-skill", name="import-skill", description="Import a skill.")
+    _write_skill(bundled, "install-skill", name="install-skill", description="Install a skill.")
     monkeypatch.setattr(skill_definitions_loader, "NATIVE_SKILLS_DIR", bundled)
     return bundled
 
@@ -148,6 +155,24 @@ async def test_activate_skill_uses_live_registry_state(tmp_path: Path) -> None:
     assert missing["error_code"] == "skill_not_found"
 
 
+@pytest.mark.asyncio
+async def test_activate_skill_reports_compatibility_and_ignores_the_enabled_flag(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "skills"
+    _write_skill(
+        skills_dir,
+        "deploy",
+        name="deploy",
+        description="Deploy the app.",
+        extra_frontmatter="enabled: false\ncompatibility: Requires bash and git\n",
+    )
+    tool = SkillLoaderTool(SkillRegistry(paths=[str(skills_dir)]))
+
+    result = await _bindings_by_name(tool)["activate_skill"].handler({"name": "deploy"}, ToolContext())
+
+    assert result["ok"] is True
+    assert result["compatibility"] == "Requires bash and git"
+
+
 def test_native_skills_load_only_when_enabled(tmp_path: Path, native_skills_dir: Path) -> None:
     skills_dir = tmp_path / "skills"
     _write_skill(skills_dir, "python-review", name="python-review", description="Review Python changes.")
@@ -156,13 +181,13 @@ def test_native_skills_load_only_when_enabled(tmp_path: Path, native_skills_dir:
     with_native = SkillRegistry(paths=[str(skills_dir)], native=True)
 
     assert without_native.names() == ["python-review"]
-    assert with_native.names() == ["create-skill", "import-skill", "python-review"]
+    assert with_native.names() == ["create-skill", "install-skill", "python-review"]
     assert with_native.get("create-skill").source is SkillSource.NATIVE
     assert with_native.get("python-review").source is SkillSource.PROJECT
 
 
 def test_native_disabled_drops_only_the_named_bundled_skill(tmp_path: Path, native_skills_dir: Path) -> None:
-    registry = SkillRegistry(paths=[str(tmp_path / "skills")], native=True, native_disabled=["import-skill"])
+    registry = SkillRegistry(paths=[str(tmp_path / "skills")], native=True, native_disabled=["install-skill"])
 
     assert registry.names() == ["create-skill"]
 
@@ -184,7 +209,7 @@ def test_native_skills_survive_configured_paths_and_write_path_is_discovered(
     write_dir = tmp_path / "written"
     registry = SkillRegistry(paths=[str(tmp_path / "configured")], native=True, write_path=str(write_dir))
 
-    assert registry.names() == ["create-skill", "import-skill"]
+    assert registry.names() == ["create-skill", "install-skill"]
     assert registry.write_dir() == write_dir.resolve()
 
     _write_skill(write_dir, "fresh", name="fresh", description="Written at runtime.")
@@ -239,3 +264,191 @@ async def test_write_dir_access_reflects_the_writers_actually_available(
     assert yolo["write_dir_access"] == "filesystem"
     assert yolo["write_dir_filesystem_path"] == (tmp_path / "elsewhere").resolve().as_posix()
     assert no_storage["write_dir_access"] == "unavailable"
+
+
+def test_bundled_install_skill_is_hidden_until_install_is_enabled(tmp_path: Path, native_skills_dir: Path) -> None:
+    def names(install: bool) -> list[str]:
+        config = SkillsToolConfig(install=install)
+        return SkillRegistry(
+            paths=[str(tmp_path / "skills")], native=True, native_disabled=config.disabled_native_skills
+        ).names()
+
+    assert names(install=False) == ["create-skill"]
+    assert names(install=True) == ["create-skill", "install-skill"]
+
+
+def _tarball(files: dict[str, str]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, text in files.items():
+            data = text.encode()
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def _serve(monkeypatch: pytest.MonkeyPatch, archive: bytes) -> list[str]:
+    requested: list[str] = []
+
+    async def fake_download(url: str) -> bytes:
+        requested.append(url)
+        return archive
+
+    monkeypatch.setattr(skill_installer, "download", fake_download)
+    return requested
+
+
+@pytest.mark.asyncio
+async def test_install_skill_previews_installs_and_is_discovered_without_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requested = _serve(
+        monkeypatch,
+        _tarball(
+            {
+                "skills-HEAD/README.md": "repo",
+                "skills-HEAD/skills/find-skills/SKILL.md": (
+                    "---\nname: find-skills\ndescription: Find skills.\ncompatibility: Requires npx\n---\n\nRun it.\n"
+                ),
+                "skills-HEAD/skills/find-skills/references/usage.md": "usage",
+                "skills-HEAD/skills/broken/SKILL.md": "---\nname: broken\ndescription: Empty.\n---\n",
+            }
+        ),
+    )
+    write_dir = tmp_path / "skills"
+    registry = SkillRegistry(paths=[str(tmp_path / "configured")], write_path=str(write_dir))
+    handler = SkillInstallerTool(registry).bindings()[0].handler
+
+    preview = await handler({"source": "vercel-labs/skills"}, ToolContext())
+
+    assert requested == ["https://codeload.github.com/vercel-labs/skills/tar.gz/HEAD"]
+    (found,) = preview["skills"]
+    assert found == {
+        "name": "find-skills",
+        "description": "Find skills.",
+        "compatibility": "Requires npx",
+        "skill_path": "skills/find-skills",
+        "hash": ANY,
+        "instructions_chars": 7,
+        "instructions_preview": "Run it.",
+        "existing": None,
+        "file_count": 2,
+        "files": ["SKILL.md", "references/usage.md"],
+    }
+    assert preview["invalid"] == [{"skill_path": "skills/broken", "error": "skill body is empty"}]
+    assert not write_dir.exists()
+
+    install = {"source": "vercel-labs/skills@find-skills", "install": True}
+    assert (await handler(install, ToolContext()))["error_code"] == "preview_required"
+    assert (await handler({**install, "expected_hash": "0" * 64}, ToolContext()))["error_code"] == "hash_mismatch"
+    assert not write_dir.exists()
+
+    install["expected_hash"] = found["hash"]
+    installed = await handler(install, ToolContext())
+
+    assert installed["ok"] is True
+    assert folder_hash(write_dir / "find-skills") == found["hash"]
+    assert (write_dir / "find-skills" / "references" / "usage.md").is_file()
+    assert registry.get("find-skills").compatibility == "Requires npx"
+    assert json.loads((write_dir / "skills-lock.json").read_text(encoding="utf-8")) == {
+        "version": 1,
+        "skills": {
+            "find-skills": {
+                "source": "vercel-labs/skills",
+                "sourceType": "github",
+                "skillPath": "skills/find-skills/SKILL.md",
+                "computedHash": folder_hash(write_dir / "find-skills"),
+            }
+        },
+    }
+
+    assert (await handler(install, ToolContext()))["error_code"] == "skill_exists"
+    assert (await handler({**install, "force": True}, ToolContext()))["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_install_skill_rejects_archive_members_escaping_the_extract_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve(monkeypatch, _tarball({"../evil/SKILL.md": "---\nname: evil\n---\n\nPwned.\n"}))
+    handler = SkillInstallerTool(SkillRegistry(write_path=str(tmp_path / "skills"))).bindings()[0].handler
+
+    with pytest.raises(ValueError, match="unsafe archive"):
+        await handler({"source": "https://example.com/skill.tar.gz", "install": True}, ToolContext())
+
+    assert not (tmp_path / "skills").exists()
+
+
+@pytest.mark.asyncio
+async def test_install_skill_reports_and_gates_a_skill_it_would_shadow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve(
+        monkeypatch,
+        _tarball({"repo/find-skills/SKILL.md": "---\nname: find-skills\ndescription: Theirs.\n---\n\nRun it.\n"}),
+    )
+    project_dir = tmp_path / "project"
+    _write_skill(project_dir, "find-skills", name="find-skills", description="Mine.")
+    write_dir = tmp_path / "written"
+    registry = SkillRegistry(paths=[str(project_dir)], write_path=str(write_dir))
+    handler = SkillInstallerTool(registry).bindings()[0].handler
+
+    preview = await handler({"source": "acme/skills"}, ToolContext())
+
+    (found,) = preview["skills"]
+    assert found["existing"] == {"source": "project", "path": (project_dir / "find-skills").resolve().as_posix()}
+
+    install = {"source": "acme/skills", "install": True, "expected_hash": found["hash"]}
+    assert (await handler(install, ToolContext()))["error_code"] == "skill_exists"
+    assert not write_dir.exists()
+    assert (await handler({**install, "force": True}, ToolContext()))["ok"] is True
+    assert registry.get("find-skills").description == "Theirs."
+
+
+@pytest.mark.parametrize(
+    ("source", "url_tail", "subpath", "skill"),
+    [
+        ("acme/skills", "acme/skills/tar.gz/HEAD", "", None),
+        ("acme/skills@find", "acme/skills/tar.gz/HEAD", "", "find"),
+        ("acme/skills/tools/find", "acme/skills/tar.gz/HEAD", "tools/find", None),
+        ("https://github.com/acme/skills.git", "acme/skills/tar.gz/HEAD", "", None),
+        ("https://github.com/acme/skills/tree/v1/tools/find", "acme/skills/tar.gz/v1", "tools/find", None),
+        (
+            "https://github.com/acme/skills/blob/main/tools/find/SKILL.md",
+            "acme/skills/tar.gz/main",
+            "tools/find",
+            None,
+        ),
+        ("https://github.com/acme/skills/blob/main/SKILL.md", "acme/skills/tar.gz/main", "", None),
+        (
+            "https://github.com/acme/skills/blob/main/tools/ANTISKILL.md",
+            "acme/skills/tar.gz/main",
+            "tools/ANTISKILL.md",
+            None,
+        ),
+    ],
+)
+def test_parse_source_resolves_github_forms(source: str, url_tail: str, subpath: str, skill: str | None) -> None:
+    resolved = parse_source(source)
+
+    assert (resolved.url, resolved.subpath, resolved.skill) == (
+        f"https://codeload.github.com/{url_tail}",
+        subpath,
+        skill,
+    )
+
+
+@pytest.mark.parametrize("source", ["../skills", "acme?x=1/skills", "http://github.com/acme/skills"])
+def test_parse_source_rejects_unsafe_sources(source: str) -> None:
+    with pytest.raises(ValueError):
+        parse_source(source)
+
+
+def test_frontmatter_reads_block_scalars_and_skips_list_items() -> None:
+    parsed = skill_definitions_loader.parse_skill_frontmatter(
+        "name: x\ndescription: >-\n  Review a diff\n  for bugs.\ncompatibility: |\n  Needs bash\n"
+        "allowed-tools:\n- Bash\n- Read\nlicense: MIT"
+    )
+
+    assert parsed == {"name": "x", "description": "Review a diff for bugs.", "compatibility": "Needs bash"}

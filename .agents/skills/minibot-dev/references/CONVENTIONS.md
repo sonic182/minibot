@@ -167,10 +167,11 @@ MiniBot implements agentskills.io but reads it more strictly than the spec
 | | Spec | MiniBot |
 |---|---|---|
 | `description` | ≤1024 chars | warns above **300** (`:14`) |
-| other fields | `license`, `metadata`, `compatibility`, `allowed-tools` allowed | parsed out and ignored, never rejected (`:156`) |
-| frontmatter syntax | YAML | flat `key: value` only; indented lines skipped |
+| `compatibility` | ≤500 chars, free text | returned by `activate_skill`; the model reports a missing tool instead of improvising |
+| other fields | `license`, `metadata`, `allowed-tools` allowed | parsed out and ignored, never rejected (`parse_skill_frontmatter`) |
+| frontmatter syntax | YAML | flat `key: value` plus block scalars; nested keys and list items skipped |
 | body | any | **must be non-empty** or the skill is dropped |
 
-`enabled: false` is a MiniBot extension that hides a skill from the runtime; other clients
-ignore it. `name` must match the directory name. Keep `SKILL.md` under 500 lines and push
-detail into `references/`, one level deep.
+A skill is on while its directory is in a discovery path; bundled
+skills are switched off with `[tools.skills] native_disabled`. `name` must match the directory
+name. Keep `SKILL.md` under 500 lines and push detail into `references/`, one level deep.
