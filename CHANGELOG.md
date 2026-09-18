@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-18
+
 ### Added
 
 - **`install_skill` — a Python `npx skills add`.** With `[tools.skills] install = true`, the agent can preview and install published skills from `owner/repo`, `owner/repo@skill`, GitHub tree/blob URLs, or `.zip`/`.tar.gz`/`SKILL.md` URLs, without Node.js or `[tools.bash]`. Each candidate is validated with the runtime's own parser, installed into `write_path`, and recorded in a `skills-lock.json` in the npm `skills` format. The bundled `install-skill` skill has the agent show a preview and ask for confirmation before installing from a source the user did not name. The preview carries the skill's `hash` and the start of its instructions, and an install must pass that `hash` back as `expected_hash`, so a source that changed after the preview is refused. A skill that would override one of the same name from another location is reported as `existing` and needs `force`. Off by default, and the bundled skill stays hidden while it is off.
@@ -850,7 +852,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.17.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.18.0...HEAD
+[0.18.0]: https://github.com/sonic182/minibot/compare/0.17.0..0.18.0
 [0.17.0]: https://github.com/sonic182/minibot/compare/0.16.0..0.17.0
 [0.16.0]: https://github.com/sonic182/minibot/compare/0.15.0..0.16.0
 [0.15.0]: https://github.com/sonic182/minibot/compare/0.14.3..0.15.0
