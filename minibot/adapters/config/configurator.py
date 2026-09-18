@@ -215,6 +215,9 @@ def _configure_tools(document: Any, settings: Settings) -> None:
     # Skills the model cannot see are skills it will not use; see SkillsToolConfig.
     if "skills" in selected:
         _set_value(document, ("tools", "skills", "preload_catalog"), True)
+        _write("Installed skills are third-party instructions the assistant will follow.\n")
+        install = _ask_bool("Let the assistant install published skills", settings.tools.skills.install)
+        _set_value(document, ("tools", "skills", "install"), install)
     # The wizard keeps rerank tied to rag for simplicity; edit config.toml directly to decouple them.
     _set_value(document, ("tools", "rag", "rerank", "enabled"), "rag" in selected)
 

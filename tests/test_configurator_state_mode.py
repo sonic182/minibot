@@ -58,12 +58,14 @@ def test_wizard_makes_enabled_skills_visible_to_the_model(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(configurator, "_write", lambda *_, **__: None)
     monkeypatch.setattr(configurator, "_ask_multiselect", lambda *_, **__: {"skills", "files"})
+    monkeypatch.setattr(configurator, "_ask_bool", lambda *_, **__: True)
     monkeypatch.setattr(configurator, "_set_value", lambda _doc, path, value: written.__setitem__(path, value))
 
     configurator._configure_tools(object(), configurator.Settings())
 
     assert written[("tools", "skills", "enabled")] is True
     assert written[("tools", "skills", "preload_catalog")] is True
+    assert written[("tools", "skills", "install")] is True
 
 
 def test_spill_default_catches_bash_because_it_has_no_spill_of_its_own() -> None:

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `minibot configure` asks whether to enable `[tools.skills] install` when skills are selected.
+
 ## [0.18.0] - 2026-09-18
 
 ### Added
@@ -18,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`[tools.skills] write_path` defaults to `~/.minibot/skills`** (was `./.minibot/skills`), so created and installed skills follow the single user rather than the working directory. Docker Compose already mounts `~/.minibot`.
 - **The skill `enabled` frontmatter field is gone.** A skill is on while its directory is in a discovery path; bundled skills are switched off with `native_disabled`. An existing `enabled:` line is ignored, so `enabled: false` skills now load: delete or move them to turn them off.
-- Invalid skills are logged once as `invalid skill, skipping` with the reason.
+- Invalid skills are logged once as `invalid skill, skipping` with the reason. A skill description above 300 characters is logged at info instead of warning.
 - **The frontmatter parser reads block scalars and skips list items.** `description: |` or `>` used to parse as the literal `|` or `>`, and an unindented list such as `allowed-tools:` followed by `- Bash` made the whole skill invalid. Both now parse, which matters for skills installed from other authors.
 
 ## [0.17.0] - 2026-09-18
