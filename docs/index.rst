@@ -12,7 +12,13 @@ Minibot is an open-source, self-hosted AI assistant for Telegram. It runs on you
 infrastructure — Telegram-first, SQLite-first, async-first — so your chats, memory, and
 scheduled automations stay in your instance, not a third-party SaaS.
 
-Project repository: `sonic182/minibot <https://github.com/sonic182/minibot>`_.
+.. code-block:: bash
+
+   pip install minibot
+   minibot configure   # interactive wizard: Telegram token, provider, tools
+
+:doc:`Quickstart <getting_started>` · `GitHub <https://github.com/sonic182/minibot>`_ ·
+`PyPI <https://pypi.org/project/minibot/>`_
 
 What Minibot can do
 -------------------

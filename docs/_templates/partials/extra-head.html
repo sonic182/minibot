@@ -1,5 +1,8 @@
-{# Shibuya's base.html renders no metatags, so this partial is the only hook for `.. meta::` #}
-{{ metatags }}
+{# `metatags` is deliberately not rendered here: Shibuya already emits description/og:* from the
+   `meta` context dict (see `_page_meta` in conf.py), and docutils bundles a second viewport tag
+   into `metatags`. Keywords are the one thing only `metatags` carried, so re-emit them. #}
+{% if meta and meta.keywords %}<meta name="keywords" content="{{ meta.keywords|e }}" />{% endif %}
+<meta property="og:site_name" content="Minibot" />
 <meta name="msvalidate.01" content="B58DE3E1AA78FDDEB30F0BA5B64939F7" />
 <meta name="google-site-verification" content="jjhyzZ2yCLXE4I9siy9fAD-Q1xT7ZVWr1FQ68r_oGY0" />
 <link rel="alternate" type="text/plain" title="llms.txt" href="{{ pathto('llms.txt', 1) }}" />

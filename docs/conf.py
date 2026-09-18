@@ -2,6 +2,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from docutils import nodes
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 _pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
@@ -85,3 +87,26 @@ html_theme_options = {
     "show_ai_links": True,
 }
 html_static_path = ["_static"]
+# Declaring one stops the browser from requesting /favicon.ico at the host root, which 404s
+# on a GitHub Pages project site served under /minibot/.
+html_favicon = "_static/favicon.svg"
+
+
+def _page_meta(app, pagename, templatename, context, doctree):
+    # Shibuya builds og:description from the `meta` context dict, but Sphinx only exposes
+    # `.. meta::` through the rendered `metatags` string; without this bridge there is none.
+    meta = dict(context.get("meta") or {})
+    if doctree is not None:
+        for node in doctree.findall(nodes.meta):
+            name = node.get("name")
+            if name in {"description", "keywords"}:
+                meta.setdefault(name, node["content"])
+    context["meta"] = meta
+    if pagename == app.config.root_doc:
+        # Subpages keep the short `html_title` suffix; only the home page gets the long
+        # title, matching its H1 and og:title.
+        context["docstitle"] = "Minibot — Self-Hosted AI Assistant for Telegram"
+
+
+def setup(app):
+    app.connect("html-page-context", _page_meta)
