@@ -22,7 +22,7 @@ class SkillDefinitionConfig(BaseModel):
 
     name: str
     description: str = ""
-    enabled: bool = True
+    compatibility: str = ""
 
 
 def load_skill_specs(
@@ -102,8 +102,10 @@ def _load_from_paths(
             skill_file = skill_dir / "SKILL.md"
             if not skill_file.exists():
                 continue
-            spec = _parse_skill_file(skill_file, skill_dir, source)
-            if spec is None:
+            try:
+                spec = parse_skill_file(skill_file, skill_dir, source)
+            except ValueError as exc:
+                logger.warning("invalid skill, skipping", extra={"path": str(skill_file), "error": str(exc)})
                 continue
             if source is SkillSource.NATIVE and spec.name in native_disabled:
                 continue
@@ -160,39 +162,22 @@ def fingerprint_skill_paths(resolved: list[tuple[Path, SkillSource]]) -> tuple[t
     return tuple(entries)
 
 
-def _parse_skill_file(skill_file: Path, skill_dir: Path, source: SkillSource) -> SkillSpec | None:
+def parse_skill_file(skill_file: Path, skill_dir: Path, source: SkillSource) -> SkillSpec:
+    """Parse one ``SKILL.md``; raise ``ValueError`` saying why it is not a usable skill."""
     try:
         text = skill_file.read_text(encoding="utf-8")
-    except OSError as exc:
-        logger.warning("could not read skill file", extra={"path": str(skill_file), "error": str(exc)})
-        return None
-    try:
-        frontmatter_text, body = split_frontmatter(text)
-    except ValueError as exc:
-        logger.warning("invalid skill frontmatter", extra={"path": str(skill_file), "error": str(exc)})
-        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"could not read skill file: {exc}") from exc
+    frontmatter_text, body = split_frontmatter(text)
     if frontmatter_text is None:
-        logger.warning("skill file has no frontmatter", extra={"path": str(skill_file)})
-        return None
+        raise ValueError("skill file has no frontmatter")
     try:
-        payload = parse_skill_frontmatter(frontmatter_text)
-    except ValueError as exc:
-        logger.warning("could not parse skill frontmatter", extra={"path": str(skill_file), "error": str(exc)})
-        return None
-    if not isinstance(payload, dict):
-        logger.warning("skill frontmatter must be a YAML object", extra={"path": str(skill_file)})
-        return None
-    try:
-        cfg = SkillDefinitionConfig.model_validate(payload)
+        cfg = SkillDefinitionConfig.model_validate(parse_skill_frontmatter(frontmatter_text))
     except ValidationError as exc:
-        logger.warning("invalid skill frontmatter fields", extra={"path": str(skill_file), "error": str(exc)})
-        return None
-    if not cfg.enabled:
-        return None
+        raise ValueError(f"invalid skill frontmatter fields: {exc}") from exc
     body = body.strip()
     if not body:
-        logger.warning("skill body is empty, skipping", extra={"path": str(skill_file)})
-        return None
+        raise ValueError("skill body is empty")
     if not _NAME_RE.fullmatch(cfg.name):
         logger.warning(
             "skill name does not match expected pattern",
@@ -203,7 +188,14 @@ def _parse_skill_file(skill_file: Path, skill_dir: Path, source: SkillSource) ->
             "skill description exceeds recommended length",
             extra={"skill_name": cfg.name, "length": len(cfg.description), "max": _DESCRIPTION_MAX_CHARS},
         )
-    return SkillSpec(name=cfg.name, description=cfg.description, body=body, skill_dir=skill_dir, source=source)
+    return SkillSpec(
+        name=cfg.name,
+        description=cfg.description,
+        body=body,
+        skill_dir=skill_dir,
+        source=source,
+        compatibility=cfg.compatibility,
+    )
 
 
 def parse_skill_frontmatter(frontmatter: str) -> dict[str, object]:
@@ -217,7 +209,7 @@ def parse_skill_frontmatter(frontmatter: str) -> dict[str, object]:
             raise ValueError(f"invalid frontmatter line: {raw_line}")
         key, value = stripped.split(":", 1)
         key = key.strip()
-        if key not in {"name", "description", "enabled"}:
+        if key not in {"name", "description", "compatibility"}:
             continue
         result[key] = parse_scalar(value.strip())
     return result

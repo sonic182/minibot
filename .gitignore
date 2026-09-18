@@ -74,7 +74,11 @@ coverage.xml
 config.toml
 config.*.bckp
 *.vault.yml
+# maybe vault password
+*.password
 data/
 testdata/
 /skills/
 docs/_build/
+
+.references/

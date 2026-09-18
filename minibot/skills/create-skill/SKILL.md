@@ -63,12 +63,15 @@ Read these before writing, not after something silently fails:
 - **Frontmatter is flat `key: value`, not real YAML.** Indented lines are skipped, so a block
   scalar (`description: |` with the text indented below) parses as the literal `|` and the whole
   description is lost. Keep every value on one line.
-- **Only `name`, `description` and `enabled` are read.** `license`, `metadata`, `compatibility`
-  and `allowed-tools` are accepted and ignored — safe to keep for portability, but inert here.
+- **Only `name`, `description` and `compatibility` are read.** `license`, `metadata` and
+  `allowed-tools` are accepted and ignored — safe to keep for portability, but inert here.
 - `description` warns above 300 characters (the spec's hard limit is 1024).
-- `enabled: false` hides a skill on disk. A bundled `native` skill is switched off with
-  `[tools.skills] native_disabled` in `config.toml` instead, since nobody edits files inside an
-  installed package.
+- If the skill needs a particular tool or program (`bash`, `git`, an HTTP tool), say so on one
+  line in `compatibility`: `activate_skill` returns it, so a bot without that tool can tell the
+  user instead of improvising.
+- There is no `enabled` switch. A skill is on while its directory exists; to turn one off, remove
+  or move the directory. A bundled `native` skill is switched off with `[tools.skills]
+  native_disabled` in `config.toml`.
 
 ## 5. Write the files
 
@@ -139,7 +142,7 @@ if it knows the trigger.
 
 Call `list_skills` again. The new skill must appear, with `source: project` (or wherever you
 wrote it). If it does not, check in this order: empty body, missing or malformed frontmatter, no
-`name`, `enabled: false`, file not at `<dir>/SKILL.md`.
+`name`, file not at `<dir>/SKILL.md`.
 
 Then call `activate_skill` with the exact name to confirm the instructions load as intended.
 

@@ -62,7 +62,7 @@ class AppContainer:
             cls._skill_registry = SkillRegistry(
                 paths=list(skills_config.paths) or None,
                 native=skills_config.native,
-                native_disabled=skills_config.native_disabled,
+                native_disabled=skills_config.disabled_native_skills,
                 write_path=skills_config.write_path,
             )
         else:

@@ -27,3 +27,4 @@ class SkillSpec:
     body: str
     skill_dir: Path
     source: SkillSource = SkillSource.PROJECT
+    compatibility: str = ""

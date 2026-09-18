@@ -51,12 +51,15 @@ The SKILL.md format
    * - ``description``
      - in practice
      - The only part of the skill the model sees before activating it.
-   * - ``enabled``
+   * - ``compatibility``
      - no
-     - Defaults to ``true``. A MiniBot extension; other agent tools ignore it.
+     - What the skill needs to run — "Requires bash and git", say. ``activate_skill`` returns it,
+       and the model is told to report a missing tool instead of improvising around it.
 
-Other fields in the spec — ``license``, ``metadata``, ``compatibility``, ``allowed-tools`` — are
-accepted and ignored, so they are safe to keep for portability but do nothing here.
+Other fields in the spec — ``license``, ``metadata``, ``allowed-tools`` — are accepted and
+ignored, so they are safe to keep for portability but do nothing here. There is no ``enabled``
+field: a skill is on while its directory is in a discovery path, and off once it is removed
+(bundled skills are switched off with ``native_disabled``).
 
 .. warning::
 
@@ -102,7 +105,7 @@ scans these locations in priority order:
      - Path
    * - 1 (highest)
      - project
-     - ``tools.skills.write_path`` (default ``./.minibot/skills/``)
+     - ``tools.skills.write_path`` (default ``~/.minibot/skills/``)
    * - 2
      - project
      - ``./.minibot/skills/``
@@ -140,21 +143,23 @@ tier, so anything you write wins over them.
    native = true                        # the whole bundled tier
    native_disabled = ["create-skill"]   # or drop individual ones
 
-Bundled skills carry no ``enabled`` frontmatter, because nobody edits files inside an installed
-package — ``native_disabled`` is the switch.
+Nobody edits files inside an installed package, so ``native_disabled`` is the switch.
 
 Currently bundled:
 
 - ``create-skill`` — how to author a skill: building it from the task you just completed rather
   than from general knowledge, writing a description that triggers, and the places this parser
   is stricter than the spec.
+- ``install-skill`` — the preview, confirm, install, verify procedure for ``install_skill``.
+  Hidden unless ``install = true`` (see below).
 
 Where the agent writes new skills
 ---------------------------------
 
-``tools.skills.write_path`` is where the agent creates or imports skills, and it is added as the
-highest-priority discovery path so a skill written mid-conversation is found on the next
-``list_skills`` call, with no restart.
+``tools.skills.write_path`` (default ``~/.minibot/skills``) is where the agent creates or installs
+skills, and it is added as the highest-priority discovery path so a skill written
+mid-conversation is found on the next ``list_skills`` call, with no restart. With the Docker
+Compose file, ``~/.minibot`` is a mounted volume, so skills written there survive a rebuild.
 
 Whether the agent can actually write there depends on which file-writing tools are enabled.
 ``list_skills`` reports the answer as ``write_dir_access``:
@@ -186,6 +191,48 @@ root:
    enabled = true
    write_path = "./data/files/skills"
 
+Installing skills
+-----------------
+
+``install_skill`` is a Python counterpart of ``npx skills add``: it downloads skills other people
+published and installs them into ``write_path``, with no Node.js and no ``[tools.bash]`` needed.
+It is off by default, because an installed skill is third-party instructions the agent will
+later follow:
+
+.. code-block:: toml
+
+   [tools.skills]
+   enabled = true
+   install = true
+
+Accepted sources, HTTPS only:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Source
+     - Installs
+   * - ``owner/repo``
+     - every skill found in the GitHub repo
+   * - ``owner/repo@skill-name``, ``owner/repo/path/to/skill``
+     - one skill (``@`` names a skill, as with ``npx skills add``)
+   * - ``https://github.com/owner/repo/tree/<ref>/<path>``
+     - the skill at that path and ref (a ``blob`` URL to a ``SKILL.md`` works too)
+   * - any other ``https://`` URL
+     - a ``.zip``/``.tar.gz`` archive, or a single raw ``SKILL.md``
+
+The tool first returns a **preview** — each skill's name, description, ``compatibility`` and
+files, plus every rejected candidate with the reason — and writes nothing. The bundled
+``install-skill`` skill has the agent show that to you and wait for confirmation when you did not
+name the source yourself. Installing validates each skill with the same parser the runtime uses,
+copies it to ``<write_path>/<name>/``, and records it in ``<write_path>/skills-lock.json`` in the
+format the npm ``skills`` tool uses. The new skill shows up in ``list_skills`` immediately and is
+never activated automatically.
+
+Limits follow ``npx skills``: 10 MiB download, 25 MiB and 1000 files once extracted. Archive
+members that would land outside the extraction directory are rejected. Private repositories and
+non-GitHub git hosts are not supported.
+
 The tools
 ---------
 
@@ -202,7 +249,13 @@ The response also carries ``write_dir``, ``write_dir_access``, ``write_dir_files
 
 Takes the exact name returned by ``list_skills`` and returns the full instructions, the skill's
 directory, its source, and a list of the other files in that directory — so a skill can point at
-``references/`` material the model reads only when it needs it.
+``references/`` material the model reads only when it needs it. When the skill declares
+``compatibility``, that is returned too.
+
+``install_skill``
+~~~~~~~~~~~~~~~~~
+
+Only with ``install = true``. Previews or installs a published skill — see `Installing skills`_.
 
 The prompt catalog
 ~~~~~~~~~~~~~~~~~~
@@ -237,8 +290,10 @@ Configuration reference
    # Skills bundled inside the package, independent of `paths`.
    native = true
    native_disabled = []
-   # Where the agent creates or imports skills; also the top-priority discovery path.
-   write_path = "./.minibot/skills"
+   # Where the agent creates or installs skills; also the top-priority discovery path.
+   write_path = "~/.minibot/skills"
+   # Attach install_skill (and show the bundled install-skill skill).
+   install = false
 
 See :doc:`config` for the full schema.
 
@@ -246,9 +301,9 @@ Troubleshooting
 ---------------
 
 **The skill does not appear in list_skills.** Check, in this order: the body is empty; the
-frontmatter block is missing or malformed; there is no ``name``; ``enabled: false`` is set; the
-file is not at ``<directory>/SKILL.md``; or a higher-priority skill has the same name and is
-shadowing it.
+frontmatter block is missing or malformed; there is no ``name``; the file is not at
+``<directory>/SKILL.md``; or a higher-priority skill has the same name and is shadowing it. An
+invalid skill is logged as ``invalid skill, skipping`` with the reason.
 
 **The description shows up as** ``|``. A YAML block scalar was used — see the warning above.
 Put the description on one line.

@@ -528,23 +528,27 @@ enabled = false
 preload_catalog = true
 # Recommended: create a ./skills directory and set paths to load only your own skills.
 # paths = ["./skills"]
-# Skills shipped inside the minibot package (create-skill today). Deliberately independent of
+# Skills shipped inside the minibot package (create-skill, install-skill). Deliberately independent of
 # `paths`, so configuring `paths` above never silently drops them.
 native = true
 # Opt out of individual bundled skills by name. To change one instead of losing it, write a
 # skill of the same name in a project or user path — it takes precedence over the bundled one.
 # native_disabled = ["create-skill"]
-# Where the agent creates or imports skills. Added as the highest-priority discovery path, so a
-# skill written at runtime is picked up without a restart.
+# Where the agent creates or installs skills. Added as the highest-priority discovery path, so a
+# skill written at runtime is picked up without a restart. Default: "~/.minibot/skills".
 # Which tool can write there is reported by list_skills as write_dir_access:
 #   "filesystem"  — inside [tools.file_storage] root_dir, or allow_outside_root is on
 #   "bash"        — outside that root, with [tools.bash] enabled
 #   "unavailable" — neither applies, and the agent will say so instead of trying
-# The default is "./.minibot/skills", which is outside the managed root: with the settings
-# shipped here (file_storage and bash both off) skills are read-only, which is fine until you
-# want the agent to write one. Enable [tools.file_storage] and point write_path inside its
-# root_dir for the simplest writable setup:
+# The default is outside the managed root: with the settings shipped here (file_storage and bash
+# both off) the agent cannot author skills by hand, which is fine until you want it to. Enable
+# [tools.file_storage] and point write_path inside its root_dir for the simplest writable setup:
 # write_path = "./data/files/skills"
+# Attach install_skill, a Python `npx skills add`: previews and installs published skills from
+# GitHub (owner/repo, owner/repo@skill, tree URLs) or .zip/.tar.gz URLs into write_path. It
+# writes there directly, so it needs neither file_storage nor bash. Off by default: an installed
+# skill is third-party instructions the agent will follow. Also shows the bundled install-skill.
+# install = true
 
 # Optional async task system. Gates both the task consumer and the
 # spawn_task / cancel_task / list_tasks / get_task tools.
