@@ -186,7 +186,7 @@ def parse_skill_file(skill_file: Path, skill_dir: Path, source: SkillSource) -> 
             extra={"skill_name": cfg.name, "pattern": _NAME_RE.pattern, "source": str(skill_file)},
         )
     if len(cfg.description) > _DESCRIPTION_MAX_CHARS:
-        logger.warning(
+        logger.info(
             "skill description exceeds recommended length",
             extra={"skill_name": cfg.name, "length": len(cfg.description), "max": _DESCRIPTION_MAX_CHARS},
         )

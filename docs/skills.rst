@@ -75,7 +75,7 @@ Writing a description that triggers
 
 The description carries the whole activation decision, so write it to answer *when should I
 reach for this*, not *what is this*. Name the situations it applies to, including ones where the
-user never says the domain out loud. ``description`` warns above 300 characters; the spec's hard
+user never says the domain out loud. A ``description`` above 300 characters is logged at info level; the spec's hard
 limit is 1024.
 
 .. code-block:: text

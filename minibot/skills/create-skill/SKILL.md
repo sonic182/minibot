@@ -64,7 +64,7 @@ Read these before writing, not after something silently fails:
   only block scalars (`description: |` or `>`) are read across lines. Keep values on one line anyway.
 - **Only `name`, `description` and `compatibility` are read.** `license`, `metadata` and
   `allowed-tools` are accepted and ignored — safe to keep for portability, but inert here.
-- `description` warns above 300 characters (the spec's hard limit is 1024).
+- Keep `description` under 300 characters; longer ones are logged (the spec's hard limit is 1024).
 - If the skill needs a particular tool or program (`bash`, `git`, an HTTP tool), say so on one
   line in `compatibility`: `activate_skill` returns it, so a bot without that tool can tell the
   user instead of improvising.
