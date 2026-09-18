@@ -13,6 +13,8 @@ from minibot.shared.frontmatter import parse_scalar, split_frontmatter
 logger = logging.getLogger("minibot.skill_definitions_loader")
 _NAME_RE = re.compile(r"^[^\r\n/\\]{2,60}$")
 _DESCRIPTION_MAX_CHARS = 300
+_BLOCK_SCALAR_RE = re.compile(r"[|>][+-]?")
+_FRONTMATTER_KEYS = frozenset({"name", "description", "compatibility"})
 _SKILL_DIR_NAMES = (".minibot", ".agents")
 NATIVE_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
@@ -200,16 +202,28 @@ def parse_skill_file(skill_file: Path, skill_dir: Path, source: SkillSource) -> 
 
 def parse_skill_frontmatter(frontmatter: str) -> dict[str, object]:
     result: dict[str, object] = {}
-    for raw_line in frontmatter.splitlines():
+    lines = frontmatter.splitlines()
+    index = 0
+    while index < len(lines):
+        raw_line = lines[index]
+        index += 1
         line = raw_line.rstrip()
         stripped = line.strip()
-        if not stripped or stripped.startswith("#") or line.startswith(" "):
+        if not stripped or stripped.startswith("#") or line.startswith(" ") or stripped.startswith("- "):
             continue
         if ":" not in stripped:
             raise ValueError(f"invalid frontmatter line: {raw_line}")
         key, value = stripped.split(":", 1)
         key = key.strip()
-        if key not in {"name", "description", "compatibility"}:
+        value = value.strip()
+        if _BLOCK_SCALAR_RE.fullmatch(value):
+            block: list[str] = []
+            while index < len(lines) and (not lines[index].strip() or lines[index].startswith(" ")):
+                block.append(lines[index].strip())
+                index += 1
+            if key in _FRONTMATTER_KEYS:
+                result[key] = "\n".join(block).strip() if value[0] == "|" else " ".join(p for p in block if p)
             continue
-        result[key] = parse_scalar(value.strip())
+        if key in _FRONTMATTER_KEYS:
+            result[key] = parse_scalar(value)
     return result

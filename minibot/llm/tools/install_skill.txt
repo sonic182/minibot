@@ -6,7 +6,8 @@ Provide:
 - source: `owner/repo`, `owner/repo@skill`, `owner/repo/path/to/skill`, a `https://github.com/...` repo, tree or blob URL, or an https URL to a `.zip`, `.tar.gz` or `SKILL.md`.
 - skill: optional skill name, needed when the source holds several skills.
 - install: false (default) returns a preview and writes nothing; true installs.
-- force: overwrite an installed skill of the same name.
+- expected_hash: the `hash` of the skill from its preview. Required when install is true; the install fails with `hash_mismatch` if the source changed since the preview.
+- force: overwrite an installed skill of the same name, or install over a skill of the same name found in another location.
 - dest: optional; one of the skill discovery paths. Defaults to the write directory.
 
-The preview lists each valid skill (name, description, compatibility, files) and every invalid one with the reason it was rejected. An install returns the installed path and the `skills-lock.json` it updated. The installed skill is never activated automatically.
+The preview lists each valid skill (name, description, compatibility, `hash`, the start of its instructions, `existing` when a skill of that name is already available, files) and every invalid one with the reason it was rejected. An install returns the installed path and the `skills-lock.json` it updated. The installed skill is never activated automatically.

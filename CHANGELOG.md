@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`install_skill` — a Python `npx skills add`.** With `[tools.skills] install = true`, the agent can preview and install published skills from `owner/repo`, `owner/repo@skill`, GitHub tree/blob URLs, or `.zip`/`.tar.gz`/`SKILL.md` URLs, without Node.js or `[tools.bash]`. Each candidate is validated with the runtime's own parser, installed into `write_path`, and recorded in a `skills-lock.json` in the npm `skills` format. The bundled `install-skill` skill has the agent show a preview and ask for confirmation before installing from a source the user did not name. Off by default, and the bundled skill stays hidden while it is off.
+- **`install_skill` — a Python `npx skills add`.** With `[tools.skills] install = true`, the agent can preview and install published skills from `owner/repo`, `owner/repo@skill`, GitHub tree/blob URLs, or `.zip`/`.tar.gz`/`SKILL.md` URLs, without Node.js or `[tools.bash]`. Each candidate is validated with the runtime's own parser, installed into `write_path`, and recorded in a `skills-lock.json` in the npm `skills` format. The bundled `install-skill` skill has the agent show a preview and ask for confirmation before installing from a source the user did not name. The preview carries the skill's `hash` and the start of its instructions, and an install must pass that `hash` back as `expected_hash`, so a source that changed after the preview is refused. A skill that would override one of the same name from another location is reported as `existing` and needs `force`. Off by default, and the bundled skill stays hidden while it is off.
 - **Skills can declare `compatibility`.** `activate_skill` returns it, and its description tells the model to report a missing tool and stop rather than imitate it with another one.
 
 ### Changed
@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`[tools.skills] write_path` defaults to `~/.minibot/skills`** (was `./.minibot/skills`), so created and installed skills follow the single user rather than the working directory. Docker Compose already mounts `~/.minibot`.
 - **The skill `enabled` frontmatter field is gone.** A skill is on while its directory is in a discovery path; bundled skills are switched off with `native_disabled`. An existing `enabled:` line is ignored, so `enabled: false` skills now load: delete or move them to turn them off.
 - Invalid skills are logged once as `invalid skill, skipping` with the reason.
+- **The frontmatter parser reads block scalars and skips list items.** `description: |` or `>` used to parse as the literal `|` or `>`, and an unindented list such as `allowed-tools:` followed by `- Bash` made the whole skill invalid. Both now parse, which matters for skills installed from other authors.
 
 ## [0.17.0] - 2026-09-18
 

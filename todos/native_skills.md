@@ -1,7 +1,7 @@
 # Native skills — working proposal
 
 Detail document for **Phase 2** of [`ROADMAP.md`](ROADMAP.md).
-Status: PR 1 shipped (#82); PR 2 is next.
+Status: PR 1 shipped (#82); PR 2 in review (#83); PR 3 (`reload_agents`) is next.
 
 ## Context
 
@@ -53,18 +53,21 @@ than trailing behind it.
 |---|---|---|---|
 | ~~1~~ | ~~Single-source the package version~~ | **Done — merged in #82** | — |
 | 2 | Native skill tier + `create-skill` | Turns an empty feature on for every install | 1 |
-| 3 | `get_settings` tool | Stops the agent guessing its own configuration | 1, 2 |
-| 4 | `minibot-docs` skill | The bot can answer questions about itself | 3 |
-| 5 | `import-skill` skill | Growth path for skills; riskiest surface | 2 |
-| 6 | `create-agent` skill + agent hot reload | Narrowest audience; one real code change | 2 |
+| 3 | `reload_agents` tool | Specialists written at runtime become usable without a restart | — |
+| 4 | `get_settings` tool | Stops the agent guessing its own configuration | 1, 2 |
+| 5 | `minibot-docs` skill | The bot can answer questions about itself | 4 |
+| 6 | `install-skill` skill + `install_skill` tool | Growth path for skills; riskiest surface | 2 |
+| 7 | `create-agent` skill | Narrowest audience; pure markdown once 3 is in | 2, 3 |
 
-PRs 4, 5 and 6 are independent of each other and can land in any order once 2 and 3 are in.
+PR 3 goes first after PR 2: it is the only remaining real code change in the agent area, it is
+independent of every skill, and `create-agent` is not worth shipping until it exists. PRs 5, 6
+and 7 are independent of each other and can land in any order once their dependencies are in.
 
 ---
 
 ## PR 1 — Single-source the package version ✅ DONE (#82)
 
-Merged. Kept here because PR 3 builds directly on what it added.
+Merged. Kept here because PR 4 builds directly on what it added.
 
 **What shipped**
 
@@ -75,7 +78,7 @@ Merged. Kept here because PR 3 builds directly on what it added.
 - **Beyond the original plan:** `AppContainer.get_config_path()` records the path
   `configure()` actually resolved, and `Dispatcher` / `build_enabled_tools` thread it into the
   fragment. Without it `minibot console --config other.toml` would report the recomputed default
-  instead of the file really loaded. **PR 3 should read `config_path` from this getter rather
+  instead of the file really loaded. **PR 4 should read `config_path` from this getter rather
   than calling `resolve_config_path()` again.**
 - `minibot --version` (`app/daemon.py:161`); there was no version flag before.
 - `tests/test_environment_context.py` covers the reported version/path and the missing-file case.
@@ -87,7 +90,7 @@ Correct for real installs; `docs/conf.py:12` still reads `pyproject.toml` direct
 <details>
 <summary>Original plan</summary>
 
-**Impact:** small diff, real bug, no dependencies, and everything in PR 3 and 4 that reports
+**Impact:** small diff, real bug, no dependencies, and everything in PR 4 and 5 that reports
 "what am I running" is wrong until it lands. Hence first.
 
 `minibot/__init__.py:1` declares `__version__ = "0.1.0"` while `pyproject.toml:3` says
@@ -141,7 +144,7 @@ minibot/skills/
 ```
 
 Packaging: `packages = [{ include = "minibot" }]` already ships every `.py`, so helper scripts
-(PR 5) ride along. Markdown does **not** — add to `pyproject.toml:31`:
+(PR 6) ride along. Markdown does **not** — add to `pyproject.toml:31`:
 
 ```toml
 { path = "minibot/skills/**/*.md", format = ["sdist", "wheel"] },
@@ -210,7 +213,7 @@ root the agent **cannot** write a skill with `filesystem` and must use `bash`. C
 once, deterministically, beats letting the model discover it by failing a tool call.
 
 `SkillRegistry` grows `write_dir() -> Path` alongside the existing `discovery_paths()`
-(`skill_registry.py:52`) so the tool does not re-resolve config — and so PR 3 can read the same
+(`skill_registry.py:52`) so the tool does not re-resolve config — and so PR 4 can read the same
 value rather than computing it twice.
 
 ### 2e. `create-skill` (SKILL.md, no code)
@@ -246,10 +249,80 @@ next call without a restart.
 
 ---
 
-## PR 3 — `get_settings`
+## PR 3 — `reload_agents` tool
+
+**Impact:** the one real code change in the agent area, pulled out of the old `create-agent` PR
+and landed first so the skill that depends on it is a pure file drop. Useful on its own too: an
+owner who hand-edits `agents/*.md` no longer has to restart the daemon.
+
+**The problem.** `SkillRegistry.refresh_if_stale()` (`app/skill_registry.py:55`) re-reads
+skills on an mtime/size fingerprint; `AgentRegistry` (`app/agent_registry.py:6`) has no
+equivalent. Specs are loaded once in `AppContainer.configure()`
+(`adapters/container/app_container.py:53`) and swapped once more by token auto-config
+(`app_container.py:224`, via `replace_all()` at `agent_registry.py:13`); nothing re-reads
+`agents/*.md` afterwards. A freshly written specialist is invisible until restart.
+
+**Chosen shape: an explicit tool, not a fingerprint hot reload.** `reload_agents` re-runs
+`load_agent_specs(settings.orchestration.directory)` (`app/agent_definitions_loader.py:18`) and
+swaps the result in with `replace_all()`. Why a tool rather than mirroring the skill registry:
+
+- **Errors reach the agent.** The loader *raises* on a bad file (invalid frontmatter, empty
+  body — `agent_definitions_loader.py:30-38`). A silent background reload would have to swallow
+  that; a tool returns it as the result, so the agent that just wrote the file sees what is
+  wrong and fixes it in the same turn. That is exactly what `create-agent` needs.
+- **The old roster survives a failure.** Swap only on success; on error the registry is left
+  untouched and the result says so.
+- **Deterministic.** The roster changes when asked, not on whichever call happens to stat the
+  directory, and nothing stats the directory on every `get()`.
+
+```json
+{"ok": true, "names": ["browser_agent", "researcher"], "added": ["researcher"], "removed": []}
+{"ok": false, "error": "agents/researcher.md: agent body prompt cannot be empty"}
+```
+
+`replace_all()` keeps the registry's identity, so `AgentDelegateTool` and `PromptService` —
+both of which hold the registry, not a snapshot — pick the change up with no further wiring.
+
+**Three things to get right:**
+
+- **`invoke_agent` must exist even when the roster started empty.** `build_enabled_tools` only
+  builds `AgentDelegateTool` when `not agent_registry.is_empty()` (`llm/tools/factory.py:67`).
+  Starting with zero agents and reloading one in would leave nothing able to delegate to it.
+  Drop the emptiness gate (the tool already handles an unknown name) or build it whenever
+  `reload_agents` is built.
+- **Token auto-config.** Startup runs `apply_runtime_token_autoconfig_async`
+  (`app/token_limits_autoconfig.py:20`) over the specs before the swap; it fetches the models.dev
+  catalog. Reloaded specs need the same treatment or a reloaded agent runs with unadjusted
+  limits — decide in the PR whether to re-run it (network call per reload) or cache the catalog.
+- **Not for specialists.** Add `reload_agents` to `RESERVED_DELEGATION_TOOL_NAMES`
+  (`app/agent_policies.py:10`); a delegated agent must not rewrite the roster it was picked from.
+  Task workers build their own registry (`adapters/tasks/worker.py:325`) per run, so they see new
+  files anyway — no worker wiring.
+
+One consequence to accept: the specialist roster is part of the system prompt
+(`PromptService._specialist_roster_fragment:134`), so a reload that changes it changes the
+prompt fingerprint and drops the cached `previous_response_id` (`session_state_service.py:54-66`)
+for that session. Rare and harmless, but deliberate: anything that varies the system prompt pays
+this cost.
+
+Files: `minibot/llm/tools/agent_reload.py` (`.bindings()`), `minibot/llm/tools/reload_agents.txt`
+(description sidecar), one branch in `factory.py`, the reserved-name addition.
+
+**Tests:** write a new `agents/*.md` after startup, call `reload_agents`, assert it is
+delegatable; a broken file returns `ok: false` and leaves the previous roster in place.
+
+**Docs:** `docs/agents.rst` (the page currently implies a restart), `docs/tools.rst`.
+
+**Done when** a specialist written at runtime is delegatable in the same session after one
+`reload_agents` call, including from a zero-agent start, and its roster line appears in the next
+system prompt.
+
+---
+
+## PR 4 — `get_settings`
 
 **Impact:** independent of any skill, benefits every turn where the agent would otherwise
-invent its own configuration, and is the prerequisite that makes PR 4 honest.
+invent its own configuration, and is the prerequisite that makes PR 5 honest.
 
 A small always-on core tool answering "what am I actually running?".
 
@@ -310,7 +383,7 @@ be chosen field by field.
 | `llm.provider`, `llm.model` | `LLMMConfig.provider/model` | self-description, cost/capability questions |
 | `llm.prompts_dir` | `LLMMConfig.prompts_dir` | where prompt packs live |
 | `memory.backend`, `max_history_messages`, `max_history_tokens` | `MemoryConfig` | history/compaction questions |
-| `agents.directory`, `agents.names` | `OrchestrationConfig.directory`, `AgentRegistry.names()` | required by `create-agent` (PR 6) |
+| `agents.directory`, `agents.names` | `OrchestrationConfig.directory`, `AgentRegistry.names()` | required by `create-agent` (PR 7) |
 | `tools.<name>` present-or-absent | `ToolsConfig` | which capabilities exist this turn |
 | `tools.file_storage.root_dir`, `.mode`, `.max_write_bytes` | `FileStorageToolConfig` | already in the prompt fragment; here in structured form |
 | `tools.skills.paths`, `.write_dir`, `.write_dir_access`, `.native`, `.count` | `SkillRegistry` (PR 2d) | required by `create-skill` / `import-skill` |
@@ -368,7 +441,7 @@ sentinel test passes with every secret field populated.
 
 ---
 
-## PR 4 — `minibot-docs`
+## PR 5 — `minibot-docs`
 
 **Impact:** the most user-visible of the remaining skills — "ask the bot how the bot works" —
 and pure markdown, so the risk is in the wording, not the code.
@@ -392,7 +465,7 @@ hide under "ask about minibot"**:
 | question | answer from |
 |---|---|
 | "How do I enable the vault?" | docs |
-| "Am I running the vault?" | `get_settings` (PR 3) — never the docs |
+| "Am I running the vault?" | `get_settings` (PR 4) — never the docs |
 
 The published docs describe the latest release, not this process. The skill must say so, and
 must refuse to answer a configuration-*state* question from documentation.
@@ -402,48 +475,46 @@ question routes to `get_settings` instead.
 
 ---
 
-## PR 5 — `import-skill`
+## PR 6 — `install-skill` (was `import-skill`) ✅ implemented on `feat/import-skill`
 
 **Impact:** the growth path — it is how a user gets skills without writing them. Sequenced late
 because it is the only PR that pulls remote content into the agent's instruction set.
 
-`scripts/import_skill.py`, run through the `bash` tool. Python-only, `urllib` + `tarfile` +
-`zipfile`, no node, no new Poetry dependency.
+**As built — a native tool, not a bash-run script.** The bot may have no `[tools.bash]`, and
+some installs want zero Node, so `install_skill` (`llm/tools/skill_installer.py`) is a Python
+counterpart of `npx skills add`: stdlib `tarfile`/`zipfile`/`hashlib` plus the existing
+`aiosonic`, no new dependency. Wired in `factory.py` next to `SkillLoaderTool` (it needs the
+registry), gated by `[tools.skills] install = false` by default; while off, the bundled
+`install-skill` skill is hidden too (`SkillsToolConfig.disabled_native_skills`).
 
-```
-python -m ... import_skill.py --list  owner/repo
-python -m ... import_skill.py owner/repo/skills/jscpd --dest <write_dir>
-python -m ... import_skill.py https://github.com/owner/repo/tree/main/skills/foo
-python -m ... import_skill.py ./local/path/to/skill
-```
+- Sources: `owner/repo`, `owner/repo@skill` (npx semantics: `@` names a skill, not a ref),
+  `owner/repo/path`, GitHub tree/blob URLs, any https `.zip`/`.tar.gz`/`SKILL.md` URL. No local
+  paths. HTTPS only. GitHub fetches `codeload.github.com/{o}/{r}/tar.gz/{ref or HEAD}`.
+- npx limits: 10 MiB download, 25 MiB / 1000 files extracted; tar `filter="data"`.
+- Discovery: walk ≤ 5 levels, skip `.git`/`node_modules`/…, shallowest `SKILL.md` per name wins,
+  each validated by `parse_skill_file` (now public, raises `ValueError` with the reason, which
+  the preview reports).
+- `install: false` previews (name, description, `compatibility`, files, invalid + reasons);
+  `install: true` copies into `write_dir` (or a `dest` that is one of the discovery paths),
+  `force` overwrites.
+- `<dest>/skills-lock.json` in the npx local-lock shape (`version: 1`, `source`, `sourceType`,
+  `ref`, `skillPath`, `computedHash` with the same hashing scheme).
 
-- Sources: `owner/repo[/subpath][@ref]`, GitHub tree/blob URLs, any `.zip`/`.tar.gz` URL,
-  local path. HTTPS only.
-- Fetch via `https://codeload.github.com/{owner}/{repo}/tar.gz/{ref}` — no API token, no rate
-  limit worth worrying about for this use.
-- Extract to a temp dir, locate every directory containing `SKILL.md`, validate frontmatter
-  with the same rules the runtime uses, then copy into `--dest`.
-- `--list` prints name + description without installing. `--dry-run`, `--force` for overwrite.
-- Maintain `skills-lock.json` in the destination, reusing the shape already sitting in this
-  repo's root (`source`, `sourceType`, `skillPath`, `computedHash`) so it stays interoperable
-  with the npm `skills` tool.
+**Riding along:** `enabled` frontmatter is gone (a skill is on when its folder exists);
+`compatibility` is parsed and returned by `activate_skill`, whose description tells the model to
+report a missing tool and stop rather than improvise. `write_path` now defaults to
+`~/.minibot/skills`.
 
-**Security stance, stated in the skill body itself:** an imported skill is instructions the
-agent will later follow — this is a prompt-injection surface. So: never auto-activate after
-import; print the parsed `name`/`description` and the resolved source URL for the user; and
-require explicit user confirmation before installing from a source the user did not name.
-
-**Tests:** `import_skill.py` against a local fixture directory — no network in tests.
-
-**Done when** importing a known public skill repo lands a valid skill in `write_dir`, it shows
-up in `list_skills` without a restart, and `skills-lock.json` records it.
+**Security stance, stated in the skill body itself:** never auto-activate; show name,
+description, `compatibility` and the resolved URL; explicit confirmation for a source the user
+did not name.
 
 ---
 
-## PR 6 — `create-agent` + agent hot reload
+## PR 7 — `create-agent`
 
-**Impact:** narrowest audience of the four skills — specialists are an advanced feature — but it
-carries the one genuine code change left, so it is worth its own PR rather than being tacked on.
+**Impact:** narrowest audience of the four skills — specialists are an advanced feature. With
+`reload_agents` already in (PR 3) this is pure markdown, the same file-drop shape as the others.
 
 Authoring `agents/<name>.md` is the same file-drop shape as a skill, but the tool-scoping rules
 are genuinely counterintuitive and documented nowhere the agent can see:
@@ -461,35 +532,12 @@ are genuinely counterintuitive and documented nowhere the agent can see:
 An agent writing a specialist without knowing this produces a broken specialist that looks
 correct.
 
-**Blocker: agents do not hot-reload.** `SkillRegistry.refresh_if_stale()`
-(`app/skill_registry.py:55`) re-reads skills on an mtime/size fingerprint; `AgentRegistry`
-(`app/agent_registry.py:6`) has no equivalent. It exposes `replace_all()` (`:13`) — used once
-at startup by token auto-config — and nothing re-reads `agents/*.md` afterwards. So a
-freshly written specialist is invisible until the daemon restarts.
+Body flow: read `agents.directory` from `get_settings` (PR 4) — or fall back to the configured
+default if PR 4 has not landed — write `<directory>/<name>.md`, then call `reload_agents`
+(PR 3). An `ok: false` result names the file and the problem; fix and reload again until it
+comes back `ok: true` with the new name in `added`.
 
-Two ways out:
-
-- **(a) Say so.** The skill ends with "restart MiniBot for the new specialist to load."
-  Zero code, honest, annoying.
-- **(b) Mirror the skill registry.** Give `AgentRegistry` a fingerprint + `refresh_if_stale()`
-  over `orchestration.directory`, called from `all()` / `get()` / `names()` exactly as
-  `SkillRegistry` does. `replace_all()` already proves the object keeps its identity across a
-  swap, so `AgentDelegateTool` and `PromptService` — both of which hold the registry, not a
-  snapshot — pick the change up with no further wiring.
-
-**(b) is the right answer**, and it is small. One consequence to accept: the specialist roster
-is part of the system prompt (`PromptService._specialist_roster_fragment:134`), so a refresh
-changes the prompt fingerprint and drops the cached `previous_response_id`
-(`session_state_service.py:54-66`) for that session. Rare and harmless, but worth knowing it is
-deliberate: anything that varies the system prompt pays this cost.
-
-**Tests:** `AgentRegistry` picks up a new `agents/*.md` without a restart, mirroring the
-existing skill hot-reload test.
-
-**Docs:** `docs/agents.rst` — the reload behaviour changes what the page promises.
-
-**Done when** a specialist written at runtime is delegatable in the same session, and its
-roster line appears in the next system prompt.
+**Done when** a specialist written by following the skill is delegatable in the same session.
 
 ---
 
@@ -498,4 +546,4 @@ roster line appears in the next system prompt.
 - `write_path` default: `./.agents/skills` (consistent with discovery) or `./skills` (what
   `config.example.toml:526` already recommends)? Blocks PR 2.
 - Do native skills need to be visible to task workers? Workers build tools independently
-  (`adapters/tasks/worker.py:166`) and load no bundled extensions. Affects PR 2 and PR 3.
+  (`adapters/tasks/worker.py:166`) and load no bundled extensions. Affects PR 2 and PR 4.

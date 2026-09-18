@@ -60,9 +60,8 @@ Read these before writing, not after something silently fails:
 
 - **An empty body drops the skill silently.** No error, no log line the user will see — it just
   never appears in `list_skills`.
-- **Frontmatter is flat `key: value`, not real YAML.** Indented lines are skipped, so a block
-  scalar (`description: |` with the text indented below) parses as the literal `|` and the whole
-  description is lost. Keep every value on one line.
+- **Frontmatter is flat `key: value`, not real YAML.** Nested keys and list items are skipped;
+  only block scalars (`description: |` or `>`) are read across lines. Keep values on one line anyway.
 - **Only `name`, `description` and `compatibility` are read.** `license`, `metadata` and
   `allowed-tools` are accepted and ignored — safe to keep for portability, but inert here.
 - `description` warns above 300 characters (the spec's hard limit is 1024).

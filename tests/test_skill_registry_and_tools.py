@@ -4,6 +4,7 @@ import io
 import json
 import tarfile
 from pathlib import Path
+from unittest.mock import ANY
 
 import pytest
 
@@ -14,7 +15,7 @@ from minibot.app.skill_registry import SkillRegistry
 from minibot.core.skills import SkillSource
 from minibot.llm.tools import skill_installer
 from minibot.llm.tools.base import ToolContext
-from minibot.llm.tools.skill_installer import SkillInstallerTool, folder_hash
+from minibot.llm.tools.skill_installer import SkillInstallerTool, folder_hash, parse_source
 from minibot.llm.tools.skill_loader import SkillLoaderTool
 
 
@@ -322,22 +323,32 @@ async def test_install_skill_previews_installs_and_is_discovered_without_restart
     preview = await handler({"source": "vercel-labs/skills"}, ToolContext())
 
     assert requested == ["https://codeload.github.com/vercel-labs/skills/tar.gz/HEAD"]
-    assert preview["skills"] == [
-        {
-            "name": "find-skills",
-            "description": "Find skills.",
-            "compatibility": "Requires npx",
-            "skill_path": "skills/find-skills",
-            "files": ["SKILL.md", "references/usage.md"],
-        }
-    ]
+    (found,) = preview["skills"]
+    assert found == {
+        "name": "find-skills",
+        "description": "Find skills.",
+        "compatibility": "Requires npx",
+        "skill_path": "skills/find-skills",
+        "hash": ANY,
+        "instructions_chars": 7,
+        "instructions_preview": "Run it.",
+        "existing": None,
+        "file_count": 2,
+        "files": ["SKILL.md", "references/usage.md"],
+    }
     assert preview["invalid"] == [{"skill_path": "skills/broken", "error": "skill body is empty"}]
     assert not write_dir.exists()
 
     install = {"source": "vercel-labs/skills@find-skills", "install": True}
+    assert (await handler(install, ToolContext()))["error_code"] == "preview_required"
+    assert (await handler({**install, "expected_hash": "0" * 64}, ToolContext()))["error_code"] == "hash_mismatch"
+    assert not write_dir.exists()
+
+    install["expected_hash"] = found["hash"]
     installed = await handler(install, ToolContext())
 
     assert installed["ok"] is True
+    assert folder_hash(write_dir / "find-skills") == found["hash"]
     assert (write_dir / "find-skills" / "references" / "usage.md").is_file()
     assert registry.get("find-skills").compatibility == "Requires npx"
     assert json.loads((write_dir / "skills-lock.json").read_text(encoding="utf-8")) == {
@@ -367,3 +378,77 @@ async def test_install_skill_rejects_archive_members_escaping_the_extract_dir(
         await handler({"source": "https://example.com/skill.tar.gz", "install": True}, ToolContext())
 
     assert not (tmp_path / "skills").exists()
+
+
+@pytest.mark.asyncio
+async def test_install_skill_reports_and_gates_a_skill_it_would_shadow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve(
+        monkeypatch,
+        _tarball({"repo/find-skills/SKILL.md": "---\nname: find-skills\ndescription: Theirs.\n---\n\nRun it.\n"}),
+    )
+    project_dir = tmp_path / "project"
+    _write_skill(project_dir, "find-skills", name="find-skills", description="Mine.")
+    write_dir = tmp_path / "written"
+    registry = SkillRegistry(paths=[str(project_dir)], write_path=str(write_dir))
+    handler = SkillInstallerTool(registry).bindings()[0].handler
+
+    preview = await handler({"source": "acme/skills"}, ToolContext())
+
+    (found,) = preview["skills"]
+    assert found["existing"] == {"source": "project", "path": (project_dir / "find-skills").resolve().as_posix()}
+
+    install = {"source": "acme/skills", "install": True, "expected_hash": found["hash"]}
+    assert (await handler(install, ToolContext()))["error_code"] == "skill_exists"
+    assert not write_dir.exists()
+    assert (await handler({**install, "force": True}, ToolContext()))["ok"] is True
+    assert registry.get("find-skills").description == "Theirs."
+
+
+@pytest.mark.parametrize(
+    ("source", "url_tail", "subpath", "skill"),
+    [
+        ("acme/skills", "acme/skills/tar.gz/HEAD", "", None),
+        ("acme/skills@find", "acme/skills/tar.gz/HEAD", "", "find"),
+        ("acme/skills/tools/find", "acme/skills/tar.gz/HEAD", "tools/find", None),
+        ("https://github.com/acme/skills.git", "acme/skills/tar.gz/HEAD", "", None),
+        ("https://github.com/acme/skills/tree/v1/tools/find", "acme/skills/tar.gz/v1", "tools/find", None),
+        (
+            "https://github.com/acme/skills/blob/main/tools/find/SKILL.md",
+            "acme/skills/tar.gz/main",
+            "tools/find",
+            None,
+        ),
+        ("https://github.com/acme/skills/blob/main/SKILL.md", "acme/skills/tar.gz/main", "", None),
+        (
+            "https://github.com/acme/skills/blob/main/tools/ANTISKILL.md",
+            "acme/skills/tar.gz/main",
+            "tools/ANTISKILL.md",
+            None,
+        ),
+    ],
+)
+def test_parse_source_resolves_github_forms(source: str, url_tail: str, subpath: str, skill: str | None) -> None:
+    resolved = parse_source(source)
+
+    assert (resolved.url, resolved.subpath, resolved.skill) == (
+        f"https://codeload.github.com/{url_tail}",
+        subpath,
+        skill,
+    )
+
+
+@pytest.mark.parametrize("source", ["../skills", "acme?x=1/skills", "http://github.com/acme/skills"])
+def test_parse_source_rejects_unsafe_sources(source: str) -> None:
+    with pytest.raises(ValueError):
+        parse_source(source)
+
+
+def test_frontmatter_reads_block_scalars_and_skips_list_items() -> None:
+    parsed = skill_definitions_loader.parse_skill_frontmatter(
+        "name: x\ndescription: >-\n  Review a diff\n  for bugs.\ncompatibility: |\n  Needs bash\n"
+        "allowed-tools:\n- Bash\n- Read\nlicense: MIT"
+    )
+
+    assert parsed == {"name": "x", "description": "Review a diff for bugs.", "compatibility": "Needs bash"}

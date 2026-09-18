@@ -4,15 +4,17 @@ import asyncio
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import tarfile
 import tempfile
+import threading
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import aiosonic
 from aiosonic.timeout import Timeouts
@@ -33,6 +35,12 @@ _MAX_DEPTH = 5
 _SKIP_DIRS = frozenset({".git", "node_modules", "dist", "build", "__pycache__"})
 _LOCK_FILE = "skills-lock.json"
 _UNSAFE_DIR_CHARS = re.compile(r"[^a-z0-9._-]+")
+_GITHUB_SEGMENT = re.compile(r"(?!\.+$)[A-Za-z0-9._-]+")
+_MAX_REDIRECTS = 5
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_PREVIEW_FILES = 50
+_PREVIEW_CHARS = 1500
+_INSTALL_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -81,9 +89,14 @@ class SkillInstallerTool:
                         "type": ["boolean", "null"],
                         "description": "false (default) previews only; true installs.",
                     },
+                    "expected_hash": {
+                        "type": ["string", "null"],
+                        "description": "The `hash` of the skill from its preview; required when install is true.",
+                    },
                     "force": {
                         "type": ["boolean", "null"],
-                        "description": "Overwrite an installed skill of the same name.",
+                        "description": "Overwrite an installed skill of the same name, or install over one of the "
+                        "same name found in another location.",
                     },
                     "dest": {
                         "type": ["string", "null"],
@@ -99,9 +112,13 @@ class SkillInstallerTool:
         skill = optional_str(payload.get("skill"), error_message="skill must be a string") or resolved.skill
         install = optional_bool(payload.get("install"), default=False, error_message="install must be a boolean")
         force = optional_bool(payload.get("force"), default=False, error_message="force must be a boolean")
+        expected_hash = optional_str(payload.get("expected_hash"), error_message="expected_hash must be a string")
         dest = self._resolve_dest(optional_str(payload.get("dest"), error_message="dest must be a string"))
+        existing = {spec.name: spec for spec in self._registry.all()}
         archive = await download(resolved.url)
-        result = await asyncio.to_thread(_process, resolved, archive, skill, install, force, dest)
+        result = await asyncio.to_thread(
+            _process, resolved, archive, skill, install, force, dest, expected_hash, existing
+        )
         if install and result.get("ok"):
             self._registry.refresh_if_stale()
         return result
@@ -130,14 +147,16 @@ def parse_source(raw: str) -> ResolvedSource:
     parts = [part for part in parsed.path.split("/") if part]
     if parsed.hostname == "github.com" and len(parts) >= 2:
         ref, subpath = None, ""
-        # ponytail: a ref containing "/" is read as its first segment; resolve refs via the API if needed.
         if len(parts) >= 4 and parts[2] in ("tree", "blob"):
-            ref, subpath = parts[3], "/".join(parts[4:]).removesuffix("SKILL.md").rstrip("/")
+            path_parts = parts[4:-1] if parts[-1] == "SKILL.md" else parts[4:]
+            ref, subpath = parts[3], "/".join(path_parts)
         return _github(parts[0], parts[1].removesuffix(".git"), ref, subpath, None)
     return ResolvedSource(source=text, url=text, source_type="url")
 
 
 def _github(owner: str, repo: str, ref: str | None, subpath: str, skill: str | None) -> ResolvedSource:
+    if not (_GITHUB_SEGMENT.fullmatch(owner) and _GITHUB_SEGMENT.fullmatch(repo)):
+        raise ValueError("owner and repo may only contain letters, digits, '.', '_' and '-'")
     return ResolvedSource(
         source=f"{owner}/{repo}",
         url=f"https://codeload.github.com/{owner}/{repo}/tar.gz/{ref or 'HEAD'}",
@@ -151,10 +170,21 @@ def _github(owner: str, repo: str, ref: str | None, subpath: str, skill: str | N
 async def download(url: str) -> bytes:
     timeouts = Timeouts(sock_connect=10, sock_read=30)
     async with aiosonic.HTTPClient() as client:
-        response = await client.request(url, follow=True, max_redirects=5, timeouts=timeouts)
+        current = url
+        for _ in range(_MAX_REDIRECTS + 1):
+            response = await client.request(current, follow=False, timeouts=timeouts)
+            if response.status_code not in _REDIRECT_STATUSES:
+                break
+            location = response.headers.get("location")
+            if not location:
+                raise ValueError(f"redirect without a Location header from {current}")
+            current = urljoin(current, location)
+            if urlparse(current).scheme != "https":
+                raise ValueError(f"refusing to follow a redirect to a non-https URL: {current}")
+        else:
+            raise ValueError(f"more than {_MAX_REDIRECTS} redirects for {url}")
         if response.status_code != 200:
             raise ValueError(f"download failed: HTTP {response.status_code} for {url}")
-        # ponytail: reads the whole body before the size check; stream with read_chunks if memory matters.
         body = await response.content()
     if len(body) > MAX_DOWNLOAD_BYTES:
         raise ValueError(f"download exceeds {MAX_DOWNLOAD_BYTES} bytes")
@@ -168,6 +198,8 @@ def _process(
     install: bool,
     force: bool,
     dest: Path,
+    expected_hash: str | None,
+    existing: dict[str, SkillSpec],
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="minibot-skill-") as tmp:
         root = _extract(archive, Path(tmp))
@@ -183,7 +215,7 @@ def _process(
             return {
                 "ok": True,
                 **base,
-                "skills": [_describe(spec, root) for spec in specs],
+                "skills": [_describe(spec, root, existing.get(spec.name)) for spec in specs],
                 "invalid": [{"skill_path": path.relative_to(root).as_posix(), "error": err} for path, err in invalid],
             }
         if not specs:
@@ -192,7 +224,7 @@ def _process(
         if len(specs) > 1:
             names = ", ".join(spec.name for spec in specs)
             return _error("skill_selection_required", f"{resolved.source} holds several skills; pick one: {names}")
-        return _install(specs[0], root, resolved, dest, force, base)
+        return _install(specs[0], root, resolved, dest, force, expected_hash, existing.get(specs[0].name), base)
 
 
 def _extract(archive: bytes, target: Path) -> Path:
@@ -210,9 +242,13 @@ def _extract(archive: bytes, target: Path) -> Path:
             (target / "SKILL.md").write_bytes(archive)
             return target
         with bundle:
-            members = [member for member in bundle.getmembers() if member.isfile()]
-            _check_limits(len(members), sum(member.size for member in members))
             try:
+                files = size = 0
+                for member in bundle:
+                    if member.isfile():
+                        files += 1
+                        size += member.size
+                        _check_limits(files, size)
                 bundle.extractall(target, filter="data")
             except tarfile.TarError as exc:
                 raise ValueError(f"unsafe archive: {exc}") from exc
@@ -251,17 +287,27 @@ def _discover(root: Path) -> tuple[list[SkillSpec], list[tuple[Path, str]]]:
         except ValueError as exc:
             invalid.append((skill_dir, str(exc)))
             continue
-        specs.setdefault(spec.name, spec)
+        if spec.name in specs:
+            invalid.append((skill_dir, f"duplicate skill name '{spec.name}'"))
+            continue
+        specs[spec.name] = spec
     return list(specs.values()), invalid
 
 
-def _describe(spec: SkillSpec, root: Path) -> dict[str, Any]:
+def _describe(spec: SkillSpec, root: Path, existing: SkillSpec | None) -> dict[str, Any]:
+    files = sorted(path.relative_to(spec.skill_dir).as_posix() for path in _files(spec.skill_dir))
+    shadowed = None if existing is None else {"source": str(existing.source), "path": existing.skill_dir.as_posix()}
     return {
         "name": spec.name,
         "description": spec.description,
         "compatibility": spec.compatibility or None,
         "skill_path": spec.skill_dir.relative_to(root).as_posix(),
-        "files": sorted(path.relative_to(spec.skill_dir).as_posix() for path in _files(spec.skill_dir)),
+        "hash": folder_hash(spec.skill_dir),
+        "instructions_chars": len(spec.body),
+        "instructions_preview": spec.body[:_PREVIEW_CHARS],
+        "existing": shadowed,
+        "file_count": len(files),
+        "files": files[:_PREVIEW_FILES],
     }
 
 
@@ -271,25 +317,40 @@ def _install(
     resolved: ResolvedSource,
     dest: Path,
     force: bool,
+    expected_hash: str | None,
+    existing: SkillSpec | None,
     base: dict[str, Any],
 ) -> dict[str, Any]:
+    if expected_hash is None:
+        return _error("preview_required", "preview the skill first and pass its hash as expected_hash")
+    if folder_hash(spec.skill_dir) != expected_hash:
+        return _error("hash_mismatch", f"{resolved.source} changed since the preview; preview it again")
     dir_name = _UNSAFE_DIR_CHARS.sub("-", spec.name.lower()).strip("-.")
     if not dir_name:
         return _error("invalid_skill_name", f"cannot derive a directory name from {spec.name!r}")
     target = dest / dir_name
-    if target.exists() and not force:
-        return _error("skill_exists", f"{target.as_posix()} already exists; pass force to overwrite")
-    dest.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(spec.skill_dir, target)
-    entry: dict[str, Any] = {"source": resolved.source, "sourceType": resolved.source_type}
-    if resolved.ref:
-        entry["ref"] = resolved.ref
-    if resolved.source_type == "github":
-        entry["skillPath"] = (spec.skill_dir.relative_to(root) / "SKILL.md").as_posix()
-    entry["computedHash"] = folder_hash(target)
-    lock_file = _write_lock(dest, spec.name, entry)
+    holder = target if target.exists() else existing.skill_dir if existing is not None else None
+    if holder is not None and not force:
+        return _error(
+            "skill_exists", f"{holder.as_posix()} already provides '{spec.name}'; pass force to install anyway"
+        )
+    with _INSTALL_LOCK:
+        dest.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".install-", dir=dest))
+        try:
+            shutil.copytree(spec.skill_dir, staging, dirs_exist_ok=True)
+            if target.exists():
+                shutil.rmtree(target)
+            os.replace(staging, target)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        entry: dict[str, Any] = {"source": resolved.source, "sourceType": resolved.source_type}
+        if resolved.ref:
+            entry["ref"] = resolved.ref
+        if resolved.source_type == "github":
+            entry["skillPath"] = (spec.skill_dir.relative_to(root) / "SKILL.md").as_posix()
+        entry["computedHash"] = folder_hash(target)
+        lock_file = _write_lock(dest, spec.name, entry)
     return {
         "ok": True,
         **base,
@@ -328,7 +389,9 @@ def _write_lock(dest: Path, name: str, entry: dict[str, Any]) -> Path:
         skills = {}
     skills[name] = entry
     lock = {"version": 1, "skills": dict(sorted(skills.items()))}
-    lock_file.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
+    staging = lock_file.with_name(f"{_LOCK_FILE}.tmp")
+    staging.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
+    os.replace(staging, lock_file)
     return lock_file
 
 

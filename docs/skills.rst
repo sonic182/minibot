@@ -63,19 +63,12 @@ field: a skill is on while its directory is in a discovery path, and off once it
 
 .. warning::
 
-   **MiniBot's frontmatter parser is stricter than the spec.** It reads flat ``key: value``
-   pairs and skips indented lines, so it is not real YAML.
+   **MiniBot's frontmatter parser is simpler than the spec.** It reads flat ``key: value``
+   pairs and block scalars (``|`` and ``>``) for ``name``, ``description`` and ``compatibility``;
+   nested keys, list items and every other key are skipped, so it is not real YAML.
 
-   A block scalar silently loses the whole description:
-
-   .. code-block:: yaml
-
-      # Parses as the literal string "|" — the description is gone.
-      description: |
-        Review a pull request diff for behavioural bugs.
-
-   Keep every value on a single line. An **empty body** is the other silent failure: the skill
-   is dropped entirely, with no error the user will see.
+   Keep values on a single line where you can. An **empty body** is the silent failure to avoid:
+   the skill is dropped entirely, with no error the user will see.
 
 Writing a description that triggers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -221,12 +214,15 @@ Accepted sources, HTTPS only:
    * - any other ``https://`` URL
      - a ``.zip``/``.tar.gz`` archive, or a single raw ``SKILL.md``
 
-The tool first returns a **preview** — each skill's name, description, ``compatibility`` and
-files, plus every rejected candidate with the reason — and writes nothing. The bundled
-``install-skill`` skill has the agent show that to you and wait for confirmation when you did not
-name the source yourself. Installing validates each skill with the same parser the runtime uses,
-copies it to ``<write_path>/<name>/``, and records it in ``<write_path>/skills-lock.json`` in the
-format the npm ``skills`` tool uses. The new skill shows up in ``list_skills`` immediately and is
+The tool first returns a **preview** — each skill's name, description, ``compatibility``, the start
+of its instructions, files and a ``hash``, plus every rejected candidate with the reason — and
+writes nothing. When a skill of the same name is already available, the preview reports it as
+``existing``, and installing needs ``force``. The bundled ``install-skill`` skill has the agent show
+the preview to you and wait for confirmation when you did not name the source yourself. Installing
+requires the preview's ``hash`` as ``expected_hash``, so a source that changed in between is
+refused. It validates each skill with the same parser the runtime uses, copies it to
+``<write_path>/<name>/``, and records it in ``<write_path>/skills-lock.json`` in the format the npm
+``skills`` tool uses. The new skill shows up in ``list_skills`` immediately and is
 never activated automatically.
 
 Limits follow ``npx skills``: 10 MiB download, 25 MiB and 1000 files once extracted. Archive
@@ -304,9 +300,6 @@ Troubleshooting
 frontmatter block is missing or malformed; there is no ``name``; the file is not at
 ``<directory>/SKILL.md``; or a higher-priority skill has the same name and is shadowing it. An
 invalid skill is logged as ``invalid skill, skipping`` with the reason.
-
-**The description shows up as** ``|``. A YAML block scalar was used — see the warning above.
-Put the description on one line.
 
 **write_dir_access is unavailable.** Enable ``[tools.bash]``, or enable
 ``[tools.file_storage]`` and point ``write_path`` inside its ``root_dir``.
