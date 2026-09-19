@@ -136,7 +136,12 @@ def _build_http_server(
     websockets = []
     if web_channel is not None and socket_token is not None:
         websockets.append(build_chat_socket(web_channel, memory, socket_token))
-    return HttpServer(settings.http, [dashboard_route, *extra_routes], websockets)
+    return HttpServer(
+        settings.http,
+        [dashboard_route, *extra_routes],
+        websockets,
+        environment=settings.runtime.environment,
+    )
 
 
 async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:

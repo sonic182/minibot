@@ -260,6 +260,7 @@ enabled = true
 preload_catalog = true
 native = true
 write_path = "./data/files/skills"
+install = true
 # paths = ["./skills"]
 # native_disabled = []
 

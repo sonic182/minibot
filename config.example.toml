@@ -593,8 +593,9 @@ path = "secrets.vault.yml"
 # password_file = ""
 
 # Built-in HTTP server. Needs the http extra: poetry install --extras http
-# Serves /health plus whatever routes core features and extensions register. There is no TLS
-# here: put a reverse proxy in front before binding anything but a literal loopback address.
+# Serves /health, /history, and /chat, plus routes core features and extensions register.
+# Enabling this server also enables the web chat; it has no separate configuration flag. There is
+# no TLS here: put a reverse proxy in front before binding anything but a literal loopback address.
 [http]
 enabled = false
 host = "127.0.0.1"
