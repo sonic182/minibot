@@ -196,6 +196,16 @@ async def test_static_css_is_served(dashboard_server: HttpServer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_static_chat_script_is_served(dashboard_server: HttpServer) -> None:
+    async with aiosonic.HTTPClient() as client:
+        response = await client.get(
+            f"http://127.0.0.1:{dashboard_server.port}/static/chat.js",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert response.status_code == 200
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("environment", "cache_control"),
     [("debug", "no-store"), ("development", "no-store"), ("production", None)],

@@ -3,28 +3,20 @@
 {% block title %}Chat · minibot{% endblock %}
 
 {% block content %}
-<section class="chat" x-data="webChat()">
+<section class="chat" x-data="webChat()" @paste.window="paste($event)"
+  data-socket-token="{{ socket_token }}" data-chat-capabilities='{{ chat_capabilities | tojson }}'>
   <h1>Chat</h1>
   <div class="chat-messages" x-ref="messages" aria-live="polite">
     <template x-for="(message, index) in messages" :key="index">
       <article class="message" :class="message.kind === 'tools' ? 'tool-activity' : message.role">
         <template x-if="message.kind === 'tools'">
-          <div>
-          <div class="message-head"><span class="role">Tools</span></div>
-          <ul class="tool-list">
-            <template x-for="tool in message.tools" :key="tool.callId">
-              <li class="tool-row">
-                <code class="tool-name" x-text="tool.name"></code>
-                <span class="tool-status" x-text="toolStatus(tool.phase)"></span>
-              </li>
-            </template>
-          </ul>
-          </div>
+          <div><div class="message-head"><span class="role">Tools</span></div><ul class="tool-list"><template x-for="tool in message.tools" :key="tool.callId"><li class="tool-row"><code class="tool-name" x-text="tool.name"></code><span class="tool-status" x-text="toolStatus(tool.phase)"></span></li></template></ul></div>
         </template>
         <template x-if="message.kind !== 'tools'">
           <div>
-          <div class="message-head"><span class="role" x-text="message.role"></span></div>
-          <div class="message-content" x-html="message.html"></div>
+            <div class="message-head"><span class="role" x-text="message.role"></span></div>
+            <div class="message-content" x-html="message.html"></div>
+            <template x-if="message.attachments?.length"><div class="chat-attachments"><template x-for="attachment in message.attachments" :key="attachment.id"><div class="chat-attachment"><img x-show="attachment.kind === 'image'" :src="attachment.url" :alt="attachment.filename"><audio x-show="attachment.kind === 'audio'" :src="attachment.url" controls></audio><span x-text="attachment.filename"></span></div></template></div></template>
           </div>
         </template>
       </article>
@@ -32,82 +24,22 @@
     <p class="muted" x-show="busy">Thinking…</p>
     <p class="muted" x-show="error" x-text="error"></p>
   </div>
-  <form class="chat-composer" @submit.prevent="send()">
-    <label class="sr-only" for="chat-message">Message</label>
-    <textarea id="chat-message" x-model="draft" :disabled="!connected" rows="1" placeholder="Write a message…"></textarea>
-    <button class="chat-send" type="submit" :disabled="!connected || !draft" aria-label="Send message">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" /></svg>
-    </button>
+  <form class="chat-composer" @submit.prevent="send()" @dragover.prevent @drop.prevent="drop($event)">
+    <input x-ref="fileInput" class="sr-only" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,audio/aac,audio/mpeg,audio/mp4,audio/ogg,audio/wav,audio/webm" @change="select($event)">
+    <template x-if="attachments.length"><div class="composer-attachments"><template x-for="attachment in attachments" :key="attachment.id"><div class="composer-attachment"><img x-show="attachment.kind === 'image'" :src="attachment.url" :alt="attachment.filename"><audio x-show="attachment.kind === 'audio'" :src="attachment.url" controls></audio><span x-text="attachment.filename"></span><button type="button" @click="remove(attachment)" aria-label="Remove attachment">×</button></div></template></div></template>
+    <div class="composer-row">
+      <button x-show="capabilities.uploads_enabled" class="chat-action" type="button" @click="$refs.fileInput.click()" :disabled="!connected || uploading" aria-label="Attach image or audio">+</button>
+      <button x-show="capabilities.audio_enabled" class="chat-action" :class="recording ? 'recording' : ''" type="button" @click="toggleRecording()" :disabled="!connected || uploading" aria-label="Record audio"><span x-text="recording ? '■' : '●'"></span></button>
+      <label class="sr-only" for="chat-message">Message</label>
+      <textarea id="chat-message" x-model="draft" :disabled="!connected || uploading" rows="1" placeholder="Write a message…"></textarea>
+      <button class="chat-send" type="submit" :disabled="!canSend()" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" /></svg></button>
+    </div>
+    <p class="muted" x-show="recording">Recording <span x-text="recordingSeconds"></span>s — tap stop when finished.</p>
+    <p class="muted" x-show="capabilities.uploads_enabled">Drop or paste images, or attach image/audio files.</p>
   </form>
 </section>
 {% endblock %}
 
 {% block scripts %}
-<script type="module">
-  import Alpine from "https://cdn.jsdelivr.net/npm/alpinejs@3.15.2/dist/module.esm.js";
-
-  const socketToken = {{ socket_token | tojson }};
-
-  window.webChat = () => ({
-    messages: [],
-    draft: "",
-    busy: false,
-    error: "",
-    connected: false,
-    socket: null,
-    reconnectDelay: 500,
-    init() { this.connect(); },
-    connect() {
-      const scheme = location.protocol === "https:" ? "wss" : "ws";
-      this.socket = new WebSocket(`${scheme}://${location.host}/chat/ws?token=${encodeURIComponent(socketToken)}`);
-      this.socket.addEventListener("open", () => {
-        this.connected = true;
-        this.error = "";
-        this.reconnectDelay = 500;
-      });
-      this.socket.addEventListener("message", ({ data }) => this.handle(JSON.parse(data)));
-      this.socket.addEventListener("close", () => {
-        this.connected = false;
-        window.setTimeout(() => this.connect(), this.reconnectDelay);
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
-      });
-      this.socket.addEventListener("error", () => { this.error = "Connection lost; retrying…"; });
-    },
-    handle(event) {
-      if (event.kind === "turn_started") {
-        this.busy = true;
-      } else if (event.kind === "turn_completed") {
-        this.busy = false;
-      } else if (event.kind === "tool") {
-        const turn = this.toolTurn(event.turn_id);
-        const tool = turn.tools.find((entry) => entry.callId === event.call_id);
-        if (tool) tool.phase = event.phase;
-        else turn.tools.push({ callId: event.call_id, name: event.tool_name, phase: event.phase });
-      }
-      if (event.html !== undefined) this.messages.push(event);
-      if (event.busy !== undefined) this.busy = event.busy;
-      if (event.error) this.error = event.error;
-      this.$nextTick(() => { this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight; });
-    },
-    toolTurn(turnId) {
-      let turn = this.messages.find((message) => message.kind === "tools" && message.turnId === turnId);
-      if (!turn) {
-        turn = { kind: "tools", turnId, tools: [] };
-        this.messages.push(turn);
-      }
-      return turn;
-    },
-    toolStatus(phase) {
-      return { started: "Running", completed: "Completed", failed: "Failed" }[phase] || phase;
-    },
-    send() {
-      const text = this.draft.trim();
-      if (!text || !this.connected) return;
-      this.socket.send(JSON.stringify({ text }));
-      this.draft = "";
-    },
-  });
-
-  Alpine.start();
-</script>
+<script type="module" src="/static/chat.js"></script>
 {% endblock %}
