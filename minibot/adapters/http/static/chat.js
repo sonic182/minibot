@@ -60,7 +60,7 @@ window.webChat = () => ({
   },
 
   toolStatus(phase) {
-    return { started: "Running", completed: "Completed", failed: "Failed" }[phase] || phase;
+    return { started: "Running", completed: "Completed", failed: "Failed" }[phase] ?? "Running";
   },
 
   send() {

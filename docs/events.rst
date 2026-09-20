@@ -113,6 +113,8 @@ then ``completed`` or ``failed``.
 Payload:
 
 - ``phase`` — ``"started"`` | ``"completed"`` | ``"failed"``.
+- ``call_id`` — a per-invocation id shared by that call's ``started`` and its
+  ``completed``/``failed`` event, so a consumer can pair the lifecycle phases.
 - ``tool_name`` — the tool name.
 - ``turn_id``, ``owner_id``, ``channel``, ``chat_id``.
 - ``detail`` — a redacted, size-clipped human-readable summary of the call, produced by
