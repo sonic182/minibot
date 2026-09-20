@@ -3,28 +3,28 @@
 {% block title %}Chat · minibot{% endblock %}
 
 {% block content %}
-<section class="chat" x-data="webChat()">
+<section class="chat" x-data="webChat()" data-socket-token="{{ socket_token }}">
   <h1>Chat</h1>
   <div class="chat-messages" x-ref="messages" aria-live="polite">
     <template x-for="(message, index) in messages" :key="index">
       <article class="message" :class="message.kind === 'tools' ? 'tool-activity' : message.role">
         <template x-if="message.kind === 'tools'">
           <div>
-          <div class="message-head"><span class="role">Tools</span></div>
-          <ul class="tool-list">
-            <template x-for="tool in message.tools" :key="tool.callId">
-              <li class="tool-row">
-                <code class="tool-name" x-text="tool.name"></code>
-                <span class="tool-status" x-text="toolStatus(tool.phase)"></span>
-              </li>
-            </template>
-          </ul>
+            <div class="message-head"><span class="role">Tools</span></div>
+            <ul class="tool-list">
+              <template x-for="tool in message.tools" :key="tool.callId">
+                <li class="tool-row">
+                  <code class="tool-name" x-text="tool.name"></code>
+                  <span class="tool-status" x-text="toolStatus(tool.phase)"></span>
+                </li>
+              </template>
+            </ul>
           </div>
         </template>
         <template x-if="message.kind !== 'tools'">
           <div>
-          <div class="message-head"><span class="role" x-text="message.role"></span></div>
-          <div class="message-content" x-html="message.html"></div>
+            <div class="message-head"><span class="role" x-text="message.role"></span></div>
+            <div class="message-content" x-html="message.html"></div>
           </div>
         </template>
       </article>
@@ -43,71 +43,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module">
-  import Alpine from "https://cdn.jsdelivr.net/npm/alpinejs@3.15.2/dist/module.esm.js";
-
-  const socketToken = {{ socket_token | tojson }};
-
-  window.webChat = () => ({
-    messages: [],
-    draft: "",
-    busy: false,
-    error: "",
-    connected: false,
-    socket: null,
-    reconnectDelay: 500,
-    init() { this.connect(); },
-    connect() {
-      const scheme = location.protocol === "https:" ? "wss" : "ws";
-      this.socket = new WebSocket(`${scheme}://${location.host}/chat/ws?token=${encodeURIComponent(socketToken)}`);
-      this.socket.addEventListener("open", () => {
-        this.connected = true;
-        this.error = "";
-        this.reconnectDelay = 500;
-      });
-      this.socket.addEventListener("message", ({ data }) => this.handle(JSON.parse(data)));
-      this.socket.addEventListener("close", () => {
-        this.connected = false;
-        window.setTimeout(() => this.connect(), this.reconnectDelay);
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
-      });
-      this.socket.addEventListener("error", () => { this.error = "Connection lost; retrying…"; });
-    },
-    handle(event) {
-      if (event.kind === "turn_started") {
-        this.busy = true;
-      } else if (event.kind === "turn_completed") {
-        this.busy = false;
-      } else if (event.kind === "tool") {
-        const turn = this.toolTurn(event.turn_id);
-        const tool = turn.tools.find((entry) => entry.callId === event.call_id);
-        if (tool) tool.phase = event.phase;
-        else turn.tools.push({ callId: event.call_id, name: event.tool_name, phase: event.phase });
-      }
-      if (event.html !== undefined) this.messages.push(event);
-      if (event.busy !== undefined) this.busy = event.busy;
-      if (event.error) this.error = event.error;
-      this.$nextTick(() => { this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight; });
-    },
-    toolTurn(turnId) {
-      let turn = this.messages.find((message) => message.kind === "tools" && message.turnId === turnId);
-      if (!turn) {
-        turn = { kind: "tools", turnId, tools: [] };
-        this.messages.push(turn);
-      }
-      return turn;
-    },
-    toolStatus(phase) {
-      return { started: "Running", completed: "Completed", failed: "Failed" }[phase] || phase;
-    },
-    send() {
-      const text = this.draft.trim();
-      if (!text || !this.connected) return;
-      this.socket.send(JSON.stringify({ text }));
-      this.draft = "";
-    },
-  });
-
-  Alpine.start();
-</script>
+<script type="module" src="/static/chat.js"></script>
 {% endblock %}

@@ -1,9 +1,9 @@
-import { createIcons, Menu } from "https://cdn.jsdelivr.net/npm/lucide@1.46.0/+esm";
-
-createIcons({ icons: { Menu } });
+window.lucide.createIcons({ icons: { Menu: window.lucide.Menu } });
 
 const toggle = document.querySelector("[data-nav-toggle]");
 const root = document.documentElement;
+
+if (window.innerWidth >= 640) root.classList.add("nav-open");
 
 toggle.setAttribute("aria-expanded", String(root.classList.contains("nav-open")));
 

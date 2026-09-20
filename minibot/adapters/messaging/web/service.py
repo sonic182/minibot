@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import dataclass
+from typing import Literal, NotRequired, TypedDict
 
 from minibot.app.event_bus import EventBus, EventSubscription
 from minibot.core.channels import ChannelMessage
@@ -17,16 +19,51 @@ from minibot.core.events import (
 
 _LIVE_QUEUE_LIMIT = 256
 
-type ChatEvent = dict[str, bool | str]
+
+class ChatMessageEvent(TypedDict):
+    role: str
+    text: str
 
 
-def _offer(queue: asyncio.Queue[ChatEvent], item: ChatEvent) -> None:
+class ChatStateEvent(TypedDict):
+    busy: bool
+    error: NotRequired[str]
+
+
+class ChatToolEvent(TypedDict):
+    kind: Literal["tool"]
+    turn_id: str
+    call_id: str
+    tool_name: str
+    phase: Literal["started", "completed", "failed"]
+
+
+type ChatStreamEvent = ChatMessageEvent | ChatToolEvent
+type ChatEvent = ChatStreamEvent | ChatStateEvent
+
+
+@dataclass(eq=False)
+class WebChatSubscription:
+    events: asyncio.Queue[ChatStreamEvent]
+    state: asyncio.Queue[ChatStateEvent]
+
+
+def _offer[T](queue: asyncio.Queue[T], item: T) -> bool:
+    dropped = False
     if queue.full():
         with contextlib.suppress(asyncio.QueueEmpty):
             queue.get_nowait()
             queue.task_done()
-    with contextlib.suppress(asyncio.QueueFull):
-        queue.put_nowait(item)
+            dropped = True
+    queue.put_nowait(item)
+    return dropped
+
+
+def _replace_state(queue: asyncio.Queue[ChatStateEvent], item: ChatStateEvent) -> None:
+    with contextlib.suppress(asyncio.QueueEmpty):
+        queue.get_nowait()
+        queue.task_done()
+    queue.put_nowait(item)
 
 
 class WebChannelService:
@@ -44,7 +81,8 @@ class WebChannelService:
         self._tool_call_subscription: EventSubscription = event_bus.subscribe(types=(ToolCallEvent,), lossy=True)
         self._outgoing_task: asyncio.Task[None] | None = None
         self._tool_call_task: asyncio.Task[None] | None = None
-        self._subscribers: set[asyncio.Queue[ChatEvent]] = set()
+        self._busy = False
+        self._subscribers: set[WebChatSubscription] = set()
 
     async def start(self) -> None:
         if self._outgoing_task is None or self._outgoing_task.done():
@@ -76,13 +114,17 @@ class WebChannelService:
         self._broadcast({"role": "user", "text": text})
         await self._event_bus.publish(MessageEvent(message=message))
 
-    def subscribe(self) -> asyncio.Queue[ChatEvent]:
-        queue: asyncio.Queue[ChatEvent] = asyncio.Queue(maxsize=_LIVE_QUEUE_LIMIT)
-        self._subscribers.add(queue)
-        return queue
+    def subscribe(self) -> WebChatSubscription:
+        subscription = WebChatSubscription(
+            events=asyncio.Queue(maxsize=_LIVE_QUEUE_LIMIT),
+            state=asyncio.Queue(maxsize=1),
+        )
+        _replace_state(subscription.state, {"busy": self._busy})
+        self._subscribers.add(subscription)
+        return subscription
 
-    def unsubscribe(self, queue: asyncio.Queue[ChatEvent]) -> None:
-        self._subscribers.discard(queue)
+    def unsubscribe(self, subscription: WebChatSubscription) -> None:
+        self._subscribers.discard(subscription)
 
     async def _consume_outgoing(self) -> None:
         async for event in self._subscription:
@@ -92,11 +134,11 @@ class WebChannelService:
                     text = render.text if render is not None else event.response.text
                     self._broadcast({"role": "assistant", "text": text})
                 elif isinstance(event, TurnStartedEvent) and event.channel == "web":
-                    self._broadcast({"kind": "turn_started", "turn_id": event.turn_id, "busy": True})
+                    self._set_busy(True)
                 elif isinstance(event, TurnCompletedEvent) and event.channel == "web":
-                    self._broadcast({"kind": "turn_completed", "turn_id": event.turn_id, "busy": False})
+                    self._set_busy(False)
                 elif isinstance(event, TurnFailedEvent) and event.channel == "web":
-                    self._broadcast({"busy": False, "error": event.error})
+                    self._set_busy(False, error=event.error)
             except Exception:
                 self._logger.exception("web outbound event failed", extra={"event_type": event.event_type})
 
@@ -118,5 +160,17 @@ class WebChannelService:
                 self._logger.exception("web tool call event failed", extra={"event_type": event.event_type})
 
     def _broadcast(self, event: ChatEvent) -> None:
-        for queue in tuple(self._subscribers):
-            _offer(queue, event)
+        if "busy" in event:
+            for subscription in tuple(self._subscribers):
+                _replace_state(subscription.state, event)
+            return
+        dropped = sum(_offer(subscription.events, event) for subscription in tuple(self._subscribers))
+        if dropped:
+            self._logger.warning("web live events dropped", extra={"component": "web", "count": dropped})
+
+    def _set_busy(self, busy: bool, *, error: str | None = None) -> None:
+        self._busy = busy
+        event: ChatStateEvent = {"busy": busy}
+        if error is not None:
+            event["error"] = error
+        self._broadcast(event)
