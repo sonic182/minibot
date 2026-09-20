@@ -258,6 +258,7 @@ ul {
   --chat-composer-size: 2.75rem;
   --chat-composer-inset: 0.25rem;
   --chat-send-size: 2.25rem;
+  --chat-bubble-max-width: 90%;
 
   display: grid;
   height: calc(100dvh - 5rem);
@@ -267,12 +268,23 @@ ul {
 }
 
 .chat-messages {
-  display: grid;
-  align-content: start;
-  gap: var(--gap);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--gap-sm);
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.chat-messages > .message {
+  align-self: flex-start;
+  inline-size: fit-content;
+  max-inline-size: var(--chat-bubble-max-width);
+}
+
+.chat-messages > .message.user {
+  align-self: flex-end;
 }
 
 .message-content {
@@ -473,6 +485,10 @@ dialog::backdrop {
 }
 
 @media (min-width: 640px) {
+  .chat {
+    --chat-bubble-max-width: 80%;
+  }
+
   /* minmax(0, 1fr), never a bare 1fr: 1fr means minmax(auto, 1fr), and that auto minimum is the
      same refuse-to-shrink default that lets one long token stretch a column past the viewport. */
   .panels {

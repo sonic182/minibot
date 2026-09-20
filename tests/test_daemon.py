@@ -64,6 +64,7 @@ def test_build_http_server_includes_extension_pages(monkeypatch: pytest.MonkeyPa
     settings = SimpleNamespace(
         http=HTTPServerConfig(enabled=True),
         llm=SimpleNamespace(provider="openai", base_url=None, model="gpt-4o-mini"),
+        runtime=SimpleNamespace(environment="production"),
         providers={},
         channels=SimpleNamespace(telegram=SimpleNamespace(enabled=False)),
     )

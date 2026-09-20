@@ -88,6 +88,7 @@ async def test_build_http_server_populates_dashboard_data(monkeypatch: pytest.Mo
             base_url="https://opencode.ai/zen/go/v1",
             model="minimax",
         ),
+        runtime=SimpleNamespace(environment="development"),
         channels=SimpleNamespace(telegram=SimpleNamespace(enabled=True)),
     )
     dispatcher = SimpleNamespace(main_agent_tool_names=["web_search"])
@@ -191,6 +192,25 @@ async def test_static_css_is_served(dashboard_server: HttpServer) -> None:
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("environment", "cache_control"),
+    [("debug", "no-store"), ("development", "no-store"), ("production", None)],
+)
+async def test_static_assets_disable_cache_only_in_development(environment: str, cache_control: str | None) -> None:
+    instance = HttpServer(
+        HTTPServerConfig(enabled=True, host="127.0.0.1", port=0),
+        environment=environment,
+    )
+    await instance.start()
+    try:
+        async with aiosonic.HTTPClient() as client:
+            response = await client.get(f"http://127.0.0.1:{instance.port}/static/dashboard.css")
+            assert response.headers.get("Cache-Control") == cache_control
+    finally:
+        await instance.stop()
 
 
 @pytest_asyncio.fixture()
