@@ -76,7 +76,6 @@
     handle(event) {
       if (event.kind === "turn_started") {
         this.busy = true;
-        this.toolTurn(event.turn_id);
       } else if (event.kind === "turn_completed") {
         this.busy = false;
       } else if (event.kind === "tool") {
