@@ -23,11 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose name is not itself an API format must declare one, instead of silently resolving to the OpenAI
   Chat Completions client. The new `models` list is advisory: it is what the main agent is offered to
   choose from.
-
-- **Live tool activity in the web chat.** The authenticated `/chat` UI lists each tool invocation of the
-  running turn and updates it from `started` to `completed`/`failed`, driven by `ToolCallEvent`. The tool
-  name is forwarded; the redacted `detail` and `error` stay server-side. `ToolCallEvent` gains a `call_id`
-  that pairs a call's lifecycle phases.
 - **`minibot configure` sets up several providers at once.** The provider step is a multiselect: each
   chosen target is written as its own `[providers.<name>]` section with `api_format`, key, base URL and a
   `models` roster picked from the endpoint's own `/models` list, and a final question chooses which one
@@ -35,7 +30,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target an older wizard had parked in a format-named section (z.ai inside `[providers.openai]`) is moved
   into its own section. Model lists longer than 25 entries get a search prompt with completion before the
   picker opens.
-- `minibot configure` asks whether to enable `[tools.skills] install` when skills are selected.
+
+### Fixed
+
+- **Specialist agents could not see any extension tool.** `build_enabled_tools` built the delegation tool
+  before appending the extension tools, and the delegate copies the list it is handed, so every specialist
+  was scoped against core tools alone — no `bash`, `filesystem`, `current_datetime`, `http_request`,
+  `python_execute`, memory, graph, rag or scheduler — whatever its `tools_allow`/`tools_deny` said. An
+  agent that needs `bash`, such as a playwright-cli specialist, could not work at all.
+
+## [0.19.0] - 2026-09-21
+
+### Added
+
+- **The browser chat.** The optional HTTP server now serves an authenticated `/chat` page backed by a
+  token-protected same-origin WebSocket channel. It shares the `web:1` conversation session with the
+  other channels, so history, tools and model changes stay consistent, and it renders assistant Markdown
+  safely. The page builds on vendored Alpine.js and Lucide assets rather than a CDN. The WebSocket
+  authenticates its per-boot token through `Sec-WebSocket-Protocol`, not a URL query parameter.
+- **Image and audio attachments in the browser chat.** A session can upload images — validated by magic
+  bytes — and audio — validated by duration with `ffprobe` — which are stored temporarily under
+  `uploads/temp/web`. The composer offers a file picker, drag-and-drop, paste and microphone recording,
+  with previews before sending. Uploads require `[tools.file_storage] enabled`; audio also requires
+  automatic transcription. `chat_upload_*` bounds attachment count, per-file and total size, and
+  completed uploads are cleaned up after `chat_upload_retention_hours`.
+- **Live tool activity in the web chat.** The authenticated `/chat` UI lists each tool invocation of the
+  running turn and updates it from `started` to `completed`/`failed`, driven by `ToolCallEvent`. The tool
+  name is forwarded; the redacted `detail` and `error` stay server-side. `ToolCallEvent` gains a `call_id`
+  that pairs a call's lifecycle phases.
+- `minibot configure` asks whether to enable `[tools.skills] install` when skills are selected, and
+  whether to run the HTTP server (dashboard and browser chat), asking for a bind host, port and — when
+  binding beyond loopback — a bearer token or basic credentials.
+
+### Changed
+
+- **`/static` caching follows the environment.** Assets are served with `Cache-Control: no-store` when
+  `[runtime].environment` is `development` or `debug`, and with normal caching otherwise. The environment
+  choices are defined once and shared by the configurator and the HTTP server so the two cannot drift.
+- Bumped the indirect `anyio` dependency from 4.13.0 to 4.14.2.
+
+### Fixed
+
+- The documentation site now emits `og:description`, serves a favicon, and gives the home page a
+  descriptive title and an install call to action.
 
 ## [0.18.0] - 2026-09-18
 
@@ -882,7 +919,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.18.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.19.0...HEAD
+[0.19.0]: https://github.com/sonic182/minibot/compare/0.18.0..0.19.0
 [0.18.0]: https://github.com/sonic182/minibot/compare/0.17.0..0.18.0
 [0.17.0]: https://github.com/sonic182/minibot/compare/0.16.0..0.17.0
 [0.16.0]: https://github.com/sonic182/minibot/compare/0.15.0..0.16.0

@@ -259,6 +259,7 @@ ul {
   --chat-composer-inset: 0.25rem;
   --chat-send-size: 2.25rem;
   --chat-bubble-max-width: 90%;
+  --chat-action-size: 2.25rem;
 
   display: grid;
   height: calc(100dvh - 5rem);
@@ -336,17 +337,24 @@ ul {
 }
 
 .chat-composer {
-  position: relative;
+  display: grid;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.composer-row {
+  display: flex;
+  align-items: end;
+  gap: var(--gap-sm);
   min-width: 0;
 }
 
 .chat-composer textarea {
-  display: block;
-  width: 100%;
+  flex: 1;
   min-width: 0;
   min-height: var(--chat-composer-size);
   max-height: 10rem;
-  padding: var(--gap-sm) calc(var(--chat-composer-size) + var(--gap-sm)) var(--gap-sm) var(--gap-sm);
+  padding: var(--gap-sm);
   resize: none;
   font: inherit;
   color: inherit;
@@ -356,15 +364,73 @@ ul {
 }
 
 .chat-send {
-  position: absolute;
-  right: var(--chat-composer-inset);
-  bottom: var(--chat-composer-inset);
   display: grid;
   width: var(--chat-send-size);
   height: var(--chat-send-size);
   padding: 0;
   place-items: center;
   border-radius: 50%;
+}
+
+.chat-action {
+  display: grid;
+  flex: 0 0 var(--chat-action-size);
+  width: var(--chat-action-size);
+  height: var(--chat-action-size);
+  padding: 0;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 1.1rem;
+}
+
+.chat-action.recording {
+  color: #c33;
+}
+
+.composer-attachments,
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.composer-attachment,
+.chat-attachment {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.chat-attachment {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.composer-attachment img,
+.chat-attachment img {
+  width: 3rem;
+  height: 3rem;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+
+.composer-attachment audio,
+.chat-attachment audio {
+  max-width: min(100%, 15rem);
+  height: 2rem;
+}
+
+.composer-attachment span,
+.chat-attachment span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
 }
 
 .chat-send svg {

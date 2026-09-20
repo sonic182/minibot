@@ -122,6 +122,8 @@ def configure(path: Path) -> bool:
     settings = _settings_for_document(document)
     _configure_tools(document, settings)
     settings = _settings_for_document(document)
+    _configure_http(document, settings)
+    settings = _settings_for_document(document)
     _configure_vault(document, settings)
     text = tomlkit.dumps(document)
     settings = Settings.from_dict(tomllib.loads(text))
@@ -305,6 +307,27 @@ def _configure_tools(document: Any, settings: Settings) -> None:
         _set_value(document, ("tools", "skills", "install"), install)
     # The wizard keeps rerank tied to rag for simplicity; edit config.toml directly to decouple them.
     _set_value(document, ("tools", "rag", "rerank", "enabled"), "rag" in selected)
+
+
+def _configure_http(document: Any, settings: Settings) -> None:
+    """Ask whether to run the built-in HTTP server, which also serves the browser chat."""
+    _write("\nThe HTTP server serves the dashboard, /history and the browser chat.\n")
+    _write("Needs its extra installed: poetry install --extras http\n")
+    http = settings.http
+    enabled = _ask_bool("Enable the HTTP server (dashboard and web chat)", http.enabled)
+    _set_value(document, ("http", "enabled"), enabled)
+    if not enabled:
+        return
+    host = _ask_required("Bind host", http.host)
+    _set_value(document, ("http", "host"), host)
+    _set_value(document, ("http", "port"), _ask_int("Port", http.port))
+    has_auth = bool(http.auth_token or (http.basic_auth_user and http.basic_auth_password))
+    if host not in {"127.0.0.1", "::1"} and not has_auth:
+        _write("A bearer token or basic credentials are required when binding beyond loopback.\n")
+        _set_value(document, ("http", "auth_token"), _ask_required_secret("Auth token", http.auth_token))
+    else:
+        _set_value(document, ("http", "auth_token"), _ask_secret("Auth token (optional on loopback)", http.auth_token))
+    _write("Browser chat uploads need [tools.file_storage] enabled; audio also needs transcription.\n")
 
 
 def _configure_vault(document: Any, settings: Settings) -> None:
@@ -530,6 +553,17 @@ def _ask_required(label: str, value: str) -> str:
         _write("A value is required.\n")
 
 
+def _ask_int(label: str, value: int) -> int:
+    while True:
+        raw = input(f"{label} [{value}]: ").strip()
+        if not raw:
+            return value
+        try:
+            return int(raw)
+        except ValueError:
+            _write("Enter an integer.\n")
+
+
 def _ask_bool(label: str, default: bool) -> bool:
     suffix = "Y/n" if default else "y/N"
     while True:
@@ -672,6 +706,7 @@ def _write_summary(path: Path, profile: str | None, settings: Settings) -> None:
     if _GRAPH_MODULE in settings.extensions.modules:
         tools.append("graph")
     provider = settings.providers.get(settings.llm.provider)
+    http = f"{settings.http.host}:{settings.http.port}" if settings.http.enabled else "disabled"
     _write(
         "\nSummary\n"
         f"  File: {path}\n"
@@ -681,6 +716,7 @@ def _write_summary(path: Path, profile: str | None, settings: Settings) -> None:
         f"  Model: {settings.llm.model}\n"
         f"  API key: {'configured' if provider and provider.api_key else 'empty'}\n"
         f"  Telegram: {'enabled' if settings.channels.telegram.enabled else 'disabled'}\n"
+        f"  HTTP server: {http}\n"
         f"  Tools: {', '.join(tools) or 'none'}\n"
         f"  Vault: {settings.vault.path if settings.vault.enabled else 'disabled'}\n"
         "  Literal secrets are stored in plain text; ${VAR} references are preserved.\n\n"
