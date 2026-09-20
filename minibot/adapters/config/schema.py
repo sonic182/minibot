@@ -26,7 +26,8 @@ _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
 
 # Mirrors the keys of minibot.llm.services.provider_registry.LLM_PROVIDERS plus chatgpt_codex,
 # spelled out here so config validation stays free of llm_async imports.
-ProviderKind = Literal["openai", "openai_responses", "openrouter", "claude", "google", "chatgpt_codex"]
+ProviderApiFormat = Literal["openai", "openai_responses", "openrouter", "claude", "google", "chatgpt_codex"]
+PROVIDER_API_FORMATS: tuple[str, ...] = get_args(ProviderApiFormat)
 
 
 def _coerce_byte_size(value: Any) -> int:
@@ -341,10 +342,11 @@ class ProviderConfig(BaseModel):
     - ``auth_path`` — used only by ``[providers.chatgpt_codex]``: path to the ChatGPT Codex OAuth
       credentials file written by ``minibot codex login``. Defaults to
       ``~/.minibot/auth_codex.json`` when unset.
-    - ``kind`` — which provider client the section builds, when the section name is an alias rather
-      than a client name. Unset means the section name is itself the client name. Aliases let two
-      endpoints of the same client type coexist, e.g. ``[providers.opencode_go]`` with
-      ``kind = "openai_responses"`` alongside ``[providers.zai]`` with ``kind = "openai"``.
+    - ``api_format`` — which API dialect this endpoint speaks, and therefore which client is built:
+      ``"openai"``, ``"openai_responses"``, ``"openrouter"``, ``"claude"``, ``"google"`` or
+      ``"chatgpt_codex"``. Required unless the section name is itself one of those values, which lets
+      several endpoints of the same format coexist: ``[providers.opencode_go]`` with
+      ``api_format = "openai_responses"`` alongside ``[providers.zai]`` with ``api_format = "openai"``.
     - ``models`` — advisory list of model ids this endpoint serves. Not validated against the
       endpoint; it is what agents and runtime delegation overrides are offered to choose from.
 
@@ -369,7 +371,7 @@ class ProviderConfig(BaseModel):
     base_url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     auth_path: str | None = None
-    kind: ProviderKind | None = None
+    api_format: ProviderApiFormat | None = None
     models: list[str] = Field(default_factory=list)
 
 
@@ -1012,6 +1014,23 @@ class Settings(BaseModel):
     extensions: ExtensionsConfig = ExtensionsConfig()
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_provider_api_formats(self) -> Settings:
+        """A provider section must name a real API format, by its own name or by ``api_format``.
+
+        Without this, an unrecognized section name falls through to the OpenAI Chat Completions
+        client, and the delegation roster then offers the model a provider whose advertised format
+        does not exist. A load failure naming the valid values is the lesser evil.
+        """
+        for name, provider_cfg in self.providers.items():
+            if provider_cfg.api_format is not None or name.strip().lower() in PROVIDER_API_FORMATS:
+                continue
+            valid = ", ".join(PROVIDER_API_FORMATS)
+            raise ValueError(
+                f"[providers.{name}] must set api_format (one of {valid}) because its name is not an API format"
+            )
+        return self
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], secrets: Mapping[str, str] | None = None) -> Settings:

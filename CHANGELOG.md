@@ -17,15 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credentials configured; anything else is refused with `provider_not_available` instead of falling
   through to the echo fallback. A retargeted call runs without mid-run compaction, since the context
   window and output cap resolved at boot belong to the agent's configured model.
-- **Named provider sections.** `[providers.<name>]` accepts `kind` (`openai`, `openai_responses`,
-  `openrouter`, `claude`, `google`, `chatgpt_codex`), so a section name can be an alias and several
-  endpoints of the same kind can coexist — `[providers.opencode_go]` next to `[providers.zai]`. The new
-  `models` list is advisory: it is what the main agent is offered to choose from.
+- **Named provider sections.** `[providers.<name>]` accepts `api_format` (`openai`, `openai_responses`,
+  `openrouter`, `claude`, `google`, `chatgpt_codex`), so a section name can be anything and several
+  endpoints of the same API can coexist — `[providers.opencode_go]` next to `[providers.zai]`. A section
+  whose name is not itself an API format must declare one, instead of silently resolving to the OpenAI
+  Chat Completions client. The new `models` list is advisory: it is what the main agent is offered to
+  choose from.
 
 - **Live tool activity in the web chat.** The authenticated `/chat` UI lists each tool invocation of the
   running turn and updates it from `started` to `completed`/`failed`, driven by `ToolCallEvent`. The tool
   name is forwarded; the redacted `detail` and `error` stay server-side. `ToolCallEvent` gains a `call_id`
   that pairs a call's lifecycle phases.
+- **`minibot configure` sets up several providers at once.** The provider step is a multiselect: each
+  chosen target is written as its own `[providers.<name>]` section with `api_format`, key, base URL and a
+  `models` roster picked from the endpoint's own `/models` list, and a final question chooses which one
+  the main agent runs on — so delegation to another provider is configurable rather than hand-written. A
+  target an older wizard had parked in a format-named section (z.ai inside `[providers.openai]`) is moved
+  into its own section. Model lists longer than 25 entries get a search prompt with completion before the
+  picker opens.
 - `minibot configure` asks whether to enable `[tools.skills] install` when skills are selected.
 
 ## [0.18.0] - 2026-09-18

@@ -14,12 +14,17 @@ class ProviderOption:
     """A provider an agent or a runtime delegation override may target."""
 
     name: str
-    kind: str
+    api_format: str
     base_url: str | None
     models: tuple[str, ...]
 
     def as_payload(self) -> dict[str, object]:
-        return {"name": self.name, "kind": self.kind, "base_url": self.base_url, "models": list(self.models)}
+        return {
+            "name": self.name,
+            "api_format": self.api_format,
+            "base_url": self.base_url,
+            "models": list(self.models),
+        }
 
 
 def available_providers(settings: Settings) -> list[ProviderOption]:
@@ -32,13 +37,13 @@ def available_providers(settings: Settings) -> list[ProviderOption]:
     seen: set[str] = set()
     for name, provider_cfg in settings.providers.items():
         normalized = name.strip().lower()
-        kind = provider_cfg.kind or normalized
-        if not provider_cfg.api_key and kind != "chatgpt_codex":
+        api_format = provider_cfg.api_format or normalized
+        if not provider_cfg.api_key and api_format != "chatgpt_codex":
             continue
         options.append(
             ProviderOption(
                 name=normalized,
-                kind=kind,
+                api_format=api_format,
                 base_url=provider_cfg.base_url or None,
                 models=tuple(provider_cfg.models),
             )
@@ -49,7 +54,7 @@ def available_providers(settings: Settings) -> list[ProviderOption]:
         options.append(
             ProviderOption(
                 name=main_provider,
-                kind=main_provider,
+                api_format=main_provider,
                 base_url=settings.llm.base_url or None,
                 models=(settings.llm.model,),
             )
@@ -135,8 +140,8 @@ class LLMClientFactory:
             config.base_url = provider_cfg.base_url
             config.extra_headers = {**config.extra_headers, **provider_cfg.headers}
             config.auth_path = provider_cfg.auth_path
-            if provider_cfg.kind:
-                config.provider = provider_cfg.kind
+            if provider_cfg.api_format:
+                config.provider = provider_cfg.api_format
         return config
 
     @staticmethod

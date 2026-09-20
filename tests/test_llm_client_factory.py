@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from minibot.adapters.config.schema import (
     LLMMConfig,
     OpenRouterLLMConfig,
@@ -82,7 +85,13 @@ def test_create_for_agent_provider_override_uses_provider_credentials(monkeypatc
             base_url="https://openai.local",
             model="gpt-4o-mini",
         ),
-        providers={"anthropic": ProviderConfig(api_key="anthropic-key", base_url="https://anthropic.local")},
+        providers={
+            "anthropic": ProviderConfig(
+                api_key="anthropic-key",
+                base_url="https://anthropic.local",
+                api_format="claude",
+            )
+        },
     )
     factory = LLMClientFactory(settings)
 
@@ -92,7 +101,7 @@ def test_create_for_agent_provider_override_uses_provider_credentials(monkeypatc
     factory.create_for_agent(agent)
 
     assert len(created_configs) == 1
-    assert created_configs[0].provider == "anthropic"
+    assert created_configs[0].provider == "claude"
     assert created_configs[0].api_key == "anthropic-key"
     assert created_configs[0].base_url == "https://anthropic.local"
 
@@ -241,14 +250,14 @@ def test_create_default_cache_key_includes_xai_config(monkeypatch) -> None:
     assert created_configs[1].xai.x_search_enabled is True
 
 
-def test_provider_alias_builds_its_declared_client_kind(monkeypatch) -> None:
+def test_provider_alias_builds_the_client_for_its_api_format(monkeypatch) -> None:
     settings = Settings(
         llm=LLMMConfig(provider="chatgpt_codex", model="gpt-5.6-sol"),
         providers={
             "opencode_go": ProviderConfig(
                 api_key="go-key",
                 base_url="https://opencode.ai/zen/go/v1",
-                kind="openai_responses",
+                api_format="openai_responses",
                 models=["deepseek-v3.6"],
             )
         },
@@ -271,7 +280,7 @@ def test_available_providers_skips_sections_without_credentials() -> None:
     settings = Settings(
         llm=LLMMConfig(provider="chatgpt_codex", model="gpt-5.6-sol"),
         providers={
-            "opencode_go": ProviderConfig(api_key="go-key", kind="openai_responses", models=["deepseek-v3.6"]),
+            "opencode_go": ProviderConfig(api_key="go-key", api_format="openai_responses", models=["deepseek-v3.6"]),
             "openrouter": ProviderConfig(api_key=""),
             "chatgpt_codex": ProviderConfig(),
         },
@@ -279,9 +288,19 @@ def test_available_providers_skips_sections_without_credentials() -> None:
 
     options = available_providers(settings)
 
-    assert [(option.name, option.kind) for option in options] == [
+    assert [(option.name, option.api_format) for option in options] == [
         ("chatgpt_codex", "chatgpt_codex"),
         ("opencode_go", "openai_responses"),
     ]
     assert find_provider("OpenCode_Go ", options) is options[1]
     assert find_provider("openrouter", options) is None
+
+
+def test_provider_section_without_a_known_name_must_declare_its_api_format() -> None:
+    # Otherwise it silently resolves to the OpenAI Chat Completions client and the delegation roster
+    # advertises an api_format that does not exist.
+    with pytest.raises(ValidationError, match="api_format"):
+        Settings(
+            llm=LLMMConfig(provider="openai", api_key="key", model="gpt-4o-mini"),
+            providers={"fireworks": ProviderConfig(api_key="fw-key", base_url="https://api.fireworks.ai/v1")},
+        )

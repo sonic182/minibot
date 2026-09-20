@@ -131,13 +131,13 @@ base_url = ""
 # api_key = "YOUR_ZAI_API_KEY"
 # base_url = "https://api.z.ai/api/v1"
 
-# Aliased provider: any section name works when `kind` says which client to build, so several
-# endpoints of the same kind can coexist (one [providers.openai_responses] would not be enough for
-# both OpenCode Go and z.ai). Agents reference the section name in `model_provider`, and the main
-# agent can retarget a single `invoke_agent` / `spawn_task` call at it. `models` is an advisory list
-# the orchestrator is offered to choose from; it is not validated against the endpoint.
+# Named provider: any section name works when `api_format` says which API the endpoint speaks, so
+# several endpoints of the same format can coexist (one [providers.openai_responses] would not be
+# enough for both OpenCode Go and z.ai). Agents reference the section name in `model_provider`, and
+# the main agent can retarget a single `invoke_agent` / `spawn_task` call at it. `models` is an
+# advisory list the orchestrator is offered to choose from; it is not validated against the endpoint.
 # [providers.opencode_go]
-# kind = "openai_responses"
+# api_format = "openai_responses"
 # api_key = "YOUR_OPENCODE_API_KEY"
 # base_url = "https://opencode.ai/zen/go/v1"
 # models = ["deepseek-v3.6", "mimo-v2.5", "gpt-5.6-luna"]

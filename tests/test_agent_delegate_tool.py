@@ -224,7 +224,7 @@ class _SpecCapturingFactory:
 def _opencode_go_option() -> ProviderOption:
     return ProviderOption(
         name="opencode_go",
-        kind="openai_responses",
+        api_format="openai_responses",
         base_url="https://opencode.ai/zen/go/v1",
         models=("deepseek-v3.6",),
     )

@@ -8,13 +8,15 @@ import shutil
 import sys
 import tempfile
 import tomllib
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from getpass import getpass
 from pathlib import Path
 from typing import Any, cast
 
 import tomlkit
-from prompt_toolkit import Application, choice
+from prompt_toolkit import Application, choice, prompt
+from prompt_toolkit.completion import FuzzyWordCompleter
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit
@@ -30,12 +32,27 @@ from minibot.adapters.config.schema import (
     Settings,
     TelegramChannelConfig,
 )
+from minibot.app.llm_client_factory import available_providers
 from minibot.llm.services.client_bootstrap import create_provider
 
 _logger = logging.getLogger(__name__)
 _MANUAL_MODEL = "Type a model name manually…"
 _MODEL_FETCH_TIMEOUT_SECONDS = 10
+_MODEL_FILTER_THRESHOLD = 25
 
+
+@dataclass(frozen=True, slots=True)
+class _ConfiguredProvider:
+    """One provider the wizard just wrote, as the main-agent pick needs to see it."""
+
+    label: str
+    api_format: str
+    models: list[str]
+
+
+# Targets whose endpoint serves both Chat Completions and Responses on the same base URL.
+_RESPONSES_OPTIONAL_TARGETS = frozenset({"opencode_zen", "opencode_go"})
+# Each target is (label, default api_format, default base_url); the target key is the section name.
 _LLM_TARGETS = {
     "openai": ("OpenAI API", "openai", ""),
     "openai_responses": ("OpenAI Responses API", "openai_responses", ""),
@@ -149,43 +166,105 @@ def _configure_telegram(document: Any, telegram: TelegramChannelConfig) -> None:
 
 
 def _configure_llm(document: Any, settings: Settings) -> None:
-    current_target = _current_llm_target(settings)
-    target = _ask_llm_target(current_target)
-    if target == "chatgpt_codex":
-        _configure_chatgpt_codex(document, settings)
+    selected = _ask_multiselect(
+        "Providers to configure",
+        [(target, f"{target} — {label}") for target, (label, _, _) in _LLM_TARGETS.items()],
+        _configured_targets(settings),
+    )
+    if not selected:
+        _write("No provider selected; leaving the LLM configuration unchanged.\n")
         return
-    _, provider, base_url = _LLM_TARGETS[target]
-    if target in {"opencode_zen", "opencode_go"} and _ask_bool(
-        "Use Responses API", target == current_target and settings.llm.provider == "openai_responses"
+    _release_legacy_sections(document, settings, selected)
+    configured: dict[str, _ConfiguredProvider] = {}
+    for target in _LLM_TARGETS:
+        if target not in selected:
+            continue
+        provider = _configure_provider(document, settings, target)
+        if provider is not None:
+            configured[target] = provider
+    if not configured:
+        return
+    main_target = _ask_main_provider(configured, _current_llm_target(settings))
+    main = configured[main_target]
+    _set_value(document, ("llm", "provider"), main_target)
+    _set_value(document, ("llm", "model"), _choose_model(main.models, settings.llm.model))
+    # Responses providers keep turn state server-side, so a tool loop can send just the delta instead
+    # of resending the whole history every step. Chat Completions (openai, openrouter) is stateless and
+    # resends regardless, and Codex forces store=False, so it can never reference a prior response.
+    state_mode = "previous_response_id" if main.api_format == "openai_responses" else "full_messages"
+    _set_value(document, ("llm", "main_responses_state_mode"), state_mode)
+    _set_value(document, ("llm", "agent_responses_state_mode"), state_mode)
+
+
+def _configure_provider(document: Any, settings: Settings, target: str) -> _ConfiguredProvider | None:
+    """Write one ``[providers.<target>]`` section and return what the main-agent pick needs."""
+    label, api_format, base_url = _LLM_TARGETS[target]
+    _write(f"\n{label} → [providers.{target}]\n")
+    if target == "chatgpt_codex":
+        return _configure_chatgpt_codex(document, settings)
+    provider_config = settings.providers.get(target, ProviderConfig())
+    if target in _RESPONSES_OPTIONAL_TARGETS and _ask_bool(
+        "Use Responses API", provider_config.api_format == "openai_responses"
     ):
-        provider = "openai_responses"
-    provider_config = settings.providers.get(provider, ProviderConfig())
-    if target == current_target:
-        base_url = provider_config.base_url or base_url
+        api_format = "openai_responses"
+    base_url = provider_config.base_url or base_url
     api_key = _ask_secret("API key", provider_config.api_key)
-    _set_value(document, ("llm", "provider"), provider)
-    _set_value(document, ("providers", provider, "api_key"), api_key)
-    _set_value(document, ("providers", provider, "base_url"), base_url)
+    _set_value(document, ("providers", target, "api_format"), api_format)
+    _set_value(document, ("providers", target, "api_key"), api_key)
+    _set_value(document, ("providers", target, "base_url"), base_url)
     # OpenCode Go rejects requests without a session id (MissingSessionID); it only routes on it.
-    session_header = ("providers", provider, "headers", "x-opencode-session")
+    session_header = ("providers", target, "headers", "x-opencode-session")
     if target == "opencode_go":
         _set_value(document, session_header, "minibot")
     else:
         _unset_value(document, session_header)
     resolved_api_key = provider_config.api_key
     if api_key != resolved_api_key:
-        resolved_api_key = cast(str, expand_environment(api_key, os.environ, path=f"providers.{provider}.api_key"))
-    _set_value(
-        document,
-        ("llm", "model"),
-        _ask_model(provider, base_url, resolved_api_key, settings.llm.model),
+        resolved_api_key = cast(str, expand_environment(api_key, os.environ, path=f"providers.{target}.api_key"))
+    models = _provider_models(api_format, base_url, resolved_api_key)
+    if models:
+        _set_value(document, ("providers", target, "models"), _ask_models(models, provider_config.models))
+    return _ConfiguredProvider(label=label, api_format=api_format, models=models)
+
+
+def _release_legacy_sections(document: Any, settings: Settings, selected: set[str]) -> None:
+    """Hand a third-party endpoint over from its format-named section to its own named section.
+
+    Before named sections existed the wizard wrote, say, z.ai's ``base_url`` into
+    ``[providers.openai]``. Left alone that section keeps a third-party key on a first-party name and
+    the delegation roster offers it as a provider in its own right.
+    """
+    for target in selected:
+        _, _, base_url = _LLM_TARGETS[target]
+        if not base_url:
+            continue
+        for name, provider_config in settings.providers.items():
+            if name == target or name in selected or provider_config.base_url != base_url:
+                continue
+            _unset_value(document, ("providers", name, "api_key"))
+            _unset_value(document, ("providers", name, "base_url"))
+            _unset_value(document, ("providers", name, "headers", "x-opencode-session"))
+            _write(f"[providers.{name}] held {base_url}; moved it to [providers.{target}].\n")
+
+
+def _configured_targets(settings: Settings) -> set[str]:
+    targets = {
+        name
+        for name, provider_config in settings.providers.items()
+        if name in _LLM_TARGETS and (provider_config.api_key or name == "chatgpt_codex")
+    }
+    targets.add(_current_llm_target(settings))
+    return targets
+
+
+def _ask_main_provider(configured: dict[str, _ConfiguredProvider], default: str) -> str:
+    if len(configured) == 1:
+        return next(iter(configured))
+    return choice(
+        "Main agent provider",
+        options=[(target, provider.label) for target, provider in configured.items()],
+        default=default if default in configured else next(iter(configured)),
     )
-    # Responses providers keep turn state server-side, so a tool loop can send just the delta instead
-    # of resending the whole history every step. Chat Completions (openai, openrouter) is stateless and
-    # resends regardless, so the setting only means anything for openai_responses.
-    state_mode = "previous_response_id" if provider == "openai_responses" else "full_messages"
-    _set_value(document, ("llm", "main_responses_state_mode"), state_mode)
-    _set_value(document, ("llm", "agent_responses_state_mode"), state_mode)
 
 
 def _configure_tools(document: Any, settings: Settings) -> None:
@@ -255,29 +334,58 @@ def _configure_graph_module(document: Any, settings: Settings, *, enabled: bool)
     _set_value(document, ("extensions", "modules"), modules)
 
 
-def _ask_llm_target(default: str) -> str:
-    return choice(
-        "LLM provider",
-        options=[(key, label) for key, (label, _, _) in _LLM_TARGETS.items()],
-        default=default,
-    )
+def _provider_models(api_format: str, base_url: str, api_key: str) -> list[str]:
+    return asyncio.run(_fetch_models(api_format, base_url, api_key))
 
 
-def _ask_model(provider: str, base_url: str, api_key: str, current: str) -> str:
-    models = asyncio.run(_fetch_models(provider, base_url, api_key))
-    return _choose_model(models, current)
+def _filter_models(models: list[str], query: str) -> list[str]:
+    terms = query.lower().split()
+    if not terms:
+        return list(models)
+    return [model for model in models if all(term in model.lower() for term in terms)]
+
+
+def _ask_model_query(models: list[str]) -> str:
+    return prompt(
+        f"Filter {len(models)} models (blank for all): ",
+        completer=FuzzyWordCompleter(models),
+        complete_while_typing=True,
+    ).strip()
+
+
+def _narrow_models(models: list[str]) -> list[str]:
+    """Catalogs like OpenRouter's run into the hundreds; a checkbox list that long is unusable."""
+    if len(models) <= _MODEL_FILTER_THRESHOLD:
+        return models
+    while True:
+        narrowed = _filter_models(models, _ask_model_query(models))
+        if narrowed:
+            return narrowed
+        _write("No model matched that filter.\n")
 
 
 def _choose_model(models: list[str], current: str) -> str:
     if not models:
         return _ask_required("Model", current)
-    options = [*models, _MANUAL_MODEL]
-    default = current if current in models else models[0]
+    narrowed = _narrow_models(models)
+    options = [*narrowed, _MANUAL_MODEL]
+    default = current if current in narrowed else narrowed[0]
     selected = choice("Model", options=[(value, value) for value in options], default=default)
     return _ask_required("Model", current) if selected == _MANUAL_MODEL else selected
 
 
-def _configure_chatgpt_codex(document: Any, settings: Settings) -> None:
+def _ask_models(models: list[str], current: list[str]) -> list[str]:
+    """Pick the advisory `models` roster the main agent may delegate to on this provider."""
+    narrowed = _narrow_models(models)
+    selected = _ask_multiselect(
+        "Models to offer the main agent",
+        [(model, model) for model in narrowed],
+        [model for model in current if model in narrowed],
+    )
+    return sorted(selected)
+
+
+def _configure_chatgpt_codex(document: Any, settings: Settings) -> _ConfiguredProvider | None:
     from minibot.app.codex_setup import CodexDependencyError
 
     provider_config = settings.providers.get("chatgpt_codex", ProviderConfig())
@@ -289,13 +397,16 @@ def _configure_chatgpt_codex(document: Any, settings: Settings) -> None:
             "llm-async-codex is required for this provider. Install with "
             "`poetry install --extras codex` or `poetry install --all-extras` and rerun.\n"
         )
-        return
-    _set_value(document, ("llm", "provider"), "chatgpt_codex")
-    _set_value(document, ("llm", "model"), _ask_chatgpt_codex_model(credentials, settings.llm.model))
-    # Codex forces store=False server-side, so it can't do previous_response_id continuity —
-    # see LLMClient.__init__, which forces this regardless of config; set it here too for clarity.
-    _set_value(document, ("llm", "main_responses_state_mode"), "full_messages")
-    _set_value(document, ("llm", "agent_responses_state_mode"), "full_messages")
+        return None
+    _set_value(document, ("providers", "chatgpt_codex", "api_format"), "chatgpt_codex")
+    models = _codex_models(credentials)
+    if models:
+        _set_value(document, ("providers", "chatgpt_codex", "models"), _ask_models(models, provider_config.models))
+    return _ConfiguredProvider(
+        label=_LLM_TARGETS["chatgpt_codex"][0],
+        api_format="chatgpt_codex",
+        models=models,
+    )
 
 
 def _ensure_codex_login(auth_path: Path) -> Any:
@@ -311,16 +422,15 @@ def _ensure_codex_login(auth_path: Path) -> Any:
     return asyncio.run(login_to_codex(device_code=device_code, auth_path=auth_path))
 
 
-def _ask_chatgpt_codex_model(credentials: Any, current: str) -> str:
+def _codex_models(credentials: Any) -> list[str]:
     from minibot.app.codex_setup import list_codex_model_slugs
 
     try:
-        models = asyncio.run(list_codex_model_slugs(credentials))
+        return asyncio.run(list_codex_model_slugs(credentials))
     except Exception:
         _logger.debug("Could not list Codex models", exc_info=True)
         _write("Could not fetch the Codex model list; enter the model name manually.\n")
-        models = []
-    return _choose_model(models, current)
+        return []
 
 
 def _resolve_codex_auth_path(auth_path: str | None) -> Path:
@@ -547,6 +657,16 @@ def _unset_value(document: Any, path: tuple[str, ...]) -> None:
     target.pop(path[-1], None)
 
 
+def _provider_summary(settings: Settings) -> str:
+    lines: list[str] = []
+    for option in available_providers(settings):
+        target = f" → {option.base_url}" if option.base_url else ""
+        models = f" · {len(option.models)} models" if option.models else ""
+        main = " (main agent)" if option.name == settings.llm.provider.strip().lower() else ""
+        lines.append(f"    {option.name} [{option.api_format}]{target}{models}{main}\n")
+    return "".join(lines) or "    none with credentials\n"
+
+
 def _write_summary(path: Path, profile: str | None, settings: Settings) -> None:
     tools = [name for name, tool_path in _TOOLS.items() if _tool_enabled(settings, tool_path)]
     if _GRAPH_MODULE in settings.extensions.modules:
@@ -556,7 +676,8 @@ def _write_summary(path: Path, profile: str | None, settings: Settings) -> None:
         "\nSummary\n"
         f"  File: {path}\n"
         f"  Profile: {profile or 'existing'}\n"
-        f"  Provider: {settings.llm.provider}\n"
+        f"  Providers:\n{_provider_summary(settings)}"
+        f"  Main agent: {settings.llm.provider}\n"
         f"  Model: {settings.llm.model}\n"
         f"  API key: {'configured' if provider and provider.api_key else 'empty'}\n"
         f"  Telegram: {'enabled' if settings.channels.telegram.enabled else 'disabled'}\n"

@@ -171,7 +171,7 @@ async def test_spawn_task_carries_model_overrides_to_the_queue() -> None:
     tools = TaskTools(
         cast(Any, producer),
         cast(Any, _TaskManagerStub()),
-        providers=[ProviderOption(name="opencode_go", kind="openai_responses", base_url=None, models=())],
+        providers=[ProviderOption(name="opencode_go", api_format="openai_responses", base_url=None, models=())],
     )
     bindings = {binding.tool.name: binding for binding in tools.bindings()}
 
@@ -196,7 +196,7 @@ async def test_spawn_task_rejects_provider_without_configured_credentials() -> N
     tools = TaskTools(
         cast(Any, producer),
         cast(Any, _TaskManagerStub()),
-        providers=[ProviderOption(name="opencode_go", kind="openai_responses", base_url=None, models=())],
+        providers=[ProviderOption(name="opencode_go", api_format="openai_responses", base_url=None, models=())],
     )
     bindings = {binding.tool.name: binding for binding in tools.bindings()}
 

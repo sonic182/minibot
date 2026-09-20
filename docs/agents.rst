@@ -173,7 +173,7 @@ only the target model is.
 
 ``fetch_agent_info`` is the discovery surface: besides the specialist's prompt it returns that
 agent's own defaults and the providers that actually have credentials configured, with their
-``kind``, ``base_url`` and advisory ``models`` list (see :ref:`providers-aliases`). A provider that is
+``api_format``, ``base_url`` and advisory ``models`` list (see :ref:`providers-aliases`). A provider that is
 not on that list is refused — ``invoke_agent`` answers with ``error_code``
 ``provider_not_available``, and ``spawn_task`` rejects the call before queueing it — because a
 provider without a key would otherwise answer with MiniBot's local echo fallback.
