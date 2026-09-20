@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-21
+
 ### Added
 
 - **The browser chat.** The optional HTTP server now serves an authenticated `/chat` page backed by a
@@ -885,7 +887,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.18.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.19.0...HEAD
+[0.19.0]: https://github.com/sonic182/minibot/compare/0.18.0..0.19.0
 [0.18.0]: https://github.com/sonic182/minibot/compare/0.17.0..0.18.0
 [0.17.0]: https://github.com/sonic182/minibot/compare/0.16.0..0.17.0
 [0.16.0]: https://github.com/sonic182/minibot/compare/0.15.0..0.16.0
