@@ -47,6 +47,23 @@ async def test_web_image_upload_builds_safe_model_attachment(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_web_upload_normalizes_parameterized_media_type(tmp_path) -> None:
+    manager = _manager(tmp_path)
+    session = manager.new_session()
+    prepared = await session.start(
+        {
+            "upload_id": "audio-1",
+            "filename": "recording.webm",
+            "mime": "audio/webm;codecs=opus",
+            "size_bytes": 4,
+            "media_kind": "audio",
+        }
+    )
+    assert prepared.mime == "audio/webm"
+    await session.close()
+
+
+@pytest.mark.asyncio
 async def test_web_upload_rejects_total_limit_and_removes_incomplete_file(tmp_path) -> None:
     manager = _manager(tmp_path, chat_upload_max_total_bytes=10)
     session = manager.new_session()

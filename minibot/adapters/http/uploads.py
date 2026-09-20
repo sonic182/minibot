@@ -89,7 +89,7 @@ class WebUploadSession:
             raise UploadError("upload id is already in use")
         kind = _required_kind(payload)
         filename = Path(_required_string(payload, "filename")).name or "upload"
-        mime = _required_string(payload, "mime").lower()
+        mime = _required_string(payload, "mime").split(";", maxsplit=1)[0].strip().lower()
         size_bytes = _required_non_negative_int(payload, "size_bytes")
         self._manager.validate_start(kind=kind, mime=mime, size_bytes=size_bytes, completed=self._completed.values())
         suffix = _suffix_for_mime(mime)

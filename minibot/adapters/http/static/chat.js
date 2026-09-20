@@ -38,6 +38,10 @@ window.webChat = () => ({
     this.socket.addEventListener("message", ({ data }) => this.handle(JSON.parse(data)));
     this.socket.addEventListener("close", () => {
       this.connected = false;
+      this.rejectWaiters("Connection lost.");
+      for (const attachment of this.attachments) {
+        attachment.uploaded = false;
+      }
       window.setTimeout(() => this.connect(), this.reconnectDelay);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10_000);
     });
@@ -146,7 +150,8 @@ window.webChat = () => ({
   addFiles(files) {
     for (const file of files) {
       const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("audio/") ? "audio" : null;
-      if (!kind || !this.capabilities[`${kind}s_enabled`]) {
+      const enabled = kind === "image" ? this.capabilities.images_enabled : this.capabilities.audio_enabled;
+      if (!kind || !enabled) {
         this.error = "That attachment type is unavailable.";
         continue;
       }
@@ -158,6 +163,11 @@ window.webChat = () => ({
       if (file.size > limit) {
         this.error = `${file.name} is too large.`;
         continue;
+      }
+      const total = this.attachments.reduce((sum, entry) => sum + entry.file.size, 0) + file.size;
+      if (total > this.capabilities.max_total_bytes) {
+        this.error = "Attachments exceed the total size limit.";
+        break;
       }
       this.attachments.push({
         id: this.attachmentId(),
@@ -180,10 +190,18 @@ window.webChat = () => ({
 
   clearSent(sent) {
     const identifiers = new Set(sent.map((attachment) => attachment.id));
+    for (const attachment of this.attachments) {
+      if (identifiers.has(attachment.id)) {
+        URL.revokeObjectURL(attachment.url);
+      }
+    }
     this.attachments = this.attachments.filter((attachment) => !identifiers.has(attachment.id));
   },
 
   async upload(attachment) {
+    if (attachment.uploaded) {
+      return;
+    }
     this.socket.send(
       JSON.stringify({
         kind: "upload_start",
@@ -200,6 +218,7 @@ window.webChat = () => ({
     }
     this.socket.send(JSON.stringify({ kind: "upload_complete", upload_id: attachment.id }));
     await this.waitFor(`complete:${attachment.id}`);
+    attachment.uploaded = true;
   },
 
   async send() {
