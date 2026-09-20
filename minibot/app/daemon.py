@@ -121,11 +121,15 @@ def _build_http_server(
     nav_entries.extend(extensions.pages())
     set_nav_entries(nav_entries)
 
+    websockets = []
+    if web_channel is not None and socket_token is not None:
+        websockets.append(build_chat_socket(web_channel, memory, socket_token))
     dashboard_route = build_dashboard_route(
         DashboardData(
             extensions=extensions.summaries(),
             tool_names=dispatcher.main_agent_tool_names,
             routes=extra_routes,
+            websockets=websockets,
             started_at=started_at,
             llm_provider=real_provider,
             llm_model=settings.llm.model,
@@ -133,9 +137,6 @@ def _build_http_server(
             pending_turns=_count_pending_turns,
         )
     )
-    websockets = []
-    if web_channel is not None and socket_token is not None:
-        websockets.append(build_chat_socket(web_channel, memory, socket_token))
     return HttpServer(settings.http, [dashboard_route, *extra_routes], websockets)
 
 

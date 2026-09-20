@@ -3,7 +3,7 @@
 {% block title %}Chat · minibot{% endblock %}
 
 {% block content %}
-<section class="chat" x-data="webChat()">
+<section class="chat" x-data="webChat()" data-socket-token="{{ socket_token }}">
   <h1>Chat</h1>
   <div class="chat-messages" x-ref="messages" aria-live="polite">
     <template x-for="(message, index) in messages" :key="index">
@@ -26,50 +26,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module">
-  import Alpine from "https://cdn.jsdelivr.net/npm/alpinejs@3.15.2/dist/module.esm.js";
-
-  const socketToken = {{ socket_token | tojson }};
-
-  window.webChat = () => ({
-    messages: [],
-    draft: "",
-    busy: false,
-    error: "",
-    connected: false,
-    socket: null,
-    reconnectDelay: 500,
-    init() { this.connect(); },
-    connect() {
-      const scheme = location.protocol === "https:" ? "wss" : "ws";
-      this.socket = new WebSocket(`${scheme}://${location.host}/chat/ws?token=${encodeURIComponent(socketToken)}`);
-      this.socket.addEventListener("open", () => {
-        this.connected = true;
-        this.error = "";
-        this.reconnectDelay = 500;
-      });
-      this.socket.addEventListener("message", ({ data }) => this.handle(JSON.parse(data)));
-      this.socket.addEventListener("close", () => {
-        this.connected = false;
-        window.setTimeout(() => this.connect(), this.reconnectDelay);
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
-      });
-      this.socket.addEventListener("error", () => { this.error = "Connection lost; retrying…"; });
-    },
-    handle(event) {
-      if (event.html !== undefined) this.messages.push(event);
-      if (event.busy !== undefined) this.busy = event.busy;
-      if (event.error) this.error = event.error;
-      this.$nextTick(() => { this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight; });
-    },
-    send() {
-      const text = this.draft.trim();
-      if (!text || !this.connected) return;
-      this.socket.send(JSON.stringify({ text }));
-      this.draft = "";
-    },
-  });
-
-  Alpine.start();
-</script>
+<script type="module" src="/static/chat.js"></script>
 {% endblock %}
