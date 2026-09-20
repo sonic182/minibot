@@ -65,6 +65,8 @@ async def run() -> None:
             await extensions.start()
         if web_channel is not None:
             await web_channel.start()
+        if web_upload_manager is not None:
+            await web_upload_manager.start()
         if http_server is not None:
             await http_server.start()
         await _replay_pending_turns(event_bus, logger)

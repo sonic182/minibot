@@ -137,6 +137,10 @@ class WebUploadSession:
     async def close(self) -> None:
         await self.cancel()
 
+    def release(self, upload_ids: list[str]) -> None:
+        for upload_id in upload_ids:
+            self._completed.pop(upload_id, None)
+
     async def message_parts(
         self, upload_ids: list[str]
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -252,7 +256,10 @@ class WebUploadManager:
 
     async def finalize(self, active: _ActiveUpload) -> PreparedUpload:
         if active.kind == "image":
-            is_valid = await asyncio.to_thread(_matches_image_signature, active.target, active.mime)
+            try:
+                is_valid = await asyncio.to_thread(_matches_image_signature, active.target, active.mime)
+            except OSError as exc:
+                raise UploadError("upload is no longer available") from exc
             if not is_valid:
                 raise UploadError("image content does not match its media type")
             duration_seconds = None
@@ -325,7 +332,8 @@ def _append_bytes(target: Path, payload: bytes) -> None:
 
 
 def _matches_image_signature(target: Path, mime: str) -> bool:
-    header = target.read_bytes()[:16]
+    with target.open("rb") as handle:
+        header = handle.read(16)
     signatures = {
         "image/gif": header.startswith((b"GIF87a", b"GIF89a")),
         "image/jpeg": header.startswith(b"\xff\xd8\xff"),

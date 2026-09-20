@@ -259,3 +259,83 @@ async def test_chat_socket_echoes_user_message_and_publishes_it() -> None:
         await subscription.close()
         await server.stop()
         await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_chat_socket_uploads_media_and_releases_attachments(tmp_path) -> None:
+    import logging
+
+    from minibot.adapters.config.schema import AudioTranscriptionToolConfig, FileStorageToolConfig
+    from minibot.adapters.files.local_storage import LocalFileStorage
+    from minibot.adapters.http.uploads import WebUploadManager
+
+    http_config = HTTPServerConfig(enabled=True, host="127.0.0.1", port=0, chat_upload_max_attachments=1)
+    manager = WebUploadManager(
+        storage=LocalFileStorage(str(tmp_path), max_write_bytes=64_000),
+        http_config=http_config,
+        file_storage_config=FileStorageToolConfig(enabled=True),
+        audio_config=AudioTranscriptionToolConfig(enabled=False),
+        supports_media_inputs=True,
+        logger=logging.getLogger("test.web_chat_uploads"),
+    )
+    event_bus = EventBus()
+    service = WebChannelService(event_bus)
+    subscription = event_bus.subscribe(types=(MessageEvent,))
+    server = HttpServer(
+        http_config,
+        websockets=[build_chat_socket(service, InMemoryMemoryStore(), SOCKET_TOKEN, manager)],
+    )
+    await service.start()
+    await server.start()
+    png = b"\x89PNG\r\n\x1a\nbody"
+    try:
+        async with connect(f"ws://127.0.0.1:{server.port}/chat/ws", subprotocols=[SOCKET_TOKEN]) as websocket:
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {"busy": False}
+            await websocket.send(
+                json.dumps(
+                    {
+                        "kind": "upload_start",
+                        "upload_id": "img-1",
+                        "filename": "photo.png",
+                        "mime": "image/png",
+                        "size_bytes": len(png),
+                        "media_kind": "image",
+                    }
+                )
+            )
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {
+                "kind": "upload_ready",
+                "upload_id": "img-1",
+            }
+            await websocket.send(png)
+            await websocket.send(json.dumps({"kind": "upload_complete", "upload_id": "img-1"}))
+            complete = json.loads(await asyncio.wait_for(websocket.recv(), timeout=1))
+            assert complete["kind"] == "upload_complete"
+            assert complete["attachment"]["kind"] == "image"
+            await websocket.send(json.dumps({"upload_ids": ["img-1"]}))
+            user_event = json.loads(await asyncio.wait_for(websocket.recv(), timeout=1))
+            assert user_event["role"] == "user"
+            assert user_event["attachments"][0]["id"] == "img-1"
+            event = await asyncio.wait_for(anext(subscription.__aiter__()), timeout=1)
+            assert event.message.attachments[0]["type"] == "input_image"
+            # The upload is released after a successful send, so a new one is accepted at the cap.
+            await websocket.send(
+                json.dumps(
+                    {
+                        "kind": "upload_start",
+                        "upload_id": "img-2",
+                        "filename": "photo2.png",
+                        "mime": "image/png",
+                        "size_bytes": len(png),
+                        "media_kind": "image",
+                    }
+                )
+            )
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {
+                "kind": "upload_ready",
+                "upload_id": "img-2",
+            }
+    finally:
+        await subscription.close()
+        await server.stop()
+        await service.stop()

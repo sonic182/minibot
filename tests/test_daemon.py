@@ -173,6 +173,86 @@ async def test_run_starts_and_stops_dispatcher_and_extensions(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
+async def test_run_starts_and_stops_web_upload_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.app import daemon as daemon_module
+
+    upload_manager = _Probe()
+
+    class _FakeExtensions:
+        routes: list[tuple] = []
+
+        def is_empty(self) -> bool:
+            return True
+
+    class _FakeContainer:
+        @classmethod
+        def configure(cls) -> None:
+            return None
+
+        @classmethod
+        async def initialize_storage(cls) -> None:
+            return None
+
+        @classmethod
+        def get_logger(cls) -> _Logger:
+            return _Logger()
+
+        @classmethod
+        def get_settings(cls):
+            return type(
+                "Settings",
+                (),
+                {
+                    "llm": type("LLM", (), {"strip_logs": False})(),
+                    "http": type("HTTP", (), {"enabled": False})(),
+                },
+            )()
+
+        @classmethod
+        def get_event_bus(cls):
+            return object()
+
+        @classmethod
+        def get_extensions(cls) -> _FakeExtensions:
+            return _FakeExtensions()
+
+        @classmethod
+        def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
+            return _EmptyPendingTurnStore()
+
+    class _FakeDispatcher:
+        main_agent_tool_names: list[str] = []
+
+        def __init__(self, _event_bus: object) -> None:
+            pass
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    @asynccontextmanager
+    async def _shutdown(services, _logger):
+        event = asyncio.Event()
+        event.set()
+        try:
+            yield event
+        finally:
+            for service in services:
+                await service.stop()
+
+    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
+    monkeypatch.setattr(daemon_module, "Dispatcher", _FakeDispatcher)
+    monkeypatch.setattr(daemon_module, "_build_http_server", lambda *args, **kwargs: (None, upload_manager))
+    monkeypatch.setattr(daemon_module, "_graceful_shutdown", _shutdown)
+
+    await daemon_module.run()
+
+    assert upload_manager.started == upload_manager.stopped == 1
+
+
+@pytest.mark.asyncio
 async def test_replay_pending_turns_republishes_unfinished_messages(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.app import daemon as daemon_module
     from minibot.core.channels import ChannelMessage

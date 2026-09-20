@@ -175,6 +175,8 @@ async def _receive_chat_message(
     await service.publish_user_message(
         message.text, attachments=attachments, incoming_files=incoming_files, attachment_display=display
     )
+    if session is not None and message.upload_ids:
+        session.release(message.upload_ids)
 
 
 async def _message_parts(
@@ -232,6 +234,7 @@ async def _receive_upload_cancel(
     websocket: WebSocket, session: WebUploadSession | None, payload: dict[str, Any], send_lock: asyncio.Lock
 ) -> None:
     if session is None:
+        await _send_error(websocket, "uploads are unavailable", send_lock)
         return
     try:
         cancel = _UploadCancel.model_validate(payload)
