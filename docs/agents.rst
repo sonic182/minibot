@@ -161,3 +161,25 @@ only; use whatever your provider lists.
 ``reasoning_effort`` is unset by default, which leaves the provider's own default in place. Set it
 per agent when you want to steer that: higher for agents that plan multi-step work, lower for agents
 that mostly call one tool and summarize.
+
+Retargeting One Call
+--------------------
+
+The frontmatter above is the agent's default, not a fixed binding. ``invoke_agent`` and
+``spawn_task`` each accept ``model_provider``, ``model`` and ``reasoning_effort`` for a single call,
+so the main agent can honour a request like *"run that on the deepseek subagent, high effort"*
+without a config change or a restart. The specialist's prompt, tool scope and timeouts are unchanged;
+only the target model is.
+
+``fetch_agent_info`` is the discovery surface: besides the specialist's prompt it returns that
+agent's own defaults and the providers that actually have credentials configured, with their
+``kind``, ``base_url`` and advisory ``models`` list (see :ref:`providers-aliases`). A provider that is
+not on that list is refused — ``invoke_agent`` answers with ``error_code``
+``provider_not_available``, and ``spawn_task`` rejects the call before queueing it — because a
+provider without a key would otherwise answer with MiniBot's local echo fallback.
+
+One caveat: token auto-config resolves each agent's context window and output cap at boot from the
+model in its frontmatter. Those numbers do not transfer to another model, so a retargeted call runs
+with the provider's default output cap and without mid-run transcript compaction. Put a model you
+delegate to regularly in the agent file (or a copy of the agent) rather than overriding it on every
+call.

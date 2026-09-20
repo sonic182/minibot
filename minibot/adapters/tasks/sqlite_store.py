@@ -30,6 +30,7 @@ class TaskModel(TaskBase):
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     agent_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     context: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    model_overrides: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
     lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -96,6 +97,7 @@ class SQLiteTaskStore:
             "timeout_seconds": "INTEGER NOT NULL DEFAULT 1800",
             "max_steps": "INTEGER",
             "max_tool_calls": "INTEGER",
+            "model_overrides": "JSON NOT NULL DEFAULT '{}'",
             "progress": "JSON NOT NULL DEFAULT '{}'",
             "result_text": "TEXT",
             "result_attachments": "JSON NOT NULL DEFAULT '[]'",
@@ -413,6 +415,7 @@ class SQLiteTaskStore:
             prompt=task.prompt,
             agent_name=task.agent_name,
             context=dict(task.context or {}),
+            model_overrides=dict(task.model_overrides or {}),
             status=TaskStatus.PENDING.value,
             retry_count=0,
             max_attempts=self._config.max_attempts,
@@ -446,6 +449,7 @@ def _to_domain(model: TaskModel) -> TaskRecord:
             prompt=model.prompt,
             agent_name=model.agent_name,
             context=dict(model.context or {}),
+            model_overrides=dict(model.model_overrides or {}),
             chat_id=model.chat_id,
             user_id=model.user_id,
             owner_id=model.owner_id,

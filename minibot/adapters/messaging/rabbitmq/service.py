@@ -10,6 +10,7 @@ import aio_pika
 import aio_pika.abc
 
 from minibot.adapters.config.schema import RabbitMQConsumerConfig
+from minibot.app.agent_policies import normalize_model_overrides
 from minibot.app.event_bus import EventBus
 from minibot.core.tasks import TaskLimits, TaskRepository, TaskRequest, TaskStatus
 
@@ -104,6 +105,9 @@ class RabbitMQConsumerService:
             prompt=str(prompt),
             agent_name=agent_name if isinstance(agent_name, str) and agent_name.strip() else None,
             context=context if isinstance(context, dict) else {},
+            model_overrides=normalize_model_overrides(
+                body.get("model_overrides") if isinstance(body.get("model_overrides"), dict) else None
+            ),
             chat_id=chat_id if isinstance(chat_id, int) else None,
             user_id=user_id if isinstance(user_id, int) else None,
             owner_id=str(body.get("owner_id") or "primary"),
@@ -148,6 +152,7 @@ class RabbitMQConsumerService:
                     prompt=request.prompt,
                     agent_name=request.agent_name,
                     context=request.context,
+                    model_overrides=request.model_overrides,
                     chat_id=request.chat_id,
                     user_id=request.user_id,
                     owner_id=request.owner_id,

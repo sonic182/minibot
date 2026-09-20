@@ -45,6 +45,7 @@ class TaskRequest:
     prompt: str
     agent_name: str | None = None
     context: dict[str, Any] = field(default_factory=dict)
+    model_overrides: dict[str, str] = field(default_factory=dict)
     chat_id: int | None = None
     user_id: int | None = None
     owner_id: str = "primary"

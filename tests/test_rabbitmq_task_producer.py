@@ -94,6 +94,7 @@ async def test_enqueue_publishes_persistent_json_to_fanout_exchange(monkeypatch:
         "prompt": "Summarize logs",
         "agent_name": "playwright_mcp_agent",
         "context": {"trace_id": "abc"},
+        "model_overrides": {},
         "chat_id": 42,
         "user_id": 7,
     }

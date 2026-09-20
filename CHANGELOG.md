@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Delegation can pick its provider, model and reasoning effort at call time.** `invoke_agent` and
+  `spawn_task` accept optional `model_provider`, `model` and `reasoning_effort`, so the main agent can
+  run a specialist on another configured provider for one call — a `chatgpt_codex` orchestrator
+  delegating to a subagent on an OpenCode Go model, for example — without editing `agents/*.md` or
+  restarting. `fetch_agent_info` now also returns the agent's own defaults and the providers that have
+  credentials configured; anything else is refused with `provider_not_available` instead of falling
+  through to the echo fallback. A retargeted call runs without mid-run compaction, since the context
+  window and output cap resolved at boot belong to the agent's configured model.
+- **Named provider sections.** `[providers.<name>]` accepts `kind` (`openai`, `openai_responses`,
+  `openrouter`, `claude`, `google`, `chatgpt_codex`), so a section name can be an alias and several
+  endpoints of the same kind can coexist — `[providers.opencode_go]` next to `[providers.zai]`. The new
+  `models` list is advisory: it is what the main agent is offered to choose from.
+
 - **Live tool activity in the web chat.** The authenticated `/chat` UI lists each tool invocation of the
   running turn and updates it from `started` to `completed`/`failed`, driven by `ToolCallEvent`. The tool
   name is forwarded; the redacted `detail` and `error` stay server-side. `ToolCallEvent` gains a `call_id`

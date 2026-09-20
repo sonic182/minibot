@@ -1,10 +1,68 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from minibot.adapters.config.schema import LLMMConfig, OpenRouterProviderRoutingConfig, Settings
 from minibot.core.agents import AgentSpec
 from minibot.llm.provider_factory import LLMClient
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderOption:
+    """A provider an agent or a runtime delegation override may target."""
+
+    name: str
+    kind: str
+    base_url: str | None
+    models: tuple[str, ...]
+
+    def as_payload(self) -> dict[str, object]:
+        return {"name": self.name, "kind": self.kind, "base_url": self.base_url, "models": list(self.models)}
+
+
+def available_providers(settings: Settings) -> list[ProviderOption]:
+    """Providers with usable credentials, by the name `model_provider` must reference.
+
+    A provider without credentials is excluded on purpose: `LLMClient.generate` degrades to an
+    `Echo:` reply when the key is missing, which reads like a model answer instead of a failure.
+    """
+    options: list[ProviderOption] = []
+    seen: set[str] = set()
+    for name, provider_cfg in settings.providers.items():
+        normalized = name.strip().lower()
+        kind = provider_cfg.kind or normalized
+        if not provider_cfg.api_key and kind != "chatgpt_codex":
+            continue
+        options.append(
+            ProviderOption(
+                name=normalized,
+                kind=kind,
+                base_url=provider_cfg.base_url or None,
+                models=tuple(provider_cfg.models),
+            )
+        )
+        seen.add(normalized)
+    main_provider = settings.llm.provider.strip().lower()
+    if main_provider not in seen and (settings.llm.api_key or main_provider == "chatgpt_codex"):
+        options.append(
+            ProviderOption(
+                name=main_provider,
+                kind=main_provider,
+                base_url=settings.llm.base_url or None,
+                models=(settings.llm.model,),
+            )
+        )
+    return sorted(options, key=lambda option: option.name)
+
+
+def find_provider(name: str, options: Sequence[ProviderOption]) -> ProviderOption | None:
+    normalized = name.strip().lower()
+    for option in options:
+        if option.name == normalized:
+            return option
+    return None
 
 
 class LLMClientFactory:
@@ -61,6 +119,9 @@ class LLMClientFactory:
         self._cache[key] = client
         return client
 
+    def available_providers(self) -> list[ProviderOption]:
+        return available_providers(self._settings)
+
     def _resolved_config(self, base: LLMMConfig, provider_override: str | None) -> LLMMConfig:
         config = base.model_copy(deep=True)
         if provider_override:
@@ -74,6 +135,8 @@ class LLMClientFactory:
             config.base_url = provider_cfg.base_url
             config.extra_headers = {**config.extra_headers, **provider_cfg.headers}
             config.auth_path = provider_cfg.auth_path
+            if provider_cfg.kind:
+                config.provider = provider_cfg.kind
         return config
 
     @staticmethod

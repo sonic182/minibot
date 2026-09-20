@@ -94,6 +94,7 @@ class TaskManager:
         context: dict[str, Any],
         chat_id: int | None,
         user_id: int | None,
+        model_overrides: dict[str, str] | None = None,
         owner_id: str = "primary",
         limits: TaskLimits | None = None,
         expected_status: TaskStatus | None = None,
@@ -121,18 +122,24 @@ class TaskManager:
             if active_lease_token is None:
                 semaphore.release()
                 return False
+        overrides = dict(model_overrides or {})
         payload = {
             "task_id": task_id,
             "channel": channel,
             "prompt": prompt,
             "agent_name": agent_name,
             "context": context,
+            "model_overrides": overrides,
             "chat_id": chat_id,
             "user_id": user_id,
             "owner_id": owner_id,
             "limits": asdict(resolved_limits),
+            # An overridden model has an unknown context window, so the budget resolved from the
+            # agent's configured model would be wrong: send none and let the worker skip compaction.
             "compact_threshold_tokens": (
-                self._compact_threshold_for(agent_name) if self._compact_threshold_for else None
+                self._compact_threshold_for(agent_name)
+                if self._compact_threshold_for and not overrides.get("model")
+                else None
             ),
         }
         mainpipe, proc = self._start_worker_process()

@@ -9,7 +9,7 @@ from minibot.adapters.config.schema import (
     ProviderConfig,
     Settings,
 )
-from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.llm_client_factory import LLMClientFactory, available_providers, find_provider
 from minibot.core.agents import AgentSpec
 
 
@@ -239,3 +239,49 @@ def test_create_default_cache_key_includes_xai_config(monkeypatch) -> None:
     assert len(created_configs) == 2
     assert created_configs[0].xai.x_search_enabled is False
     assert created_configs[1].xai.x_search_enabled is True
+
+
+def test_provider_alias_builds_its_declared_client_kind(monkeypatch) -> None:
+    settings = Settings(
+        llm=LLMMConfig(provider="chatgpt_codex", model="gpt-5.6-sol"),
+        providers={
+            "opencode_go": ProviderConfig(
+                api_key="go-key",
+                base_url="https://opencode.ai/zen/go/v1",
+                kind="openai_responses",
+                models=["deepseek-v3.6"],
+            )
+        },
+    )
+    factory = LLMClientFactory(settings)
+
+    created_configs = _patch_fake_client(monkeypatch)
+
+    factory.create_for_agent(_agent_spec(name="worker", model_provider="opencode_go", model="deepseek-v3.6"))
+
+    assert len(created_configs) == 1
+    config = created_configs[0]
+    assert config.provider == "openai_responses"
+    assert config.api_key == "go-key"
+    assert config.base_url == "https://opencode.ai/zen/go/v1"
+    assert config.model == "deepseek-v3.6"
+
+
+def test_available_providers_skips_sections_without_credentials() -> None:
+    settings = Settings(
+        llm=LLMMConfig(provider="chatgpt_codex", model="gpt-5.6-sol"),
+        providers={
+            "opencode_go": ProviderConfig(api_key="go-key", kind="openai_responses", models=["deepseek-v3.6"]),
+            "openrouter": ProviderConfig(api_key=""),
+            "chatgpt_codex": ProviderConfig(),
+        },
+    )
+
+    options = available_providers(settings)
+
+    assert [(option.name, option.kind) for option in options] == [
+        ("chatgpt_codex", "chatgpt_codex"),
+        ("opencode_go", "openai_responses"),
+    ]
+    assert find_provider("OpenCode_Go ", options) is options[1]
+    assert find_provider("openrouter", options) is None

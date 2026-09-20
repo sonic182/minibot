@@ -123,6 +123,7 @@ async def _spawn(
     prompt: str = "hello",
     channel: str = "console",
     agent_name: str | None = None,
+    model_overrides: dict[str, str] | None = None,
 ):
     """Spawn a task with a fake pipe and return the mocked callbacks + semaphore."""
     ack_cb = AsyncMock()
@@ -142,6 +143,7 @@ async def _spawn(
             prompt=prompt,
             agent_name=agent_name,
             context={},
+            model_overrides=model_overrides,
             chat_id=1,
             user_id=2,
             ack_cb=ack_cb,
@@ -518,6 +520,31 @@ async def test_spawn_sends_the_compaction_threshold_to_the_worker() -> None:
     await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert seen[0]["compact_threshold_tokens"] == 4321
+
+
+@pytest.mark.asyncio
+async def test_spawn_forwards_model_overrides_and_drops_the_stale_threshold() -> None:
+    # The threshold was derived from the agent's configured model, so it cannot describe another one.
+    bus = EventBus()
+    manager = TaskManager(bus, 5.0, compact_threshold_for=lambda _: 4321)
+    pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
+
+    seen: list[dict] = []
+    original = manager._read_worker_result
+
+    async def _capture(mainpipe, payload, *args):
+        seen.append(payload)
+        return await original(mainpipe, payload, *args)
+
+    manager._read_worker_result = _capture  # type: ignore[method-assign]
+    overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6"}
+    _, _, _, _, reader_task = await _spawn(
+        manager, pipe, task_id="t1", agent_name="prospector", model_overrides=overrides
+    )
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    assert seen[0]["model_overrides"] == overrides
+    assert seen[0]["compact_threshold_tokens"] is None
 
 
 @pytest.mark.asyncio

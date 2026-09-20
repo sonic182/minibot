@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 
 from minibot.app.agent_registry import AgentRegistry
+from minibot.app.llm_client_factory import ProviderOption
 from minibot.core.agents import AgentSpec
 from minibot.core.tasks import TaskRequest
 from minibot.llm.tools.base import ToolContext
@@ -162,3 +163,47 @@ async def test_list_tasks_returns_active_tasks() -> None:
     assert result["tasks"][0]["task_id"] == "task-1"
     assert result["tasks"][0]["channel"] == "telegram"
     assert isinstance(result["tasks"][0]["started_at"], str)
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_carries_model_overrides_to_the_queue() -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(
+        cast(Any, producer),
+        cast(Any, _TaskManagerStub()),
+        providers=[ProviderOption(name="opencode_go", kind="openai_responses", base_url=None, models=())],
+    )
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+
+    result = await bindings["spawn_task"].handler(
+        {
+            "prompt": "Summarize logs",
+            "model_provider": "opencode_go",
+            "model": "deepseek-v3.6",
+            "reasoning_effort": "high",
+        },
+        ToolContext(channel="console"),
+    )
+
+    overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6", "reasoning_effort": "high"}
+    assert result["model_overrides"] == overrides
+    assert producer.enqueued[0].model_overrides == overrides
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_rejects_provider_without_configured_credentials() -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(
+        cast(Any, producer),
+        cast(Any, _TaskManagerStub()),
+        providers=[ProviderOption(name="opencode_go", kind="openai_responses", base_url=None, models=())],
+    )
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+
+    with pytest.raises(ValueError, match="opencode_go"):
+        await bindings["spawn_task"].handler(
+            {"prompt": "Summarize logs", "model_provider": "zai"},
+            ToolContext(channel="console"),
+        )
+
+    assert producer.enqueued == []

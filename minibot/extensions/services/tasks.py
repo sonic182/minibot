@@ -6,6 +6,7 @@ from minibot.adapters.tasks.sqlite_store import SQLiteTaskProducer, SQLiteTaskSt
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.extensions import ExtensionContext
+from minibot.app.llm_client_factory import available_providers
 from minibot.app.task_consumer_service import SQLiteTaskConsumerService
 from minibot.llm.tools.tasks import TaskTools
 
@@ -52,6 +53,7 @@ def register(mb: ExtensionContext) -> None:
             task_repository=store,
             config=settings.tasks,
             agent_registry=agent_registry,
+            providers=available_providers(settings),
         ).bindings()
     )
     mb.add_service(_SQLiteTasksService(store, consumer))

@@ -258,3 +258,43 @@ def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
     assert "cancel_task" not in tool_names
     assert "list_tasks" not in tool_names
     assert "fetch_agent_info" not in tool_names
+
+
+def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:
+    settings = Settings()
+    specialist = AgentSpec(
+        name="general_agent",
+        description="generalist",
+        system_prompt="You are a generalist.",
+        source_path=worker.Path("/tmp/agent.md"),
+        model_provider="openai",
+        model="gpt-4o-mini",
+        max_new_tokens=4096,
+        context_limit=128000,
+    )
+    overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6", "reasoning_effort": "high"}
+    factory = _FakeFactory(settings)
+
+    with patch("minibot.adapters.tasks.worker.load_agent_specs", return_value=[specialist]):
+        specialist_spec = worker._resolve_task_spec(
+            settings=settings,
+            llm_factory=factory,
+            environment_prompt_fragment="",
+            task={"agent_name": "general_agent", "model_overrides": overrides},
+        )
+        default_spec = worker._resolve_task_spec(
+            settings=settings,
+            llm_factory=factory,
+            environment_prompt_fragment="",
+            task={"model_overrides": overrides},
+        )
+
+    for spec in (specialist_spec, default_spec):
+        assert (spec.model_provider, spec.model, spec.reasoning_effort) == (
+            "opencode_go",
+            "deepseek-v3.6",
+            "high",
+        )
+        assert spec.context_limit is None
+        assert spec.max_new_tokens is None
+    assert default_spec.name == "task_worker"

@@ -1,6 +1,6 @@
 Fetch the full prompt instructions for a specific specialist agent.
 
-Use this when the available specialist roster suggests a likely match, but you want to inspect that agent's exact prompt before deciding to delegate.
+Use this when the available specialist roster suggests a likely match, but you want to inspect that agent's exact prompt before deciding to delegate. It also returns that agent's default provider/model/reasoning_effort and the providers with configured credentials, so call it first whenever the request asks for a specific provider, model or thinking budget.
 
 Provide:
 - agent_name: exact specialist name from the available specialists list in your system prompt.

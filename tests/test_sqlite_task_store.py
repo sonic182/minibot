@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 
 from minibot.adapters.config.schema import SqliteTaskQueueConfig
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
@@ -239,3 +240,23 @@ async def test_producer_enqueue_creates_a_pending_row(task_store: SQLiteTaskStor
     assert stored is not None
     assert stored.status == TaskStatus.PENDING
     assert stored.request == _request("task-1")
+
+
+@pytest.mark.asyncio
+async def test_model_overrides_round_trip_and_are_added_to_existing_tables(task_store: SQLiteTaskStore) -> None:
+    overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6", "reasoning_effort": "high"}
+    request = _request("task-overrides")
+    request.model_overrides = dict(overrides)
+    await task_store.create(request)
+
+    leased = await task_store.lease_due_tasks(now=_utcnow(), limit=10, lease_timeout_seconds=30)
+    assert leased[0].request.model_overrides == overrides
+
+    # A queue file created before this column existed must gain it instead of failing to open.
+    async with task_store._engine.begin() as connection:
+        await connection.execute(text("ALTER TABLE tasks DROP COLUMN model_overrides"))
+    await task_store.initialize()
+    await task_store.create(_request("task-legacy"))
+    reloaded = await task_store.get("task-legacy", "primary")
+    assert reloaded is not None
+    assert reloaded.request.model_overrides == {}

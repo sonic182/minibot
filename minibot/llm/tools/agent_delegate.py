@@ -11,10 +11,15 @@ from llm_async.models import Tool
 
 from minibot.adapters.config.schema import ToolOutputSpillConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
-from minibot.app.agent_policies import filter_tools_for_agent, strip_reserved_delegation_tools
+from minibot.app.agent_policies import (
+    apply_agent_overrides,
+    filter_tools_for_agent,
+    normalize_model_overrides,
+    strip_reserved_delegation_tools,
+)
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime, RuntimeResult
-from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.llm_client_factory import LLMClientFactory, find_provider
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
@@ -25,7 +30,7 @@ from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.output_spill import apply_tool_output_spill
-from minibot.llm.tools.schema_utils import strict_object, string_field
+from minibot.llm.tools.schema_utils import nullable_string, strict_object, string_field
 from minibot.shared.utils import session_identifier, validate_attachments
 
 
@@ -90,6 +95,14 @@ class AgentDelegateTool:
                     "agent_name": string_field("Exact specialist name."),
                     "task": string_field("Concrete delegated task for the specialist."),
                     "context": string_field("Optional supporting context for the specialist."),
+                    "model_provider": nullable_string(
+                        "Optional provider name from fetch_agent_info's available_providers; "
+                        "defaults to the specialist's own provider."
+                    ),
+                    "model": nullable_string("Optional model id served by that provider."),
+                    "reasoning_effort": nullable_string(
+                        "Optional reasoning budget for this call (provider-specific, e.g. low, medium, high)."
+                    ),
                 },
                 required=["agent_name", "task"],
             ),
@@ -111,6 +124,17 @@ class AgentDelegateTool:
             "name": spec.name,
             "description": spec.description,
             "system_prompt": spec.system_prompt,
+            "defaults": {
+                "model_provider": spec.model_provider,
+                "model": spec.model,
+                "reasoning_effort": spec.reasoning_effort,
+            },
+            "available_providers": [option.as_payload() for option in self._llm_factory.available_providers()],
+            "override_hint": (
+                "invoke_agent and spawn_task accept model_provider, model and reasoning_effort to run this "
+                "specialist on one of the providers listed above for a single call. A null default means the "
+                "specialist inherits the main configured provider or model."
+            ),
         }
 
     async def _invoke_agent(self, payload: dict[str, object], context: ToolContext) -> dict[str, object]:
@@ -126,12 +150,31 @@ class AgentDelegateTool:
                 "error": f"agent '{agent_name}' is not available",
             }
 
+        overrides = normalize_model_overrides(payload)
+        requested_provider = overrides.get("model_provider")
+        if requested_provider is not None:
+            options = self._llm_factory.available_providers()
+            if find_provider(requested_provider, options) is None:
+                self._logger.warning(
+                    "delegation rejected: provider not configured",
+                    extra={"agent": spec.name, "requested_provider": requested_provider},
+                )
+                return {
+                    "ok": False,
+                    "agent": spec.name,
+                    "error_code": "provider_not_available",
+                    "error": f"provider '{requested_provider}' has no configured credentials",
+                    "available_providers": [option.as_payload() for option in options],
+                }
+        spec = apply_agent_overrides(spec, overrides)
+
         self._logger.debug(
             "delegated agent invocation started",
             extra={
                 "agent": agent_name,
                 "task_preview": task[:240],
                 "has_context": bool(details),
+                "model_overrides": overrides or None,
             },
         )
 

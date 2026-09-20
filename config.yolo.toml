@@ -62,6 +62,29 @@ base_url = ""
 [providers.openai_responses.headers]
 x-opencode-session = "minibot"
 
+# Aliased providers: `kind` says which client to build, so the section name is free and several
+# endpoints of the same kind coexist. Agents point at the section name with `model_provider`, and the
+# main agent can retarget a single invoke_agent / spawn_task call at it ("run that on deepseek via
+# opencode_go, high effort"). `models` is the advisory list it is offered to choose from.
+# [providers.opencode_go]
+# kind = "openai_responses"
+# api_key = "${OPENCODE_API_KEY}"
+# base_url = "https://opencode.ai/zen/go/v1"
+# models = ["deepseek-v3.6", "mimo-v2.5", "gpt-5.6-luna"]
+# [providers.opencode_go.headers]
+# x-opencode-session = "minibot"
+
+# [providers.zai]
+# kind = "openai"
+# api_key = "${ZAI_API_KEY}"
+# base_url = "https://api.z.ai/api/coding/paas/v4"
+# models = ["glm-5.3", "glm-5.3-flash"]
+
+# Orchestrator on a ChatGPT Codex subscription (OAuth, no api_key) delegating to the aliases above:
+# set [llm] provider = "chatgpt_codex" and model to one the login flow returns.
+# [providers.chatgpt_codex]
+# auth_path = "~/.minibot/auth_codex.json"
+
 [providers.openrouter]
 api_key = ""
 base_url = ""

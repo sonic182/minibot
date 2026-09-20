@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from typing import Any
 
 from minibot.app.mcp_tool_name import extract_mcp_server, is_mcp_tool_name
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns, validate_allow_deny
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
+
+MODEL_OVERRIDE_KEYS = ("model_provider", "model", "reasoning_effort")
 
 RESERVED_DELEGATION_TOOL_NAMES = {
     "invoke_agent",
@@ -52,3 +56,34 @@ def filter_tools_for_agent(tools: Sequence[ToolBinding], spec: AgentSpec) -> lis
 
 def strip_reserved_delegation_tools(tools: Sequence[ToolBinding]) -> list[ToolBinding]:
     return [binding for binding in tools if binding.tool.name not in RESERVED_DELEGATION_TOOL_NAMES]
+
+
+def normalize_model_overrides(payload: Mapping[str, Any] | None) -> dict[str, str]:
+    """Keep only the known override keys carrying a non-empty string."""
+    if not payload:
+        return {}
+    overrides: dict[str, str] = {}
+    for key in MODEL_OVERRIDE_KEYS:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            overrides[key] = value.strip()
+    return overrides
+
+
+def apply_agent_overrides(spec: AgentSpec, overrides: Mapping[str, Any] | None) -> AgentSpec:
+    """Retarget one invocation of an agent at another provider, model or reasoning effort."""
+    normalized = normalize_model_overrides(overrides)
+    if not normalized:
+        return spec
+    retargeted = any(
+        normalized.get(key, getattr(spec, key)) != getattr(spec, key) for key in ("model_provider", "model")
+    )
+    if retargeted:
+        # ponytail: context_limit and max_new_tokens were derived at boot from the spec's own model
+        # by token auto-config, so they are meaningless for an ad-hoc target: drop both rather than
+        # send another model's output cap. Costs mid-run compaction and the tuned cap for this call;
+        # re-resolving would mean a models.dev fetch per delegation.
+        normalized_spec = replace(spec, context_limit=None, max_new_tokens=None)
+    else:
+        normalized_spec = spec
+    return replace(normalized_spec, **normalized)

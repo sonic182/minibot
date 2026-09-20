@@ -61,6 +61,43 @@ The ``base_url`` and ``headers`` fields are optional for all API-key providers. 
 compatible endpoint, proxy, or provider-specific requirement. Specialist agents can select a different
 provider with their ``model_provider`` frontmatter; see :doc:`agents`.
 
+.. _providers-aliases:
+
+Named providers
+---------------
+
+A section name above is also a client name, so ``[providers.openai_responses]`` can describe only one
+Responses endpoint. To run several endpoints of the same kind side by side, name the section whatever
+you like and add ``kind`` to say which client it builds:
+
+.. code-block:: toml
+
+   [providers.opencode_go]
+   kind = "openai_responses"
+   api_key = "${OPENCODE_API_KEY}"
+   base_url = "https://opencode.ai/zen/go/v1"
+   models = ["deepseek-v3.6", "mimo-v2.5"]
+
+   [providers.opencode_go.headers]
+   x-opencode-session = "minibot"
+
+   [providers.zai]
+   kind = "openai"
+   api_key = "${ZAI_API_KEY}"
+   base_url = "https://api.z.ai/api/coding/paas/v4"
+   models = ["glm-5.3", "glm-5.3-flash"]
+
+``kind`` accepts ``openai``, ``openai_responses``, ``openrouter``, ``claude``, ``google`` and
+``chatgpt_codex``; leaving it unset means the section name is itself the client name. The section name
+is what ``[llm].provider``, an agent's ``model_provider`` frontmatter and a runtime delegation override
+reference.
+
+``models`` is advisory: MiniBot never validates it against the endpoint, and it does not restrict what
+an agent may request. It is what the main agent is shown when it asks which providers and models are
+available (see :doc:`agents`), so list the ids you actually want it to pick from.
+
+``minibot configure`` manages the client-named sections only; write aliases by hand.
+
 OpenAI Chat Completions
 -----------------------
 

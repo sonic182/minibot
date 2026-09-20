@@ -24,6 +24,10 @@ from minibot.adapters.config.environment import expand_environment, expand_secre
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
 
+# Mirrors the keys of minibot.llm.services.provider_registry.LLM_PROVIDERS plus chatgpt_codex,
+# spelled out here so config validation stays free of llm_async imports.
+ProviderKind = Literal["openai", "openai_responses", "openrouter", "claude", "google", "chatgpt_codex"]
+
 
 def _coerce_byte_size(value: Any) -> int:
     if isinstance(value, bool):
@@ -337,6 +341,12 @@ class ProviderConfig(BaseModel):
     - ``auth_path`` — used only by ``[providers.chatgpt_codex]``: path to the ChatGPT Codex OAuth
       credentials file written by ``minibot codex login``. Defaults to
       ``~/.minibot/auth_codex.json`` when unset.
+    - ``kind`` — which provider client the section builds, when the section name is an alias rather
+      than a client name. Unset means the section name is itself the client name. Aliases let two
+      endpoints of the same client type coexist, e.g. ``[providers.opencode_go]`` with
+      ``kind = "openai_responses"`` alongside ``[providers.zai]`` with ``kind = "openai"``.
+    - ``models`` — advisory list of model ids this endpoint serves. Not validated against the
+      endpoint; it is what agents and runtime delegation overrides are offered to choose from.
 
     OpenAI-compatible third-party endpoints (set under ``[providers.openai]`` with
     ``[llm].provider = "openai"``, or ``[providers.openai_responses]`` with
@@ -359,6 +369,8 @@ class ProviderConfig(BaseModel):
     base_url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     auth_path: str | None = None
+    kind: ProviderKind | None = None
+    models: list[str] = Field(default_factory=list)
 
 
 class AgentDefinitionConfig(BaseModel):
