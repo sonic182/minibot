@@ -37,6 +37,71 @@ class _EmptyPendingTurnStore:
         return []
 
 
+def _make_container(extensions: object) -> type:
+    class _FakeContainer:
+        @classmethod
+        def configure(cls) -> None:
+            return None
+
+        @classmethod
+        async def initialize_storage(cls) -> None:
+            return None
+
+        @classmethod
+        def get_logger(cls) -> _Logger:
+            return _Logger()
+
+        @classmethod
+        def get_settings(cls) -> SimpleNamespace:
+            return SimpleNamespace(
+                llm=SimpleNamespace(strip_logs=False),
+                http=SimpleNamespace(enabled=False),
+            )
+
+        @classmethod
+        def get_event_bus(cls) -> object:
+            return object()
+
+        @classmethod
+        def get_extensions(cls) -> object:
+            return extensions
+
+        @classmethod
+        def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
+            return _EmptyPendingTurnStore()
+
+    return _FakeContainer
+
+
+def _make_dispatcher(*, on_start=None, on_stop=None) -> type:
+    class _FakeDispatcher:
+        main_agent_tool_names: list[str] = []
+
+        def __init__(self, _event_bus: object) -> None:
+            pass
+
+        async def start(self) -> None:
+            if on_start is not None:
+                await on_start()
+
+        async def stop(self) -> None:
+            if on_stop is not None:
+                await on_stop()
+
+    return _FakeDispatcher
+
+
+@asynccontextmanager
+async def _immediate_shutdown(services, _logger):
+    event = asyncio.Event()
+    event.set()
+    try:
+        yield event
+    finally:
+        for service in services:
+            await service.stop()
+
+
 @pytest.mark.parametrize(("environment", "disable_static_cache"), [("production", False), ("development", True)])
 def test_build_http_server_includes_extension_pages(
     monkeypatch: pytest.MonkeyPatch, environment: str, disable_static_cache: bool
@@ -104,67 +169,13 @@ async def test_run_starts_and_stops_dispatcher_and_extensions(monkeypatch: pytes
         async def stop(self) -> None:
             await extensions.stop()
 
-    class _FakeContainer:
-        @classmethod
-        def configure(cls) -> None:
-            return None
-
-        @classmethod
-        async def initialize_storage(cls) -> None:
-            return None
-
-        @classmethod
-        def get_logger(cls) -> _Logger:
-            return _Logger()
-
-        @classmethod
-        def get_settings(cls):
-            return type(
-                "Settings",
-                (),
-                {
-                    "llm": type("LLM", (), {"strip_logs": False})(),
-                    "http": type("HTTP", (), {"enabled": False})(),
-                },
-            )()
-
-        @classmethod
-        def get_event_bus(cls):
-            return object()
-
-        @classmethod
-        def get_extensions(cls) -> _FakeExtensions:
-            return _FakeExtensions()
-
-        @classmethod
-        def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
-            return _EmptyPendingTurnStore()
-
-    class _FakeDispatcher:
-        main_agent_tool_names: list[str] = []
-
-        def __init__(self, _event_bus: object) -> None:
-            pass
-
-        async def start(self) -> None:
-            await dispatcher.start()
-
-        async def stop(self) -> None:
-            await dispatcher.stop()
-
-    @asynccontextmanager
-    async def _shutdown(services, _logger):
-        event = asyncio.Event()
-        event.set()
-        try:
-            yield event
-        finally:
-            for service in services:
-                await service.stop()
-
-    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
-    monkeypatch.setattr(daemon_module, "Dispatcher", _FakeDispatcher)
-    monkeypatch.setattr(daemon_module, "_graceful_shutdown", _shutdown)
+    monkeypatch.setattr(daemon_module, "AppContainer", _make_container(_FakeExtensions()))
+    monkeypatch.setattr(
+        daemon_module,
+        "Dispatcher",
+        _make_dispatcher(on_start=dispatcher.start, on_stop=dispatcher.stop),
+    )
+    monkeypatch.setattr(daemon_module, "_graceful_shutdown", _immediate_shutdown)
 
     await daemon_module.run()
 
@@ -184,68 +195,10 @@ async def test_run_starts_and_stops_web_upload_manager(monkeypatch: pytest.Monke
         def is_empty(self) -> bool:
             return True
 
-    class _FakeContainer:
-        @classmethod
-        def configure(cls) -> None:
-            return None
-
-        @classmethod
-        async def initialize_storage(cls) -> None:
-            return None
-
-        @classmethod
-        def get_logger(cls) -> _Logger:
-            return _Logger()
-
-        @classmethod
-        def get_settings(cls):
-            return type(
-                "Settings",
-                (),
-                {
-                    "llm": type("LLM", (), {"strip_logs": False})(),
-                    "http": type("HTTP", (), {"enabled": False})(),
-                },
-            )()
-
-        @classmethod
-        def get_event_bus(cls):
-            return object()
-
-        @classmethod
-        def get_extensions(cls) -> _FakeExtensions:
-            return _FakeExtensions()
-
-        @classmethod
-        def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
-            return _EmptyPendingTurnStore()
-
-    class _FakeDispatcher:
-        main_agent_tool_names: list[str] = []
-
-        def __init__(self, _event_bus: object) -> None:
-            pass
-
-        async def start(self) -> None:
-            return None
-
-        async def stop(self) -> None:
-            return None
-
-    @asynccontextmanager
-    async def _shutdown(services, _logger):
-        event = asyncio.Event()
-        event.set()
-        try:
-            yield event
-        finally:
-            for service in services:
-                await service.stop()
-
-    monkeypatch.setattr(daemon_module, "AppContainer", _FakeContainer)
-    monkeypatch.setattr(daemon_module, "Dispatcher", _FakeDispatcher)
+    monkeypatch.setattr(daemon_module, "AppContainer", _make_container(_FakeExtensions()))
+    monkeypatch.setattr(daemon_module, "Dispatcher", _make_dispatcher())
     monkeypatch.setattr(daemon_module, "_build_http_server", lambda *args, **kwargs: (None, upload_manager))
-    monkeypatch.setattr(daemon_module, "_graceful_shutdown", _shutdown)
+    monkeypatch.setattr(daemon_module, "_graceful_shutdown", _immediate_shutdown)
 
     await daemon_module.run()
 
