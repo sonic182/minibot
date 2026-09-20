@@ -7,9 +7,26 @@
   <h1>Chat</h1>
   <div class="chat-messages" x-ref="messages" aria-live="polite">
     <template x-for="(message, index) in messages" :key="index">
-      <article class="message" :class="message.role">
-        <div class="message-head"><span class="role" x-text="message.role"></span></div>
-        <div class="message-content" x-html="message.html"></div>
+      <article class="message" :class="message.kind === 'tools' ? 'tool-activity' : message.role">
+        <template x-if="message.kind === 'tools'">
+          <div>
+            <div class="message-head"><span class="role">Tools</span></div>
+            <ul class="tool-list">
+              <template x-for="tool in message.tools" :key="tool.callId">
+                <li class="tool-row">
+                  <code class="tool-name" x-text="tool.name"></code>
+                  <span class="tool-status" x-text="toolStatus(tool.phase)"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </template>
+        <template x-if="message.kind !== 'tools'">
+          <div>
+            <div class="message-head"><span class="role" x-text="message.role"></span></div>
+            <div class="message-content" x-html="message.html"></div>
+          </div>
+        </template>
       </article>
     </template>
     <p class="muted" x-show="busy">Thinking…</p>

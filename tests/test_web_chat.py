@@ -16,7 +16,7 @@ from minibot.adapters.http.chat import _render_message, _socket_is_authorized
 from minibot.adapters.messaging.web import WebChannelService
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.events import MessageEvent, OutboundEvent, ToolCallEvent
 from tests.fixtures.memory import InMemoryMemoryStore
 
 TOKEN = "s3cret"
@@ -72,6 +72,40 @@ async def test_outbound_event_reaches_web_subscribers_only() -> None:
         assert await asyncio.wait_for(subscription.events.get(), timeout=1) == {
             "role": "assistant",
             "text": "hello from web",
+        }
+        subscription.events.task_done()
+    finally:
+        service.unsubscribe(subscription)
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_tool_call_event_reaches_web_subscribers_without_detail() -> None:
+    event_bus = EventBus()
+    service = WebChannelService(event_bus)
+    subscription = service.subscribe()
+    await service.start()
+    try:
+        initial_state = await asyncio.wait_for(subscription.state.get(), timeout=1)
+        assert initial_state == {"busy": False}
+        subscription.state.task_done()
+        await event_bus.publish(
+            ToolCallEvent(
+                phase="started",
+                call_id="call-1",
+                tool_name="read_file",
+                turn_id="turn-1",
+                channel="web",
+                detail="/private/path",
+                error="private error",
+            )
+        )
+        assert await asyncio.wait_for(subscription.events.get(), timeout=1) == {
+            "kind": "tool",
+            "turn_id": "turn-1",
+            "call_id": "call-1",
+            "tool_name": "read_file",
+            "phase": "started",
         }
         subscription.events.task_done()
     finally:

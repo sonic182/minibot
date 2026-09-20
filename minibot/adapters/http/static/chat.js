@@ -36,12 +36,31 @@ window.webChat = () => ({
   },
 
   handle(event) {
+    if (event.kind === "tool") {
+      const turn = this.toolTurn(event.turn_id);
+      const tool = turn.tools.find((entry) => entry.callId === event.call_id);
+      if (tool) tool.phase = event.phase;
+      else turn.tools.push({ callId: event.call_id, name: event.tool_name, phase: event.phase });
+    }
     if (event.html !== undefined) this.messages.push(event);
     if (event.busy !== undefined) this.busy = event.busy;
     if (event.error) this.error = event.error;
     this.$nextTick(() => {
       this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
     });
+  },
+
+  toolTurn(turnId) {
+    let turn = this.messages.find((message) => message.kind === "tools" && message.turnId === turnId);
+    if (!turn) {
+      turn = { kind: "tools", turnId, tools: [] };
+      this.messages.push(turn);
+    }
+    return turn;
+  },
+
+  toolStatus(phase) {
+    return { started: "Running", completed: "Completed", failed: "Failed" }[phase] ?? "Running";
   },
 
   send() {

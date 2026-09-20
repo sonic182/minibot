@@ -4,13 +4,14 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass
-from typing import NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from minibot.app.event_bus import EventBus, EventSubscription
 from minibot.core.channels import ChannelMessage
 from minibot.core.events import (
     MessageEvent,
     OutboundEvent,
+    ToolCallEvent,
     TurnCompletedEvent,
     TurnFailedEvent,
     TurnStartedEvent,
@@ -29,12 +30,21 @@ class ChatStateEvent(TypedDict):
     error: NotRequired[str]
 
 
-type ChatEvent = ChatMessageEvent | ChatStateEvent
+class ChatToolEvent(TypedDict):
+    kind: Literal["tool"]
+    turn_id: str
+    call_id: str
+    tool_name: str
+    phase: Literal["started", "completed", "failed"]
+
+
+type ChatStreamEvent = ChatMessageEvent | ChatToolEvent
+type ChatEvent = ChatStreamEvent | ChatStateEvent
 
 
 @dataclass(eq=False)
 class WebChatSubscription:
-    events: asyncio.Queue[ChatMessageEvent]
+    events: asyncio.Queue[ChatStreamEvent]
     state: asyncio.Queue[ChatStateEvent]
 
 
@@ -68,21 +78,28 @@ class WebChannelService:
         self._subscription: EventSubscription = event_bus.subscribe(
             types=(OutboundEvent, TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent)
         )
+        self._tool_call_subscription: EventSubscription = event_bus.subscribe(types=(ToolCallEvent,), lossy=True)
         self._outgoing_task: asyncio.Task[None] | None = None
+        self._tool_call_task: asyncio.Task[None] | None = None
         self._busy = False
         self._subscribers: set[WebChatSubscription] = set()
 
     async def start(self) -> None:
         if self._outgoing_task is None or self._outgoing_task.done():
             self._outgoing_task = asyncio.create_task(self._consume_outgoing())
+        if self._tool_call_task is None or self._tool_call_task.done():
+            self._tool_call_task = asyncio.create_task(self._consume_tool_calls())
 
     async def stop(self) -> None:
         await self._subscription.close()
-        if self._outgoing_task is not None:
-            self._outgoing_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._outgoing_task
+        await self._tool_call_subscription.close()
+        for task in (self._outgoing_task, self._tool_call_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         self._outgoing_task = None
+        self._tool_call_task = None
         self._subscribers.clear()
 
     async def publish_user_message(self, text: str) -> None:
@@ -124,6 +141,23 @@ class WebChannelService:
                     self._set_busy(False, error=event.error)
             except Exception:
                 self._logger.exception("web outbound event failed", extra={"event_type": event.event_type})
+
+    async def _consume_tool_calls(self) -> None:
+        async for event in self._tool_call_subscription:
+            try:
+                if not isinstance(event, ToolCallEvent) or event.channel != "web" or event.turn_id is None:
+                    continue
+                self._broadcast(
+                    {
+                        "kind": "tool",
+                        "turn_id": event.turn_id,
+                        "call_id": event.call_id,
+                        "tool_name": event.tool_name,
+                        "phase": event.phase,
+                    }
+                )
+            except Exception:
+                self._logger.exception("web tool call event failed", extra={"event_type": event.event_type})
 
     def _broadcast(self, event: ChatEvent) -> None:
         if "busy" in event:

@@ -108,6 +108,7 @@ class ToolCallEvent(BaseEvent):
 
     event_type: str = "tool_call"
     phase: Literal["started", "completed", "failed"]
+    call_id: str = Field(default_factory=lambda: uuid4().hex)
     tool_name: str
     turn_id: str | None = None
     owner_id: str | None = None

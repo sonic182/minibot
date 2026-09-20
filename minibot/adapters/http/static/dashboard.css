@@ -288,6 +288,41 @@ ul {
   margin-bottom: 0;
 }
 
+.tool-activity {
+  display: grid;
+  gap: var(--gap-sm);
+}
+
+.tool-list {
+  display: grid;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.tool-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tool-status {
+  margin-left: auto;
+  font-size: 0.85rem;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
 .chat-composer {
   position: relative;
   min-width: 0;
