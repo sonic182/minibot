@@ -85,8 +85,8 @@ Configuration wizard
    minibot configure
    minibot configure --config path/to/config.toml
 
-Walks through Telegram, provider, model, tool selection, and — when tasks are enabled — the task
-queue backend. New files start from the ``Example`` profile; ``YOLO`` enables broad host execution
+Walks through Telegram, provider, model, tool selection, the HTTP server (dashboard and browser
+chat), and — when tasks are enabled — the task queue backend. New files start from the ``Example`` profile; ``YOLO`` enables broad host execution
 and integrations — file storage, HTTP/KV tools, MCP bridge, unrestricted Python and Bash, and
 patch-based file editing, all on with nothing gated behind a confirmation step.
 
