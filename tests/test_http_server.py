@@ -123,6 +123,7 @@ async def dashboard_server():
         ],
         tool_names=["send_message", "web_search"],
         routes=[("/ping", _pong, ("GET",))],
+        websockets=[("/chat/ws", _pong)],
         started_at=datetime.now(UTC),
         llm_provider="openai",
         llm_model="gpt-4o-mini",
@@ -174,6 +175,7 @@ async def test_dashboard_shows_status_and_routes(dashboard_server: HttpServer) -
         assert "0 pending turns" in body
         assert "Telegram" in body
         assert "/ping" in body
+        assert "/chat/ws" in body
         assert "/health" in body
 
 

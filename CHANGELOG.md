@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Live tool activity in the web chat.** The authenticated `/chat` UI lists each tool invocation of the
+  running turn and updates it from `started` to `completed`/`failed`, driven by `ToolCallEvent`. The tool
+  name is forwarded; the redacted `detail` and `error` stay server-side. `ToolCallEvent` gains a `call_id`
+  that pairs a call's lifecycle phases.
 - `minibot configure` asks whether to enable `[tools.skills] install` when skills are selected.
 
 ## [0.18.0] - 2026-09-18
