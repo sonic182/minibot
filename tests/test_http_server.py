@@ -90,6 +90,7 @@ async def test_build_http_server_populates_dashboard_data(monkeypatch: pytest.Mo
         ),
         runtime=SimpleNamespace(environment="development"),
         channels=SimpleNamespace(telegram=SimpleNamespace(enabled=True)),
+        tools=SimpleNamespace(file_storage=SimpleNamespace(enabled=False)),
     )
     dispatcher = SimpleNamespace(main_agent_tool_names=["web_search"])
 

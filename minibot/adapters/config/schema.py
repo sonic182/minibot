@@ -949,6 +949,8 @@ class HTTPServerConfig(BaseModel):
     - ``auth_token`` — bearer token required on every route except ``/health``. Accepts ``${secret:NAME}``.
     - ``basic_auth_user`` / ``basic_auth_password`` — HTTP Basic credentials, used instead of the bearer
       token when set (browsers prompt for these natively). Accepts ``${secret:NAME}``.
+    - ``chat_upload_*`` — browser-chat media limits and temporary upload retention. Uploads require
+      ``[tools.file_storage] enabled``; audio also requires automatic transcription.
 
     Routes come from core features and from extensions calling ``mb.add_route``. There is no TLS
     here: put a reverse proxy in front when this is reachable from outside the host.
@@ -964,6 +966,11 @@ class HTTPServerConfig(BaseModel):
     auth_token: str = ""
     basic_auth_user: str = ""
     basic_auth_password: str = ""
+    chat_upload_max_attachments: PositiveInt = 3
+    chat_upload_max_image_bytes: ByteSizeValue = 5_000_000
+    chat_upload_max_audio_bytes: ByteSizeValue = 10_000_000
+    chat_upload_max_total_bytes: ByteSizeValue = 12_000_000
+    chat_upload_retention_hours: Annotated[int, Field(ge=0)] = 24
 
     @model_validator(mode="after")
     def _require_auth_off_loopback(self) -> HTTPServerConfig:

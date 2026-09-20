@@ -43,13 +43,17 @@ async def run() -> None:
     extensions = AppContainer.get_extensions()
 
     web_channel = WebChannelService(event_bus) if settings.http.enabled else None
-    http_server = _build_http_server(settings, dispatcher, extensions, started_at, logger, web_channel)
+    http_server, web_upload_manager = _build_http_server(
+        settings, dispatcher, extensions, started_at, logger, web_channel
+    )
 
     services: list[Any] = [dispatcher]
     if not extensions.is_empty():
         services.append(extensions)
     if web_channel is not None:
         services.append(web_channel)
+    if web_upload_manager is not None:
+        services.append(web_upload_manager)
     if http_server is not None:
         services.append(http_server)
 
@@ -61,6 +65,8 @@ async def run() -> None:
             await extensions.start()
         if web_channel is not None:
             await web_channel.start()
+        if web_upload_manager is not None:
+            await web_upload_manager.start()
         if http_server is not None:
             await http_server.start()
         await _replay_pending_turns(event_bus, logger)
@@ -75,7 +81,7 @@ def _build_http_server(
     started_at: datetime,
     logger: logging.Logger,
     web_channel: WebChannelService | None = None,
-) -> Any:
+) -> tuple[Any, Any]:
     """Build the HTTP server, or warn about the routes nobody will serve when it is off."""
     routes = extensions.routes
     if not settings.http.enabled:
@@ -84,8 +90,9 @@ def _build_http_server(
                 "extensions registered http routes but [http] enabled is false",
                 extra={"component": "http", "routes": [path for path, _, _ in routes]},
             )
-        return None
+        return None, None
     # Imported here so the starlette/uvicorn extra is only required when the server is switched on.
+    from minibot.adapters.files.local_storage import LocalFileStorage
     from minibot.adapters.http import (
         DashboardData,
         HttpServer,
@@ -95,7 +102,9 @@ def _build_http_server(
         build_history_route,
         set_nav_entries,
     )
+    from minibot.adapters.http.uploads import WebUploadManager
     from minibot.app.token_limits_autoconfig import effective_base_url
+    from minibot.llm.services import LLMExecutionProfile
     from minibot.llm.services.provider_target import resolve_target_provider
 
     pending_turn_store = AppContainer.get_pending_turn_store()
@@ -111,9 +120,25 @@ def _build_http_server(
     real_provider = resolve_target_provider(provider_name=settings.llm.provider, base_url=base_url)
 
     memory = AppContainer.get_memory_backend()
+    upload_manager = None
+    if settings.tools.file_storage.enabled:
+        storage = LocalFileStorage(
+            root_dir=settings.tools.file_storage.root_dir,
+            max_write_bytes=settings.tools.file_storage.max_write_bytes,
+            allow_outside_root=settings.tools.file_storage.allow_outside_root,
+        )
+        upload_manager = WebUploadManager(
+            storage=storage,
+            http_config=settings.http,
+            file_storage_config=settings.tools.file_storage,
+            audio_config=settings.tools.audio_transcription,
+            supports_media_inputs=LLMExecutionProfile.from_client(AppContainer.get_llm_client()).supports_media_inputs,
+            logger=logger,
+        )
     history_route = build_history_route(memory)
     socket_token = secrets.token_urlsafe(32) if web_channel is not None else None
-    chat_route = build_chat_route(socket_token) if socket_token is not None else None
+    chat_capabilities = upload_manager.capabilities if upload_manager else None
+    chat_route = build_chat_route(socket_token, chat_capabilities) if socket_token else None
     extra_routes = [history_route, *([chat_route] if chat_route is not None else []), *routes]
     nav_entries = [("/", "Home"), ("/history", "History")]
     if chat_route is not None:
@@ -123,7 +148,7 @@ def _build_http_server(
 
     websockets = []
     if web_channel is not None and socket_token is not None:
-        websockets.append(build_chat_socket(web_channel, memory, socket_token))
+        websockets.append(build_chat_socket(web_channel, memory, socket_token, upload_manager))
     dashboard_route = build_dashboard_route(
         DashboardData(
             extensions=extensions.summaries(),
@@ -137,11 +162,14 @@ def _build_http_server(
             pending_turns=_count_pending_turns,
         )
     )
-    return HttpServer(
-        settings.http,
-        [dashboard_route, *extra_routes],
-        websockets,
-        environment=settings.runtime.environment,
+    return (
+        HttpServer(
+            settings.http,
+            [dashboard_route, *extra_routes],
+            websockets,
+            environment=settings.runtime.environment,
+        ),
+        upload_manager,
     )
 
 
