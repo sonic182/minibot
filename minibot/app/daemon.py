@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import logging
+import secrets
 import signal
 import sys
 from contextlib import asynccontextmanager
@@ -9,6 +10,7 @@ from typing import Any
 
 from minibot import __version__
 from minibot.adapters.container import AppContainer
+from minibot.adapters.messaging.web import WebChannelService
 from minibot.app.console import main as console_main
 from minibot.app.dispatcher import Dispatcher
 from minibot.app.event_bus import EventBus
@@ -40,11 +42,14 @@ async def run() -> None:
     logger.info("booting minibot", extra={"component": "daemon"})
     extensions = AppContainer.get_extensions()
 
-    http_server = _build_http_server(settings, dispatcher, extensions, started_at, logger)
+    web_channel = WebChannelService(event_bus) if settings.http.enabled else None
+    http_server = _build_http_server(settings, dispatcher, extensions, started_at, logger, web_channel)
 
     services: list[Any] = [dispatcher]
     if not extensions.is_empty():
         services.append(extensions)
+    if web_channel is not None:
+        services.append(web_channel)
     if http_server is not None:
         services.append(http_server)
 
@@ -54,6 +59,8 @@ async def run() -> None:
         if not extensions.is_empty():
             logger.info("starting extensions", extra={"component": "extensions", "extensions": extensions.names()})
             await extensions.start()
+        if web_channel is not None:
+            await web_channel.start()
         if http_server is not None:
             await http_server.start()
         await _replay_pending_turns(event_bus, logger)
@@ -62,7 +69,12 @@ async def run() -> None:
 
 
 def _build_http_server(
-    settings: Any, dispatcher: Dispatcher, extensions: Any, started_at: datetime, logger: logging.Logger
+    settings: Any,
+    dispatcher: Dispatcher,
+    extensions: Any,
+    started_at: datetime,
+    logger: logging.Logger,
+    web_channel: WebChannelService | None = None,
 ) -> Any:
     """Build the HTTP server, or warn about the routes nobody will serve when it is off."""
     routes = extensions.routes
@@ -77,6 +89,8 @@ def _build_http_server(
     from minibot.adapters.http import (
         DashboardData,
         HttpServer,
+        build_chat_route,
+        build_chat_socket,
         build_dashboard_route,
         build_history_route,
         set_nav_entries,
@@ -96,15 +110,26 @@ def _build_http_server(
     base_url = effective_base_url(settings, provider_name=settings.llm.provider)
     real_provider = resolve_target_provider(provider_name=settings.llm.provider, base_url=base_url)
 
-    history_route = build_history_route(AppContainer.get_memory_backend())
-    extra_routes = [history_route, *routes]
-    set_nav_entries([("/", "Home"), ("/history", "History"), *extensions.pages()])
+    memory = AppContainer.get_memory_backend()
+    history_route = build_history_route(memory)
+    socket_token = secrets.token_urlsafe(32) if web_channel is not None else None
+    chat_route = build_chat_route(socket_token) if socket_token is not None else None
+    extra_routes = [history_route, *([chat_route] if chat_route is not None else []), *routes]
+    nav_entries = [("/", "Home"), ("/history", "History")]
+    if chat_route is not None:
+        nav_entries.append(("/chat", "Chat"))
+    nav_entries.extend(extensions.pages())
+    set_nav_entries(nav_entries)
 
+    websockets = []
+    if web_channel is not None and socket_token is not None:
+        websockets.append(build_chat_socket(web_channel, memory, socket_token))
     dashboard_route = build_dashboard_route(
         DashboardData(
             extensions=extensions.summaries(),
             tool_names=dispatcher.main_agent_tool_names,
             routes=extra_routes,
+            websockets=websockets,
             started_at=started_at,
             llm_provider=real_provider,
             llm_model=settings.llm.model,
@@ -112,7 +137,7 @@ def _build_http_server(
             pending_turns=_count_pending_turns,
         )
     )
-    return HttpServer(settings.http, [dashboard_route, *extra_routes])
+    return HttpServer(settings.http, [dashboard_route, *extra_routes], websockets)
 
 
 async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Chat · minibot{% endblock %}
+
+{% block content %}
+<section class="chat" x-data="webChat()" data-socket-token="{{ socket_token }}">
+  <h1>Chat</h1>
+  <div class="chat-messages" x-ref="messages" aria-live="polite">
+    <template x-for="(message, index) in messages" :key="index">
+      <article class="message" :class="message.role">
+        <div class="message-head"><span class="role" x-text="message.role"></span></div>
+        <div class="message-content" x-html="message.html"></div>
+      </article>
+    </template>
+    <p class="muted" x-show="busy">Thinking…</p>
+    <p class="muted" x-show="error" x-text="error"></p>
+  </div>
+  <form class="chat-composer" @submit.prevent="send()">
+    <label class="sr-only" for="chat-message">Message</label>
+    <textarea id="chat-message" x-model="draft" :disabled="!connected" rows="1" placeholder="Write a message…"></textarea>
+    <button class="chat-send" type="submit" :disabled="!connected || !draft" aria-label="Send message">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" /></svg>
+    </button>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/chat.js"></script>
+{% endblock %}
