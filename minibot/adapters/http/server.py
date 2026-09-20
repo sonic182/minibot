@@ -15,6 +15,7 @@ from typing import Any
 
 import uvicorn
 from starlette.applications import Starlette
+from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route, WebSocketRoute
@@ -23,14 +24,13 @@ from starlette.templating import Jinja2Templates
 from starlette.types import Scope
 from starlette.websockets import WebSocket
 
-from minibot.adapters.config.schema import HTTPServerConfig
+from minibot.adapters.config.schema import STATIC_CACHE_DISABLED_ENVIRONMENTS, HTTPServerConfig
 
 type RouteSpec = tuple[str, Callable[[Request], Awaitable[Any]], tuple[str, ...]]
 type WebSocketSpec = tuple[str, Callable[[WebSocket], Awaitable[None]]]
 
 HEALTH_PATH = "/health"
 STATIC_PATH = "/static"
-_NO_CACHE_ENVIRONMENTS = frozenset({"debug", "development"})
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -85,6 +85,7 @@ class DashboardData:
     extensions: Sequence[Mapping[str, Any]]
     tool_names: Sequence[str]
     routes: Sequence[RouteSpec]
+    websockets: Sequence[WebSocketSpec]
     started_at: datetime
     llm_provider: str
     llm_model: str
@@ -121,7 +122,7 @@ def _describe_extensions(summaries: Sequence[Mapping[str, Any]]) -> list[dict[st
     return described
 
 
-def _describe_routes(routes: Sequence[RouteSpec]) -> list[dict[str, str]]:
+def _describe_routes(routes: Sequence[RouteSpec], websockets: Sequence[WebSocketSpec]) -> list[dict[str, str]]:
     described = [
         {"method": "GET", "path": "/", "note": ""},
         {"method": "GET", "path": HEALTH_PATH, "note": "public"},
@@ -130,6 +131,7 @@ def _describe_routes(routes: Sequence[RouteSpec]) -> list[dict[str, str]]:
     described.extend(
         {"method": method, "path": path, "note": ""} for path, _handler, methods in routes for method in methods
     )
+    described.extend({"method": "WS", "path": path, "note": ""} for path, _handler in websockets)
     return sorted(described, key=lambda route: route["path"])
 
 
@@ -147,7 +149,7 @@ def build_dashboard_route(data: DashboardData) -> RouteSpec:
             "pending_turns": await data.pending_turns(),
             "extensions": _describe_extensions(data.extensions),
             "tool_names": list(data.tool_names),
-            "routes": _describe_routes(data.routes),
+            "routes": _describe_routes(data.routes, data.websockets),
         }
         return _templates.TemplateResponse(request, "dashboard.html", context)
 
@@ -237,6 +239,24 @@ class _BasicAuth:
         return header.startswith(prefix) and hmac.compare_digest(header[len(prefix) :], self._expected)
 
 
+class _SecurityHeaders:
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        async def send_with_headers(message: Any) -> None:
+            if scope["type"] == "http" and message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["Content-Security-Policy"] = (
+                    "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; media-src 'self'; "
+                    "style-src 'self'; script-src 'self' 'unsafe-eval'; object-src 'none'; base-uri 'self'; "
+                    "frame-ancestors 'none'"
+                )
+            await send(message)
+
+        await self._app(scope, receive, send_with_headers)
+
+
 class HttpServer:
     """Serves ``routes`` next to the daemon, on the daemon's own event loop."""
 
@@ -251,7 +271,7 @@ class HttpServer:
         self._config = config
         self._routes = list(routes)
         self._websockets = list(websockets)
-        self._disable_static_cache = environment.casefold() in _NO_CACHE_ENVIRONMENTS
+        self._disable_static_cache = environment.casefold() in STATIC_CACHE_DISABLED_ENVIRONMENTS
         self._logger = logging.getLogger("minibot.http")
         self._server: uvicorn.Server | None = None
         self._task: asyncio.Task[None] | None = None
@@ -278,7 +298,7 @@ class HttpServer:
             *(Route(path, handler, methods=list(methods)) for path, handler, methods in self._routes),
             *(WebSocketRoute(path, handler) for path, handler in self._websockets),
         ]
-        app: Any = Starlette(routes=routes)
+        app: Any = _SecurityHeaders(Starlette(routes=routes))
         if self._config.basic_auth_user and self._config.basic_auth_password:
             app = _BasicAuth(app, self._config.basic_auth_user, self._config.basic_auth_password)
         elif self._config.auth_token:

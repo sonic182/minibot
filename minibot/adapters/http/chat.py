@@ -15,15 +15,17 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from minibot.adapters.http.server import RouteSpec, WebSocketSpec, render
 from minibot.adapters.http.uploads import ChatCapabilities, UploadError, WebUploadManager, WebUploadSession
 from minibot.adapters.messaging.web import WebChannelService
+from minibot.adapters.messaging.web.service import WebChatSubscription
 from minibot.core.memory import MemoryBackend
 from minibot.shared.utils import session_identifier
 
-_HISTORY_LIMIT = 50
+_HISTORY_LIMIT = 200
+_MAX_MESSAGE_CHARS = 8_000
 _MARKDOWN = MarkdownIt("commonmark", {"html": False})
 
 
 class _IncomingChatMessage(BaseModel):
-    text: str = ""
+    text: str = Field(default="", max_length=_MAX_MESSAGE_CHARS)
     upload_ids: list[str] = Field(default_factory=list)
 
 
@@ -71,39 +73,48 @@ def build_chat_socket(
         if not _socket_is_authorized(websocket, socket_token):
             await websocket.close(code=1008)
             return
-        await websocket.accept()
-        queue = service.subscribe()
+        await websocket.accept(subprotocol=socket_token)
+        subscription = service.subscribe()
         session = upload_manager.new_session() if upload_manager is not None else None
         send_lock = asyncio.Lock()
         try:
             for entry in await memory.get_history(session_identifier("web", 1), limit=_HISTORY_LIMIT):
                 await _send_json(websocket, _render_message(entry.role, entry.content), send_lock)
             receive_task = asyncio.create_task(_receive_messages(websocket, service, session, send_lock))
-            send_task = asyncio.create_task(_send_events(websocket, queue, send_lock))
+            send_task = asyncio.create_task(_send_events(websocket, subscription, send_lock))
             done, pending = await asyncio.wait((receive_task, send_task), return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
                 task.cancel()
             for task in done:
                 with contextlib.suppress(WebSocketDisconnect):
                     task.result()
-            await asyncio.gather(*pending, return_exceptions=True)
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         finally:
             if session is not None:
                 await session.close()
-            service.unsubscribe(queue)
+            service.unsubscribe(subscription)
 
     return ("/chat/ws", _chat_socket)
 
 
 def _socket_is_authorized(websocket: WebSocket, socket_token: str) -> bool:
-    supplied_token = websocket.query_params.get("token", "")
-    if not hmac.compare_digest(supplied_token, socket_token):
+    subprotocols = websocket.scope.get("subprotocols", [])
+    if not any(hmac.compare_digest(str(protocol), socket_token) for protocol in subprotocols):
         return False
     origin = websocket.headers.get("origin")
     if origin is None:
         return True
-    scheme = "https" if websocket.url.scheme == "wss" else "http"
-    return hmac.compare_digest(origin, f"{scheme}://{websocket.headers.get('host', '')}")
+    expected_origin = _expected_origin(websocket)
+    return hmac.compare_digest(origin, expected_origin)
+
+
+def _expected_origin(websocket: WebSocket) -> str:
+    forwarded_proto = websocket.headers.get("x-forwarded-proto", "").split(",", maxsplit=1)[0].strip()
+    forwarded_host = websocket.headers.get("x-forwarded-host", "").split(",", maxsplit=1)[0].strip()
+    scheme = forwarded_proto or ("https" if websocket.url.scheme == "wss" else "http")
+    host = forwarded_host or websocket.headers.get("host", "")
+    return f"{scheme}://{host}"
 
 
 async def _receive_messages(
@@ -150,10 +161,15 @@ async def _receive_chat_message(
 ) -> None:
     try:
         message = _IncomingChatMessage.model_validate(payload)
-        if not message.text.strip() and not message.upload_ids:
-            raise ValueError("message requires text or attachments")
+    except ValidationError:
+        await _send_error(websocket, "invalid chat message", send_lock)
+        return
+    if not message.text.strip() and not message.upload_ids:
+        await _send_error(websocket, "chat message must not be blank", send_lock)
+        return
+    try:
         attachments, incoming_files, display = await _message_parts(session, message.upload_ids)
-    except (ValidationError, UploadError, ValueError) as exc:
+    except (UploadError, ValueError) as exc:
         await _send_error(websocket, str(exc), send_lock)
         return
     await service.publish_user_message(
@@ -225,17 +241,25 @@ async def _receive_upload_cancel(
     await session.cancel(cancel.upload_id)
 
 
-async def _send_events(websocket: WebSocket, queue: asyncio.Queue[dict[str, Any]], send_lock: asyncio.Lock) -> None:
+async def _send_events(websocket: WebSocket, subscription: WebChatSubscription, send_lock: asyncio.Lock) -> None:
     while True:
-        event = await queue.get()
-        try:
+        state_task = asyncio.create_task(subscription.state.get())
+        event_task = asyncio.create_task(subscription.events.get())
+        done, pending = await asyncio.wait((state_task, event_task), return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        for task, queue in ((state_task, subscription.state), (event_task, subscription.events)):
+            if task not in done:
+                continue
+            event = task.result()
+            queue.task_done()
             if "text" in event:
                 payload = _render_message(str(event["role"]), str(event["text"]), event.get("attachments"))
             else:
                 payload = event
             await _send_json(websocket, payload, send_lock)
-        finally:
-            queue.task_done()
 
 
 async def _send_error(websocket: WebSocket, error: str, send_lock: asyncio.Lock) -> None:

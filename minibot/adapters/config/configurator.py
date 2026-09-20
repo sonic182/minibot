@@ -23,7 +23,13 @@ from pydantic import ValidationError
 
 from minibot.adapters.config.environment import expand_environment
 from minibot.adapters.config.loader import resolve_config_path
-from minibot.adapters.config.schema import LLMMConfig, ProviderConfig, Settings, TelegramChannelConfig
+from minibot.adapters.config.schema import (
+    ENVIRONMENT_CHOICES,
+    LLMMConfig,
+    ProviderConfig,
+    Settings,
+    TelegramChannelConfig,
+)
 from minibot.llm.services.client_bootstrap import create_provider
 
 _logger = logging.getLogger(__name__)
@@ -40,7 +46,7 @@ _LLM_TARGETS = {
     "chatgpt_codex": ("ChatGPT Codex subscription (OAuth)", "chatgpt_codex", ""),
 }
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-_ENVIRONMENTS = ("development", "production")
+_ENVIRONMENTS = ENVIRONMENT_CHOICES
 _TOOLS = {
     "memory": ("tools", "kv_memory"),
     "http": ("tools", "http_client"),
