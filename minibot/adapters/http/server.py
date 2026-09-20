@@ -24,14 +24,13 @@ from starlette.templating import Jinja2Templates
 from starlette.types import Scope
 from starlette.websockets import WebSocket
 
-from minibot.adapters.config.schema import HTTPServerConfig
+from minibot.adapters.config.schema import STATIC_CACHE_DISABLED_ENVIRONMENTS, HTTPServerConfig
 
 type RouteSpec = tuple[str, Callable[[Request], Awaitable[Any]], tuple[str, ...]]
 type WebSocketSpec = tuple[str, Callable[[WebSocket], Awaitable[None]]]
 
 HEALTH_PATH = "/health"
 STATIC_PATH = "/static"
-_NO_CACHE_ENVIRONMENTS = frozenset({"debug", "development"})
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -272,7 +271,7 @@ class HttpServer:
         self._config = config
         self._routes = list(routes)
         self._websockets = list(websockets)
-        self._disable_static_cache = environment.casefold() in _NO_CACHE_ENVIRONMENTS
+        self._disable_static_cache = environment.casefold() in STATIC_CACHE_DISABLED_ENVIRONMENTS
         self._logger = logging.getLogger("minibot.http")
         self._server: uvicorn.Server | None = None
         self._task: asyncio.Task[None] | None = None

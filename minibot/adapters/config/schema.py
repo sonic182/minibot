@@ -102,11 +102,20 @@ ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
 TaskLimitValue = PositiveInt | Literal["unlimited"]
 
 
+ENVIRONMENT_CHOICES: tuple[str, ...] = ("development", "debug", "production")
+# Environments where the HTTP server serves /static with Cache-Control: no-store so a normal
+# reload picks up dashboard edits. Kept here so the configurator and the server share one set.
+STATIC_CACHE_DISABLED_ENVIRONMENTS: frozenset[str] = frozenset({"development", "debug"})
+
+
 class RuntimeConfig(BaseModel):
     """Top-level runtime settings. TOML section: ``[runtime]``
 
     - ``log_level`` — root log level (default: ``"INFO"``).
-    - ``environment`` — label used in log context (default: ``"development"``).
+    - ``environment`` — label used in log context (default: ``"development"``). It also drives
+      the built-in HTTP UI: ``"development"`` and ``"debug"`` make the server send
+      ``Cache-Control: no-store`` for dashboard static assets, so a normal reload picks up edits;
+      any other value (for example ``"production"``) leaves normal caching on.
     - ``agent_timeout_seconds`` — hard wall-clock timeout for any agent turn (min/default: ``120``).
     - ``owner_id`` — the person this MiniBot assists (default: ``"primary"``).
 
@@ -943,6 +952,10 @@ class HTTPServerConfig(BaseModel):
 
     Routes come from core features and from extensions calling ``mb.add_route``. There is no TLS
     here: put a reverse proxy in front when this is reachable from outside the host.
+
+    Static dashboard assets under ``/static`` are served with ``Cache-Control: no-store`` when
+    ``[runtime].environment`` is ``"development"`` or ``"debug"``, and with normal caching
+    otherwise.
     """
 
     enabled: bool = False
