@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from typing import Any
 
 from minibot.app.event_bus import EventBus, EventSubscription
 from minibot.core.channels import ChannelMessage
@@ -17,7 +18,7 @@ from minibot.core.events import (
 
 _LIVE_QUEUE_LIMIT = 256
 
-type ChatEvent = dict[str, bool | str]
+type ChatEvent = dict[str, Any]
 
 
 def _offer(queue: asyncio.Queue[ChatEvent], item: ChatEvent) -> None:
@@ -64,7 +65,14 @@ class WebChannelService:
         self._tool_call_task = None
         self._subscribers.clear()
 
-    async def publish_user_message(self, text: str) -> None:
+    async def publish_user_message(
+        self,
+        text: str,
+        *,
+        attachments: list[dict[str, Any]] | None = None,
+        incoming_files: list[dict[str, Any]] | None = None,
+        attachment_display: list[dict[str, Any]] | None = None,
+    ) -> None:
         self._message_id += 1
         message = ChannelMessage(
             channel="web",
@@ -72,8 +80,13 @@ class WebChannelService:
             chat_id=self._chat_id,
             message_id=self._message_id,
             text=text,
+            attachments=attachments or [],
+            metadata={"incoming_files": incoming_files or []} if incoming_files else {},
         )
-        self._broadcast({"role": "user", "text": text})
+        event: ChatEvent = {"role": "user", "text": text}
+        if attachment_display:
+            event["attachments"] = attachment_display
+        self._broadcast(event)
         await self._event_bus.publish(MessageEvent(message=message))
 
     def subscribe(self) -> asyncio.Queue[ChatEvent]:

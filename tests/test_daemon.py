@@ -67,13 +67,15 @@ def test_build_http_server_includes_extension_pages(monkeypatch: pytest.MonkeyPa
         runtime=SimpleNamespace(environment="production"),
         providers={},
         channels=SimpleNamespace(telegram=SimpleNamespace(enabled=False)),
+        tools=SimpleNamespace(file_storage=SimpleNamespace(enabled=False)),
     )
     dispatcher = SimpleNamespace(main_agent_tool_names=[])
     monkeypatch.setattr(daemon_module, "AppContainer", _Container)
 
-    server = daemon_module._build_http_server(settings, dispatcher, _Extensions(), None, _Logger())
+    server, upload_manager = daemon_module._build_http_server(settings, dispatcher, _Extensions(), None, _Logger())
 
     assert [path for path, _, _ in server._routes] == ["/", "/history", "/extension"]
+    assert upload_manager is None
 
 
 @pytest.mark.asyncio

@@ -602,6 +602,14 @@ host = "127.0.0.1"
 port = 8080
 # Required on every route except /health, and mandatory unless host is 127.0.0.1 or ::1.
 # auth_token = "${secret:http_admin}"
+# Web chat media uploads require [tools.file_storage] enabled. Audio also requires automatic
+# transcription. Files are stored temporarily in uploads/temp/web.
+chat_upload_max_attachments = 3
+chat_upload_max_image_bytes = "5MB"
+chat_upload_max_audio_bytes = "10MB"
+chat_upload_max_total_bytes = "12MB"
+# Completed web uploads expire after this many hours. Set to 0 to disable automatic cleanup.
+chat_upload_retention_hours = 24
 
 # Broker connection for tasks.backend = "rabbitmq" (requires extras: rabbitmq).
 # Each message body must be a JSON object with at least a "text" field.
