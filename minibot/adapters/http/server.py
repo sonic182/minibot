@@ -248,7 +248,8 @@ class _SecurityHeaders:
             if scope["type"] == "http" and message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 headers["Content-Security-Policy"] = (
-                    "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; media-src 'self'; "
+                    "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; "
+                    "media-src 'self' blob:; "
                     "style-src 'self'; script-src 'self' 'unsafe-eval'; object-src 'none'; base-uri 'self'; "
                     "frame-ancestors 'none'"
                 )
