@@ -65,6 +65,8 @@ async def run() -> None:
             await extensions.start()
         if web_channel is not None:
             await web_channel.start()
+        if web_upload_manager is not None:
+            await web_upload_manager.start()
         if http_server is not None:
             await http_server.start()
         await _replay_pending_turns(event_bus, logger)
@@ -144,11 +146,15 @@ def _build_http_server(
     nav_entries.extend(extensions.pages())
     set_nav_entries(nav_entries)
 
+    websockets = []
+    if web_channel is not None and socket_token is not None:
+        websockets.append(build_chat_socket(web_channel, memory, socket_token, upload_manager))
     dashboard_route = build_dashboard_route(
         DashboardData(
             extensions=extensions.summaries(),
             tool_names=dispatcher.main_agent_tool_names,
             routes=extra_routes,
+            websockets=websockets,
             started_at=started_at,
             llm_provider=real_provider,
             llm_model=settings.llm.model,
@@ -156,9 +162,6 @@ def _build_http_server(
             pending_turns=_count_pending_turns,
         )
     )
-    websockets = []
-    if web_channel is not None and socket_token is not None:
-        websockets.append(build_chat_socket(web_channel, memory, socket_token, upload_manager))
     return (
         HttpServer(
             settings.http,

@@ -147,17 +147,11 @@ class MCPClient:
         return await self._request_http(payload)
 
     async def _request_stdio(self, payload: dict[str, Any]) -> dict[str, Any]:
-        process = await self._ensure_stdio_process()
-        assert process.stdin is not None
-        request_id = payload["id"]
-        stdio_lock, _ = self._ensure_stdio_runtime()
-        async with stdio_lock:
-            process.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
-            await process.stdin.drain()
-            parsed = await self._read_matching_stdio_response(process, request_id=request_id)
-            if "error" in parsed:
-                raise RuntimeError(f"mcp server error: {parsed['error']}")
-            return parsed
+        await self._ensure_stdio_process()
+        parsed = await self._request_stdio_raw(payload)
+        if "error" in parsed:
+            raise RuntimeError(f"mcp server error: {parsed['error']}")
+        return parsed
 
     async def _ensure_stdio_process(self) -> asyncio.subprocess.Process:
         _, stdio_start_lock = self._ensure_stdio_runtime()

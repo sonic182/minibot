@@ -206,7 +206,17 @@ also contribute routes through ``mb.add_route`` (see :doc:`extensions`). All rou
 ``/health`` require a bearer token or HTTP Basic credentials; one is mandatory unless ``host`` is
 the literal ``127.0.0.1`` or ``::1``. When the key-value memory and graph extensions are enabled,
 their review pages are available at ``/memory`` and ``/graph``. TLS is out of scope: run it behind
-a reverse proxy when it is reachable from outside the host.
+a reverse proxy when it is reachable from outside the host. The chat WebSocket authenticates with a
+per-boot token sent through ``Sec-WebSocket-Protocol``, not a URL query parameter. A TLS-terminating
+proxy must forward the original ``X-Forwarded-Proto`` and ``X-Forwarded-Host`` headers so browser
+origin validation compares against the public origin.
+
+The browser chat can accept image and audio uploads stored temporarily under ``uploads/temp/web``.
+This requires ``[tools.file_storage] enabled``; audio additionally requires automatic
+transcription. ``chat_upload_max_attachments``, ``chat_upload_max_image_bytes``,
+``chat_upload_max_audio_bytes`` and ``chat_upload_max_total_bytes`` bound a browser session's
+uploads, and ``chat_upload_retention_hours`` controls how long completed uploads are kept before
+cleanup (``0`` disables it).
 
 .. autoclass:: minibot.adapters.config.schema.HTTPServerConfig
    :no-members:
@@ -269,7 +279,7 @@ Tool Configuration
      - ``enabled``, ``path``, ``password_file``; see `Vault`_ above
    * - ``[http]``
      - ``HTTPServerConfig``
-     - ``enabled``, ``host``, ``port``, ``auth_token``; see `HTTP server`_ above
+     - ``enabled``, ``host``, ``port``, ``auth_token``, ``basic_auth_user``, ``basic_auth_password``, ``chat_upload_*``; see `HTTP server`_ above
    * - ``[tools.tool_output_spill]``
      - ``ToolOutputSpillConfig``
      - ``enabled``, ``spill_after_chars``, ``preview_chars``, ``subdir``, ``exclude_tools``; applies to every tool result (not just ``http_request``)
