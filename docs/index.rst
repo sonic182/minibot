@@ -69,6 +69,7 @@ Why self-host
 
    extending
    extensions
+   multi_tenant
    events
    skills
    agents

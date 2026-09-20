@@ -17,6 +17,7 @@
 - [Multi-agent orchestration](https://sonic182.github.io/minibot/agents.html)
 - [Prompt packs](https://sonic182.github.io/minibot/prompts.html)
 - [MCP integration](https://sonic182.github.io/minibot/mcp.html)
+- [Multi-tenant deployments](https://sonic182.github.io/minibot/multi_tenant.html): shared-state model and per-tool tenant safety
 - [Architecture](https://sonic182.github.io/minibot/architecture.html)
 - [Configuration reference](https://sonic182.github.io/minibot/config.html)
 - [CLI reference](https://sonic182.github.io/minibot/cli.html)

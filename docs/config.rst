@@ -330,7 +330,9 @@ Tool Configuration
    that owner's memory, graph and schedules.
 
    Multi-user or multi-tenant isolation is deliberately not supported; it would arrive as an
-   opt-in extension with its own identity model, not by reusing a channel's sender id.
+   opt-in extension with its own identity model, not by reusing a channel's sender id. See
+   :doc:`multi_tenant` for the shared-state model, a tool-by-tool tenant-safety table, and how to
+   run one owner per process.
 
 Tool Config Models
 ------------------

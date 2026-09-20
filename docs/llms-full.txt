@@ -145,6 +145,18 @@ Minibot exposes a minimal tool surface by default. `python_execute` and `bash` s
 sandbox modes (`none`, `basic`, `rlimit`, `cgroup`, `jail`); `apply_patch` and `file_storage`
 are restricted to the workspace/managed root unless explicitly widened.
 
+## Multi-tenant deployments
+
+MiniBot is single-owner by design: `[runtime].owner_id` (default `primary`) is a deployment
+constant that owns long-term memory, the relation graph, tasks, scheduled jobs and the RAG
+corpus; only conversation history is scoped per `channel:chat_id`. Most tools therefore share
+state across conversations — `memory`, `graph`, `spawn_task`/`cancel_task`/`list_tasks`/`get_task`,
+`schedule*`, `invoke_agent`, the filesystem and execution tools, `install_skill`, `list_secrets`,
+`http_request` and MCP. Only the stateless tools (`calculate_expression`, `current_datetime`,
+`wait`, `transcribe_audio`), per-conversation `chat_history_*`, the read-only skill tools, and RAG
+(when the channel supplies a distinct per-tenant `chat_id`/`user_id`) are tenant-safe. Real
+isolation needs one process per tenant with its own `owner_id` and data root.
+
 ## Links
 
 - [Documentation](https://sonic182.github.io/minibot/)
