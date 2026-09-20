@@ -137,7 +137,12 @@ def _build_http_server(
             pending_turns=_count_pending_turns,
         )
     )
-    return HttpServer(settings.http, [dashboard_route, *extra_routes], websockets)
+    return HttpServer(
+        settings.http,
+        [dashboard_route, *extra_routes],
+        websockets,
+        environment=settings.runtime.environment,
+    )
 
 
 async def _replay_pending_turns(event_bus: EventBus, logger: logging.Logger) -> None:

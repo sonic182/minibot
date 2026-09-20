@@ -37,7 +37,10 @@ class _EmptyPendingTurnStore:
         return []
 
 
-def test_build_http_server_includes_extension_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("environment", "disable_static_cache"), [("production", False), ("development", True)])
+def test_build_http_server_includes_extension_pages(
+    monkeypatch: pytest.MonkeyPatch, environment: str, disable_static_cache: bool
+) -> None:
     from minibot.app import daemon as daemon_module
 
     async def extension_page(request: object) -> object:
@@ -64,6 +67,7 @@ def test_build_http_server_includes_extension_pages(monkeypatch: pytest.MonkeyPa
     settings = SimpleNamespace(
         http=HTTPServerConfig(enabled=True),
         llm=SimpleNamespace(provider="openai", base_url=None, model="gpt-4o-mini"),
+        runtime=SimpleNamespace(environment=environment),
         providers={},
         channels=SimpleNamespace(telegram=SimpleNamespace(enabled=False)),
     )
@@ -73,6 +77,7 @@ def test_build_http_server_includes_extension_pages(monkeypatch: pytest.MonkeyPa
     server = daemon_module._build_http_server(settings, dispatcher, _Extensions(), None, _Logger())
 
     assert [path for path, _, _ in server._routes] == ["/", "/history", "/extension"]
+    assert server._disable_static_cache is disable_static_cache
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ import base64
 import hmac
 import importlib.metadata
 import logging
+import os
 import platform
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -16,13 +17,14 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
+from starlette.types import Scope
 from starlette.websockets import WebSocket
 
-from minibot.adapters.config.schema import HTTPServerConfig
+from minibot.adapters.config.schema import STATIC_CACHE_DISABLED_ENVIRONMENTS, HTTPServerConfig
 
 type RouteSpec = tuple[str, Callable[[Request], Awaitable[Any]], tuple[str, ...]]
 type WebSocketSpec = tuple[str, Callable[[WebSocket], Awaitable[None]]]
@@ -45,6 +47,19 @@ except importlib.metadata.PackageNotFoundError:
 
 async def _health(_: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
+
+
+class _NoCacheStaticFiles(StaticFiles):
+    def file_response(
+        self,
+        full_path: str | Path,
+        stat_result: os.stat_result,
+        scope: Scope,
+        status_code: int = 200,
+    ) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
 
 def render(request: Request, template_name: str, context: dict[str, Any] | None = None) -> Any:
@@ -250,10 +265,13 @@ class HttpServer:
         config: HTTPServerConfig,
         routes: Sequence[RouteSpec] = (),
         websockets: Sequence[WebSocketSpec] = (),
+        *,
+        environment: str = "production",
     ) -> None:
         self._config = config
         self._routes = list(routes)
         self._websockets = list(websockets)
+        self._disable_static_cache = environment.casefold() in STATIC_CACHE_DISABLED_ENVIRONMENTS
         self._logger = logging.getLogger("minibot.http")
         self._server: uvicorn.Server | None = None
         self._task: asyncio.Task[None] | None = None
@@ -269,9 +287,14 @@ class HttpServer:
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
             return
+        static_files: StaticFiles
+        if self._disable_static_cache:
+            static_files = _NoCacheStaticFiles(directory=STATIC_DIR)
+        else:
+            static_files = StaticFiles(directory=STATIC_DIR)
         routes = [
             Route(HEALTH_PATH, _health),
-            Mount(STATIC_PATH, app=StaticFiles(directory=STATIC_DIR), name="static"),
+            Mount(STATIC_PATH, app=static_files, name="static"),
             *(Route(path, handler, methods=list(methods)) for path, handler, methods in self._routes),
             *(WebSocketRoute(path, handler) for path, handler in self._websockets),
         ]

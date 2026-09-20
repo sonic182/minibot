@@ -190,9 +190,11 @@ a cached Jinja environment, so redeploy after changes:
 
 ```
 docker compose up -d --force-recreate minibot
-curl -s -u <user>:<pass> http://minibot.minipc.com/static/dashboard.css | head
+curl -s -u <user>:<pass> http://minibot.minipc.local/static/dashboard.css | head
 ```
 
-Then check the page itself at both widths. The browser caches `dashboard.css` aggressively and the
-response carries no `Cache-Control`, so verify in a private window or with an empty-cache reload —
-otherwise you will be looking at the previous stylesheet and think the fix did nothing.
+Then check the page itself at both widths. Under `runtime.environment = "development"` (or `"debug"`)
+the server serves `dashboard.css` with `Cache-Control: no-store`, so a normal reload picks up edits.
+In `"production"` the response carries no `Cache-Control` and the browser caches it aggressively, so
+verify there in a private window or with an empty-cache reload — otherwise you will be looking at the
+previous stylesheet and think the fix did nothing.
