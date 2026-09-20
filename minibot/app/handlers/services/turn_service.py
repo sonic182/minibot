@@ -96,7 +96,6 @@ class LLMTurnService:
         session_id = session_id_for(message)
         turn_total_tokens = 0
         owner_id = self._owner_id
-        model_text, model_user_content = self._input_service.build_model_user_input(message)
         tool_context = ToolContext(
             owner_id=owner_id,
             channel=message.channel,
@@ -105,12 +104,16 @@ class LLMTurnService:
             turn_id=event.event_id,
             task_handoff_callback=self._task_handoff_callback,
         )
-        if model_user_content is None and self._audio_auto_transcription_service is not None:
+        input_message = message
+        if self._audio_auto_transcription_service is not None:
             auto_result = await self._audio_auto_transcription_service.transcribe_incoming_audio(
                 message=message,
                 context=tool_context,
             )
-            model_text = self._audio_auto_transcription_service.apply_to_model_text(model_text, auto_result)
+            transcribed_text = self._audio_auto_transcription_service.apply_to_model_text(message.text, auto_result)
+            if transcribed_text != message.text:
+                input_message = message.model_copy(update={"text": transcribed_text})
+        model_text, model_user_content = self._input_service.build_model_user_input(input_message)
         if message.attachments:
             self._logger.debug(
                 "prepared multimodal message",
