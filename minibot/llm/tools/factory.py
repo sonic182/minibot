@@ -64,6 +64,12 @@ def build_enabled_tools(
             from minibot.llm.tools.skill_installer import SkillInstallerTool
 
             tools.extend(SkillInstallerTool(skill_registry).bindings())
+    if extension_tools:
+        tools.extend(extension_tools)
+    # After the extension tools, not before: AgentDelegateTool copies the list it is handed, so a
+    # delegate built earlier scopes specialists against core tools alone — no bash, no filesystem,
+    # no current_datetime. Its own bindings land in `tools` after the copy, which is what keeps
+    # delegation from recursing (strip_reserved_delegation_tools covers the task tools).
     if agent_registry is not None and llm_factory is not None and not agent_registry.is_empty():
         tools.extend(
             AgentDelegateTool(
@@ -78,8 +84,6 @@ def build_enabled_tools(
                 context_ratio_before_compact=settings.memory.context_ratio_before_compact,
             ).bindings()
         )
-    if extension_tools:
-        tools.extend(extension_tools)
     _ensure_unique_tool_names(tools)
     return apply_tool_call_events(
         apply_tool_output_spill(

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from llm_async.models import Tool
 
 from minibot.adapters.config.schema import CalculatorToolConfig, Settings, ToolsConfig
+from minibot.app.agent_policies import RESERVED_DELEGATION_TOOL_NAMES
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
+from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.factory import build_enabled_tools
 
@@ -63,3 +68,31 @@ def test_build_enabled_tools_rejects_extension_tool_name_collisions() -> None:
     )
     with pytest.raises(ValueError, match="duplicate tool name"):
         build_enabled_tools(settings, memory=_MemoryStub(), extension_tools=[duplicate])
+
+
+def test_specialists_are_scoped_against_extension_tools_too() -> None:
+    """A delegate built before the extension tools scopes specialists against core tools alone."""
+    settings = Settings.from_dict({"tools": {"time": {"enabled": True}, "wait": {"enabled": True}}})
+    registry = load_extensions(settings, EventBus(), entrypoint="console")
+    specialist = AgentSpec(
+        name="general_agent",
+        description="generalist",
+        system_prompt="do the work",
+        source_path=Path("agents/general.md"),
+        tools_deny=["mcp*"],
+    )
+
+    tools = build_enabled_tools(
+        settings,
+        memory=_MemoryStub(),
+        extension_tools=registry.tools,
+        agent_registry=AgentRegistry([specialist]),
+        llm_factory=LLMClientFactory(settings),
+    )
+
+    delegate = next(binding for binding in tools if binding.tool.name == "invoke_agent").handler.__self__
+    scoped = {binding.tool.name for binding in delegate._scoped_tools(specialist)}
+
+    assert {"current_datetime", "wait", "calculate_expression"}.issubset(scoped)
+    # Recursive delegation and async hand-off stay out of a specialist's reach.
+    assert scoped.isdisjoint(RESERVED_DELEGATION_TOOL_NAMES)
