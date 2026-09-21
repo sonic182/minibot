@@ -321,16 +321,16 @@ def _resolve_task_spec(
     extension_tool_names: Sequence[str] = (),
 ) -> AgentSpec:
     overrides = task.get("model_overrides")
-    # Re-derived by the daemon against the real target; this process has a cold limits cache and
-    # would have to download the whole models.dev catalog to work it out for itself.
-    max_new_tokens = _coerce_int(task.get("max_new_tokens"))
+    # What the retargeted model itself allows, resolved by the daemon: this process has a cold
+    # limits cache and would have to download the whole models.dev catalog to work it out.
+    target_ceiling = _coerce_int(task.get("max_new_tokens"))
     agent_name = task.get("agent_name")
     if isinstance(agent_name, str) and agent_name.strip():
         registry = AgentRegistry(load_agent_specs(settings.orchestration.directory))
         spec = registry.get(agent_name.strip())
         if spec is None:
             raise ValueError(f"agent '{agent_name.strip()}' is not available for async task execution")
-        spec = _with_resolved_cap(apply_agent_overrides(spec, overrides), max_new_tokens)
+        spec = _capped_at(apply_agent_overrides(spec, overrides), settings, target_ceiling)
         if not environment_prompt_fragment.strip():
             return spec
         # replace() rather than a field-by-field copy: the hand-written version silently dropped
@@ -341,11 +341,20 @@ def _resolve_task_spec(
         environment_prompt_fragment=environment_prompt_fragment,
         extension_tool_names=extension_tool_names,
     )
-    return _with_resolved_cap(apply_agent_overrides(worker_spec, overrides), max_new_tokens)
+    return _capped_at(apply_agent_overrides(worker_spec, overrides), settings, target_ceiling)
 
 
-def _with_resolved_cap(spec: AgentSpec, max_new_tokens: int | None) -> AgentSpec:
-    return spec if max_new_tokens is None else replace(spec, max_new_tokens=max_new_tokens)
+def _capped_at(spec: AgentSpec, settings: Settings, target_ceiling: int | None) -> AgentSpec:
+    """Combine what the target model allows with the cap the user actually configured.
+
+    Each side contributes what only it knows. The daemon knows the target's limits but its own
+    copies of both caps were rewritten at boot for the main model; this process reloaded settings
+    and specs from disk, so `spec.max_new_tokens` and `[llm].max_new_tokens` are still the user's.
+    """
+    if target_ceiling is None:
+        return spec
+    configured = spec.max_new_tokens or settings.llm.max_new_tokens
+    return replace(spec, max_new_tokens=min(target_ceiling, configured) if configured else target_ceiling)
 
 
 def _build_worker_state(*, spec: AgentSpec, prompt: str, context: dict[str, Any]) -> AgentState:

@@ -148,21 +148,24 @@ def _retargetable_spec() -> AgentSpec:
     )
 
 
-def test_retargeting_drops_the_caps_that_describe_another_model() -> None:
-    """The daemon re-derives both against the real target and ships them in the task payload."""
+def test_retargeting_changes_the_target_and_leaves_the_configured_cap_alone() -> None:
+    """The only caller is the task worker, which loads specs from disk.
+
+    ``max_new_tokens`` there is the cap the user wrote in the frontmatter, not one auto-config
+    derived for the agent's configured model, so discarding it would throw away real intent. What
+    the *target* model allows arrives separately, in the task payload.
+    """
     spec = apply_agent_overrides(_retargetable_spec(), {"model_provider": "fireworks", "model": "deepseek-v4p1"})
 
-    assert spec.model_provider == "fireworks"
-    assert spec.context_limit is None
-    assert spec.max_new_tokens is None
+    assert (spec.model_provider, spec.model) == ("fireworks", "deepseek-v4p1")
+    assert spec.max_new_tokens == 50_000
 
 
-def test_overriding_only_reasoning_effort_keeps_the_boot_derived_caps() -> None:
+def test_overriding_only_reasoning_effort_keeps_the_target() -> None:
     spec = apply_agent_overrides(_retargetable_spec(), {"reasoning_effort": "high"})
 
     assert spec.reasoning_effort == "high"
-    assert spec.context_limit == 1_050_000
-    assert spec.max_new_tokens == 50_000
+    assert (spec.model_provider, spec.model) == ("openai_responses", "gpt-5.6-luna")
 
 
 def test_resolve_delegation_target_falls_back_to_the_main_llm_section() -> None:

@@ -293,6 +293,51 @@ def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:
             "deepseek-v3.6",
             "high",
         )
-        assert spec.context_limit is None
-        assert spec.max_new_tokens is None
+    # Without a ceiling in the payload the configured cap stands: this process read it from disk,
+    # so unlike the daemon's copy it was never rewritten for another model.
+    assert specialist_spec.max_new_tokens == 4096
     assert default_spec.name == "task_worker"
+
+
+def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
+    """The daemon knows the target's ceiling; only this process still has the user's own cap."""
+    settings = Settings()
+    settings.llm.max_new_tokens = 8192
+    specialist = AgentSpec(
+        name="general_agent",
+        description="generalist",
+        system_prompt="You are a generalist.",
+        source_path=worker.Path("/tmp/agent.md"),
+        model_provider="openai",
+        model="gpt-4o-mini",
+        max_new_tokens=4096,
+    )
+    overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6"}
+    factory = _FakeFactory(settings)
+
+    with patch("minibot.adapters.tasks.worker.load_agent_specs", return_value=[specialist]):
+        # Target allows more than the agent asked for: the agent's own cap wins.
+        generous = worker._resolve_task_spec(
+            settings=settings,
+            llm_factory=factory,
+            environment_prompt_fragment="",
+            task={"agent_name": "general_agent", "model_overrides": overrides, "max_new_tokens": 65536},
+        )
+        # Target allows less: its ceiling wins, since the agent cannot exceed what the model does.
+        tight = worker._resolve_task_spec(
+            settings=settings,
+            llm_factory=factory,
+            environment_prompt_fragment="",
+            task={"agent_name": "general_agent", "model_overrides": overrides, "max_new_tokens": 2048},
+        )
+        # No spec cap at all falls back to [llm]'s, also read from disk here.
+        general = worker._resolve_task_spec(
+            settings=settings,
+            llm_factory=factory,
+            environment_prompt_fragment="",
+            task={"model_overrides": overrides, "max_new_tokens": 65536},
+        )
+
+    assert generous.max_new_tokens == 4096
+    assert tight.max_new_tokens == 2048
+    assert general.max_new_tokens == 8192

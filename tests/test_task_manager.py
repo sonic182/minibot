@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -663,3 +664,54 @@ async def test_budget_for_an_uncatalogued_target_sends_nothing_rather_than_anoth
 
     assert budget.compact_threshold_tokens is None
     assert budget.max_new_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_budget_is_not_clipped_by_the_main_models_auto_derived_cap() -> None:
+    """Boot rewrites both caps this side can reach, for the main model. Neither may leak here.
+
+    `settings.llm.max_new_tokens` and every registered spec's cap are post-auto-config values
+    describing a different model, so a target with a *larger* output limit must not be clipped to
+    them. The worker combines this ceiling with the cap the user actually wrote.
+    """
+    settings = _settings_with_main_model()
+    # What auto-config leaves behind after resolving the 1.05M/128k main model.
+    settings.llm.max_new_tokens = 128000
+    derived_spec = replace(_inheriting_spec(), max_new_tokens=128000)
+    prime_model_limits(
+        "openai_responses", "big-output", {"catalog_provider": "zai", "context": 400000, "output": 200000}
+    )
+
+    budget = await resolve_delegation_budget(
+        AgentRegistry([derived_spec]), settings, "prospector", {"model": "big-output"}
+    )
+
+    assert budget.max_new_tokens == 200000
+    assert budget.compact_threshold_tokens == 380000
+
+
+@pytest.mark.asyncio
+async def test_budget_is_resolved_before_the_execution_lease_is_claimed() -> None:
+    """Resolving an uncached target downloads the catalog; the lease only covers the worker run."""
+    bus = EventBus()
+    order: list[str] = []
+
+    async def _budget(_name: str | None, _overrides: dict) -> DelegationBudget:
+        order.append("budget")
+        return DelegationBudget(compact_threshold_tokens=4321)
+
+    repository = MagicMock()
+
+    async def _claim(*_args, **_kwargs) -> str:
+        order.append("claim")
+        return "lease-1"
+
+    repository.claim_execution = _claim
+    repository.mark_done = AsyncMock(return_value=True)
+    repository.append_event = AsyncMock()
+    manager = TaskManager(bus, 5.0, task_repository=repository, budget_for=_budget)
+
+    _, _, _, _, reader_task = await _spawn(manager, _PipeSuccess({"task_id": "t1", "text": "ok"}), task_id="t1")
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    assert order == ["budget", "claim"]

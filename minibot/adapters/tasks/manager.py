@@ -19,7 +19,6 @@ from minibot.app.agent_policies import is_retargeted, resolve_delegation_target
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.token_limits_autoconfig import ensure_model_limits
-from minibot.core.agents import AgentSpec
 from minibot.core.channels import ChannelFileResponse, ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundEvent, OutboundFileEvent
 from minibot.core.tasks import TaskLimits, TaskRepository, TaskResult, TaskStatus, TaskStopReason
@@ -75,20 +74,24 @@ async def resolve_delegation_budget(
     ratio = settings.memory.context_ratio_before_compact
     return DelegationBudget(
         compact_threshold_tokens=threshold_from_context_limit(context_limit, ratio),
-        max_new_tokens=_retargeted_max_new_tokens(settings, spec, limits, ratio),
+        max_new_tokens=_target_output_ceiling(limits, ratio),
     )
 
 
-def _retargeted_max_new_tokens(
-    settings: Settings, spec: AgentSpec | None, limits: dict[str, Any] | None, context_ratio: float
-) -> int | None:
+def _target_output_ceiling(limits: dict[str, Any] | None, context_ratio: float) -> int | None:
+    """What the target model itself allows — never a cap the user configured.
+
+    Both caps this process could reach for describe another model: boot's auto-config overwrites
+    ``settings.llm.max_new_tokens`` with one derived for the main model, and swaps every registered
+    spec for one carrying a cap derived from *its* configured model. The worker loads settings and
+    specs from disk itself, so its copies are still the ones the user wrote; it is the side that
+    combines them with this ceiling.
+    """
     if not limits:
         return None
     budget = max(1, int(limits["context"] * context_ratio)) if context_ratio > 0 else None
-    configured = spec.max_new_tokens if spec and spec.max_new_tokens else settings.llm.max_new_tokens
-    # `if value` mirrors token auto-config: it drops both an unset cap and the None output limit
-    # the chatgpt_codex branch returns.
-    ceilings = [value for value in (limits.get("output"), budget, configured) if value]
+    # `if value` drops the None output limit the chatgpt_codex branch returns.
+    ceilings = [value for value in (limits.get("output"), budget) if value]
     return max(1, min(ceilings)) if ceilings else None
 
 
@@ -165,6 +168,12 @@ class TaskManager:
             self._lease_timeout_seconds,
             int(resolved_limits.timeout_seconds) + _SUPERVISOR_GRACE_SECONDS + 1,
         )
+        overrides = dict(model_overrides or {})
+        # Before the lease, not after: a target outside the advisory roster makes this download the
+        # models.dev catalog, and the lease only covers the worker's own timeout plus grace. Those
+        # seconds would come straight out of it and let a second consumer reclaim a running task.
+        # It also avoids paying for a catalog fetch on a task another consumer already owns.
+        budget = await self._budget(agent_name, overrides)
         active_lease_token: str | None = None
         if self._task_repository is not None:
             active_lease_token = await self._task_repository.claim_execution(
@@ -177,8 +186,6 @@ class TaskManager:
             if active_lease_token is None:
                 semaphore.release()
                 return False
-        overrides = dict(model_overrides or {})
-        budget = await self._budget(agent_name, overrides)
         payload = {
             "task_id": task_id,
             "channel": channel,

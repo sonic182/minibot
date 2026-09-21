@@ -102,14 +102,12 @@ def is_retargeted(spec: AgentSpec | None, overrides: Mapping[str, Any] | None) -
 def apply_agent_overrides(spec: AgentSpec, overrides: Mapping[str, Any] | None) -> AgentSpec:
     """Retarget one invocation of an agent at another provider, model or reasoning effort.
 
-    ``context_limit`` and ``max_new_tokens`` were derived from the spec's own model, so they are
-    meaningless for an ad-hoc target and are dropped here. The daemon re-derives both against the
-    real target and ships them in the task payload; it has to, because the worker is a cold
-    subprocess whose limits cache would need a full catalog download to answer.
+    Only the target changes. ``max_new_tokens`` is left alone because the one caller runs inside a
+    task worker, which loads specs from disk: the value there is the cap the user wrote in the
+    frontmatter, not one auto-config derived for the agent's configured model. What the target
+    model itself allows arrives separately, resolved by the daemon and carried in the payload.
     """
     normalized = normalize_model_overrides(overrides)
     if not normalized:
         return spec
-    if is_retargeted(spec, normalized):
-        spec = replace(spec, context_limit=None, max_new_tokens=None)
     return replace(spec, **normalized)
