@@ -5,4 +5,4 @@ Use this when the available specialist roster suggests a likely match, but you w
 Provide:
 - agent_name: exact specialist name from the available specialists list in your system prompt.
 
-After fetching, either delegate with invoke_agent or continue directly if the specialist is not needed.
+After fetching, either delegate with spawn_task or continue directly if the specialist is not needed.

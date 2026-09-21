@@ -230,7 +230,6 @@ def test_build_worker_tools_excludes_orchestration_tools() -> None:
     assert "http_request" in tool_names
     assert "filesystem" in tool_names
     assert "grep" in tool_names
-    assert "invoke_agent" not in tool_names
     assert "fetch_agent_info" not in tool_names
     assert "memory" not in tool_names
     assert "chat_history_info" not in tool_names
@@ -246,7 +245,7 @@ def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
         description="desc",
         system_prompt="prompt",
         source_path=worker.Path("/tmp/specialist.md"),
-        tools_allow=["http_request", "spawn_task", "invoke_agent", "cancel_task", "list_tasks", "fetch_agent_info"],
+        tools_allow=["http_request", "spawn_task", "cancel_task", "list_tasks", "fetch_agent_info"],
     )
 
     bindings = worker._build_worker_tools(settings=settings, spec=spec)
@@ -254,7 +253,6 @@ def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
 
     assert "http_request" in tool_names
     assert "spawn_task" not in tool_names
-    assert "invoke_agent" not in tool_names
     assert "cancel_task" not in tool_names
     assert "list_tasks" not in tool_names
     assert "fetch_agent_info" not in tool_names

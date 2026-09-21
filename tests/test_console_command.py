@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -74,7 +75,7 @@ def _install_console_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
 
         async def wait_for_response(self, timeout_seconds: float):
             calls["timeout"] = timeout_seconds
-            response = calls.get("response", object())
+            response = calls.get("response", SimpleNamespace(response=SimpleNamespace(metadata={})))
             if isinstance(response, BaseException):
                 raise response
             return response
@@ -109,6 +110,35 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
     assert calls["dispatcher_stopped"] is True
     assert calls["service_started"] is True
     assert calls["service_stopped"] is True
+
+
+@pytest.mark.asyncio
+async def test_console_run_once_waits_for_the_worker_after_a_delegation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Returning on the handoff ack would stop the extensions and cancel the running worker."""
+    from minibot.app import console as console_module
+
+    calls = _install_console_fakes(monkeypatch)
+    queued = [
+        SimpleNamespace(response=SimpleNamespace(metadata={"task_handoff": True})),
+        SimpleNamespace(response=SimpleNamespace(metadata={"source": "task_worker", "status": "retrying"})),
+        SimpleNamespace(response=SimpleNamespace(metadata={"source": "task_worker", "task_id": "t1"})),
+    ]
+    calls["responses"] = queued
+
+    console_service_cls = console_module.ConsoleService
+
+    async def _wait_for_response(self, timeout_seconds: float):
+        del self
+        calls["timeout"] = timeout_seconds
+        calls["waits"] = calls.get("waits", 0) + 1
+        return queued.pop(0)
+
+    monkeypatch.setattr(console_service_cls, "wait_for_response", _wait_for_response, raising=False)
+
+    await console_module.run(once="delegate", chat_id=1, user_id=1, timeout_seconds=30.0, config_path=None)
+
+    assert calls["waits"] == 3
+    assert queued == []
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,6 @@ from minibot.llm.tools.base import ToolBinding
 MODEL_OVERRIDE_KEYS = ("model_provider", "model", "reasoning_effort")
 
 RESERVED_DELEGATION_TOOL_NAMES = {
-    "invoke_agent",
     "fetch_agent_info",
     "spawn_task",
     "list_tasks",

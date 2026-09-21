@@ -70,10 +70,9 @@ def test_build_enabled_tools_rejects_extension_tool_name_collisions() -> None:
         build_enabled_tools(settings, memory=_MemoryStub(), extension_tools=[duplicate])
 
 
-def test_specialists_are_scoped_against_extension_tools_too() -> None:
-    """A delegate built before the extension tools scopes specialists against core tools alone."""
+def test_a_registry_adds_only_fetch_agent_info() -> None:
+    """Delegation itself is spawn_task, contributed by the tasks extension — not by this factory."""
     settings = Settings.from_dict({"tools": {"time": {"enabled": True}, "wait": {"enabled": True}}})
-    registry = load_extensions(settings, EventBus(), entrypoint="console")
     specialist = AgentSpec(
         name="general_agent",
         description="generalist",
@@ -82,17 +81,15 @@ def test_specialists_are_scoped_against_extension_tools_too() -> None:
         tools_deny=["mcp*"],
     )
 
-    tools = build_enabled_tools(
-        settings,
-        memory=_MemoryStub(),
-        extension_tools=registry.tools,
-        agent_registry=AgentRegistry([specialist]),
-        llm_factory=LLMClientFactory(settings),
-    )
+    names = {
+        binding.tool.name
+        for binding in build_enabled_tools(
+            settings,
+            memory=_MemoryStub(),
+            agent_registry=AgentRegistry([specialist]),
+            llm_factory=LLMClientFactory(settings),
+        )
+    }
 
-    delegate = next(binding for binding in tools if binding.tool.name == "invoke_agent").handler.__self__
-    scoped = {binding.tool.name for binding in delegate._scoped_tools(specialist)}
-
-    assert {"current_datetime", "wait", "calculate_expression"}.issubset(scoped)
-    # Recursive delegation and async hand-off stay out of a specialist's reach.
-    assert scoped.isdisjoint(RESERVED_DELEGATION_TOOL_NAMES)
+    assert "fetch_agent_info" in names
+    assert names & RESERVED_DELEGATION_TOOL_NAMES == {"fetch_agent_info"}

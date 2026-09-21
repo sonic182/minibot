@@ -76,7 +76,8 @@ async def test_console_functional_openai_responses_flow(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> None:
+async def test_console_functional_offers_the_specialist_roster(tmp_path: Path) -> None:
+    """Delegation itself lives in tests/test_agents_functional.py; this covers the console wiring."""
     write_agent(
         agents_dir=tmp_path / "agents",
         name="worker",
@@ -87,30 +88,12 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
     default_client = ScriptedLLMClient(provider="openai")
     default_client.runtime_steps = [
         {
-            "content": "delegating",
-            "tool_name": "invoke_agent",
-            "arguments": {
-                "agent_name": "worker",
-                "task": "answer delegated task",
-            },
+            "content": "answered locally",
             "response_id": "main-agent-1",
             "total_tokens": 8,
         },
-        {
-            "content": "delegated response",
-            "response_id": "main-agent-2",
-            "total_tokens": 8,
-        },
     ]
-    worker_client = ScriptedLLMClient(provider="openai")
-    worker_client.runtime_steps = [
-        {
-            "content": "delegated response",
-            "response_id": "worker-1",
-            "total_tokens": 8,
-        }
-    ]
-    factory = ScriptedLLMFactory(default_client=default_client, agent_clients={"worker": worker_client})
+    factory = ScriptedLLMFactory(default_client=default_client)
 
     config_path = _write_agents_config(tmp_path, provider="openai")
     response = await _run_console_turn(
@@ -121,6 +104,6 @@ async def test_console_functional_agent_delegation_metadata(tmp_path: Path) -> N
         user_id=202,
     )
 
-    assert response.response.text == "delegated response"
+    assert response.response.text == "answered locally"
     assert response.response.metadata["primary_agent"] == "minibot"
-    assert isinstance(response.response.metadata.get("agent_trace"), list)
+    assert "fetch_agent_info" in default_client.complete_requests[0]["tool_names"]

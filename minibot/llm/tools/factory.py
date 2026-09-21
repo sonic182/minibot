@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app.agent_registry import AgentRegistry
-from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_registry import SkillRegistry
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.core.tasks import TaskProducer
 from minibot.llm.services.tool_executor import canonical_tool_name
-from minibot.llm.tools.agent_delegate import AgentDelegateTool
+from minibot.llm.tools.agent_info import AgentInfoTool
 from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
@@ -38,7 +36,6 @@ def build_enabled_tools(
     task_manager: TaskManager | None = None,
     task_producer: TaskProducer | None = None,
     extension_tools: Sequence[ToolBinding] | None = None,
-    config_path: Path | None = None,
 ) -> list[ToolBinding]:
     """Build core tools, then merge contributions from loaded extensions.
 
@@ -66,24 +63,8 @@ def build_enabled_tools(
             tools.extend(SkillInstallerTool(skill_registry).bindings())
     if extension_tools:
         tools.extend(extension_tools)
-    # After the extension tools, not before: AgentDelegateTool copies the list it is handed, so a
-    # delegate built earlier scopes specialists against core tools alone — no bash, no filesystem,
-    # no current_datetime. Its own bindings land in `tools` after the copy, which is what keeps
-    # delegation from recursing (strip_reserved_delegation_tools covers the task tools).
     if agent_registry is not None and llm_factory is not None and not agent_registry.is_empty():
-        tools.extend(
-            AgentDelegateTool(
-                registry=agent_registry,
-                llm_factory=llm_factory,
-                tools=tools,
-                default_timeout_seconds=settings.orchestration.default_timeout_seconds,
-                delegated_tool_call_policy=settings.orchestration.delegated_tool_call_policy,
-                environment_prompt_fragment=build_environment_prompt_fragment(settings, config_path),
-                managed_storage=managed_storage,
-                spill_config=settings.tools.tool_output_spill,
-                context_ratio_before_compact=settings.memory.context_ratio_before_compact,
-            ).bindings()
-        )
+        tools.extend(AgentInfoTool(registry=agent_registry, llm_factory=llm_factory).bindings())
     _ensure_unique_tool_names(tools)
     return apply_tool_call_events(
         apply_tool_output_spill(

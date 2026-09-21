@@ -145,7 +145,8 @@ class TaskTools:
         prompt = require_non_empty_str(payload, "prompt")
         agent_name = optional_str(payload.get("agent_name"), error_message="agent_name must be a string or null")
         registry = self._agent_registry
-        if agent_name is not None and registry is not None and registry.get(agent_name) is None:
+        spec = None if agent_name is None or registry is None else registry.get(agent_name)
+        if agent_name is not None and registry is not None and spec is None:
             available = ", ".join(registry.names()) or "none registered"
             raise ValueError(f"agent_name '{agent_name}' is not a registered agent. Available: {available}")
         model_overrides = normalize_model_overrides(payload)
@@ -156,7 +157,7 @@ class TaskTools:
                 f"model_provider '{requested_provider}' has no configured credentials. Available: {available}"
             )
         task_context = _coerce_task_context(payload)
-        limits = _resolve_limits(payload, self._config)
+        limits = _resolve_limits(payload, self._config, spec_timeout_seconds=spec.timeout_seconds if spec else None)
         await self._producer.enqueue(
             TaskRequest(
                 task_id=task_id,
@@ -244,8 +245,19 @@ class TaskTools:
         return records
 
 
-def _resolve_limits(payload: dict[str, Any], config: TasksConfig) -> TaskLimits:
+def _resolve_limits(
+    payload: dict[str, Any], config: TasksConfig, *, spec_timeout_seconds: int | None = None
+) -> TaskLimits:
+    """Resolve this task's budget.
+
+    The agent's own ``timeout_seconds`` is the default when the call names none. It is resolved
+    here and not in the worker because the daemon-side supervisor derives its deadline from the
+    same ``TaskLimits`` (``adapters/tasks/manager.py``); deciding it in the subprocess would let
+    the two disagree.
+    """
     timeout_seconds = optional_int(payload.get("timeout_seconds"), field="timeout_seconds", min_value=1)
+    if timeout_seconds is None and spec_timeout_seconds:
+        timeout_seconds = min(spec_timeout_seconds, config.worker_timeout_seconds)
     effective_timeout = config.worker_timeout_seconds if timeout_seconds is None else timeout_seconds
     if effective_timeout > config.worker_timeout_seconds:
         raise ValueError("timeout_seconds may not exceed tasks.worker_timeout_seconds")

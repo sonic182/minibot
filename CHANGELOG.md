@@ -9,14 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Delegation can pick its provider, model and reasoning effort at call time.** `invoke_agent` and
-  `spawn_task` accept optional `model_provider`, `model` and `reasoning_effort`, so the main agent can
-  run a specialist on another configured provider for one call — a `chatgpt_codex` orchestrator
-  delegating to a subagent on an OpenCode Go model, for example — without editing `agents/*.md` or
-  restarting. `fetch_agent_info` now also returns the agent's own defaults and the providers that have
-  credentials configured; anything else is refused with `provider_not_available` instead of falling
-  through to the echo fallback. A retargeted call runs without mid-run compaction, since the context
-  window and output cap resolved at boot belong to the agent's configured model.
+- **Delegation can pick its provider, model and reasoning effort at call time.** `spawn_task` accepts
+  optional `model_provider`, `model` and `reasoning_effort`, so the main agent can run a specialist on
+  another configured provider for one task — a `chatgpt_codex` orchestrator delegating to a subagent on
+  an OpenCode Go model, for example — without editing `agents/*.md` or restarting. `fetch_agent_info`
+  now also returns the agent's own defaults and the providers that have credentials configured; anything
+  else is refused with `provider_not_available` instead of falling through to the echo fallback. A
+  retargeted task re-derives its context window and output cap from the target model, so mid-run
+  compaction stays armed.
 - **Named provider sections.** `[providers.<name>]` accepts `api_format` (`openai`, `openai_responses`,
   `openrouter`, `claude`, `google`, `chatgpt_codex`), so a section name can be anything and several
   endpoints of the same API can coexist — `[providers.opencode_go]` next to `[providers.zai]`. A section
@@ -30,6 +30,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target an older wizard had parked in a format-named section (z.ai inside `[providers.openai]`) is moved
   into its own section. Model lists longer than 25 entries get a search prompt with completion before the
   picker opens.
+
+### Removed
+
+- **`invoke_agent` is gone; `spawn_task` is the only way to delegate.** The two tools had grown into two
+  full implementations of the same thing — tool scoping, initial state, prompt cache key, compactor,
+  attachment handling — and `spawn_task` was already the superset: it takes per-call `timeout_seconds`,
+  `max_steps` and `max_tool_calls`, reports progress, persists its result for `get_task`/`list_tasks`,
+  can be cancelled, retries a rate-limited provider, runs in its own process, and can run a general
+  worker with no `agent_name` at all. The one thing it does not do is return the answer inside the turn.
+
+  **This changes what delegation means.** `spawn_task` acknowledges with a `task_id` and ends the turn;
+  the specialist's answer arrives as a later message on the same conversation. The main agent can no
+  longer fold a specialist's reply into its own response. `[tasks].enabled` therefore now defaults to
+  `true` — the SQLite backend needs no broker and no extra — because with it off there is no delegation
+  at all, and the specialist roster is dropped from the system prompt along with it.
+
+  An agent's `timeout_seconds` keeps working: it is the default when a `spawn_task` call names none,
+  capped by `[tasks].worker_timeout_seconds`. Two `[orchestration]` keys are retired with the tool that
+  read them, `default_timeout_seconds` and `delegated_tool_call_policy` (and with the latter, the rule
+  that a delegated agent must call at least one tool). A config that still declares them is accepted and
+  ignores them. Response metadata loses `agent_trace` and `delegation_fallback_used`, which only ever
+  described an in-turn delegation.
 
 ### Fixed
 

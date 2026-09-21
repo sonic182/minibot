@@ -134,7 +134,7 @@ base_url = ""
 # Named provider: any section name works when `api_format` says which API the endpoint speaks, so
 # several endpoints of the same format can coexist (one [providers.openai_responses] would not be
 # enough for both OpenCode Go and z.ai). Agents reference the section name in `model_provider`, and
-# the main agent can retarget a single `invoke_agent` / `spawn_task` call at it. `models` is an
+# the main agent can retarget a single `spawn_task` call at it. `models` is an
 # advisory list the orchestrator is offered to choose from; it is not validated against the endpoint.
 # [providers.opencode_go]
 # api_format = "openai_responses"
@@ -158,7 +158,6 @@ base_url = ""
 
 [orchestration]
 directory = "./agents"
-default_timeout_seconds = 360
 # Tool ownership mode controls whether specialist-agent claimed tools are hidden from main agent.
 # - "shared": main agent and specialists can both access the same tools.
 # - "exclusive": any tool matched by an enabled specialist's allow/deny policy is hidden from main.
@@ -166,11 +165,6 @@ default_timeout_seconds = 360
 # - "exclusive_mcp": only specialist-claimed MCP tools are hidden from main; built-in tools stay shared.
 #   Recommended when browser MCP tools should be specialist-only but main should keep filesystem/memory/etc.
 tool_ownership_mode = "exclusive_mcp"
-# Delegated specialist tool-call policy:
-# - "auto": require at least one tool call when delegated agent has any scoped tools
-# - "always": require at least one tool call for every delegated agent
-# - "never": do not enforce delegated tool calls
-delegated_tool_call_policy = "auto"
 # Tool-use guardrail for the main agent.
 # - "disabled": no guardrail — the handler trusts the model's output directly (default, simpler).
 # - "llm_classifier": before returning, runs a secondary LLM call to decide whether the request
@@ -563,10 +557,11 @@ native = true
 # skill is third-party instructions the agent will follow. Also shows the bundled install-skill.
 # install = true
 
-# Optional async task system. Gates both the task consumer and the
-# spawn_task / cancel_task / list_tasks / get_task tools.
+# Async task system. Gates both the task consumer and the
+# spawn_task / cancel_task / list_tasks / get_task tools. `spawn_task` is also the only way to
+# delegate to a specialist agent, so turning this off disables multi-agent orchestration.
 [tasks]
-enabled = false
+enabled = true
 # Queue backend: "sqlite" (default, no broker needed) or "rabbitmq" (see [rabbitmq] below).
 backend = "sqlite"
 # Seconds to wait for a spawned worker process to return a result before it is terminated.

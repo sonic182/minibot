@@ -77,9 +77,8 @@ This is the single most violable invariant in the codebase.
 `tools_allow` and `tools_deny` are mutually exclusive; this is enforced in `tool_policy_utils.py`
 and again by pydantic validators in `adapters/config/schema.py`.
 
-Reserved names always stripped from delegated agents (`agent_policies.py:10`): `invoke_agent`,
-`fetch_agent_info`, `spawn_task`, `list_tasks`, `cancel_task` — so there is no recursive
-delegation.
+Reserved names always stripped from delegated agents (`agent_policies.py:15`): `fetch_agent_info`,
+`spawn_task`, `list_tasks`, `get_task`, `cancel_task` — so there is no recursive delegation.
 
 One tool escapes the system entirely: `pre_response` is prepended by `AgentRuntime` to every
 runtime's tool list, bypassing both the factory and allow/deny filtering. Listing it in

@@ -445,20 +445,15 @@ class OrchestrationConfig(BaseModel):
     """Multi-agent orchestration settings. TOML section: ``[orchestration]``
 
     - ``directory`` — path to agent definition files (default: ``"./agents"``).
-    - ``default_timeout_seconds`` — per-agent-call timeout (default: ``90``).
     - ``tool_ownership_mode`` — how tools are shared between agents:
       ``"shared"`` (default), ``"exclusive"``, or ``"exclusive_mcp"``.
-    - ``delegated_tool_call_policy`` — whether delegated agents may call tools:
-      ``"auto"`` (default), ``"always"``, or ``"never"``.
     - ``main_tool_use_guardrail`` — optional guardrail before tool execution:
       ``"disabled"`` (default) or ``"llm_classifier"``.
     - ``main_agent`` — tool allow/deny policy for the main agent (``[orchestration.main_agent]``).
     """
 
     directory: str = "./agents"
-    default_timeout_seconds: PositiveInt = 90
     tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
-    delegated_tool_call_policy: Literal["auto", "always", "never"] = "auto"
     main_tool_use_guardrail: Literal["disabled", "llm_classifier"] = "disabled"
     main_agent: MainAgentConfig = MainAgentConfig()
 
@@ -869,8 +864,11 @@ class TasksConfig(BaseModel):
     """Async task system settings. TOML section: ``[tasks]``
 
     Gates both the task consumer service and the ``spawn_task``/``cancel_task``/``list_tasks``/``get_task`` tools.
+    ``spawn_task`` is also the only way to delegate to a specialist agent, so disabling this
+    section turns multi-agent orchestration off entirely.
 
-    - ``enabled`` — enable the async task system (default: ``false``).
+    - ``enabled`` — enable the async task system (default: ``true``; the ``sqlite`` backend
+      needs no broker and no extra).
     - ``backend`` — queue backend: ``"sqlite"`` (default; no broker required) or
       ``"rabbitmq"`` (see ``[rabbitmq]``).
     - ``worker_timeout_seconds`` — hard per-task processing timeout (default: ``1800``).
@@ -880,7 +878,7 @@ class TasksConfig(BaseModel):
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
-    enabled: bool = False
+    enabled: bool = True
     backend: Literal["rabbitmq", "sqlite"] = "sqlite"
     worker_timeout_seconds: PositiveInt = 1800
     worker_max_steps: TaskLimitValue = "unlimited"

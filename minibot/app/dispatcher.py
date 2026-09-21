@@ -64,7 +64,6 @@ class Dispatcher:
             llm_factory=llm_factory,
             skill_registry=skill_registry,
             extension_tools=AppContainer.get_extensions().tools,
-            config_path=config_path,
         )
         main_agent_tools_view = main_agent_tool_view(
             tools=tools,

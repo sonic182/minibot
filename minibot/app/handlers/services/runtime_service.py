@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from minibot.app.agent_runtime import AgentRuntime
-from minibot.app.delegation_trace import count_tool_messages, extract_delegation_trace
 from minibot.app.handlers.services.session_state_service import SessionStateService
 from minibot.app.response_parser import extract_answer, plain_render, resolve_reply_render
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
@@ -16,6 +15,10 @@ from minibot.llm.provider_factory import LLMClient
 from minibot.llm.tools.base import ToolContext
 
 
+def count_tool_messages(state: AgentState) -> int:
+    return sum(1 for message in state.messages if message.role == "tool" and message.name != "pre_response")
+
+
 @dataclass(frozen=True)
 class AgentRuntimeResult:
     render: Any
@@ -23,8 +26,6 @@ class AgentRuntimeResult:
     response_updates: list[RenderableResponse]
     response_id: str | None
     runtime_state: AgentState | None
-    agent_trace: list[dict[str, Any]]
-    delegation_fallback_used: bool
     tokens_used: int
     provider_tool_calls: int
 
@@ -60,7 +61,6 @@ class RuntimeOrchestrationService:
         channel: str | None,
     ) -> AgentRuntimeResult:
         tokens_used = 0
-        trace_result = None
         response_updates: list[RenderableResponse] = []
 
         state = self._build_agent_state(
@@ -79,7 +79,6 @@ class RuntimeOrchestrationService:
         self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
         tool_messages_count = count_tool_messages(generation.state)
         provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
-        trace_result = extract_delegation_trace(generation.state)
 
         guardrail = None
         if tool_messages_count == 0 and provider_tool_calls == 0:
@@ -110,8 +109,6 @@ class RuntimeOrchestrationService:
                 response_updates=[],
                 response_id=generation.response_id,
                 runtime_state=generation.state,
-                agent_trace=trace_result.trace,
-                delegation_fallback_used=trace_result.fallback_used,
                 tokens_used=tokens_used,
                 provider_tool_calls=provider_tool_calls,
             )
@@ -134,7 +131,6 @@ class RuntimeOrchestrationService:
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
             self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
-            trace_result = extract_delegation_trace(generation.state)
             provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
             if count_tool_messages(generation.state) == 0 and provider_tool_calls == 0:
                 return AgentRuntimeResult(
@@ -146,8 +142,6 @@ class RuntimeOrchestrationService:
                     response_updates=[],
                     response_id=generation.response_id,
                     runtime_state=generation.state,
-                    agent_trace=trace_result.trace,
-                    delegation_fallback_used=trace_result.fallback_used,
                     tokens_used=tokens_used,
                     provider_tool_calls=provider_tool_calls,
                 )
@@ -156,15 +150,12 @@ class RuntimeOrchestrationService:
         render = resolve_reply_render(parsed)
         should_reply = True
 
-        assert trace_result is not None
         return AgentRuntimeResult(
             render=render,
             should_reply=should_reply,
             response_updates=response_updates,
             response_id=generation.response_id,
             runtime_state=generation.state,
-            agent_trace=trace_result.trace,
-            delegation_fallback_used=trace_result.fallback_used,
             tokens_used=tokens_used,
             provider_tool_calls=provider_tool_calls,
         )

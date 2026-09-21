@@ -120,7 +120,6 @@ def test_agent_policy_rejects_allow_and_deny_together() -> None:
 
 def test_strip_reserved_delegation_tools_removes_recursive_tools() -> None:
     tools = [
-        _binding("invoke_agent"),
         _binding("fetch_agent_info"),
         _binding("spawn_task"),
         _binding("cancel_task"),

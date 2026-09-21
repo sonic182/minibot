@@ -28,9 +28,9 @@ class RuntimeCompactor:
     """Compacts an in-flight ``AgentState`` when the context window starts filling up.
 
     ``HistoryCompactionService`` already does this for the main chat, but between turns and over
-    persisted memory. A delegated run never reaches that layer: ``spawn_task`` and
-    ``invoke_agent`` can loop for dozens of tool-calling steps inside a single
-    ``AgentRuntime.run()``, so the same strategy has to apply to the live message list.
+    persisted memory. A delegated run never reaches that layer: a ``spawn_task`` worker can loop
+    for dozens of tool-calling steps inside a single ``AgentRuntime.run()``, so the same strategy
+    has to apply to the live message list.
     """
 
     def __init__(self, *, llm_client: Any, threshold_tokens: int, logger: logging.Logger) -> None:

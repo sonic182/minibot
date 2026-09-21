@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import logging
@@ -57,8 +58,8 @@ def _write_e2e_config(
     main_agent_tools_allow: list[str],
     tool_ownership_mode: str,
     enable_http_client: bool = True,
-    delegated_tool_call_policy: str | None = None,
     llm_max_tool_iterations: int = 45,
+    worker_timeout_seconds: int = 240,
 ) -> Path:
     config_path = tmp_path / "config.e2e.toml"
     browser_dir = tmp_path / "files" / "browser"
@@ -83,24 +84,17 @@ def _write_e2e_config(
     )
     text = text.replace('directory = "./agents"\n', f'directory = "{agents_dir.as_posix()}"\n')
     text = text.replace('tool_ownership_mode = "exclusive"\n', f'tool_ownership_mode = "{tool_ownership_mode}"\n')
-    if delegated_tool_call_policy is not None:
-        insertion_marker = f'tool_ownership_mode = "{tool_ownership_mode}"\n'
-        if insertion_marker in text and "delegated_tool_call_policy" not in text:
-            text = text.replace(
-                insertion_marker,
-                insertion_marker + f'delegated_tool_call_policy = "{delegated_tool_call_policy}"\n',
-            )
-        else:
-            text = text.replace(
-                'delegated_tool_call_policy = "auto"\n',
-                f'delegated_tool_call_policy = "{delegated_tool_call_policy}"\n',
-            )
-    text = text.replace("# include_agent_trace_in_metadata = true\n", "include_agent_trace_in_metadata = true\n")
     text = text.replace("agent_timeout_seconds = 120\n", "agent_timeout_seconds = 240\n")
     text = text.replace("max_tool_iterations = 15\n", f"max_tool_iterations = {max(1, llm_max_tool_iterations)}\n")
     text = text.replace("request_timeout_seconds = 45\n", "request_timeout_seconds = 120\n")
     text = text.replace("sock_read_timeout_seconds = 45\n", "sock_read_timeout_seconds = 120\n")
-    text = text.replace("default_timeout_seconds = 90\n", "default_timeout_seconds = 240\n")
+    # Delegation runs through the task queue, so the consumer has to poll fast enough for a test.
+    text = text.replace("worker_timeout_seconds = 1800\n", f"worker_timeout_seconds = {worker_timeout_seconds}\n")
+    text = text.replace("poll_interval_seconds = 5\n", "poll_interval_seconds = 1\n")
+    text = text.replace(
+        'sqlite_url = "sqlite+aiosqlite:///./data/tasks.db"\n',
+        f'sqlite_url = "sqlite+aiosqlite:///{(tmp_path / "tasks.db").as_posix()}"\n',
+    )
     text = text.replace(
         'tools_allow = ["current_*", "calculate_*", "http_*", "*_agent*"]\n',
         f"tools_allow = {_array(main_agent_tools_allow)}\n",
@@ -138,7 +132,7 @@ def _write_e2e_config(
             "config_path": config_path.as_posix(),
             "tool_ownership_mode": tool_ownership_mode,
             "main_agent_tools_allow": main_agent_tools_allow,
-            "delegated_tool_call_policy": delegated_tool_call_policy,
+            "worker_timeout_seconds": worker_timeout_seconds,
             "llm_max_tool_iterations": llm_max_tool_iterations,
             "enable_http_client": enable_http_client,
         },
@@ -366,7 +360,13 @@ def _resolve_npx_command() -> str:
     return "npx"
 
 
-async def _run_console_turn(*, config_path: Path, text: str, wait_timeout_seconds: float = 120.0):
+async def _run_console_turn(
+    *,
+    config_path: Path,
+    text: str,
+    wait_timeout_seconds: float = 120.0,
+    await_task_result: bool = False,
+):
     _LOGGER.debug(
         "starting console turn",
         extra={
@@ -382,6 +382,8 @@ async def _run_console_turn(*, config_path: Path, text: str, wait_timeout_second
     dispatcher = Dispatcher(bus)
     console_service = ConsoleService(bus, chat_id=4321, user_id=8765)
     await dispatcher.start()
+    extensions = AppContainer.get_extensions()
+    await extensions.start()
     await console_service.start()
     try:
         await console_service.publish_user_message(text)
@@ -395,11 +397,30 @@ async def _run_console_turn(*, config_path: Path, text: str, wait_timeout_second
                 "metadata": payload.metadata,
             },
         )
-        return response.response
+        if not await_task_result:
+            return payload
+        return await _await_task_worker_message(console_service, wait_timeout_seconds)
     finally:
         await console_service.stop()
+        await extensions.stop()
         await dispatcher.stop()
         _reset_container()
+
+
+async def _await_task_worker_message(console_service: ConsoleService, wait_timeout_seconds: float):
+    """Delegation is asynchronous: the turn only acknowledges, the answer is a later message."""
+    deadline = asyncio.get_running_loop().time() + wait_timeout_seconds
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise TimeoutError("no task_worker message arrived")
+        payload = (await console_service.wait_for_response(remaining)).response
+        _LOGGER.debug(
+            "console message received while awaiting task result",
+            extra={"source": payload.metadata.get("source"), "text_preview": payload.text[:600]},
+        )
+        if payload.metadata.get("source") == "task_worker":
+            return payload
 
 
 async def _run_console_turn_with_retry(
@@ -408,6 +429,7 @@ async def _run_console_turn_with_retry(
     text: str,
     attempts: int = 2,
     wait_timeout_seconds: float = 120.0,
+    await_task_result: bool = False,
 ):
     retry_markers = (
         "maximum execution steps",
@@ -424,6 +446,7 @@ async def _run_console_turn_with_retry(
                 config_path=config_path,
                 text=text,
                 wait_timeout_seconds=wait_timeout_seconds,
+                await_task_result=await_task_result,
             )
         except TimeoutError:
             _LOGGER.warning("console turn timed out", extra={"attempt": attempt, "attempts": attempts})
@@ -454,28 +477,26 @@ async def test_e2e_console_agent_offload_workspace_file_workflow(tmp_path: Path)
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "spawn_task", "get_task", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
     )
 
     response = await _run_console_turn(
         config_path=config_path,
         text=(
-            "Use invoke_agent with agent_name workspace_manager_agent. "
+            "Use spawn_task with agent_name workspace_manager_agent. "
             "Create notes/e2e-offload.txt with exact content E2E_OFFLOAD_OK. "
             "Then provide a short confirmation."
         ),
+        await_task_result=True,
     )
 
     created_file = tmp_path / "files" / "notes" / "e2e-offload.txt"
     assert created_file.exists()
     assert created_file.read_text(encoding="utf-8").strip() == "E2E_OFFLOAD_OK"
     assert response.channel == "console"
-    assert response.metadata["primary_agent"] == "minibot"
-    assert response.metadata["delegation_fallback_used"] is False
-    trace = response.metadata.get("agent_trace")
-    assert isinstance(trace, list)
-    assert any(entry.get("target") == "workspace_manager_agent" and entry.get("ok") is True for entry in trace)
+    assert response.metadata["source"] == "task_worker"
+    assert response.metadata["task_id"]
 
 
 @pytest.mark.asyncio
@@ -498,9 +519,7 @@ async def test_e2e_console_normal_tool_call_workspace_file_workflow(tmp_path: Pa
     assert created_file.exists()
     assert created_file.read_text(encoding="utf-8").strip() == "E2E_DIRECT_OK"
     assert response.channel == "console"
-    trace = response.metadata.get("agent_trace")
-    if trace is not None:
-        assert trace == []
+    assert response.metadata.get("source") != "task_worker"
 
 
 @pytest.mark.asyncio
@@ -516,33 +535,31 @@ async def test_e2e_console_agent_offload_browser_playwright_workflow(tmp_path: P
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "spawn_task", "get_task", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
     )
 
     response = await _run_console_turn_with_retry(
         config_path=config_path,
         text=(
-            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent. "
+            "Use spawn_task exactly once with agent_name=playwright_mcp_agent. "
             "Task: use browser_run_code once on https://www.example.com and return "
             "title plus meta description in one line. "
             "If any browser tool fails, stop immediately and return exactly: browser unavailable. "
-            "After tool result, do not call invoke_agent again; just return the result."
+            "Do not call spawn_task again."
         ),
         attempts=1,
         wait_timeout_seconds=30.0,
+        await_task_result=True,
     )
 
     assert response.channel == "console"
+    assert response.metadata["source"] == "task_worker"
     lowered = response.text.lower()
     has_expected_extract = "title" in lowered or "description" in lowered or "example" in lowered
     has_explicit_unavailable = "browser unavailable" in lowered
     has_browser_contention = "browser" in lowered and ("already in use" in lowered or "in use" in lowered)
     has_expected_fallback = "could not complete that delegated action reliably" in lowered
-    if not (has_explicit_unavailable or has_browser_contention):
-        trace = response.metadata.get("agent_trace")
-        assert isinstance(trace, list)
-        assert any(entry.get("target") == "playwright_mcp_agent" for entry in trace)
     assert has_expected_extract or has_explicit_unavailable or has_browser_contention or has_expected_fallback
 
 
@@ -603,32 +620,30 @@ async def test_e2e_console_main_agent_delegates_example_screenshot_and_reports_w
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "spawn_task", "get_task", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
     )
 
     response = await _run_console_turn_with_retry(
         config_path=config_path,
         text=(
-            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent. "
+            "Use spawn_task exactly once with agent_name=playwright_mcp_agent. "
             "Task: use browser_run_code once to open https://www.example.com/, take one screenshot, "
             "and return screenshot path plus workspace folder. "
             "Do not call filesystem. "
             "If any browser tool fails, stop immediately and return exactly: browser unavailable. "
-            "After tool result, do not call invoke_agent again; only return the final answer."
+            "Do not call spawn_task again."
         ),
         attempts=2,
         wait_timeout_seconds=25.0,
+        await_task_result=True,
     )
 
     assert response.channel == "console"
+    assert response.metadata["source"] == "task_worker"
     lowered = response.text.lower()
     has_explicit_unavailable = "browser unavailable" in lowered
     has_browser_contention = "browser" in lowered and ("already in use" in lowered or "in use" in lowered)
-    if not (has_explicit_unavailable or has_browser_contention):
-        trace = response.metadata.get("agent_trace")
-        assert isinstance(trace, list)
-        assert any(entry.get("target") == "playwright_mcp_agent" and entry.get("ok") is True for entry in trace)
 
     expected_browser_dir = (tmp_path / "files" / "browser").as_posix().lower()
     has_expected_success_report = ("example" in lowered or "screenshot" in lowered) and (
@@ -657,29 +672,25 @@ async def test_e2e_console_screenshot_delegation_with_attachments_reports_path(
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "spawn_task", "get_task", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
     )
 
     response = await _run_console_turn_with_retry(
         config_path=config_path,
         text=(
-            "Use invoke_agent exactly once with agent_name=playwright_mcp_agent. "
-            "Task: take a screenshot of https://www.example.com/. "
-            "After receiving the delegation result, report the screenshot file path "
+            "Use spawn_task exactly once with agent_name=playwright_mcp_agent. "
+            "Task: take a screenshot of https://www.example.com/ and report the screenshot file path "
             "in a user-friendly console message format like 'Screenshot saved at: <path>'. "
             "Do NOT use filesystem action=send since console cannot send files to users."
         ),
         attempts=2,
         wait_timeout_seconds=25.0,
+        await_task_result=True,
     )
 
     assert response.channel == "console"
-    trace = response.metadata.get("agent_trace")
-    if isinstance(trace, list):
-        delegation_entry = next((e for e in trace if e.get("target") == "playwright_mcp_agent"), None)
-        assert delegation_entry is not None, "Expected delegation to playwright_mcp_agent"
-        assert delegation_entry.get("ok") is True, "Expected successful delegation"
+    assert response.metadata["source"] == "task_worker"
 
     lowered = response.text.lower()
     has_success_indicator = any(keyword in lowered for keyword in ["saved", "screenshot", "captured"])
@@ -718,15 +729,14 @@ async def test_e2e_console_top5_spanish_ai_youtubers_with_browser_and_llm_classi
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["fetch_agent_info", "invoke_agent", "current_*", "calculate_*"],
+        main_agent_tools_allow=["fetch_agent_info", "spawn_task", "get_task", "current_*", "calculate_*"],
         tool_ownership_mode="exclusive",
         enable_http_client=False,
-        delegated_tool_call_policy="never",
         llm_max_tool_iterations=8,
     )
 
     request_text = (
-        "Usa invoke_agent exactamente una vez con agent_name=playwright_mcp_agent para investigar en web. "
+        "Usa spawn_task exactamente una vez con agent_name=playwright_mcp_agent para investigar en web. "
         "No llames otras tools despues de eso. "
         "Necesito un top de al menos 5 youtubers que hablen en espanol sobre agentes AI y automatizaciones; "
         "si puedes recomendar mas de 5, esta bien. "
@@ -740,15 +750,12 @@ async def test_e2e_console_top5_spanish_ai_youtubers_with_browser_and_llm_classi
         text=request_text,
         attempts=2,
         wait_timeout_seconds=160.0,
+        await_task_result=True,
     )
 
     assert response.channel == "console"
+    assert response.metadata["source"] == "task_worker"
     assert isinstance(response.text, str) and response.text.strip()
-
-    trace = response.metadata.get("agent_trace")
-    assert isinstance(trace, list), "Expected agent_trace in metadata"
-    delegated_entries = [entry for entry in trace if entry.get("target") == "playwright_mcp_agent"]
-    assert delegated_entries, "Expected delegation attempt to playwright_mcp_agent"
 
     judgment = await _classify_youtube_answer(request_text=request_text, answer_text=response.text)
     recommended_count = judgment.get("recommended_count")

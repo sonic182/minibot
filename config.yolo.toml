@@ -64,7 +64,7 @@ x-opencode-session = "minibot"
 
 # Named providers: `api_format` says which API the endpoint speaks, so the section name is free and
 # several endpoints of the same format coexist. Agents point at the section name with
-# `model_provider`, and the main agent can retarget a single invoke_agent / spawn_task call at it
+# `model_provider`, and the main agent can retarget a single spawn_task call at it
 # ("run that on deepseek via opencode_go, high effort"). `models` is the advisory list it is offered
 # to choose from.
 # [providers.opencode_go]
@@ -100,9 +100,7 @@ base_url = ""
 
 [orchestration]
 directory = "./agents"
-default_timeout_seconds = 360
 tool_ownership_mode = "exclusive_mcp"
-delegated_tool_call_policy = "auto"
 main_tool_use_guardrail = "disabled"
 
 [orchestration.main_agent]

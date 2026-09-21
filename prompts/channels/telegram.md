@@ -23,12 +23,7 @@ Markdown rules:
 General:
 - Keep replies concise and directly renderable in Telegram.
 
-Attachment handling for delegations (CRITICAL):
-- When invoke_agent tool result contains "attachments" array:
-  1. Call filesystem(action="send") for each attachment path
-  2. Respond with brief confirmation
-- Example:
-  - Delegation result: {"ok": true, "attachments": [{"path": "browser/shot.png", "type": "image/png"}]}
-  - You call: filesystem(action="send", path="browser/shot.png", caption="Screenshot")
-  - You respond: Screenshot sent
+Attachment handling (CRITICAL):
+- To put a local file in front of the user, call filesystem(action="send", path=..., caption=...).
 - NEVER return base64 data or file contents to user - always send via filesystem(action="send")
+- A delegated task's attachments are delivered by the worker itself; do not re-send them.
