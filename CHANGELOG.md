@@ -16,7 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now also returns the agent's own defaults and the providers that have credentials configured; anything
   else is refused with `provider_not_available` instead of falling through to the echo fallback. A
   retargeted task re-derives its context window and output cap from the target model, so mid-run
-  compaction stays armed.
+  compaction stays armed. The target is resolved the way `create_for_agent` resolves it — override,
+  then the agent's own value, then `[llm]` — so an agent whose frontmatter names no provider, and a
+  task with no `agent_name` at all, resolve against the model they actually run on instead of
+  against `None`. Both numbers travel in the task payload, because the worker is a cold subprocess
+  whose limits cache would need a full catalog download to work them out.
+- **`chatgpt_codex` is only advertised with loadable OAuth credentials.** `available_providers()`
+  treated any section with that `api_format` as usable, so an empty `[providers.chatgpt_codex]`
+  passed the credential gate and queued work that failed only once the worker built the client. The
+  configured (or default) auth path is now read through the existing credential loader, and a
+  missing, unreadable or uninstallable one drops the provider from the roster like any other.
 - **Named provider sections.** `[providers.<name>]` accepts `api_format` (`openai`, `openai_responses`,
   `openrouter`, `claude`, `google`, `chatgpt_codex`), so a section name can be anything and several
   endpoints of the same API can coexist — `[providers.opencode_go]` next to `[providers.zai]`. A section

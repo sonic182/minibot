@@ -38,7 +38,7 @@ def available_providers(settings: Settings) -> list[ProviderOption]:
     for name, provider_cfg in settings.providers.items():
         normalized = name.strip().lower()
         api_format = provider_cfg.api_format or normalized
-        if not provider_cfg.api_key and api_format != "chatgpt_codex":
+        if not _has_credentials(api_format=api_format, api_key=provider_cfg.api_key, auth_path=provider_cfg.auth_path):
             continue
         options.append(
             ProviderOption(
@@ -50,7 +50,9 @@ def available_providers(settings: Settings) -> list[ProviderOption]:
         )
         seen.add(normalized)
     main_provider = settings.llm.provider.strip().lower()
-    if main_provider not in seen and (settings.llm.api_key or main_provider == "chatgpt_codex"):
+    if main_provider not in seen and _has_credentials(
+        api_format=main_provider, api_key=settings.llm.api_key, auth_path=settings.llm.auth_path
+    ):
         options.append(
             ProviderOption(
                 name=main_provider,
@@ -60,6 +62,20 @@ def available_providers(settings: Settings) -> list[ProviderOption]:
             )
         )
     return sorted(options, key=lambda option: option.name)
+
+
+def _has_credentials(*, api_format: str, api_key: str | None, auth_path: str | None) -> bool:
+    if api_format != "chatgpt_codex":
+        return bool(api_key)
+    # Codex authenticates with an OAuth file, not a key. Its presence is not enough: an empty
+    # `[providers.chatgpt_codex]` section would otherwise be advertised and queue work that only
+    # fails once the worker builds the client.
+    from minibot.llm.services.codex_setup import CodexSetupError, load_credentials, resolve_auth_path
+
+    try:
+        return load_credentials(resolve_auth_path(auth_path)) is not None
+    except (CodexSetupError, OSError):
+        return False
 
 
 def find_provider(name: str, options: Sequence[ProviderOption]) -> ProviderOption | None:

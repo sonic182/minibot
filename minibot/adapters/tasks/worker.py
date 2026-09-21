@@ -321,13 +321,16 @@ def _resolve_task_spec(
     extension_tool_names: Sequence[str] = (),
 ) -> AgentSpec:
     overrides = task.get("model_overrides")
+    # Re-derived by the daemon against the real target; this process has a cold limits cache and
+    # would have to download the whole models.dev catalog to work it out for itself.
+    max_new_tokens = _coerce_int(task.get("max_new_tokens"))
     agent_name = task.get("agent_name")
     if isinstance(agent_name, str) and agent_name.strip():
         registry = AgentRegistry(load_agent_specs(settings.orchestration.directory))
         spec = registry.get(agent_name.strip())
         if spec is None:
             raise ValueError(f"agent '{agent_name.strip()}' is not available for async task execution")
-        spec = apply_agent_overrides(spec, overrides)
+        spec = _with_resolved_cap(apply_agent_overrides(spec, overrides), max_new_tokens)
         if not environment_prompt_fragment.strip():
             return spec
         # replace() rather than a field-by-field copy: the hand-written version silently dropped
@@ -338,7 +341,11 @@ def _resolve_task_spec(
         environment_prompt_fragment=environment_prompt_fragment,
         extension_tool_names=extension_tool_names,
     )
-    return apply_agent_overrides(worker_spec, overrides)
+    return _with_resolved_cap(apply_agent_overrides(worker_spec, overrides), max_new_tokens)
+
+
+def _with_resolved_cap(spec: AgentSpec, max_new_tokens: int | None) -> AgentSpec:
+    return spec if max_new_tokens is None else replace(spec, max_new_tokens=max_new_tokens)
 
 
 def _build_worker_state(*, spec: AgentSpec, prompt: str, context: dict[str, Any]) -> AgentState:

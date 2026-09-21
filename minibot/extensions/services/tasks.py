@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from minibot.adapters.tasks.manager import TaskManager, compact_threshold_for_agent
+from minibot.adapters.tasks.manager import TaskManager, resolve_delegation_budget
 from minibot.adapters.tasks.retention import TaskRetentionService
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskProducer, SQLiteTaskStore
 from minibot.app.agent_definitions_loader import load_agent_specs
@@ -36,7 +36,7 @@ def register(mb: ExtensionContext) -> None:
         store,
         settings.tasks.sqlite.lease_timeout_seconds,
         secrets=mb.vault.as_mapping() if mb.vault else None,
-        compact_threshold_for=lambda name, ov: compact_threshold_for_agent(agent_registry, settings, name, ov),
+        budget_for=lambda name, ov: resolve_delegation_budget(agent_registry, settings, name, ov),
     )
     producer = SQLiteTaskProducer(store)
     consumer = SQLiteTaskConsumerService(

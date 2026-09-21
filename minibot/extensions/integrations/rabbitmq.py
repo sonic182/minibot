@@ -13,7 +13,7 @@ def register(mb: ExtensionContext) -> None:
         return
     from minibot.adapters.messaging.rabbitmq.producer import RabbitMQTaskProducer
     from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
-    from minibot.adapters.tasks.manager import TaskManager, compact_threshold_for_agent
+    from minibot.adapters.tasks.manager import TaskManager, resolve_delegation_budget
     from minibot.llm.tools.tasks import TaskTools
 
     settings = mb.settings
@@ -25,7 +25,7 @@ def register(mb: ExtensionContext) -> None:
         store,
         settings.tasks.sqlite.lease_timeout_seconds,
         secrets=mb.vault.as_mapping() if mb.vault else None,
-        compact_threshold_for=lambda name, ov: compact_threshold_for_agent(agent_registry, settings, name, ov),
+        budget_for=lambda name, ov: resolve_delegation_budget(agent_registry, settings, name, ov),
     )
     producer = RabbitMQTaskProducer(settings.rabbitmq, store)
     consumer = RabbitMQConsumerService(

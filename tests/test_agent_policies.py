@@ -5,12 +5,14 @@ from pathlib import Path
 import pytest
 from llm_async.models import Tool
 
+from minibot.adapters.config.schema import Settings
 from minibot.app.agent_policies import (
     apply_agent_overrides,
     filter_tools_for_agent,
+    is_retargeted,
+    resolve_delegation_target,
     strip_reserved_delegation_tools,
 )
-from minibot.app.token_limits_autoconfig import prime_model_limits
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
 
@@ -146,36 +148,49 @@ def _retargetable_spec() -> AgentSpec:
     )
 
 
-def test_retargeting_rederives_the_caps_from_the_target_model() -> None:
-    prime_model_limits(
-        "fireworks", "deepseek-v4p1", {"catalog_provider": "fireworks", "context": 163840, "output": 16384}
-    )
+def test_retargeting_drops_the_caps_that_describe_another_model() -> None:
+    """The daemon re-derives both against the real target and ships them in the task payload."""
+    spec = apply_agent_overrides(_retargetable_spec(), {"model_provider": "fireworks", "model": "deepseek-v4p1"})
 
-    spec = apply_agent_overrides(
-        _retargetable_spec(),
-        {"model_provider": "fireworks", "model": "deepseek-v4p1"},
-        context_ratio=0.95,
-    )
-
-    # Not the 1.05M of the spec's own model: inheriting that would compact ~6x too late.
-    assert spec.context_limit == 163840
-    assert spec.max_new_tokens == 16384
-
-
-def test_retargeting_without_cached_limits_drops_the_caps() -> None:
-    spec = apply_agent_overrides(
-        _retargetable_spec(),
-        {"model_provider": "fireworks", "model": "never-seen"},
-        context_ratio=0.95,
-    )
-
+    assert spec.model_provider == "fireworks"
     assert spec.context_limit is None
     assert spec.max_new_tokens is None
 
 
 def test_overriding_only_reasoning_effort_keeps_the_boot_derived_caps() -> None:
-    spec = apply_agent_overrides(_retargetable_spec(), {"reasoning_effort": "high"}, context_ratio=0.95)
+    spec = apply_agent_overrides(_retargetable_spec(), {"reasoning_effort": "high"})
 
     assert spec.reasoning_effort == "high"
     assert spec.context_limit == 1_050_000
     assert spec.max_new_tokens == 50_000
+
+
+def test_resolve_delegation_target_falls_back_to_the_main_llm_section() -> None:
+    """An agent without `model_provider` inherits it, so a bare spec lookup resolves nothing."""
+    settings = Settings.from_dict({"llm": {"provider": "openai_responses", "model": "gpt-5.6-luna"}})
+    inheriting = AgentSpec(
+        name="plain", description="", system_prompt="x", source_path=Path("agents/plain.md"), model=None
+    )
+
+    assert resolve_delegation_target(settings, inheriting, None) == ("openai_responses", "gpt-5.6-luna")
+    # Only the model overridden: the provider still has to come from [llm], not from None.
+    assert resolve_delegation_target(settings, inheriting, {"model": "deepseek-v4p1"}) == (
+        "openai_responses",
+        "deepseek-v4p1",
+    )
+    # Only the provider overridden: the model still has to resolve.
+    assert resolve_delegation_target(settings, inheriting, {"model_provider": "fireworks"}) == (
+        "fireworks",
+        "gpt-5.6-luna",
+    )
+    # No spec at all is the general worker, which runs on [llm] outright.
+    assert resolve_delegation_target(settings, None, {"model": "glm-5.3"}) == ("openai_responses", "glm-5.3")
+
+
+def test_is_retargeted_ignores_an_override_that_repeats_the_spec() -> None:
+    spec = _retargetable_spec()
+
+    assert is_retargeted(spec, {"model": "deepseek-v4p1"}) is True
+    assert is_retargeted(spec, {"model": spec.model, "model_provider": spec.model_provider}) is False
+    assert is_retargeted(spec, {"reasoning_effort": "high"}) is False
+    assert is_retargeted(None, {"model": "glm-5.3"}) is True

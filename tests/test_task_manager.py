@@ -3,12 +3,17 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from minibot.adapters.tasks.manager import TaskManager
+from minibot.adapters.config.schema import Settings
+from minibot.adapters.tasks.manager import DelegationBudget, TaskManager, resolve_delegation_budget
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.token_limits_autoconfig import prime_model_limits
+from minibot.core.agents import AgentSpec
 from minibot.core.events import OutboundEvent, OutboundFileEvent
 
 # ---------------------------------------------------------------------------
@@ -506,10 +511,10 @@ async def test_spawn_sends_the_compaction_threshold_to_the_worker() -> None:
     # boot, so the daemon has to resolve the budget and ship it with the task.
     bus = EventBus()
 
-    async def _threshold(name: str | None, _overrides: dict) -> int | None:
-        return 4321 if name == "prospector" else None
+    async def _budget(name: str | None, _overrides: dict) -> DelegationBudget:
+        return DelegationBudget(compact_threshold_tokens=4321) if name == "prospector" else DelegationBudget()
 
-    manager = TaskManager(bus, 5.0, compact_threshold_for=_threshold)
+    manager = TaskManager(bus, 5.0, budget_for=_budget)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
 
     seen: list[dict] = []
@@ -527,17 +532,19 @@ async def test_spawn_sends_the_compaction_threshold_to_the_worker() -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_forwards_model_overrides_to_the_threshold_resolver() -> None:
+async def test_spawn_forwards_model_overrides_to_the_budget_resolver() -> None:
     # The agent's configured window cannot describe another model, so the resolver gets the
     # overrides and answers for the model actually being run.
     bus = EventBus()
     seen_overrides: list[dict] = []
 
-    async def _threshold(_name: str | None, overrides: dict) -> int | None:
+    async def _budget(_name: str | None, overrides: dict) -> DelegationBudget:
         seen_overrides.append(overrides)
-        return 777 if overrides.get("model") else 4321
+        if overrides.get("model"):
+            return DelegationBudget(compact_threshold_tokens=777, max_new_tokens=16384)
+        return DelegationBudget(compact_threshold_tokens=4321)
 
-    manager = TaskManager(bus, 5.0, compact_threshold_for=_threshold)
+    manager = TaskManager(bus, 5.0, budget_for=_budget)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
 
     seen: list[dict] = []
@@ -557,10 +564,12 @@ async def test_spawn_forwards_model_overrides_to_the_threshold_resolver() -> Non
     assert seen[0]["model_overrides"] == overrides
     assert seen_overrides == [overrides]
     assert seen[0]["compact_threshold_tokens"] == 777
+    # The worker's cache is cold, so the cap has to travel with the task or it is lost.
+    assert seen[0]["max_new_tokens"] == 16384
 
 
 @pytest.mark.asyncio
-async def test_spawn_works_without_a_threshold_resolver() -> None:
+async def test_spawn_works_without_a_budget_resolver() -> None:
     bus = EventBus()
     manager = _make_manager(bus)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
@@ -577,3 +586,80 @@ async def test_spawn_works_without_a_threshold_resolver() -> None:
     await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert seen[0]["compact_threshold_tokens"] is None
+
+
+def _settings_with_main_model() -> Settings:
+    return Settings.from_dict(
+        {
+            "llm": {"provider": "openai_responses", "model": "gpt-5.6-luna", "max_new_tokens": 50000},
+            "memory": {"max_history_tokens": 997500, "context_ratio_before_compact": 0.95},
+        }
+    )
+
+
+def _inheriting_spec() -> AgentSpec:
+    """A specialist whose frontmatter names no provider: it inherits the one from [llm]."""
+    return AgentSpec(
+        name="prospector",
+        description="research specialist",
+        system_prompt="research",
+        source_path=Path("agents/prospector.md"),
+        model_provider=None,
+        model=None,
+        context_limit=1_050_000,
+    )
+
+
+@pytest.mark.asyncio
+async def test_budget_for_an_untouched_target_uses_what_boot_already_derived() -> None:
+    settings = _settings_with_main_model()
+    registry = AgentRegistry([_inheriting_spec()])
+
+    specialist = await resolve_delegation_budget(registry, settings, "prospector", {})
+    assert specialist.compact_threshold_tokens == 997500
+    assert specialist.max_new_tokens is None
+
+    # No agent_name is the default worker on the main model, whose budget auto-config wrote to
+    # memory.max_history_tokens.
+    general = await resolve_delegation_budget(registry, settings, None, {})
+    assert general.compact_threshold_tokens == 997500
+
+
+@pytest.mark.asyncio
+async def test_budget_resolves_a_general_workers_model_override() -> None:
+    """Returning the main model's threshold here would compact ~6x too late on a smaller target."""
+    settings = _settings_with_main_model()
+    prime_model_limits(
+        "openai_responses", "deepseek-v4p1", {"catalog_provider": "fireworks-ai", "context": 163840, "output": 16384}
+    )
+
+    budget = await resolve_delegation_budget(AgentRegistry([]), settings, None, {"model": "deepseek-v4p1"})
+
+    assert budget.compact_threshold_tokens == 155648
+    assert budget.max_new_tokens == 16384
+
+
+@pytest.mark.asyncio
+async def test_budget_resolves_against_the_inherited_provider() -> None:
+    """spec.model_provider is None here, so resolving against it alone would find nothing."""
+    settings = _settings_with_main_model()
+    prime_model_limits("openai_responses", "glm-5.3", {"catalog_provider": "zai", "context": 200000, "output": 32768})
+
+    budget = await resolve_delegation_budget(
+        AgentRegistry([_inheriting_spec()]), settings, "prospector", {"model": "glm-5.3"}
+    )
+
+    assert budget.compact_threshold_tokens == 190000
+    assert budget.max_new_tokens == 32768
+
+
+@pytest.mark.asyncio
+async def test_budget_for_an_uncatalogued_target_sends_nothing_rather_than_another_models_window() -> None:
+    settings = _settings_with_main_model()
+
+    budget = await resolve_delegation_budget(
+        AgentRegistry([_inheriting_spec()]), settings, "prospector", {"model": "never-seen"}
+    )
+
+    assert budget.compact_threshold_tokens is None
+    assert budget.max_new_tokens is None

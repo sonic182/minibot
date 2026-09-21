@@ -276,8 +276,8 @@ def test_provider_alias_builds_the_client_for_its_api_format(monkeypatch) -> Non
     assert config.model == "deepseek-v3.6"
 
 
-def test_available_providers_skips_sections_without_credentials() -> None:
-    settings = Settings(
+def _codex_settings() -> Settings:
+    return Settings(
         llm=LLMMConfig(provider="chatgpt_codex", model="gpt-5.6-sol"),
         providers={
             "opencode_go": ProviderConfig(api_key="go-key", api_format="openai_responses", models=["deepseek-v3.6"]),
@@ -286,7 +286,12 @@ def test_available_providers_skips_sections_without_credentials() -> None:
         },
     )
 
-    options = available_providers(settings)
+
+def test_available_providers_skips_sections_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import codex_setup
+
+    monkeypatch.setattr(codex_setup, "load_credentials", lambda _path: object())
+    options = available_providers(_codex_settings())
 
     assert [(option.name, option.api_format) for option in options] == [
         ("chatgpt_codex", "chatgpt_codex"),
@@ -294,6 +299,33 @@ def test_available_providers_skips_sections_without_credentials() -> None:
     ]
     assert find_provider("OpenCode_Go ", options) is options[1]
     assert find_provider("openrouter", options) is None
+
+
+def test_available_providers_drops_codex_without_loadable_oauth_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A key-less Codex section is not a credential: queueing work on it fails only in the worker."""
+    from minibot.llm.services import codex_setup
+
+    def _missing(_path):
+        raise codex_setup.CodexCredentialsError("no credentials at that path")
+
+    monkeypatch.setattr(codex_setup, "load_credentials", _missing)
+    options = available_providers(_codex_settings())
+
+    assert [option.name for option in options] == ["opencode_go"]
+    assert find_provider("chatgpt_codex", options) is None
+
+
+def test_available_providers_drops_codex_when_the_extra_is_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import codex_setup
+
+    def _no_extra(_path):
+        raise codex_setup.CodexDependencyError("llm_async_codex is not installed")
+
+    monkeypatch.setattr(codex_setup, "load_credentials", _no_extra)
+
+    assert [option.name for option in available_providers(_codex_settings())] == ["opencode_go"]
 
 
 def test_provider_section_without_a_known_name_must_declare_its_api_format() -> None:
