@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from multiprocessing import Process
@@ -17,6 +17,7 @@ from minibot.adapters.config.schema import Settings
 from minibot.adapters.tasks.worker import worker_entry
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.token_limits_autoconfig import ensure_model_limits
 from minibot.core.channels import ChannelFileResponse, ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundEvent, OutboundFileEvent
 from minibot.core.tasks import TaskLimits, TaskRepository, TaskResult, TaskStatus, TaskStopReason
@@ -27,19 +28,40 @@ _MAX_RETRYABLE_ATTEMPTS = 2
 _SUPERVISOR_GRACE_SECONDS = 10
 
 
-def compact_threshold_for_agent(registry: AgentRegistry, settings: Settings, agent_name: str | None) -> int | None:
+async def compact_threshold_for_agent(
+    registry: AgentRegistry,
+    settings: Settings,
+    agent_name: str | None,
+    overrides: Mapping[str, Any] | None = None,
+) -> int | None:
     """Token budget a worker may reach before compacting its own transcript.
 
-    Resolved on the daemon side rather than in the worker: the subprocess reloads specs from disk
-    and never sees what token auto-config derived at boot. A task with no agent runs the default
-    worker on the main model, whose budget auto-config already wrote to ``memory.max_history_tokens``.
+    Resolved on the daemon side rather than in the worker: the subprocess reloads specs from disk,
+    never sees what token auto-config derived at boot, and starts with a cold limits cache that a
+    lookup there would have to refill with a full catalog download per task. A task with no agent
+    runs the default worker on the main model, whose budget auto-config already wrote to
+    ``memory.max_history_tokens``.
     """
     if not agent_name:
         return settings.memory.max_history_tokens
     spec = registry.get(agent_name)
     if spec is None:
         return None
-    return threshold_from_context_limit(spec.context_limit, settings.memory.context_ratio_before_compact)
+    overrides = overrides or {}
+    provider_name = overrides.get("model_provider") or spec.model_provider
+    model_name = overrides.get("model") or spec.model
+    context_limit = spec.context_limit
+    if overrides.get("model_provider") or overrides.get("model"):
+        # The spec's own window belongs to another model entirely — resolve the target's or send
+        # nothing, never the configured agent's.
+        limits = await ensure_model_limits(
+            settings=settings,
+            provider_name=provider_name,
+            model_name=model_name,
+            logger=logging.getLogger("minibot.tasks"),
+        )
+        context_limit = limits["context"] if limits else None
+    return threshold_from_context_limit(context_limit, settings.memory.context_ratio_before_compact)
 
 
 class _LeaseLostError(Exception):
@@ -69,7 +91,7 @@ class TaskManager:
         task_repository: TaskRepository | None = None,
         lease_timeout_seconds: int | None = None,
         secrets: Mapping[str, str] | None = None,
-        compact_threshold_for: Callable[[str | None], int | None] | None = None,
+        compact_threshold_for: Callable[[str | None, Mapping[str, Any]], Awaitable[int | None]] | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._worker_timeout_seconds = worker_timeout_seconds
@@ -83,6 +105,11 @@ class TaskManager:
         self._secrets = dict(secrets) if secrets else None
         self._tasks: dict[str, Task] = {}
         self._logger = logging.getLogger("minibot.tasks")
+
+    async def _compact_threshold(self, agent_name: str | None, overrides: Mapping[str, Any]) -> int | None:
+        if self._compact_threshold_for is None:
+            return None
+        return await self._compact_threshold_for(agent_name, overrides)
 
     async def spawn(
         self,
@@ -134,13 +161,7 @@ class TaskManager:
             "user_id": user_id,
             "owner_id": owner_id,
             "limits": asdict(resolved_limits),
-            # An overridden model has an unknown context window, so the budget resolved from the
-            # agent's configured model would be wrong: send none and let the worker skip compaction.
-            "compact_threshold_tokens": (
-                self._compact_threshold_for(agent_name)
-                if self._compact_threshold_for and not overrides.get("model")
-                else None
-            ),
+            "compact_threshold_tokens": await self._compact_threshold(agent_name, overrides),
         }
         mainpipe, proc = self._start_worker_process()
         reader = asyncio.create_task(

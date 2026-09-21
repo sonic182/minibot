@@ -117,8 +117,18 @@ def build_compactor(
 ) -> RuntimeCompactor | None:
     """``None`` whenever the threshold is unknown — a model with no catalog entry gives us
     nothing to compare against, and guessing a window is worse than not compacting."""
-    if not threshold_tokens or threshold_tokens <= 0:
+    armed = bool(threshold_tokens and threshold_tokens > 0)
+    logger.debug(
+        "runtime compaction armed" if armed else "runtime compaction unavailable: no known context limit",
+        extra={
+            "threshold_tokens": threshold_tokens,
+            "provider": getattr(llm_client, "provider_name", lambda: None)(),
+            "model": getattr(llm_client, "model_name", lambda: None)(),
+        },
+    )
+    if not armed:
         return None
+    assert threshold_tokens is not None
     return RuntimeCompactor(llm_client=llm_client, threshold_tokens=threshold_tokens, logger=logger)
 
 

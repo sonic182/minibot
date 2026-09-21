@@ -124,6 +124,10 @@ class LLMClientFactory:
         self._cache[key] = client
         return client
 
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
     def available_providers(self) -> list[ProviderOption]:
         return available_providers(self._settings)
 

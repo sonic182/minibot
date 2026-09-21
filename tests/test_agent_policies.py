@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 from llm_async.models import Tool
 
-from minibot.app.agent_policies import filter_tools_for_agent, strip_reserved_delegation_tools
+from minibot.app.agent_policies import (
+    apply_agent_overrides,
+    filter_tools_for_agent,
+    strip_reserved_delegation_tools,
+)
+from minibot.app.token_limits_autoconfig import prime_model_limits
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
 
@@ -127,3 +132,51 @@ def test_strip_reserved_delegation_tools_removes_recursive_tools() -> None:
     names = [binding.tool.name for binding in filtered]
 
     assert names == ["current_datetime"]
+
+
+def _retargetable_spec() -> AgentSpec:
+    return AgentSpec(
+        name="browser",
+        description="browser specialist",
+        system_prompt="drive the browser",
+        source_path=Path("agents/browser_agent.md"),
+        model_provider="openai_responses",
+        model="gpt-5.6-luna",
+        context_limit=1_050_000,
+        max_new_tokens=50_000,
+    )
+
+
+def test_retargeting_rederives_the_caps_from_the_target_model() -> None:
+    prime_model_limits(
+        "fireworks", "deepseek-v4p1", {"catalog_provider": "fireworks", "context": 163840, "output": 16384}
+    )
+
+    spec = apply_agent_overrides(
+        _retargetable_spec(),
+        {"model_provider": "fireworks", "model": "deepseek-v4p1"},
+        context_ratio=0.95,
+    )
+
+    # Not the 1.05M of the spec's own model: inheriting that would compact ~6x too late.
+    assert spec.context_limit == 163840
+    assert spec.max_new_tokens == 16384
+
+
+def test_retargeting_without_cached_limits_drops_the_caps() -> None:
+    spec = apply_agent_overrides(
+        _retargetable_spec(),
+        {"model_provider": "fireworks", "model": "never-seen"},
+        context_ratio=0.95,
+    )
+
+    assert spec.context_limit is None
+    assert spec.max_new_tokens is None
+
+
+def test_overriding_only_reasoning_effort_keeps_the_boot_derived_caps() -> None:
+    spec = apply_agent_overrides(_retargetable_spec(), {"reasoning_effort": "high"}, context_ratio=0.95)
+
+    assert spec.reasoning_effort == "high"
+    assert spec.context_limit == 1_050_000
+    assert spec.max_new_tokens == 50_000

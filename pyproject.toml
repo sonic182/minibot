@@ -44,6 +44,7 @@ include = [
 [tool.poetry.dependencies]
 python = ">=3.12,<3.15"
 aiosonic = "^1.0.6"
+onecache = "^0.8.1"
 llm-async = "^0.5.3"
 pydantic = "^2.12.5"
 pydantic-settings = "^2.12.0"

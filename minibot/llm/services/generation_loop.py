@@ -70,6 +70,7 @@ async def generate_with_tools(
         system_prompt=system_prompt,
     )
     conversation = list(messages)
+    replay_text = provider_name == "openrouter"
     tool_bindings = list(tools or [])
     tool_specs = prepare_tool_specs(tool_bindings, model)
     context = tool_context or ToolContext()
@@ -143,11 +144,11 @@ async def generate_with_tools(
                         response_id,
                         total_tokens=usage_accumulator.total_tokens_used or None,
                     )
-                conversation.append(assistant_message_for_followup(message))
+                conversation.append(assistant_message_for_followup(message, replay_text=replay_text))
                 conversation.append({"role": "user", "content": _TRUNCATED_PATCH})
                 continue
             if not message_tool_calls and _has_pseudo_tool_call_tag(raw_content):
-                conversation.append(assistant_message_for_followup(message))
+                conversation.append(assistant_message_for_followup(message, replay_text=replay_text))
                 conversation.append({"role": "user", "content": _PSEUDO_TOOL_PATCH})
                 continue
         if not effective_tool_calls or not tool_bindings:
@@ -215,7 +216,7 @@ async def generate_with_tools(
                 extra_kwargs["previous_response_id"] = response_id
             conversation = tool_messages
         else:
-            conversation.append(assistant_message_for_followup(message))
+            conversation.append(assistant_message_for_followup(message, replay_text=replay_text))
             conversation.extend(tool_messages)
         iterations += 1
         if iterations >= max_tool_iterations:

@@ -21,6 +21,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime, RuntimeResult
 from minibot.app.llm_client_factory import LLMClientFactory, find_provider
 from minibot.app.runtime_limits import build_runtime_limits
+from minibot.app.token_limits_autoconfig import ensure_model_limits
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.agents import AgentSpec
 from minibot.llm.errors import ProviderHTTPError
@@ -166,7 +167,15 @@ class AgentDelegateTool:
                     "error": f"provider '{requested_provider}' has no configured credentials",
                     "available_providers": [option.as_payload() for option in options],
                 }
-        spec = apply_agent_overrides(spec, overrides)
+        # Fills the limits cache for an ad-hoc target so apply_agent_overrides can re-derive this
+        # run's compaction threshold and output cap instead of dropping them.
+        await ensure_model_limits(
+            settings=self._llm_factory.settings,
+            provider_name=overrides.get("model_provider") or spec.model_provider,
+            model_name=overrides.get("model") or spec.model,
+            logger=self._logger,
+        )
+        spec = apply_agent_overrides(spec, overrides, context_ratio=self._context_ratio_before_compact)
 
         self._logger.debug(
             "delegated agent invocation started",

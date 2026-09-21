@@ -25,7 +25,7 @@ def register(mb: ExtensionContext) -> None:
         store,
         settings.tasks.sqlite.lease_timeout_seconds,
         secrets=mb.vault.as_mapping() if mb.vault else None,
-        compact_threshold_for=lambda name: compact_threshold_for_agent(agent_registry, settings, name),
+        compact_threshold_for=lambda name, ov: compact_threshold_for_agent(agent_registry, settings, name, ov),
     )
     producer = RabbitMQTaskProducer(settings.rabbitmq, store)
     consumer = RabbitMQConsumerService(

@@ -6,6 +6,7 @@ from typing import Any, cast
 import pytest
 from llm_async.models import Tool
 
+from minibot.adapters.config.schema import Settings
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import RuntimeResult
 from minibot.app.llm_client_factory import ProviderOption
@@ -36,6 +37,7 @@ class _StubLLMClient:
 class _StubLLMFactory:
     def __init__(self) -> None:
         self.client = _StubLLMClient()
+        self.settings = Settings()
 
     def create_for_agent(self, _: AgentSpec) -> _StubLLMClient:
         return self.client
@@ -211,6 +213,7 @@ class _SpecCapturingFactory:
     def __init__(self, providers: list[ProviderOption]) -> None:
         self.client = _StubLLMClient()
         self.specs: list[AgentSpec] = []
+        self.settings = Settings()
         self._providers = providers
 
     def create_for_agent(self, spec: AgentSpec) -> _StubLLMClient:

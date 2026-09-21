@@ -52,6 +52,9 @@ class _StubRuntimeLLMClient:
     def is_responses_provider(self) -> bool:
         return self._is_responses_provider
 
+    def provider_name(self) -> str:
+        return "openai"
+
     def responses_state_mode(self) -> str:
         return self._responses_state_mode
 

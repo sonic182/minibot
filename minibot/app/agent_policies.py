@@ -5,6 +5,7 @@ from dataclasses import replace
 from typing import Any
 
 from minibot.app.mcp_tool_name import extract_mcp_server, is_mcp_tool_name
+from minibot.app.token_limits_autoconfig import cached_model_limits
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns, validate_allow_deny
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
@@ -70,8 +71,19 @@ def normalize_model_overrides(payload: Mapping[str, Any] | None) -> dict[str, st
     return overrides
 
 
-def apply_agent_overrides(spec: AgentSpec, overrides: Mapping[str, Any] | None) -> AgentSpec:
-    """Retarget one invocation of an agent at another provider, model or reasoning effort."""
+def apply_agent_overrides(
+    spec: AgentSpec,
+    overrides: Mapping[str, Any] | None,
+    *,
+    context_ratio: float = 0.0,
+) -> AgentSpec:
+    """Retarget one invocation of an agent at another provider, model or reasoning effort.
+
+    ``context_limit`` and ``max_new_tokens`` were derived at boot from the spec's own model, so
+    they are meaningless for an ad-hoc target: they get re-derived from the cached limits of the
+    model actually being called. A cache miss falls back to dropping both, which costs this run its
+    mid-run compaction and tuned cap but never sends another model's window.
+    """
     normalized = normalize_model_overrides(overrides)
     if not normalized:
         return spec
@@ -79,11 +91,25 @@ def apply_agent_overrides(spec: AgentSpec, overrides: Mapping[str, Any] | None) 
         normalized.get(key, getattr(spec, key)) != getattr(spec, key) for key in ("model_provider", "model")
     )
     if retargeted:
-        # ponytail: context_limit and max_new_tokens were derived at boot from the spec's own model
-        # by token auto-config, so they are meaningless for an ad-hoc target: drop both rather than
-        # send another model's output cap. Costs mid-run compaction and the tuned cap for this call;
-        # re-resolving would mean a models.dev fetch per delegation.
-        normalized_spec = replace(spec, context_limit=None, max_new_tokens=None)
+        limits = cached_model_limits(
+            normalized.get("model_provider") or spec.model_provider,
+            normalized.get("model") or spec.model,
+        )
+        normalized_spec = replace(
+            spec,
+            context_limit=limits["context"] if limits else None,
+            max_new_tokens=_retargeted_max_new_tokens(spec, limits, context_ratio),
+        )
     else:
         normalized_spec = spec
     return replace(normalized_spec, **normalized)
+
+
+def _retargeted_max_new_tokens(spec: AgentSpec, limits: dict[str, Any] | None, context_ratio: float) -> int | None:
+    if not limits:
+        return None
+    budget = max(1, int(limits["context"] * context_ratio)) if context_ratio > 0 else None
+    # `if value` mirrors token auto-config: it drops both an unset cap and the None output limit
+    # the chatgpt_codex branch returns.
+    ceilings = [value for value in (limits.get("output"), budget, spec.max_new_tokens) if value]
+    return max(1, min(ceilings)) if ceilings else None

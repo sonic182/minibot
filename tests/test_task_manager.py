@@ -505,7 +505,11 @@ async def test_spawn_sends_the_compaction_threshold_to_the_worker() -> None:
     # The worker reloads agent specs from disk and never sees what token auto-config derived at
     # boot, so the daemon has to resolve the budget and ship it with the task.
     bus = EventBus()
-    manager = TaskManager(bus, 5.0, compact_threshold_for=lambda name: 4321 if name == "prospector" else None)
+
+    async def _threshold(name: str | None, _overrides: dict) -> int | None:
+        return 4321 if name == "prospector" else None
+
+    manager = TaskManager(bus, 5.0, compact_threshold_for=_threshold)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
 
     seen: list[dict] = []
@@ -523,10 +527,17 @@ async def test_spawn_sends_the_compaction_threshold_to_the_worker() -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_forwards_model_overrides_and_drops_the_stale_threshold() -> None:
-    # The threshold was derived from the agent's configured model, so it cannot describe another one.
+async def test_spawn_forwards_model_overrides_to_the_threshold_resolver() -> None:
+    # The agent's configured window cannot describe another model, so the resolver gets the
+    # overrides and answers for the model actually being run.
     bus = EventBus()
-    manager = TaskManager(bus, 5.0, compact_threshold_for=lambda _: 4321)
+    seen_overrides: list[dict] = []
+
+    async def _threshold(_name: str | None, overrides: dict) -> int | None:
+        seen_overrides.append(overrides)
+        return 777 if overrides.get("model") else 4321
+
+    manager = TaskManager(bus, 5.0, compact_threshold_for=_threshold)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
 
     seen: list[dict] = []
@@ -544,7 +555,8 @@ async def test_spawn_forwards_model_overrides_and_drops_the_stale_threshold() ->
     await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert seen[0]["model_overrides"] == overrides
-    assert seen[0]["compact_threshold_tokens"] is None
+    assert seen_overrides == [overrides]
+    assert seen[0]["compact_threshold_tokens"] == 777
 
 
 @pytest.mark.asyncio
