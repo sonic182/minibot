@@ -69,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was scoped against core tools alone — no `bash`, `filesystem`, `current_datetime`, `http_request`,
   `python_execute`, memory, graph, rag or scheduler — whatever its `tools_allow`/`tools_deny` said. An
   agent that needs `bash`, such as a playwright-cli specialist, could not work at all.
+- **Reasoning replay no longer breaks strict providers.** The assistant's thinking text was echoed back
+  on the next request as `reasoning`, which Fireworks rejects with HTTP 400 ("Extra inputs are not
+  permitted"), killing a tool loop on its first step. The text now goes back under the key it arrived
+  with — `reasoning_content` for DeepSeek and Kimi thinking-mode loops — and bare `reasoning` only for
+  OpenRouter, the one target that reads it. `reasoning_details` is replayed as before, since the
+  Responses API rebuilds its `rs_` item from it.
 
 ## [0.19.0] - 2026-09-21
 
