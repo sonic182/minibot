@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Specialist agents can load skills again.** Since 0.20 delegation runs in a task worker, which built
+  its tools without `list_skills` and `activate_skill`, so a specialist listing them in `tools_allow`
+  silently lost them. The worker now attaches both, scoped by the agent's `tools_allow`/`tools_deny`
+  like every other tool; the default worker gets them too. `install_skill` stays with the main agent.
+
 ## [0.21.0] - 2026-09-22
 
 ### Added

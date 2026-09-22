@@ -258,6 +258,41 @@ def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
     assert "fetch_agent_info" not in tool_names
 
 
+@pytest.mark.asyncio
+async def test_build_worker_tools_scopes_skill_tools_to_the_spec(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skills" / "deploy"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: deploy\ndescription: Ship it.\n---\nRun the deploy.\n")
+    settings = Settings()
+    settings.tools.skills.enabled = True
+    settings.tools.skills.install = True
+    settings.tools.skills.paths = [str(tmp_path / "skills")]
+    spec = AgentSpec(
+        name="specialist",
+        description="desc",
+        system_prompt="prompt",
+        source_path=worker.Path("/tmp/specialist.md"),
+        tools_allow=["activate_skill", "install_skill"],
+    )
+
+    bindings = {binding.tool.name: binding for binding in worker._build_worker_tools(settings=settings, spec=spec)}
+
+    assert set(bindings) == {"activate_skill"}
+    result = await bindings["activate_skill"].handler({"name": "deploy"}, ToolContext())
+    assert "Run the deploy." in result["instructions"]
+
+
+def test_build_worker_tools_omits_skill_tools_when_skills_disabled() -> None:
+    settings = Settings()
+    settings.tools.skills.enabled = False
+    spec = worker._build_worker_spec(system_prompt="You are Minibot.", environment_prompt_fragment="")
+
+    tool_names = {binding.tool.name for binding in worker._build_worker_tools(settings=settings, spec=spec)}
+
+    assert "list_skills" not in tool_names
+    assert "activate_skill" not in tool_names
+
+
 def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:
     settings = Settings()
     specialist = AgentSpec(

@@ -22,6 +22,7 @@ from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.response_parser import extract_answer, resolve_reply_render
+from minibot.app.skill_registry import SkillRegistry
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentSpec
 from minibot.core.tasks import TaskLimits, TaskStopReason
@@ -39,6 +40,7 @@ from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.mcp_bridge import build_mcp_bindings
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
+from minibot.llm.tools.skill_loader import SkillLoaderTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.shared.utils import session_identifier, validate_attachments
 
@@ -58,6 +60,8 @@ _WORKER_TOOL_ALLOWLIST = [
     "python_environment_info",
     "apply_patch",
     "transcribe_audio",
+    "list_skills",
+    "activate_skill",
 ]
 _WORKER_SYSTEM_PROMPT_SUFFIX = (
     "You are an isolated task worker.\n"
@@ -260,6 +264,15 @@ def _build_worker_tools(
                     storage=managed_storage,
                 ).bindings()
             )
+    if settings.tools.skills.enabled:
+        skills_config = settings.tools.skills
+        registry = SkillRegistry(
+            paths=list(skills_config.paths) or None,
+            native=skills_config.native,
+            native_disabled=skills_config.disabled_native_skills,
+            write_path=skills_config.write_path,
+        )
+        bindings.extend(SkillLoaderTool(registry, managed_storage, settings.tools.bash.enabled).bindings())
     if settings.tools.mcp.enabled and spec.mcp_servers:
         for server in settings.tools.mcp.servers:
             if server.name not in spec.mcp_servers:

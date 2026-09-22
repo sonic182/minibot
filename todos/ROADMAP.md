@@ -157,7 +157,7 @@ memory (e.g. `/proc/<pid>/mem`) — same trust boundary as any self-hosted
 secret manager running as one OS user. Out of scope unless that threat model
 changes.
 
-## [ ] Phase 2 — Skills for specialist agents (regression from 0.20) — PRIORITY
+## [x] Phase 2 — Skills for specialist agents (regression from 0.20) — PRIORITY
 
 Specialists cannot load skills today, whatever their `tools_allow` says. Before 0.20,
 `invoke_agent` ran a specialist inside the daemon against the main agent's tool list, which
