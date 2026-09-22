@@ -20,7 +20,7 @@ guarantee the software can't actually make.
 
 - **MiniBot's own responsibility**: safe-by-default config
   (`bash.pass_parent_env = false`), secrets never reaching the LLM (Phase 1),
-  guardrails on consequential actions (Phase 4's SMTP gate, Phase 5). These
+  guardrails on consequential actions (Phase 5's SMTP gate, Phase 6). These
   matter *regardless of deployment*, because the LLM provider itself — the
   remote API — sees whatever ends up in tool-call arguments and context, no
   matter how isolated the host is. No amount of sandboxing the process
@@ -28,7 +28,7 @@ guarantee the software can't actually make.
   place does. This is why the vault stays high priority even for an owner
   who already runs MiniBot in a throwaway VM.
 - **Deployment's responsibility**: OS/filesystem/process isolation for
-  `bash`/`python_exec` (Phase 6's jail/container options). An owner who
+  `bash`/`python_exec` (Phase 7's jail/container options). An owner who
   already isolates the host can reasonably set `sandbox_mode = "none"` and
   accept the ambient risk — that's a valid choice, not a bug to prevent.
 
@@ -80,8 +80,8 @@ Ansible-vault-style design, shipped as an optional extension (not core):
   on equal footing — ship with an explicit warning: Phase 0 only fixes env
   inheritance, it says nothing about `--vault-password-file`, which stays
   exposed to `bash` reading it directly off disk (no cwd jail at all — see
-  Phase 6) regardless of Phase 0. Both alternate methods stay a real risk
-  until Phase 6's filesystem isolation lands, not just the env-var one.
+  Phase 7) regardless of Phase 0. Both alternate methods stay a real risk
+  until Phase 7's filesystem isolation lands, not just the env-var one.
   Whichever method is used, that password/file becomes the thing to protect
   instead.
 - CLI helper `minibot vault edit <path>` — like `ansible-vault edit`:
@@ -106,14 +106,14 @@ Ansible-vault-style design, shipped as an optional extension (not core):
   checks against the *actual request host*, attaching the header itself
   when it matches. The LLM never writes or sees a secret reference either
   way.
-- **Deferred to Phase 3**, where this is restated concretely:
+- **Deferred to Phase 4**, where this is restated concretely:
   `execute_tool_calls_for_runtime` (`minibot/llm/services/tool_executor.py`)
   is the choke point for the *other* side of this — redacting any known
   secret value out of a `ToolResult` (and logs) before it reaches the LLM.
   Not shipped in Phase 1: the same exfil-via-echo risk already exists
   un-redacted today for `${ENV_VAR}` static MCP headers, so Phase 1 does not
   widen it, and threading a redactor through `LLMClientFactory` →
-  `LLMClient` → the executor before Phase 3 knows its shape is premature.
+  `LLMClient` → the executor before Phase 4 knows its shape is premature.
   The "reject a call whose target isn't the bound destination" half is moot
   under the destination-bound model — nothing resolves at the executor, so
   there is no call to reject. It is a literal containment/redaction check
@@ -157,7 +157,39 @@ memory (e.g. `/proc/<pid>/mem`) — same trust boundary as any self-hosted
 secret manager running as one OS user. Out of scope unless that threat model
 changes.
 
-## [ ] Phase 2 — Native skills & runtime self-knowledge
+## [ ] Phase 2 — Skills for specialist agents (regression from 0.20) — PRIORITY
+
+Specialists cannot load skills today, whatever their `tools_allow` says. Before 0.20,
+`invoke_agent` ran a specialist inside the daemon against the main agent's tool list, which
+includes `list_skills` and `activate_skill` (`llm/tools/factory.py:56-59`). Since #93 every
+delegation goes through `spawn_task`, and the worker subprocess builds its own tools in
+`_build_worker_tools` (`adapters/tasks/worker.py:227`): time, calculator, HTTP, Python, bash,
+files, grep, MCP and extension tools — **no skill tools**. `filter_tools_for_agent` has nothing to
+let through, so an agent listing `activate_skill` silently runs without it. The skill catalog
+(`preload_catalog`) is only composed into the main agent's prompt (`app/dispatcher.py:110`), so a
+specialist does not even learn which skills exist.
+
+This is also why `docs/agents.rst` is wrong right now ("a specialist can be pointed at one the same
+way the main agent is"), and why adding `list_skills` / `activate_skill` to an agent such as
+`agents/browser_agent.md` has no effect.
+
+- In `_build_worker_tools`, when `[tools.skills] enabled`, build a `SkillRegistry` the way
+  `AppContainer` does (`adapters/container/app_container.py:62`) and add `SkillLoaderTool`.
+  Still scoped by `tools_allow` / `tools_deny` like every other tool, so a specialist only gets
+  skills if its definition asks for them.
+- **Not** `install_skill`: installing pulls remote instructions into the agent's instruction set
+  and needs the owner's confirmation, which a background worker has no channel for. It stays on
+  the main agent.
+- Optional: append the skill catalog to a specialist's prompt when it ends up with
+  `activate_skill`; without it the specialist has to call `list_skills` first or already know the
+  skill's name from its own prompt.
+- Test in `tests/test_task_worker.py`: a spec with `tools_allow: [activate_skill]` receives it; one
+  without does not.
+
+Ahead of everything below because it is a regression in shipped behaviour, not new capability,
+and the fix is small.
+
+## [ ] Phase 3 — Native skills & runtime self-knowledge
 
 Detailed design, broken into seven PRs: [`native_skills.md`](native_skills.md).
 **In progress** — done: PR 1 (version single-sourcing, #82), PR 2 (native
@@ -241,7 +273,7 @@ Trust model, for the two new surfaces:
   import; show the parsed name, description and resolved source URL; require
   explicit owner confirmation for a source the owner did not name.
 
-## [ ] Phase 3 — MCP OAuth (issue #65)
+## [ ] Phase 4 — MCP OAuth (issue #65)
 
 Scope: alternative 1 only (auth-code + PKCE + manual callback paste). No HTTP
 callback endpoint, no device flow.
@@ -288,7 +320,7 @@ implementation that happens to work against two test servers:
   editing the vault file while the daemon is running requires a restart to
   pick up the change.
 
-## [ ] Phase 4 — SMTP tool
+## [ ] Phase 5 — SMTP tool
 
 - `SMTPToolConfig` next to `HTTPClientToolConfig`.
 - Credentials bound to the SMTP adapter per Phase 1's destination-bound
@@ -301,7 +333,7 @@ implementation that happens to work against two test servers:
   owner-facing Telegram confirmation, or a `dry_run` default) rather than a
   cross-cutting approval framework.
 
-## [ ] Phase 5 — Guardrail enhancements
+## [ ] Phase 6 — Guardrail enhancements
 
 Not a duplicate of Phase 1. Under the destination-bound model, the LLM never
 has a `secret://` reference to put in an argument at all, so there's nothing
@@ -318,7 +350,7 @@ call's arguments:
 - `GuardrailDecision` gains a `credential_exposure` field (structured, not
   regex/text classification, per project convention).
 
-## [ ] Phase 6 — bash tool hardening (mixed priority — see Trust model)
+## [ ] Phase 7 — bash tool hardening (mixed priority — see Trust model)
 
 Two different things live in this phase, deliberately split by who owns
 them:

@@ -1,6 +1,6 @@
 # Native skills — working proposal
 
-Detail document for **Phase 2** of [`ROADMAP.md`](ROADMAP.md).
+Detail document for **Phase 3** of [`ROADMAP.md`](ROADMAP.md).
 Status: PRs 1 (#82), 2 (#83) and 6 (#84, released in 0.18.0) shipped; PR 3 (`reload_agents`) is
 next, then 4, and 5 and 7 in any order.
 
