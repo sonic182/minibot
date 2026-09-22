@@ -5,9 +5,13 @@
 {% block content %}
 <section>
   <h2>Key-value memory</h2>
+  <form class="search" method="get" action="/memory" role="search">
+    <input type="search" name="q" value="{{ q }}" placeholder="Search titles and data" aria-label="Search memory">
+    <button type="submit">Search</button>
+  </form>
   {% if entries %}
-  <p class="muted">{{ offset + 1 }}&ndash;{{ offset + entries | length }} of {{ total }} &middot; owner {{ owner_id }}</p>
-  <ul class="entries">
+  <p class="muted">{{ total }} {{ "match" if q and total == 1 else "matches" if q else "entries" }} &middot; owner {{ owner_id }}</p>
+  <ul class="entries" data-pager-list>
     {% for entry in entries %}
     <li class="entry">
       <div class="entry-head">
@@ -23,7 +27,7 @@
       <div class="entry-actions">
         <details>
           <summary>Edit</summary>
-          <form method="post" action="/memory?offset={{ offset }}">
+          <form method="post" action="{{ action_url }}">
             <input type="hidden" name="action" value="update">
             <input type="hidden" name="id" value="{{ entry.id }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -31,20 +35,17 @@
             <button type="submit">Save</button>
           </form>
         </details>
-        <button type="button" class="danger" data-delete="{{ entry.id }}" data-delete-title="{{ entry.title }}">
+        <button type="button" class="danger" data-confirm="confirm-delete" data-confirm-value="{{ entry.id }}" data-confirm-label="{{ entry.title }}">
           Delete
         </button>
       </div>
     </li>
     {% endfor %}
   </ul>
-  <p class="pager">
-    {% if offset > 0 %}<a href="/memory?offset={{ previous_offset }}">&larr; newer</a>{% endif %}
-    {% if next_offset is not none %}<a href="/memory?offset={{ next_offset }}">older &rarr;</a>{% endif %}
-  </p>
+  {% if next_url %}<p class="pager"><a href="{{ next_url }}" data-pager-next>older &rarr;</a></p>{% endif %}
 
   <dialog id="confirm-delete">
-    <form method="post" action="/memory?offset={{ offset }}">
+    <form method="post" action="{{ action_url }}">
       <input type="hidden" name="action" value="delete">
       <input type="hidden" name="id" data-confirm-id>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -56,23 +57,7 @@
     </form>
   </dialog>
   {% else %}
-  <p>nothing stored yet</p>
+  <p>{{ "nothing matches" if q else "nothing stored yet" }}</p>
   {% endif %}
 </section>
-{% endblock %}
-
-{% block scripts %}
-{% if entries %}
-<script>
-  const dialog = document.getElementById("confirm-delete");
-  for (const button of document.querySelectorAll("[data-delete]")) {
-    button.addEventListener("click", () => {
-      dialog.querySelector("[data-confirm-id]").value = button.dataset.delete;
-      dialog.querySelector("[data-confirm-title]").textContent = button.dataset.deleteTitle;
-      dialog.showModal();
-    });
-  }
-  dialog.querySelector("[data-confirm-cancel]").addEventListener("click", () => dialog.close());
-</script>
-{% endif %}
 {% endblock %}

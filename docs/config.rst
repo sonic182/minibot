@@ -201,7 +201,9 @@ An optional HTTP server running on the daemon's own event loop. Needs the ``http
 no credential — and an authenticated dashboard at ``/`` showing the running model, channels,
 extensions, tools, routes, uptime, and pending turns. Its stylesheet is served beneath ``/static``.
 Conversation history is available at ``/history`` and can contain sensitive data. The browser chat at ``/chat``
-uses the ``web:1`` history session and can contain the same sensitive data. Extensions can
+uses the ``web:1`` history session and can contain the same sensitive data. The ``/history``,
+``/memory`` and ``/scheduled`` pages each have a search box and load more entries as you scroll;
+history search matches message text across every conversation. Extensions can
 also contribute routes through ``mb.add_route`` (see :doc:`extensions`). All routes except
 ``/health`` require a bearer token or HTTP Basic credentials; one is mandatory unless ``host`` is
 the literal ``127.0.0.1`` or ``::1``. When the key-value memory and graph extensions are enabled,

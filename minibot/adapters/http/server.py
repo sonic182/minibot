@@ -16,8 +16,9 @@ from typing import Any
 import uvicorn
 from starlette.applications import Starlette
 from starlette.datastructures import MutableHeaders
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -68,13 +69,41 @@ def render(request: Request, template_name: str, context: dict[str, Any] | None 
     return _templates.TemplateResponse(request, template_name, context or {})
 
 
-def set_nav_entries(entries: Sequence[tuple[str, str]]) -> None:
+MAX_QUERY_INT = 2**63 - 1  # SQLite's INTEGER range; the driver raises OverflowError past it.
+
+
+def query_int(request: Request, name: str, default: int | None = None) -> int | None:
+    """Read a non-negative integer query parameter, or ``default`` when absent. Raises ``ValueError``
+    for anything else, including values SQLite cannot bind, so pages answer 400 instead of 500."""
+    raw = request.query_params.get(name)
+    if raw is None or raw == "":
+        return default
+    value = int(raw)
+    if not 0 <= value <= MAX_QUERY_INT:
+        raise ValueError(f"{name} is out of range")
+    return value
+
+
+def page_url(request: Request, **params: Any) -> str:
+    """The current path and query with ``params`` replaced, host-relative so it survives a proxy.
+    Pages use it for their "next page" links, which keeps the search and filters in the URL."""
+    url = request.url.include_query_params(**params)
+    return f"{url.path}?{url.query}"
+
+
+_DEFAULT_NAV_ICON = "file"
+
+
+def set_nav_entries(entries: Sequence[tuple[str, str] | tuple[str, str, str]]) -> None:
     """Publish the navigation menu as a Jinja global, once, at daemon boot.
 
-    A global rather than per-handler context: the menu is the same on every page, and an
-    extension's own handler should not have to know it exists in order to render inside it.
+    Each entry is ``(path, label)`` or ``(path, label, lucide_icon)``; entries without an icon get
+    a generic one. A global rather than per-handler context: the menu is the same on every page,
+    and an extension's own handler should not have to know it exists in order to render inside it.
     """
-    _templates.env.globals["nav_entries"] = list(entries)
+    _templates.env.globals["nav_entries"] = [
+        (entry[0], entry[1], entry[2] if len(entry) > 2 else _DEFAULT_NAV_ICON) for entry in entries
+    ]
 
 
 @dataclass(frozen=True)
@@ -157,23 +186,34 @@ def build_dashboard_route(data: DashboardData) -> RouteSpec:
 
 
 HISTORY_PATH = "/history"
-_HISTORY_MESSAGE_LIMIT = 200
 
 
 def build_history_route(memory: Any) -> RouteSpec:
     """Build the ``/history`` route: sessions index, or one session's messages with ``?session=``.
 
     The session id goes in a query parameter rather than the path because ids embed a colon
-    (``telegram:12345``, see ``minibot.shared.utils.session_identifier``).
+    (``telegram:12345``, see ``minibot.shared.utils.session_identifier``). Both views take ``q`` to
+    search message content and page by cursor: ``cursor`` for sessions, ``before`` for messages.
     """
 
     async def _history(request: Request) -> Any:
         session_id = request.query_params.get("session")
+        query = request.query_params.get("q", "").strip()
         if not session_id:
-            sessions = await memory.list_sessions()
-            return _templates.TemplateResponse(request, "history.html", {"sessions": sessions})
-        entries = list(await memory.get_history(session_id, limit=_HISTORY_MESSAGE_LIMIT))
-        context = {"session_id": session_id, "entries": entries, "limit": _HISTORY_MESSAGE_LIMIT}
+            try:
+                page = await memory.list_sessions(query=query or None, cursor=request.query_params.get("cursor"))
+            except ValueError:
+                return PlainTextResponse("invalid cursor", status_code=400)
+            next_url = page_url(request, cursor=page.next_cursor) if page.next_cursor else None
+            context = {"sessions": page.sessions, "q": query, "next_url": next_url}
+            return _templates.TemplateResponse(request, "history.html", context)
+        try:
+            before_id = query_int(request, "before")
+        except ValueError:
+            return PlainTextResponse("before must be a non-negative integer", status_code=400)
+        page = await memory.get_history_page(session_id, before_id=before_id, query=query or None)
+        next_url = page_url(request, before=page.next_before_id) if page.next_before_id else None
+        context = {"session_id": session_id, "entries": page.entries, "q": query, "next_url": next_url}
         return _templates.TemplateResponse(request, "history_detail.html", context)
 
     return (HISTORY_PATH, _history, ("GET",))
@@ -295,7 +335,9 @@ class HttpServer:
             static_files = StaticFiles(directory=STATIC_DIR)
         routes = [
             Route(HEALTH_PATH, _health),
-            Mount(STATIC_PATH, app=static_files, name="static"),
+            # Only static assets are compressed: pages carry secrets (CSRF and socket tokens) next to
+            # reflected input such as the search query, the mix a BREACH-style attack needs.
+            Mount(STATIC_PATH, app=GZipMiddleware(static_files, compresslevel=6), name="static"),
             *(Route(path, handler, methods=list(methods)) for path, handler, methods in self._routes),
             *(WebSocketRoute(path, handler) for path, handler in self._websockets),
         ]

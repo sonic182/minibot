@@ -37,7 +37,7 @@ from sqlalchemy.event import listens_for
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateIndex, CreateTable
 
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, like_pattern, resolve_sqlite_storage_path
 from minibot.shared.datetime_utils import ensure_utc, utcnow
 
 DEFAULT_SQLITE_URL = "sqlite+aiosqlite:///./data/graph.db"
@@ -207,7 +207,7 @@ class SqliteGraphStore:
         self, *, graph: str, owner_id: str, query: str, limit: int = 25, history: bool = False
     ) -> dict[str, Any]:
         await self._ensure_schema()
-        pattern = _like_pattern(_slug(query, field="query"))
+        pattern = like_pattern(_slug(query, field="query"))
         stmt = select(GRAPH_EDGES).where(
             GRAPH_EDGES.c.graph == graph,
             GRAPH_EDGES.c.owner_id == owner_id,
@@ -379,11 +379,6 @@ def _normalize_node(value: str) -> str:
 
 def _normalize_rel(value: str) -> str:
     return _slug(value, field="rel")
-
-
-def _like_pattern(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
 
 
 def _edge_key(edge: dict[str, Any]) -> tuple[str, str, str]:

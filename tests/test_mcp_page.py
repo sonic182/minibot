@@ -80,7 +80,7 @@ async def test_lists_each_server_with_its_tools(monkeypatch, serve) -> None:
     )
     context = _context()
     register(context)
-    assert ("/mcp", "MCP") in context.pages
+    assert ("/mcp", "MCP", "plug") in context.pages
 
     server = await serve(context)
     async with aiosonic.HTTPClient() as client:

@@ -107,6 +107,7 @@ class ScheduledPromptRepository(Protocol):
         statuses: Sequence[ScheduledPromptStatus] | None = None,
         limit: int = 20,
         offset: int = 0,
+        query: str | None = None,
     ) -> Sequence[ScheduledPrompt]: ...
 
     async def get_nearest_pending_run_at(self) -> datetime | None: ...

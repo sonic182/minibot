@@ -7,8 +7,10 @@
   <link rel="stylesheet" href="/static/dashboard.css">
   <script defer src="/static/vendor/lucide-1.46.0.min.js"></script>
   <script defer src="/static/nav.js"></script>
+  <script type="module" src="/static/pager.js"></script>
+  <script defer src="/static/confirm.js"></script>
 </head>
-<body>
+<body class="cloak">
   <nav class="navbar">
     <button type="button" class="burger" data-nav-toggle aria-label="Toggle menu" aria-expanded="false">
       <i data-lucide="menu" aria-hidden="true"></i>
@@ -18,8 +20,8 @@
   <div class="shell">
     <aside class="sidebar" data-nav-panel>
       <ul>
-        {% for path, label in nav_entries %}
-        <li><a href="{{ path }}"{% if path == request.url.path %} class="current"{% endif %}>{{ label }}</a></li>
+        {% for path, label, icon in nav_entries %}
+        <li><a href="{{ path }}"{% if path == request.url.path %} class="current"{% endif %}><i data-lucide="{{ icon }}" aria-hidden="true"></i>{{ label }}</a></li>
         {% endfor %}
       </ul>
     </aside>

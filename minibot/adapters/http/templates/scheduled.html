@@ -6,12 +6,16 @@
 <section>
   <h2>Scheduled prompts</h2>
   <p class="muted">
-    {{ jobs | length }} {{ "of up to " ~ limit ~ " " if jobs | length == limit }}
-    {{ "job" if jobs | length == 1 else "jobs" }} &middot; owner {{ owner_id }} &middot;
-    {% if show_all %}<a href="/scheduled">active only</a>{% else %}<a href="/scheduled?status=all">show all</a>{% endif %}
+    owner {{ owner_id }} &middot;
+    {% if show_all %}<a href="/scheduled{{ '?q=' ~ (q | urlencode) if q }}">active only</a>{% else %}<a href="/scheduled?status=all{{ '&q=' ~ (q | urlencode) if q }}">show all</a>{% endif %}
   </p>
+  <form class="search" method="get" action="/scheduled" role="search">
+    {% if show_all %}<input type="hidden" name="status" value="all">{% endif %}
+    <input type="search" name="q" value="{{ q }}" placeholder="Search prompt text" aria-label="Search scheduled prompts">
+    <button type="submit">Search</button>
+  </form>
   {% if jobs %}
-  <ul class="entries">
+  <ul class="entries" data-pager-list>
     {% for job in jobs %}
     <li class="entry {{ '' if job.active else 'inactive' }}">
       <div class="entry-head">
@@ -28,7 +32,7 @@
       {% if job.last_error %}<pre class="error">{{ job.last_error }}</pre>{% endif %}
       {% if job.active %}
       <div class="entry-actions">
-        <button type="button" class="danger" data-cancel="{{ job.id }}" data-cancel-when="{{ job.run_at.strftime("%Y-%m-%d %H:%M") }}">
+        <button type="button" class="danger" data-confirm="confirm-cancel" data-confirm-value="{{ job.id }}" data-confirm-label="{{ job.run_at.strftime("%Y-%m-%d %H:%M") }}">
           Cancel
         </button>
       </div>
@@ -36,9 +40,10 @@
     </li>
     {% endfor %}
   </ul>
+  {% if next_url %}<p class="pager"><a href="{{ next_url }}" data-pager-next>later &rarr;</a></p>{% endif %}
 
   <dialog id="confirm-cancel">
-    <form method="post" action="{{ '/scheduled?status=all' if show_all else '/scheduled' }}">
+    <form method="post" action="{{ action_url }}">
       <input type="hidden" name="action" value="cancel">
       <input type="hidden" name="id" data-confirm-id>
       <p>Cancel the prompt scheduled for <strong data-confirm-title></strong>?</p>
@@ -48,24 +53,10 @@
       </p>
     </form>
   </dialog>
+  {% elif q %}
+  <p>no prompt matches</p>
   {% else %}
   <p>{{ "nothing scheduled" if show_all else "nothing scheduled right now" }}</p>
   {% endif %}
 </section>
-{% endblock %}
-
-{% block scripts %}
-{% if jobs %}
-<script>
-  const dialog = document.getElementById("confirm-cancel");
-  for (const button of document.querySelectorAll("[data-cancel]")) {
-    button.addEventListener("click", () => {
-      dialog.querySelector("[data-confirm-id]").value = button.dataset.cancel;
-      dialog.querySelector("[data-confirm-title]").textContent = button.dataset.cancelWhen;
-      dialog.showModal();
-    });
-  }
-  dialog.querySelector("[data-confirm-cancel]").addEventListener("click", () => dialog.close());
-</script>
-{% endif %}
 {% endblock %}

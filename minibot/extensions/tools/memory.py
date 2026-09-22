@@ -26,7 +26,8 @@ def register(mb: ExtensionContext) -> None:
     mb.add_tool(build_kv_tools(memory))
     mb.add_service(_MemoryService(memory))
     if mb.settings.http.enabled:
-        mb.add_page("/memory", "Memory", _build_page(memory, mb.settings.runtime.owner_id), ("GET", "POST"))
+        page = _build_page(memory, mb.settings.runtime.owner_id)
+        mb.add_page("/memory", "Memory", page, ("GET", "POST"), icon="brain")
 
 
 def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
@@ -35,15 +36,20 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
 
     from starlette.responses import PlainTextResponse, RedirectResponse
 
-    from minibot.adapters.http import render
+    from minibot.adapters.http import page_url, query_int, render
 
     csrf_token = token_urlsafe()
 
     async def _page(request: Any) -> Any:
         try:
-            offset = max(0, int(request.query_params.get("offset", 0) or 0))
+            offset = query_int(request, "offset", 0) or 0
         except ValueError:
-            return PlainTextResponse("offset must be an integer", status_code=400)
+            return PlainTextResponse("offset must be a non-negative integer", status_code=400)
+        query = request.query_params.get("q", "").strip()
+        # Offset rather than a cursor: search results are ranked by relevance, not by a stable key.
+        # Writes land back on the first page: rows appended by infinite scroll come from later
+        # pages, and redirecting to one of those would leave the reader with no way back up.
+        action_url = page_url(request, offset=0)
         if request.method == "POST":
             form = await request.form()
             submitted_token = str(form.get("csrf_token") or "")
@@ -59,16 +65,20 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
             else:
                 return PlainTextResponse("invalid memory action", status_code=400)
             # Redirect so a reload does not resubmit the edit or the delete.
-            return RedirectResponse(f"/memory?offset={offset}", status_code=303)
-        result = await memory.list_entries(owner_id, offset=offset)
+            return RedirectResponse(action_url, status_code=303)
+        if query:
+            result = await memory.search_entries(owner_id, query=query, offset=offset)
+        else:
+            result = await memory.list_entries(owner_id, offset=offset)
         shown = offset + len(result.entries)
         context = {
             "owner_id": owner_id,
             "entries": [_row(entry) for entry in result.entries],
             "total": result.total,
             "offset": offset,
-            "previous_offset": max(0, offset - result.limit),
-            "next_offset": shown if shown < result.total else None,
+            "q": query,
+            "action_url": action_url,
+            "next_url": page_url(request, offset=shown) if shown < result.total else None,
             "csrf_token": csrf_token,
         }
         return render(request, "memory.html", context)

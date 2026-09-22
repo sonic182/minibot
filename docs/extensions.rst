@@ -120,9 +120,10 @@ Extension API
    Register an object with async ``start()`` and ``stop()`` methods for work that belongs to
    the daemon or console lifecycle.
 
-``mb.add_route(path, handler)`` / ``mb.add_page(path, label, handler)``
+``mb.add_route(path, handler)`` / ``mb.add_page(path, label, handler, icon="file")``
    Serve a Starlette request handler on the built-in HTTP server (``[http] enabled``).
-   ``add_page`` also adds a navigation entry under ``label``. Requires the ``http`` extra.
+   ``add_page`` also adds a navigation entry under ``label``, drawn with the named
+   `Lucide <https://lucide.dev/icons>`_ icon. Requires the ``http`` extra.
 
 ``mb.add_prompt_fragment(text, tool_names=())``
    Append a fragment to the main agent's system prompt, optionally gated on the listed tools

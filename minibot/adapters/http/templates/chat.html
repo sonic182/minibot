@@ -6,7 +6,8 @@
 <section class="chat" x-data="webChat()" @paste.window="paste($event)"
   data-socket-token="{{ socket_token }}" data-chat-capabilities='{{ chat_capabilities | tojson }}'>
   <h1>Chat</h1>
-  <div class="chat-messages" x-ref="messages" aria-live="polite">
+  <div class="chat-messages" x-ref="messages" aria-live="polite" @scroll.passive="loadOlder()">
+    <p class="muted" x-show="loadingHistory" x-cloak>Loading older messages…</p>
     <template x-for="(message, index) in messages" :key="index">
       <article class="message" :class="message.kind === 'tools' ? 'tool-activity' : message.role">
         <template x-if="message.kind === 'tools'">
@@ -21,21 +22,21 @@
         </template>
       </article>
     </template>
-    <p class="muted" x-show="busy">Thinking…</p>
-    <p class="muted" x-show="error" x-text="error"></p>
+    <p class="muted" x-show="busy" x-cloak>Thinking…</p>
+    <p class="muted" x-show="error" x-text="error" x-cloak></p>
   </div>
   <form class="chat-composer" @submit.prevent="send()" @dragover.prevent @drop.prevent="drop($event)">
     <input x-ref="fileInput" class="sr-only" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,audio/aac,audio/mpeg,audio/mp4,audio/ogg,audio/wav,audio/webm" @change="select($event)">
     <template x-if="attachments.length"><div class="composer-attachments"><template x-for="attachment in attachments" :key="attachment.id"><div class="composer-attachment"><img x-show="attachment.kind === 'image'" :src="attachment.url" :alt="attachment.filename"><audio x-show="attachment.kind === 'audio'" :src="attachment.url" controls></audio><span x-text="attachment.filename"></span><button type="button" @click="remove(attachment)" aria-label="Remove attachment">×</button></div></template></div></template>
     <div class="composer-row">
-      <button x-show="capabilities.uploads_enabled" class="chat-action" type="button" @click="$refs.fileInput.click()" :disabled="!connected || uploading" aria-label="Attach image or audio">+</button>
-      <button x-show="capabilities.audio_enabled" class="chat-action" :class="recording ? 'recording' : ''" type="button" @click="toggleRecording()" :disabled="!connected || uploading" aria-label="Record audio"><span x-text="recording ? '■' : '●'"></span></button>
+      <button x-show="capabilities.uploads_enabled" x-cloak class="chat-action" type="button" @click="$refs.fileInput.click()" :disabled="!connected || uploading" aria-label="Attach image or audio">+</button>
+      <button x-show="capabilities.audio_enabled" x-cloak class="chat-action" :class="recording ? 'recording' : ''" type="button" @click="toggleRecording()" :disabled="!connected || uploading" aria-label="Record audio"><span x-text="recording ? '■' : '●'"></span></button>
       <label class="sr-only" for="chat-message">Message</label>
       <textarea id="chat-message" x-model="draft" :disabled="!connected || uploading" rows="1" placeholder="Write a message…"></textarea>
       <button class="chat-send" type="submit" :disabled="!canSend()" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" /></svg></button>
     </div>
-    <p class="muted" x-show="recording">Recording <span x-text="recordingSeconds"></span>s — tap stop when finished.</p>
-    <p class="muted" x-show="capabilities.uploads_enabled">Drop or paste images, or attach image/audio files.</p>
+    <p class="muted" x-show="recording" x-cloak>Recording <span x-text="recordingSeconds"></span>s — tap stop when finished.</p>
+    <p class="muted" x-show="capabilities.uploads_enabled" x-cloak>Drop or paste images, or attach image/audio files.</p>
   </form>
 </section>
 {% endblock %}

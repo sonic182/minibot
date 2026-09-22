@@ -6,9 +6,14 @@
 <section>
   <p class="crumb"><a href="/history">&larr; all conversations</a></p>
   <h2>{{ session_id }}</h2>
+  <form class="search" method="get" action="/history" role="search">
+    <input type="hidden" name="session" value="{{ session_id }}">
+    <input type="search" name="q" value="{{ q }}" placeholder="Search this conversation" aria-label="Search messages">
+    <button type="submit">Search</button>
+  </form>
   {% if entries %}
-  <p class="muted">showing the latest {{ entries | length }} of at most {{ limit }} messages</p>
-  <ol class="messages">
+  <p class="muted">newest first</p>
+  <ol class="messages" data-pager-list>
     {% for entry in entries %}
     <li class="message role-{{ entry.role }}">
       <div class="message-head">
@@ -25,8 +30,9 @@
     </li>
     {% endfor %}
   </ol>
+  {% if next_url %}<p class="pager"><a href="{{ next_url }}" data-pager-next>older &rarr;</a></p>{% endif %}
   {% else %}
-  <p>no messages in this session</p>
+  <p>{{ "no message matches" if q else "no messages in this session" }}</p>
   {% endif %}
 </section>
 {% endblock %}

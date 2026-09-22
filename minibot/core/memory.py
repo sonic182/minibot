@@ -12,6 +12,7 @@ class MemoryEntry:
     content: str
     created_at: datetime
     reasoning: str | None = None
+    id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,23 @@ class SessionSummary:
     session_id: str
     message_count: int
     last_activity: datetime
+    match_count: int | None = None
+
+
+@dataclass(frozen=True)
+class HistoryPage:
+    """Messages newest first; pass ``next_before_id`` back as ``before_id`` for the older page."""
+
+    entries: Sequence[MemoryEntry]
+    next_before_id: int | None
+
+
+@dataclass(frozen=True)
+class SessionPage:
+    """Sessions by latest activity; pass ``next_cursor`` back as ``cursor`` for the next page."""
+
+    sessions: Sequence[SessionSummary]
+    next_cursor: str | None
 
 
 class MemoryBackend(Protocol):
@@ -32,7 +50,13 @@ class MemoryBackend(Protocol):
 
     async def trim_history(self, session_id: str, keep_latest: int) -> int: ...
 
-    async def list_sessions(self) -> Sequence[SessionSummary]: ...
+    async def get_history_page(
+        self, session_id: str, *, before_id: int | None = None, query: str | None = None, limit: int = 50
+    ) -> HistoryPage: ...
+
+    async def list_sessions(
+        self, *, query: str | None = None, cursor: str | None = None, limit: int = 50
+    ) -> SessionPage: ...
 
 
 @dataclass(frozen=True)

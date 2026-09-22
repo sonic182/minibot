@@ -38,7 +38,7 @@ def register(mb: ExtensionContext) -> None:
     if mb.entrypoint != "worker":
         mb.add_service(_GraphStoreService(store))
     if mb.entrypoint != "worker" and mb.settings.http.enabled:
-        mb.add_page("/graph", "Graph", _build_page(store, mb.settings.runtime.owner_id))
+        mb.add_page("/graph", "Graph", _build_page(store, mb.settings.runtime.owner_id), icon="network")
 
 
 def _build_page(store: SqliteGraphStore, owner_id: str) -> Any:

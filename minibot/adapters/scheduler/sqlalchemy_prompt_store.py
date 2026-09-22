@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from minibot.adapters.config.schema import ScheduledPromptsConfig
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, lease_rows, resolve_sqlite_storage_path
+from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, lease_rows, like_pattern, resolve_sqlite_storage_path
 from minibot.core.jobs import (
     PromptRecurrence,
     PromptRole,
@@ -238,6 +238,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
         statuses: Sequence[ScheduledPromptStatus] | None = None,
         limit: int = 20,
         offset: int = 0,
+        query: str | None = None,
     ) -> Sequence[ScheduledPrompt]:
         resolved_limit = max(1, min(limit, 100))
         resolved_offset = max(offset, 0)
@@ -251,6 +252,9 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
         if statuses:
             status_values = [status.value for status in statuses]
             filters.append(ScheduledPromptModel.status.in_(status_values))
+        if query and query.strip():
+            # SQLite's LIKE ignores ASCII case by itself; lower() would break non-ASCII exact matches.
+            filters.append(ScheduledPromptModel.content.like(like_pattern(query.strip()), escape="\\"))
 
         async with self._session_factory() as session:
             stmt = (

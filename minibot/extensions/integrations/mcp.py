@@ -69,7 +69,7 @@ def register(mb: ExtensionContext) -> None:
         servers.append({**status, "tools": tool_names, "error": None, "instructions": instructions})
     mb.add_tool(bindings)
     if settings.http.enabled:
-        mb.add_page("/mcp", "MCP", _build_page(servers))
+        mb.add_page("/mcp", "MCP", _build_page(servers), icon="plug")
 
 
 def _server_instructions(client: MCPClient) -> str:

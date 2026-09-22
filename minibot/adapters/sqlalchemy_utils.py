@@ -22,6 +22,22 @@ def ensure_parent_dir(path: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def like_pattern(value: str) -> str:
+    """Wrap ``value`` in ``%`` for a ``LIKE ... ESCAPE '\\'`` substring match, escaping its wildcards."""
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def fts_match_query(query: str, joiner: str = "AND") -> str:
+    """Turn free text into an FTS5 prefix query. Each token is quoted, so ``web:1`` or ``foo-bar``
+    stay search terms instead of being parsed as column filters or operators. Tokens with no letter
+    or digit (``-``, ``...``) are dropped: FTS5 indexes nothing for them, so under ``AND`` one would
+    make the whole query match nothing."""
+    tokens = [token.replace('"', "") for token in query.split()]
+    separator = " OR " if joiner.upper() == "OR" else " AND "
+    return separator.join(f'"{token}"*' for token in tokens if any(char.isalnum() for char in token))
+
+
 async def lease_rows(
     session: AsyncSession,
     model: type[Any],
