@@ -18,7 +18,7 @@
       <tbody data-pager-list>
         {% for session in sessions %}
         <tr>
-          <td><a href="/history?session={{ session.session_id | urlencode }}{% if q %}&q={{ q | urlencode }}{% endif %}">{{ session.session_id }}</a></td>
+          <td><a href="/history?session={{ session.session_id | urlencode }}{% if q and session.match_count %}&q={{ q | urlencode }}{% endif %}">{{ session.session_id }}</a></td>
           <td>{{ session.match_count if q else session.message_count }}</td>
           <td>{{ session.last_activity.strftime("%Y-%m-%d %H:%M") }}</td>
         </tr>

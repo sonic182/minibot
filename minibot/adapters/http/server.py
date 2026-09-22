@@ -16,6 +16,7 @@ from typing import Any
 import uvicorn
 from starlette.applications import Starlette
 from starlette.datastructures import MutableHeaders
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route, WebSocketRoute
@@ -334,7 +335,9 @@ class HttpServer:
             static_files = StaticFiles(directory=STATIC_DIR)
         routes = [
             Route(HEALTH_PATH, _health),
-            Mount(STATIC_PATH, app=static_files, name="static"),
+            # Only static assets are compressed: pages carry secrets (CSRF and socket tokens) next to
+            # reflected input such as the search query, the mix a BREACH-style attack needs.
+            Mount(STATIC_PATH, app=GZipMiddleware(static_files, compresslevel=6), name="static"),
             *(Route(path, handler, methods=list(methods)) for path, handler, methods in self._routes),
             *(WebSocketRoute(path, handler) for path, handler in self._websockets),
         ]

@@ -156,7 +156,7 @@ async def test_store_persists_recurrence_and_supports_cancel_and_list(
 
 @pytest.mark.asyncio
 async def test_list_jobs_query_is_case_insensitive_and_literal(prompt_store: SQLAlchemyScheduledPromptStore) -> None:
-    for text in ("Pay 100% of rent", "pay 100 of rent", "water_plants", "waterXplants"):
+    for text in ("Pay 100% of rent", "pay 100 of rent", "water_plants", "waterXplants", "Llamar a Ángela"):
         await prompt_store.create(
             ScheduledPromptCreate(owner_id="tenant", channel="telegram", text=text, run_at=_utcnow())
         )
@@ -167,6 +167,9 @@ async def test_list_jobs_query_is_case_insensitive_and_literal(prompt_store: SQL
     assert await texts("PAY") == ["Pay 100% of rent", "pay 100 of rent"]
     assert await texts("100%") == ["Pay 100% of rent"]
     assert await texts("water_") == ["water_plants"]
+    # Non-ASCII text matches as typed; SQLite's lower() would have folded only one side of it.
+    assert await texts("Ángela") == ["Llamar a Ángela"]
+    assert await texts("LLAMAR A Ángela") == ["Llamar a Ángela"]
 
 
 @pytest.mark.asyncio

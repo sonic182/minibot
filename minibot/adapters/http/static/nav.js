@@ -16,3 +16,11 @@ toggle.addEventListener("click", () => {
   root.classList.toggle("nav-toggled");
   syncExpanded();
 });
+
+// .nav-toggled means "opened" on phones and "closed" on desktop, so crossing the breakpoint (a
+// rotated tablet, a resized window) returns to that size's default instead of inverting it.
+// Keep the width in step with the @media query in dashboard.css.
+matchMedia("(min-width: 640px)").addEventListener("change", () => {
+  root.classList.remove("nav-toggled");
+  syncExpanded();
+});

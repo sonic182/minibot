@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without JavaScript. History search is full-text (SQLite FTS5) over message content, across all
   conversations on the index — with a match count per conversation — or within one conversation; session
   ids match too. Memory search reuses the key-value store's existing FTS5 ranking; scheduled prompts
-  match their text case-insensitively. History pages by cursor, so new messages arriving while you
+  match their text ignoring the case of ASCII letters, and accented text matches as typed. History pages by cursor, so new messages arriving while you
   scroll cannot shift or repeat a page; memory and scheduled keep offsets, since relevance ranking and a
   recurring job's moving `run_at` have no stable key. A conversation now reads newest first.
 - **`/chat` loads older messages as you scroll up.** The WebSocket sends the latest 50 messages instead
@@ -35,12 +35,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web paging parameters are validated.** A non-integer, negative or out-of-range `offset` on
   `/memory` and `/scheduled` answers 400; a negative one used to be treated as 0 and a huge one as a
   server error. Edits, deletes and cancels there return to the first page.
+- **Static assets are served gzip-compressed** when the browser accepts it, so the vendored Lucide and
+  Alpine bundles download at about a fifth of their size (655 KB → 120 KB, 103 KB → 24 KB). Pages are
+  left uncompressed: they carry CSRF and socket tokens next to reflected input like the search query,
+  the combination a BREACH-style attack needs.
 
 ### Fixed
 
 - **The desktop menu no longer slides in after the page draws.** The sidebar started hidden and the
   script opened it after first paint, shifting every page to the right. The CSS now sets the default per
   screen size, and the page stays hidden until its icons are drawn, instead of popping them in.
+  Crossing that size — a rotated tablet, a resized window — returns the menu to its default there
+  instead of leaving it inverted.
 - **`/chat` no longer flashes hidden controls while loading.** "Thinking…", the recording notice and the
   upload controls showed until Alpine started.
 - **The delete and cancel confirmations on `/memory` and `/scheduled` open again.** Their inline script

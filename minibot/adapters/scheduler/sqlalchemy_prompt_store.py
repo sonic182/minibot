@@ -253,8 +253,8 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             status_values = [status.value for status in statuses]
             filters.append(ScheduledPromptModel.status.in_(status_values))
         if query and query.strip():
-            pattern = like_pattern(query.strip().lower())
-            filters.append(func.lower(ScheduledPromptModel.content).like(pattern, escape="\\"))
+            # SQLite's LIKE ignores ASCII case by itself; lower() would break non-ASCII exact matches.
+            filters.append(ScheduledPromptModel.content.like(like_pattern(query.strip()), escape="\\"))
 
         async with self._session_factory() as session:
             stmt = (

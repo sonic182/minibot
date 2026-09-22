@@ -151,7 +151,7 @@ class SQLAlchemyMemoryBackend(MemoryBackend):
         normalized_query = query.strip() if query else ""
         if normalized_query:
             match_count = func.sum(case((self._content_matches(normalized_query), 1), else_=0))
-            session_matches = func.lower(Message.session_id).like(like_pattern(normalized_query.lower()), escape="\\")
+            session_matches = Message.session_id.like(like_pattern(normalized_query), escape="\\")
             stmt = stmt.add_columns(match_count.label("match_count")).having(or_(match_count > 0, session_matches))
         if cursor:
             cursor_activity, cursor_session = _parse_session_cursor(cursor)
@@ -188,7 +188,9 @@ class SQLAlchemyMemoryBackend(MemoryBackend):
                 .columns(column("rowid", Integer))
             )
             return Message.id.in_(fts_rows)
-        return func.lower(Message.content).like(like_pattern(query.lower()), escape="\\")
+        # No lower() on either side: SQLite's LIKE already ignores ASCII case, while its lower() only
+        # folds ASCII, so lowering "Ángela" in Python would stop it matching the stored "Ángela".
+        return Message.content.like(like_pattern(query), escape="\\")
 
     async def trim_history(self, session_id: str, keep_latest: int) -> int:
         async with self._session_factory() as session:

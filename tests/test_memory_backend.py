@@ -68,8 +68,9 @@ async def test_history_search_matches_content_case_insensitively(tmp_path: Path,
     backend._fts_enabled = fts_enabled
     await backend.append_history("telegram:42", "user", "Pizza on web:1 tonight")
     await backend.append_history("telegram:42", "assistant", "sure")
-    await backend.append_history("web:1", "user", "no food here")
+    await backend.append_history("web:1", "user", "no food here, ask Ángela")
 
+    assert len((await backend.get_history_page("web:1", query="Ángela")).entries) == 1
     page = await backend.get_history_page("telegram:42", query="pizza")
     assert [entry.content for entry in page.entries] == ["Pizza on web:1 tonight"]
     # Punctuation that means something to FTS5 is searched as text, not parsed as syntax.
