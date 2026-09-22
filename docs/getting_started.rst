@@ -31,7 +31,8 @@ run it safely. The static file itself is there if you'd rather copy or hand-edit
 
 The Docker image includes:
 
-- Python deps with all MiniBot extras (``telegram``, ``stt``, ``rag``, ``rabbitmq``, ``graph``)
+- Python deps with all MiniBot extras (``telegram``, ``stt``, ``rag``, ``rabbitmq``, ``graph``,
+  ``codex``, ``vault``, ``http``)
 - Node.js/npm (v24 from official tarball)
 - Playwright + Chromium
 - ffmpeg

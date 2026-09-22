@@ -199,15 +199,19 @@ HTTP server
 An optional HTTP server running on the daemon's own event loop. Needs the ``http`` extra
 (``poetry install --extras http``). It serves ``/health`` — open, so a container healthcheck needs
 no credential — and an authenticated dashboard at ``/`` showing the running model, channels,
-extensions, tools, routes, uptime, and pending turns. Its stylesheet is served beneath ``/static``.
+extensions, tools, routes, uptime, and pending turns. Its stylesheet and scripts are served beneath
+``/static``, gzip-compressed when the browser accepts it; pages are not compressed, since they
+carry tokens next to reflected input such as the search query.
 Conversation history is available at ``/history`` and can contain sensitive data. The browser chat at ``/chat``
 uses the ``web:1`` history session and can contain the same sensitive data. The ``/history``,
 ``/memory`` and ``/scheduled`` pages each have a search box and load more entries as you scroll;
 history search matches message text across every conversation. Extensions can
-also contribute routes through ``mb.add_route`` (see :doc:`extensions`). All routes except
+also contribute routes through ``mb.add_route``, or ``mb.add_page`` for one with a menu entry (see
+:doc:`extensions`). All routes except
 ``/health`` require a bearer token or HTTP Basic credentials; one is mandatory unless ``host`` is
-the literal ``127.0.0.1`` or ``::1``. When the key-value memory and graph extensions are enabled,
-their review pages are available at ``/memory`` and ``/graph``. TLS is out of scope: run it behind
+the literal ``127.0.0.1`` or ``::1``. When the key-value memory, scheduled prompts, graph and MCP
+extensions are enabled, their pages are available at ``/memory``, ``/scheduled``, ``/graph`` and
+``/mcp``. TLS is out of scope: run it behind
 a reverse proxy when it is reachable from outside the host. The chat WebSocket authenticates with a
 per-boot token sent through ``Sec-WebSocket-Protocol``, not a URL query parameter. A TLS-terminating
 proxy must forward the original ``X-Forwarded-Proto`` and ``X-Forwarded-Host`` headers so browser

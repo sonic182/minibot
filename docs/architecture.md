@@ -102,7 +102,8 @@ flowchart TD
 
 ## Data and state
 
-- Conversation history: SQLite transcript store (optional trimming/compaction).
+- Conversation history: SQLite transcript store (optional trimming/compaction), with an FTS5
+  index over message text for the web UI's search.
 - Pending turns: SQLite rows marking in-flight turns, replayed by the daemon after a crash.
 - KV notes: optional SQLAlchemy-backed store under tool controls.
 - Scheduled prompts: SQLite prompt store with recurrence + retry metadata.

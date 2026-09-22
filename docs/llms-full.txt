@@ -11,7 +11,8 @@ not a third-party service.
 
 ## Getting started
 
-- Install: `pip install minibot` (extras: `telegram`, `rag`, `stt`, `rabbitmq`, `graph`).
+- Install: `pip install minibot` (extras: `telegram`, `rag`, `stt`, `rabbitmq`, `graph`, `codex`,
+  `vault`, `http`).
 - Configure: `minibot configure` writes `config.toml`.
 - Providers: see [Providers](https://sonic182.github.io/minibot/providers.html) for OpenAI, Anthropic,
   Google, OpenRouter, ChatGPT Codex, and compatible endpoints.
@@ -44,7 +45,8 @@ Minibot is built to be extended, and most changes need no Python:
 - Level 3 — Python extensions: `register(mb)` modules enabled via `[extensions].modules`.
 
 A Python extension can contribute tools (`@mb.tool`), subscribe to events (`@mb.on`),
-register services (`mb.add_service`), or implement a channel. The tool name comes from the
+register services (`mb.add_service`), serve web pages (`mb.add_route`, or `mb.add_page` for one
+with a menu entry and Lucide icon), or implement a channel. The tool name comes from the
 function name, the description from its docstring, and the schema from its first argument's
 pydantic model.
 
@@ -72,8 +74,12 @@ fingerprint, so no restart. `tools.skills.install = true` adds `install_skill`, 
 
 Specialist agents are Markdown files in `./agents` with YAML frontmatter (name, description,
 model provider, temperature, `tools_allow`/`tools_deny`, `mcp_servers`). The main agent
-delegates via `invoke_agent` and inspects definitions via `fetch_agent_info`. Tool ownership
-is controlled by `[orchestration].tool_ownership_mode` (`shared`, `exclusive`, `exclusive_mcp`).
+delegates with `spawn_task`, which is asynchronous: it returns a `task_id`, the turn ends, and the
+specialist's answer arrives later as its own message. A call can override `model_provider`,
+`model` and `reasoning_effort` for that one task, limited to providers with credentials.
+`fetch_agent_info` returns an agent's definition and defaults plus those providers. Delegation
+needs `[tasks]`, which is on by default. Tool ownership is controlled by
+`[orchestration].tool_ownership_mode` (`shared`, `exclusive`, `exclusive_mcp`).
 
 ## Agent tools
 
@@ -112,6 +118,15 @@ The system prompt is composed from a base file (`prompts/main_agent_system.md`),
 fragments (`prompts/policies/*.md`), a specialist roster, optional skill catalog, runtime
 capability status, a channel fragment (`prompts/channels/<channel>.md`), and environment
 context. Configure the root with `llm.prompts_dir`.
+
+## Web UI
+
+`[http]` (the `http` extra) runs an authenticated web UI on the daemon's event loop: a status
+dashboard at `/`, a browser chat at `/chat` (the `web:1` session, with image and audio uploads),
+conversation history at `/history`, and review pages from extensions (`/memory`, `/scheduled`,
+`/graph`, `/mcp`). History, memory and scheduled pages have search, with SQLite FTS5 over message
+text, and load more as you scroll. Credentials are a bearer token or HTTP Basic, and are
+mandatory unless bound to loopback.
 
 ## Relation graph
 

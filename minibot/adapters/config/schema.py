@@ -964,12 +964,12 @@ class HTTPServerConfig(BaseModel):
     - ``chat_upload_*`` — browser-chat media limits and temporary upload retention. Uploads require
       ``[tools.file_storage] enabled``; audio also requires automatic transcription.
 
-    Routes come from core features and from extensions calling ``mb.add_route``. There is no TLS
-    here: put a reverse proxy in front when this is reachable from outside the host.
+    Routes come from core features and from extensions calling ``mb.add_route`` or ``mb.add_page``.
+    There is no TLS here: put a reverse proxy in front when this is reachable from outside the host.
 
     Static dashboard assets under ``/static`` are served with ``Cache-Control: no-store`` when
     ``[runtime].environment`` is ``"development"`` or ``"debug"``, and with normal caching
-    otherwise.
+    otherwise. They are gzip-compressed when the browser accepts it; pages are not.
     """
 
     enabled: bool = False

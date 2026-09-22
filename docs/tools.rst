@@ -125,7 +125,7 @@ Tool Surface
    * - Delegation
      - ``fetch_agent_info``
      - Enabled when agent definitions exist
-     - Inspect a specialist agent definition.
+     - Inspect a specialist's definition and defaults, and list the providers a delegation can target.
    * - Skills
      - ``list_skills``
      - ``[tools.skills]``
@@ -141,7 +141,8 @@ Tool Surface
    * - Async tasks
      - ``spawn_task``
      - ``[tasks]``
-     - Queue a background worker task; the only way to delegate to a specialist agent.
+     - Queue a background worker task; the only way to delegate to a specialist agent. Can override
+       ``model_provider``, ``model`` and ``reasoning_effort`` for that one task.
    * - Async tasks
      - ``cancel_task``
      - ``[tasks]``
@@ -162,6 +163,10 @@ Tool Surface
      - ``rag_index``, ``rag_search``, ``rag_list_metadata``, ``rag_delete``
      - ``[tools.rag]``
      - Index text files into the configured vector store and retrieve semantically relevant chunks.
+   * - Credential vault
+     - ``list_secrets``
+     - ``[vault] enabled`` (unlocked)
+     - List the names of stored secrets; values are never exposed. See :doc:`vault`.
 
 Runtime Notes
 -------------
