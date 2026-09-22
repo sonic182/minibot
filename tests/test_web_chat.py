@@ -21,6 +21,7 @@ from tests.fixtures.memory import InMemoryMemoryStore
 
 TOKEN = "s3cret"
 SOCKET_TOKEN = "socket-secret"
+_EMPTY_HISTORY = {"kind": "history_page", "initial": True, "messages": [], "before_id": None}
 
 
 @pytest.mark.asyncio
@@ -239,6 +240,7 @@ async def test_chat_socket_echoes_user_message_and_publishes_it() -> None:
     try:
         async with connect(f"ws://127.0.0.1:{server.port}/chat/ws", subprotocols=[SOCKET_TOKEN]) as websocket:
             assert websocket.subprotocol == SOCKET_TOKEN
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == _EMPTY_HISTORY
             assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {"busy": False}
             await websocket.send("not-json")
             assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {"error": "invalid chat message"}
@@ -257,6 +259,41 @@ async def test_chat_socket_echoes_user_message_and_publishes_it() -> None:
             assert event.message.text == "hello <world>"
     finally:
         await subscription.close()
+        await server.stop()
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_chat_socket_pages_older_history_on_request() -> None:
+    memory = InMemoryMemoryStore()
+    for index in range(55):
+        await memory.append_history("web:1", "user", f"message {index}")
+    await memory.append_history("telegram:1", "user", "someone else")
+    service = WebChannelService(EventBus())
+    server = HttpServer(
+        HTTPServerConfig(enabled=True, host="127.0.0.1", port=0),
+        websockets=[build_chat_socket(service, memory, SOCKET_TOKEN)],
+    )
+    await service.start()
+    await server.start()
+    try:
+        async with connect(f"ws://127.0.0.1:{server.port}/chat/ws", subprotocols=[SOCKET_TOKEN]) as websocket:
+            first = json.loads(await asyncio.wait_for(websocket.recv(), timeout=1))
+            assert first["initial"] is True
+            assert [message["html"] for message in first["messages"]][::49] == ["message 5", "message 54"]
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {"busy": False}
+
+            await websocket.send(json.dumps({"kind": "history_before", "before_id": first["before_id"]}))
+            older = json.loads(await asyncio.wait_for(websocket.recv(), timeout=1))
+            assert older["initial"] is False
+            assert [message["html"] for message in older["messages"]] == [f"message {i}" for i in range(5)]
+            assert older["before_id"] is None
+
+            await websocket.send(json.dumps({"kind": "history_before", "before_id": 0}))
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {
+                "error": "invalid history request"
+            }
+    finally:
         await server.stop()
         await service.stop()
 
@@ -290,6 +327,7 @@ async def test_chat_socket_uploads_media_and_releases_attachments(tmp_path) -> N
     png = b"\x89PNG\r\n\x1a\nbody"
     try:
         async with connect(f"ws://127.0.0.1:{server.port}/chat/ws", subprotocols=[SOCKET_TOKEN]) as websocket:
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == _EMPTY_HISTORY
             assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {"busy": False}
             await websocket.send(
                 json.dumps(

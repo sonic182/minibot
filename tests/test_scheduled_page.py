@@ -87,6 +87,25 @@ async def test_terminal_jobs_only_show_under_status_all(server: HttpServer, stor
 
 
 @pytest.mark.asyncio
+async def test_search_filters_jobs_and_links_the_next_page(server: HttpServer, store) -> None:
+    for index in range(51):
+        await _job(store, f"Riega las plantas {index}")
+    await _job(store, "paga la luz")
+
+    async with aiosonic.HTTPClient() as client:
+        first = await (await client.get(f"http://127.0.0.1:{server.port}/scheduled?q=riega", headers=AUTH)).text()
+        rest = await (
+            await client.get(f"http://127.0.0.1:{server.port}/scheduled?q=riega&offset=50", headers=AUTH)
+        ).text()
+
+    assert "paga la luz" not in first
+    assert first.count("Riega las plantas") == 50
+    assert 'href="/scheduled?q=riega&amp;offset=50" data-pager-next' in first
+    assert rest.count("Riega las plantas") == 1
+    assert "data-pager-next" not in rest
+
+
+@pytest.mark.asyncio
 async def test_cancel_marks_the_job_cancelled(server: HttpServer, store) -> None:
     job = await _job(store, "cancelame")
 

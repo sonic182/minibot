@@ -477,6 +477,17 @@ pre.error {
   gap: var(--gap);
 }
 
+.search {
+  display: flex;
+  gap: var(--gap-sm);
+  margin-bottom: var(--gap);
+}
+
+.search input[type="search"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .entry-actions {
   display: flex;
   flex-wrap: wrap;

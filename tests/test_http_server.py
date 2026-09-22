@@ -269,6 +269,52 @@ async def test_history_shows_one_session(history_server: HttpServer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_history_search_filters_sessions_and_messages(history_server: HttpServer) -> None:
+    base = f"http://127.0.0.1:{history_server.port}/history"
+    async with aiosonic.HTTPClient() as client:
+        index = await (await client.get(f"{base}?q=ayudo", headers={"Authorization": f"Bearer {TOKEN}"})).text()
+        missing = await (await client.get(f"{base}?q=nope", headers={"Authorization": f"Bearer {TOKEN}"})).text()
+        detail = await (
+            await client.get(f"{base}?session=telegram:42&q=ayudo", headers={"Authorization": f"Bearer {TOKEN}"})
+        ).text()
+
+    assert "telegram:42" in index
+    assert "Matches" in index
+    assert "telegram:42" not in missing
+    assert "hola, en que ayudo" in detail
+    assert "hola minibot" not in detail
+
+
+@pytest.mark.asyncio
+async def test_history_links_the_next_page_and_rejects_bad_cursors() -> None:
+    memory = InMemoryMemoryStore()
+    for index in range(51):
+        await memory.append_history("web:1", "user", f"message {index}")
+    instance = HttpServer(
+        HTTPServerConfig(enabled=True, host="127.0.0.1", port=0, auth_token=TOKEN),
+        [build_history_route(memory)],
+    )
+    await instance.start()
+    try:
+        base = f"http://127.0.0.1:{instance.port}/history"
+        headers = {"Authorization": f"Bearer {TOKEN}"}
+        async with aiosonic.HTTPClient() as client:
+            first = await (await client.get(f"{base}?session=web:1&q=message", headers=headers)).text()
+            older = await (await client.get(f"{base}?session=web:1&q=message&before=2", headers=headers)).text()
+            bad_before = await client.get(f"{base}?session=web:1&before=x", headers=headers)
+            bad_cursor = await client.get(f"{base}?cursor=unknown", headers=headers)
+    finally:
+        await instance.stop()
+
+    # Relative, and it keeps the search.
+    assert 'href="/history?session=web%3A1&amp;q=message&amp;before=2" data-pager-next' in first
+    assert "message 0" in older
+    assert "data-pager-next" not in older
+    assert bad_before.status_code == 400
+    assert bad_cursor.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_history_requires_the_token(history_server: HttpServer) -> None:
     async with aiosonic.HTTPClient() as client:
         assert (await client.get(f"http://127.0.0.1:{history_server.port}/history")).status_code == 401

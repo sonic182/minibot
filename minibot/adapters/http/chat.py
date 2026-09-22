@@ -19,7 +19,7 @@ from minibot.adapters.messaging.web.service import WebChatSubscription
 from minibot.core.memory import MemoryBackend
 from minibot.shared.utils import session_identifier
 
-_HISTORY_LIMIT = 200
+_HISTORY_PAGE_SIZE = 50
 _MAX_MESSAGE_CHARS = 8_000
 _MARKDOWN = MarkdownIt("commonmark", {"html": False})
 
@@ -27,6 +27,10 @@ _MARKDOWN = MarkdownIt("commonmark", {"html": False})
 class _IncomingChatMessage(BaseModel):
     text: str = Field(default="", max_length=_MAX_MESSAGE_CHARS)
     upload_ids: list[str] = Field(default_factory=list)
+
+
+class _HistoryRequest(BaseModel):
+    before_id: int = Field(gt=0)
 
 
 class _UploadStart(BaseModel):
@@ -78,9 +82,8 @@ def build_chat_socket(
         session = upload_manager.new_session() if upload_manager is not None else None
         send_lock = asyncio.Lock()
         try:
-            for entry in await memory.get_history(session_identifier("web", 1), limit=_HISTORY_LIMIT):
-                await _send_json(websocket, _render_message(entry.role, entry.content), send_lock)
-            receive_task = asyncio.create_task(_receive_messages(websocket, service, session, send_lock))
+            await _send_history_page(websocket, memory, None, send_lock)
+            receive_task = asyncio.create_task(_receive_messages(websocket, service, memory, session, send_lock))
             send_task = asyncio.create_task(_send_events(websocket, subscription, send_lock))
             done, pending = await asyncio.wait((receive_task, send_task), return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
@@ -118,7 +121,11 @@ def _expected_origin(websocket: WebSocket) -> str:
 
 
 async def _receive_messages(
-    websocket: WebSocket, service: WebChannelService, session: WebUploadSession | None, send_lock: asyncio.Lock
+    websocket: WebSocket,
+    service: WebChannelService,
+    memory: MemoryBackend,
+    session: WebUploadSession | None,
+    send_lock: asyncio.Lock,
 ) -> None:
     while True:
         received = await websocket.receive()
@@ -146,10 +153,31 @@ async def _receive_messages(
             await _receive_upload_complete(websocket, session, payload, send_lock)
         elif kind == "upload_cancel":
             await _receive_upload_cancel(websocket, session, payload, send_lock)
+        elif kind == "history_before":
+            try:
+                request = _HistoryRequest.model_validate(payload)
+            except ValidationError:
+                await _send_error(websocket, "invalid history request", send_lock)
+                continue
+            await _send_history_page(websocket, memory, request.before_id, send_lock)
         elif kind in {None, "message"}:
             await _receive_chat_message(websocket, service, session, payload, send_lock)
         else:
             await _send_error(websocket, "unknown chat message", send_lock)
+
+
+async def _send_history_page(
+    websocket: WebSocket, memory: MemoryBackend, before_id: int | None, send_lock: asyncio.Lock
+) -> None:
+    # Always the one web session: the client only chooses how far back, never whose history.
+    page = await memory.get_history_page(session_identifier("web", 1), before_id=before_id, limit=_HISTORY_PAGE_SIZE)
+    payload = {
+        "kind": "history_page",
+        "initial": before_id is None,
+        "messages": [_render_message(entry.role, entry.content) for entry in reversed(page.entries)],
+        "before_id": page.next_before_id,
+    }
+    await _send_json(websocket, payload, send_lock)
 
 
 async def _receive_chat_message(

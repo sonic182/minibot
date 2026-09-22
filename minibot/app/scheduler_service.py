@@ -144,6 +144,7 @@ class ScheduledPromptService:
         active_only: bool = True,
         limit: int = 20,
         offset: int = 0,
+        query: str | None = None,
     ) -> list[ScheduledPrompt]:
         statuses: list[ScheduledPromptStatus] | None = None
         if active_only:
@@ -156,6 +157,7 @@ class ScheduledPromptService:
             statuses=statuses,
             limit=limit,
             offset=offset,
+            query=query,
         )
         return list(jobs)
 

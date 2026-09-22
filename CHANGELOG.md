@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Search and infinite scroll on the web pages.** `/history`, `/memory` and `/scheduled` each get a
+  search box, and every list loads the next page as you scroll, with a plain "older" link still there
+  without JavaScript. History search is full-text (SQLite FTS5) over message content, across all
+  conversations on the index — with a match count per conversation — or within one conversation; session
+  ids match too. Memory search reuses the key-value store's existing FTS5 ranking; scheduled prompts
+  match their text case-insensitively. History pages by cursor, so new messages arriving while you
+  scroll cannot shift or repeat a page; memory and scheduled keep offsets, since relevance ranking and a
+  recurring job's moving `run_at` have no stable key. A conversation now reads newest first.
+- **`/chat` loads older messages as you scroll up.** The WebSocket sends the latest 50 messages instead
+  of 200, and asks for the next 50 when you reach the top, keeping your scroll position. A reconnect
+  replaces the conversation instead of appending a second copy of it.
+
+### Changed
+
+- **FTS5 searches quote each term.** Input such as `web:1` or `foo-bar` used to be parsed as FTS5 syntax
+  — a column filter, an operator — and the error switched key-value memory search to `LIKE` for the rest
+  of the process. Each term is now searched as text.
+
 ## [0.20.0] - 2026-09-22
 
 ### Added

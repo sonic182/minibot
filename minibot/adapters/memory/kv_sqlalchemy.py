@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from minibot.adapters.config.schema import KeyValueMemoryConfig
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, fts_match_query, resolve_sqlite_storage_path
 from minibot.core.memory import (
     KeyValueCreateResult,
     KeyValueEntry,
@@ -327,7 +327,7 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
         offset: int,
         token_joiner: str,
     ) -> KeyValueSearchResult | None:
-        match_query = self._to_fts_match_query(query, token_joiner=token_joiner)
+        match_query = fts_match_query(query, token_joiner)
         if not match_query:
             return None
 
@@ -427,14 +427,6 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
             if isinstance(parsed, dict):
                 return parsed
         return {}
-
-    def _to_fts_match_query(self, query: str, token_joiner: str) -> str:
-        tokens = [token for token in query.split() if token]
-        if not tokens:
-            return ""
-        normalized_tokens = [token.replace('"', "").replace("'", "") for token in tokens]
-        joiner = " AND " if token_joiner.upper() == "AND" else " OR "
-        return joiner.join(f"{token}*" for token in normalized_tokens if token)
 
     def _resolve_limit(self, limit: int | None) -> int:
         requested = limit or self._config.default_limit

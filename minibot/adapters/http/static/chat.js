@@ -22,6 +22,8 @@ window.webChat = () => ({
   recordingChunks: [],
   recordingSeconds: 0,
   recordingTimer: null,
+  beforeId: null,
+  loadingHistory: false,
 
   init() {
     this.connect();
@@ -51,6 +53,10 @@ window.webChat = () => ({
   },
 
   handle(event) {
+    if (event.kind === "history_page") {
+      this.receiveHistory(event);
+      return;
+    }
     if (event.kind === "upload_ready") {
       this.resolveWaiter(`ready:${event.upload_id}`, event);
     }
@@ -78,11 +84,31 @@ window.webChat = () => ({
     if (event.busy !== undefined) this.busy = event.busy;
     if (event.error) {
       this.error = event.error;
+      this.loadingHistory = false;
       this.rejectWaiters(event.error);
     }
     this.$nextTick(() => {
       this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
     });
+  },
+
+  receiveHistory(page) {
+    const list = this.$refs.messages;
+    const previousHeight = list.scrollHeight;
+    // The first page replaces the list, so a reconnect does not duplicate the conversation.
+    this.messages = page.initial ? page.messages : [...page.messages, ...this.messages];
+    this.beforeId = page.before_id;
+    this.loadingHistory = false;
+    this.$nextTick(() => {
+      // Older pages keep the reader where they were instead of jumping by the prepended height.
+      list.scrollTop = page.initial ? list.scrollHeight : list.scrollTop + list.scrollHeight - previousHeight;
+    });
+  },
+
+  loadOlder() {
+    if (!this.connected || !this.beforeId || this.loadingHistory || this.$refs.messages.scrollTop > 40) return;
+    this.loadingHistory = true;
+    this.socket.send(JSON.stringify({ kind: "history_before", before_id: this.beforeId }));
   },
 
   resolveWaiter(key, value) {

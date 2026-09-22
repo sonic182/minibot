@@ -35,7 +35,7 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
 
     from starlette.responses import PlainTextResponse, RedirectResponse
 
-    from minibot.adapters.http import render
+    from minibot.adapters.http import page_url, render
 
     csrf_token = token_urlsafe()
 
@@ -44,6 +44,9 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
             offset = max(0, int(request.query_params.get("offset", 0) or 0))
         except ValueError:
             return PlainTextResponse("offset must be an integer", status_code=400)
+        query = request.query_params.get("q", "").strip()
+        # Offset rather than a cursor: search results are ranked by relevance, not by a stable key.
+        current_url = page_url(request, offset=offset)
         if request.method == "POST":
             form = await request.form()
             submitted_token = str(form.get("csrf_token") or "")
@@ -59,16 +62,20 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
             else:
                 return PlainTextResponse("invalid memory action", status_code=400)
             # Redirect so a reload does not resubmit the edit or the delete.
-            return RedirectResponse(f"/memory?offset={offset}", status_code=303)
-        result = await memory.list_entries(owner_id, offset=offset)
+            return RedirectResponse(current_url, status_code=303)
+        if query:
+            result = await memory.search_entries(owner_id, query=query, offset=offset)
+        else:
+            result = await memory.list_entries(owner_id, offset=offset)
         shown = offset + len(result.entries)
         context = {
             "owner_id": owner_id,
             "entries": [_row(entry) for entry in result.entries],
             "total": result.total,
             "offset": offset,
-            "previous_offset": max(0, offset - result.limit),
-            "next_offset": shown if shown < result.total else None,
+            "q": query,
+            "current_url": current_url,
+            "next_url": page_url(request, offset=shown) if shown < result.total else None,
             "csrf_token": csrf_token,
         }
         return render(request, "memory.html", context)

@@ -6,7 +6,8 @@
 <section class="chat" x-data="webChat()" @paste.window="paste($event)"
   data-socket-token="{{ socket_token }}" data-chat-capabilities='{{ chat_capabilities | tojson }}'>
   <h1>Chat</h1>
-  <div class="chat-messages" x-ref="messages" aria-live="polite">
+  <div class="chat-messages" x-ref="messages" aria-live="polite" @scroll.passive="loadOlder()">
+    <p class="muted" x-show="loadingHistory">Loading older messages…</p>
     <template x-for="(message, index) in messages" :key="index">
       <article class="message" :class="message.kind === 'tools' ? 'tool-activity' : message.role">
         <template x-if="message.kind === 'tools'">
