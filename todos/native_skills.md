@@ -1,7 +1,8 @@
 # Native skills — working proposal
 
 Detail document for **Phase 2** of [`ROADMAP.md`](ROADMAP.md).
-Status: PR 1 shipped (#82); PR 2 in review (#83); PR 3 (`reload_agents`) is next.
+Status: PRs 1 (#82), 2 (#83) and 6 (#84, released in 0.18.0) shipped; PR 3 (`reload_agents`) is
+next, then 4, and 5 and 7 in any order.
 
 ## Context
 
@@ -52,11 +53,11 @@ than trailing behind it.
 | # | PR | Impact | Depends on |
 |---|---|---|---|
 | ~~1~~ | ~~Single-source the package version~~ | **Done — merged in #82** | — |
-| 2 | Native skill tier + `create-skill` | Turns an empty feature on for every install | 1 |
+| ~~2~~ | ~~Native skill tier + `create-skill`~~ | **Done — merged in #83** | 1 |
 | 3 | `reload_agents` tool | Specialists written at runtime become usable without a restart | — |
 | 4 | `get_settings` tool | Stops the agent guessing its own configuration | 1, 2 |
 | 5 | `minibot-docs` skill | The bot can answer questions about itself | 4 |
-| 6 | `install-skill` skill + `install_skill` tool | Growth path for skills; riskiest surface | 2 |
+| ~~6~~ | ~~`install-skill` skill + `install_skill` tool~~ | **Done — merged in #84** | 2 |
 | 7 | `create-agent` skill | Narrowest audience; pure markdown once 3 is in | 2, 3 |
 
 PR 3 goes first after PR 2: it is the only remaining real code change in the agent area, it is
@@ -127,7 +128,7 @@ metadata is absent.
 
 ---
 
-## PR 2 — Native skill tier + `create-skill`  ← in review (#83)
+## PR 2 — Native skill tier + `create-skill` ✅ DONE (#83)
 
 **Impact:** the load-bearing PR. Everything else in this document is a file drop on top of it,
 and on its own it turns `[tools.skills]` from an empty feature into one that ships something.
@@ -476,7 +477,7 @@ question routes to `get_settings` instead.
 
 ---
 
-## PR 6 — `install-skill` (was `import-skill`) ✅ implemented on `feat/import-skill`
+## PR 6 — `install-skill` (was `import-skill`) ✅ DONE (#84, released in 0.18.0)
 
 **Impact:** the growth path — it is how a user gets skills without writing them. Sequenced late
 because it is the only PR that pulls remote content into the agent's instruction set.

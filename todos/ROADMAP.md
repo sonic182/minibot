@@ -160,9 +160,10 @@ changes.
 ## [ ] Phase 2 — Native skills & runtime self-knowledge
 
 Detailed design, broken into seven PRs: [`native_skills.md`](native_skills.md).
-**In progress** — PR 1 (version single-sourcing) merged in #82; PR 2 (native
-tier + `create-skill`) in review as #83. Next: `reload_agents` (PR 3), ahead
-of `get_settings` and the remaining skills.
+**In progress** — done: PR 1 (version single-sourcing, #82), PR 2 (native
+tier + `create-skill`, #83) and PR 6 (`install-skill` + `install_skill`, #84,
+released in 0.18.0). Next: `reload_agents` (PR 3), ahead of `get_settings`
+(PR 4), then the `minibot-docs` and `create-agent` skills (PRs 5 and 7).
 
 Different theme from the phases around it — capability, not containment —
 but it lands two new LLM-facing surfaces, so the Trust model above still
