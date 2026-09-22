@@ -90,13 +90,19 @@ def page_url(request: Request, **params: Any) -> str:
     return f"{url.path}?{url.query}"
 
 
-def set_nav_entries(entries: Sequence[tuple[str, str]]) -> None:
+_DEFAULT_NAV_ICON = "file"
+
+
+def set_nav_entries(entries: Sequence[tuple[str, str] | tuple[str, str, str]]) -> None:
     """Publish the navigation menu as a Jinja global, once, at daemon boot.
 
-    A global rather than per-handler context: the menu is the same on every page, and an
-    extension's own handler should not have to know it exists in order to render inside it.
+    Each entry is ``(path, label)`` or ``(path, label, lucide_icon)``; entries without an icon get
+    a generic one. A global rather than per-handler context: the menu is the same on every page,
+    and an extension's own handler should not have to know it exists in order to render inside it.
     """
-    _templates.env.globals["nav_entries"] = list(entries)
+    _templates.env.globals["nav_entries"] = [
+        (entry[0], entry[1], entry[2] if len(entry) > 2 else _DEFAULT_NAV_ICON) for entry in entries
+    ]
 
 
 @dataclass(frozen=True)

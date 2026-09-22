@@ -17,6 +17,19 @@ body {
   line-height: 1.4;
 }
 
+/* Hidden until nav.js has drawn the icons, so the page never paints half-built. The animation
+   reveals it anyway after a second, in case that script never runs. */
+.cloak {
+  visibility: hidden;
+  animation: uncloak 0s 1s forwards;
+}
+
+@keyframes uncloak {
+  to {
+    visibility: visible;
+  }
+}
+
 .navbar {
   display: flex;
   align-items: center;
@@ -41,7 +54,9 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.nav-open .sidebar {
+/* The default is set here, per breakpoint: closed on phones, open on desktop. nav.js only flips
+   it with .nav-toggled, so a page never paints with the menu missing and then shifts when it opens. */
+.nav-toggled .sidebar {
   display: block;
 }
 
@@ -54,11 +69,19 @@ body {
 }
 
 .sidebar a {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
   padding: 0.4rem var(--gap-sm);
   border-radius: var(--radius-sm);
   text-decoration: none;
   color: inherit;
+}
+
+.sidebar a svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: none;
 }
 
 .sidebar a.current {
@@ -472,6 +495,11 @@ pre.error {
   border-radius: var(--radius-sm);
 }
 
+/* Alpine removes x-cloak once it initializes; until then x-show elements would flash visible. */
+[x-cloak] {
+  display: none !important;
+}
+
 .pager {
   display: flex;
   gap: var(--gap);
@@ -580,15 +608,20 @@ dialog::backdrop {
 
   .shell {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 14rem minmax(0, 1fr);
     align-items: start;
   }
 
-  .nav-open .shell {
-    grid-template-columns: 14rem minmax(0, 1fr);
+  .nav-toggled .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nav-toggled .sidebar {
+    display: none;
   }
 
   .sidebar {
+    display: block;
     position: sticky;
     top: 0;
     border-bottom: none;

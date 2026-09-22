@@ -26,7 +26,8 @@ def register(mb: ExtensionContext) -> None:
     mb.add_tool(build_kv_tools(memory))
     mb.add_service(_MemoryService(memory))
     if mb.settings.http.enabled:
-        mb.add_page("/memory", "Memory", _build_page(memory, mb.settings.runtime.owner_id), ("GET", "POST"))
+        page = _build_page(memory, mb.settings.runtime.owner_id)
+        mb.add_page("/memory", "Memory", page, ("GET", "POST"), icon="brain")
 
 
 def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:

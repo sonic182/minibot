@@ -140,9 +140,9 @@ def _build_http_server(
     chat_capabilities = upload_manager.capabilities if upload_manager else None
     chat_route = build_chat_route(socket_token, chat_capabilities) if socket_token else None
     extra_routes = [history_route, *([chat_route] if chat_route is not None else []), *routes]
-    nav_entries = [("/", "Home"), ("/history", "History")]
+    nav_entries = [("/", "Home", "house"), ("/history", "History", "history")]
     if chat_route is not None:
-        nav_entries.append(("/chat", "Chat"))
+        nav_entries.append(("/chat", "Chat", "message-circle"))
     nav_entries.extend(extensions.pages())
     set_nav_entries(nav_entries)
 

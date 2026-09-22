@@ -45,7 +45,7 @@ def register(mb: ExtensionContext) -> None:
     mb.add_service(_SchedulerService(store, scheduler, mb.entrypoint))
     if mb.settings.http.enabled:
         page = _build_page(scheduler, mb.settings.runtime.owner_id)
-        mb.add_page("/scheduled", "Scheduled", page, ("GET", "POST"))
+        mb.add_page("/scheduled", "Scheduled", page, ("GET", "POST"), icon="calendar-clock")
 
 
 _PAGE_SIZE = 50
