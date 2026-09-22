@@ -27,6 +27,7 @@ class RabbitMQTaskProducer:
                 "prompt": task.prompt,
                 "agent_name": task.agent_name,
                 "context": task.context,
+                "model_overrides": task.model_overrides,
                 "chat_id": task.chat_id,
                 "user_id": task.user_id,
             }

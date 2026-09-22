@@ -14,7 +14,7 @@ from minibot.adapters.config.schema import Settings
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
 from minibot.app.agent_definitions_loader import load_agent_specs
-from minibot.app.agent_policies import filter_tools_for_agent, strip_reserved_delegation_tools
+from minibot.app.agent_policies import apply_agent_overrides, filter_tools_for_agent, strip_reserved_delegation_tools
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.environment_context import build_environment_prompt_fragment
@@ -320,22 +320,41 @@ def _resolve_task_spec(
     task: dict[str, Any],
     extension_tool_names: Sequence[str] = (),
 ) -> AgentSpec:
+    overrides = task.get("model_overrides")
+    # What the retargeted model itself allows, resolved by the daemon: this process has a cold
+    # limits cache and would have to download the whole models.dev catalog to work it out.
+    target_ceiling = _coerce_int(task.get("max_new_tokens"))
     agent_name = task.get("agent_name")
     if isinstance(agent_name, str) and agent_name.strip():
         registry = AgentRegistry(load_agent_specs(settings.orchestration.directory))
         spec = registry.get(agent_name.strip())
         if spec is None:
             raise ValueError(f"agent '{agent_name.strip()}' is not available for async task execution")
+        spec = _capped_at(apply_agent_overrides(spec, overrides), settings, target_ceiling)
         if not environment_prompt_fragment.strip():
             return spec
         # replace() rather than a field-by-field copy: the hand-written version silently dropped
         # omit_temperature, and would drop every field added after it too.
         return replace(spec, system_prompt=f"{spec.system_prompt}\n\n{environment_prompt_fragment.strip()}")
-    return _build_worker_spec(
+    worker_spec = _build_worker_spec(
         system_prompt=llm_factory.create_default().system_prompt(),
         environment_prompt_fragment=environment_prompt_fragment,
         extension_tool_names=extension_tool_names,
     )
+    return _capped_at(apply_agent_overrides(worker_spec, overrides), settings, target_ceiling)
+
+
+def _capped_at(spec: AgentSpec, settings: Settings, target_ceiling: int | None) -> AgentSpec:
+    """Combine what the target model allows with the cap the user actually configured.
+
+    Each side contributes what only it knows. The daemon knows the target's limits but its own
+    copies of both caps were rewritten at boot for the main model; this process reloaded settings
+    and specs from disk, so `spec.max_new_tokens` and `[llm].max_new_tokens` are still the user's.
+    """
+    if target_ceiling is None:
+        return spec
+    configured = spec.max_new_tokens or settings.llm.max_new_tokens
+    return replace(spec, max_new_tokens=min(target_ceiling, configured) if configured else target_ceiling)
 
 
 def _build_worker_state(*, spec: AgentSpec, prompt: str, context: dict[str, Any]) -> AgentState:

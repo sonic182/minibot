@@ -96,13 +96,24 @@ class LLMTurnService:
         session_id = session_id_for(message)
         turn_total_tokens = 0
         owner_id = self._owner_id
+        # Delegation ends the turn without its answer, so the reply has to say a task is still
+        # running. A caller that exits on the reply (`minibot console --once`) would otherwise tear
+        # the worker down before it produced anything.
+        handed_off_to_task = False
+
+        async def _on_task_handoff(turn_id: str) -> None:
+            nonlocal handed_off_to_task
+            handed_off_to_task = True
+            if self._task_handoff_callback is not None:
+                await self._task_handoff_callback(turn_id)
+
         tool_context = ToolContext(
             owner_id=owner_id,
             channel=message.channel,
             chat_id=message.chat_id,
             user_id=message.user_id,
             turn_id=event.event_id,
-            task_handoff_callback=self._task_handoff_callback,
+            task_handoff_callback=_on_task_handoff,
         )
         input_message = message
         if self._audio_auto_transcription_service is not None:
@@ -164,8 +175,6 @@ class LLMTurnService:
             else None
         )
         prompt_cache_key = _prompt_cache_key(message) if self._profile.prompt_cache_enabled else None
-        agent_trace: list[dict[str, Any]] = []
-        delegation_fallback_used = False
         runtime_result = None
         try:
             if self._runtime_service is None:
@@ -226,8 +235,6 @@ class LLMTurnService:
                 )
                 render = runtime_result.render or plain_render("")
                 should_reply = runtime_result.should_reply
-                agent_trace = runtime_result.agent_trace
-                delegation_fallback_used = runtime_result.delegation_fallback_used
                 self._recent_file_tracking_service.track_from_runtime_state(session_id, runtime_result.runtime_state)
                 if use_previous_response_id and runtime_result.response_id:
                     self._session_state.set_previous_response_id(
@@ -276,11 +283,10 @@ class LLMTurnService:
         metadata = self._metadata_service.response_metadata(should_reply)
         _set_reply_target(metadata, channel=message.channel, message_id=message.message_id)
         metadata["primary_agent"] = "minibot"
+        if handed_off_to_task:
+            metadata["task_handoff"] = True
         if reasoning_text:
             metadata["reasoning"] = reasoning_text
-        if agent_trace:
-            metadata["agent_trace"] = agent_trace
-        metadata["delegation_fallback_used"] = delegation_fallback_used
         if compaction_result.updates:
             metadata["compaction_updates"] = compaction_result.updates
         if response_updates_payload:

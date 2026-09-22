@@ -62,6 +62,30 @@ base_url = ""
 [providers.openai_responses.headers]
 x-opencode-session = "minibot"
 
+# Named providers: `api_format` says which API the endpoint speaks, so the section name is free and
+# several endpoints of the same format coexist. Agents point at the section name with
+# `model_provider`, and the main agent can retarget a single spawn_task call at it
+# ("run that on deepseek via opencode_go, high effort"). `models` is the advisory list it is offered
+# to choose from.
+# [providers.opencode_go]
+# api_format = "openai_responses"
+# api_key = "${OPENCODE_API_KEY}"
+# base_url = "https://opencode.ai/zen/go/v1"
+# models = ["deepseek-v3.6", "mimo-v2.5", "gpt-5.6-luna"]
+# [providers.opencode_go.headers]
+# x-opencode-session = "minibot"
+
+# [providers.zai]
+# api_format = "openai"
+# api_key = "${ZAI_API_KEY}"
+# base_url = "https://api.z.ai/api/coding/paas/v4"
+# models = ["glm-5.3", "glm-5.3-flash"]
+
+# Orchestrator on a ChatGPT Codex subscription (OAuth, no api_key) delegating to the aliases above:
+# set [llm] provider = "chatgpt_codex" and model to one the login flow returns.
+# [providers.chatgpt_codex]
+# auth_path = "~/.minibot/auth_codex.json"
+
 [providers.openrouter]
 api_key = ""
 base_url = ""
@@ -76,9 +100,7 @@ base_url = ""
 
 [orchestration]
 directory = "./agents"
-default_timeout_seconds = 360
 tool_ownership_mode = "exclusive_mcp"
-delegated_tool_call_policy = "auto"
 main_tool_use_guardrail = "disabled"
 
 [orchestration.main_agent]

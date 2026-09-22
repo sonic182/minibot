@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from minibot.llm.tools.agent_delegate import _extract_outcome
 from minibot.shared.utils import validate_attachments
 
 
@@ -92,53 +91,3 @@ def test_validate_attachments_strips_whitespace():
     assert result[0]["path"] == "browser/shot.png"
     assert result[0]["type"] == "image/png"
     assert result[0]["caption"] == "Test"
-
-
-def test_extract_outcome_with_plain_text_and_attachments():
-    pre_response_meta = {
-        "kind": "text",
-        "attachments": [{"path": "browser/shot.png", "type": "image/png", "caption": "Test screenshot"}],
-    }
-    outcome = _extract_outcome("Screenshot taken", pre_response_meta)
-    assert outcome.valid is True
-    assert outcome.text == "Screenshot taken"
-    assert len(outcome.attachments) == 1
-    assert outcome.attachments[0]["path"] == "browser/shot.png"
-
-
-def test_extract_outcome_with_multiple_attachments():
-    pre_response_meta = {
-        "attachments": [
-            {"path": "file1.png", "type": "image/png"},
-            {"path": "file2.pdf", "type": "application/pdf", "caption": "Report"},
-        ],
-    }
-    outcome = _extract_outcome("Done", pre_response_meta)
-    assert outcome.valid is True
-    assert len(outcome.attachments) == 2
-    assert outcome.attachments[0]["path"] == "file1.png"
-    assert outcome.attachments[1]["caption"] == "Report"
-
-
-def test_extract_outcome_without_attachments():
-    outcome = _extract_outcome("Result", None)
-    assert outcome.valid is True
-    assert outcome.attachments == []
-
-
-def test_extract_outcome_with_empty_text_is_invalid():
-    outcome = _extract_outcome("", None)
-    assert outcome.valid is False
-    assert outcome.attachments == []
-
-
-def test_extract_outcome_with_whitespace_only_is_invalid():
-    outcome = _extract_outcome("   ", None)
-    assert outcome.valid is False
-
-
-def test_extract_outcome_string_payload():
-    outcome = _extract_outcome("just a string", None)
-    assert outcome.valid is True
-    assert outcome.text == "just a string"
-    assert outcome.attachments == []

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from minibot.adapters.tasks.manager import TaskManager, compact_threshold_for_agent
+from minibot.adapters.tasks.manager import TaskManager, resolve_delegation_budget
 from minibot.adapters.tasks.retention import TaskRetentionService
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskProducer, SQLiteTaskStore
 from minibot.app.agent_definitions_loader import load_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.extensions import ExtensionContext
+from minibot.app.llm_client_factory import available_providers
 from minibot.app.task_consumer_service import SQLiteTaskConsumerService
 from minibot.llm.tools.tasks import TaskTools
 
@@ -35,7 +36,7 @@ def register(mb: ExtensionContext) -> None:
         store,
         settings.tasks.sqlite.lease_timeout_seconds,
         secrets=mb.vault.as_mapping() if mb.vault else None,
-        compact_threshold_for=lambda name: compact_threshold_for_agent(agent_registry, settings, name),
+        budget_for=lambda name, ov: resolve_delegation_budget(agent_registry, settings, name, ov),
     )
     producer = SQLiteTaskProducer(store)
     consumer = SQLiteTaskConsumerService(
@@ -52,6 +53,7 @@ def register(mb: ExtensionContext) -> None:
             task_repository=store,
             config=settings.tasks,
             agent_registry=agent_registry,
+            providers=available_providers(settings),
         ).bindings()
     )
     mb.add_service(_SQLiteTasksService(store, consumer))

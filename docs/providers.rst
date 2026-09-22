@@ -61,6 +61,50 @@ The ``base_url`` and ``headers`` fields are optional for all API-key providers. 
 compatible endpoint, proxy, or provider-specific requirement. Specialist agents can select a different
 provider with their ``model_provider`` frontmatter; see :doc:`agents`.
 
+.. _providers-aliases:
+
+Named providers
+---------------
+
+A section name above is also an API format name, so ``[providers.openai_responses]`` can describe only
+one Responses endpoint. To run several endpoints of the same format side by side, name the section
+whatever you like and add ``api_format`` to say which API it speaks:
+
+.. code-block:: toml
+
+   [providers.opencode_go]
+   api_format = "openai_responses"
+   api_key = "${OPENCODE_API_KEY}"
+   base_url = "https://opencode.ai/zen/go/v1"
+   models = ["deepseek-v3.6", "mimo-v2.5"]
+
+   [providers.opencode_go.headers]
+   x-opencode-session = "minibot"
+
+   [providers.zai]
+   api_format = "openai"
+   api_key = "${ZAI_API_KEY}"
+   base_url = "https://api.z.ai/api/coding/paas/v4"
+   models = ["glm-5.3", "glm-5.3-flash"]
+
+``api_format`` accepts ``openai``, ``openai_responses``, ``openrouter``, ``claude``, ``google`` and
+``chatgpt_codex``. It may be left out only when the section name is itself one of those values;
+otherwise configuration loading fails naming the valid formats, rather than quietly building an
+OpenAI Chat Completions client for an endpoint that speaks something else. The section name is what
+``[llm].provider``, an agent's ``model_provider`` frontmatter and a runtime delegation override
+reference.
+
+``models`` is advisory: MiniBot never validates it against the endpoint, and it does not restrict what
+an agent may request. It is what the main agent is shown when it asks which providers and models are
+available (see :doc:`agents`), so list the ids you actually want it to pick from.
+
+``minibot configure`` writes these sections: it asks which of its known targets to set up — OpenAI,
+OpenAI Responses, xAI, z.ai, OpenCode Zen, OpenCode Go, ChatGPT Codex — configures each as
+``[providers.<target>]`` with its ``api_format``, key, base URL and ``models``, then asks which one the
+main agent uses. A target that an older wizard had put in a format-named section (z.ai inside
+``[providers.openai]``, say) is moved into its own section, and the old one is emptied. Endpoints the
+wizard does not know about are still written by hand.
+
 OpenAI Chat Completions
 -----------------------
 

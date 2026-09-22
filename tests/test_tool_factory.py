@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from llm_async.models import Tool
 
 from minibot.adapters.config.schema import CalculatorToolConfig, Settings, ToolsConfig
+from minibot.app.agent_policies import RESERVED_DELEGATION_TOOL_NAMES
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
+from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.factory import build_enabled_tools
 
@@ -63,3 +68,28 @@ def test_build_enabled_tools_rejects_extension_tool_name_collisions() -> None:
     )
     with pytest.raises(ValueError, match="duplicate tool name"):
         build_enabled_tools(settings, memory=_MemoryStub(), extension_tools=[duplicate])
+
+
+def test_a_registry_adds_only_fetch_agent_info() -> None:
+    """Delegation itself is spawn_task, contributed by the tasks extension — not by this factory."""
+    settings = Settings.from_dict({"tools": {"time": {"enabled": True}, "wait": {"enabled": True}}})
+    specialist = AgentSpec(
+        name="general_agent",
+        description="generalist",
+        system_prompt="do the work",
+        source_path=Path("agents/general.md"),
+        tools_deny=["mcp*"],
+    )
+
+    names = {
+        binding.tool.name
+        for binding in build_enabled_tools(
+            settings,
+            memory=_MemoryStub(),
+            agent_registry=AgentRegistry([specialist]),
+            llm_factory=LLMClientFactory(settings),
+        )
+    }
+
+    assert "fetch_agent_info" in names
+    assert names & RESERVED_DELEGATION_TOOL_NAMES == {"fetch_agent_info"}

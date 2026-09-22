@@ -17,6 +17,7 @@ class ReasoningReplay:
     reasoning_details: list[dict[str, Any] | str] | None
     original_had_reasoning: bool
     source: str | None
+    reasoning_key: str | None = None
 
     @property
     def has_replayable_reasoning(self) -> bool:
@@ -41,6 +42,7 @@ def extract_reasoning_replay(message: Any) -> ReasoningReplay:
                 reasoning_details=None,
                 original_had_reasoning=True,
                 source=f"message.{key}",
+                reasoning_key=key,
             )
 
     original = getattr(message, "original", None)
@@ -62,6 +64,7 @@ def extract_reasoning_replay(message: Any) -> ReasoningReplay:
                     reasoning_details=None,
                     original_had_reasoning=True,
                     source=f"message.original.{key}",
+                    reasoning_key=key,
                 )
 
     return ReasoningReplay(
@@ -83,18 +86,26 @@ def reasoning_text_from_message(message: Any) -> str | None:
     return "\n\n".join(parts) or None
 
 
-def apply_reasoning_replay(payload: dict[str, Any], replay: ReasoningReplay) -> dict[str, Any]:
+def apply_reasoning_replay(
+    payload: dict[str, Any], replay: ReasoningReplay, *, replay_text: bool = False
+) -> dict[str, Any]:
+    """Echo provider-native reasoning back onto an assistant message for the next request.
+
+    ``reasoning_details`` always travels: the Responses API rebuilds its ``rs_`` item from it and
+    rejects a ``function_call`` whose reasoning item is missing, and OpenRouter needs it to keep
+    Anthropic thinking signatures valid. The plain text goes back under the key it arrived with:
+    ``reasoning_content`` (DeepSeek, Kimi: required in thinking-mode tool loops) always, bare
+    ``reasoning`` only with ``replay_text`` (OpenRouter) since strict OpenAI-compatible endpoints
+    (Fireworks, DeepSeek) answer HTTP 400 "Extra inputs are not permitted, field:
+    'messages[N].reasoning'" when it is sent.
+    """
     updated = dict(payload)
     if replay.reasoning_details:
         updated["reasoning_details"] = [
             dict(item) if isinstance(item, Mapping) else item for item in replay.reasoning_details
         ]
-        updated.pop("reasoning", None)
-    elif replay.reasoning:
-        updated["reasoning"] = replay.reasoning
-        updated.pop("reasoning_details", None)
-    if replay.original_had_reasoning and "reasoning" not in updated and "reasoning_details" not in updated:
-        raise RuntimeError("provider reasoning context would be dropped during follow-up replay")
+    elif replay.reasoning and (replay.reasoning_key == "reasoning_content" or replay_text):
+        updated[replay.reasoning_key or "reasoning"] = replay.reasoning
     return updated
 
 

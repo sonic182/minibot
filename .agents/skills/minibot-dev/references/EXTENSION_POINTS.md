@@ -49,7 +49,7 @@ Dispatcher.__init__ → build_enabled_tools()    llm/tools/factory.py:28
     ChatMemoryTool        (always)             factory.py:47
     CalculatorTool        if tools.calculator.enabled     factory.py:51
     SkillLoaderTool       if tools.skills.enabled         factory.py:60
-    AgentDelegateTool     if the agent registry is non-empty   factory.py:63
+    AgentInfoTool         if the agent registry is non-empty   factory.py:63
 ```
 
 Create: `minibot/llm/tools/<module>.py` exposing `.bindings() -> list[ToolBinding]`, and
@@ -117,8 +117,9 @@ AppContainer.configure()
       ├─ AgentDefinitionConfig.model_validate     adapters/config/schema.py:318
       └─ → AgentSpec                              core/agents.py
   └─ AgentRegistry(agent_specs)                   app/agent_registry.py
-Dispatcher → build_enabled_tools(agent_registry=...) → AgentDelegateTool
-  → invoke_agent / fetch_agent_info
+Dispatcher → build_enabled_tools(agent_registry=...) → AgentInfoTool → fetch_agent_info
+Delegation itself is spawn_task, from the tasks extension:
+  extensions/services/tasks.py → TaskTools → spawn_task → TaskManager → worker subprocess
 PromptService._specialist_roster_fragment         app/handlers/services/prompt_service.py:125
 ```
 

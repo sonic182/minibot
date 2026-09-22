@@ -9,6 +9,10 @@ _BASE_URL_PROVIDER_ALIAS = {
     "api.openai.com": "openai",
     "x.ai": "xai",
     "api.x.ai": "xai",
+    # models.dev catalogs Fireworks as "fireworks-ai", so a `[providers.fireworks]` section name
+    # would miss every model without this.
+    "fireworks.ai": "fireworks-ai",
+    "api.fireworks.ai": "fireworks-ai",
 }
 
 

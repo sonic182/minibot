@@ -28,9 +28,9 @@ class RuntimeCompactor:
     """Compacts an in-flight ``AgentState`` when the context window starts filling up.
 
     ``HistoryCompactionService`` already does this for the main chat, but between turns and over
-    persisted memory. A delegated run never reaches that layer: ``spawn_task`` and
-    ``invoke_agent`` can loop for dozens of tool-calling steps inside a single
-    ``AgentRuntime.run()``, so the same strategy has to apply to the live message list.
+    persisted memory. A delegated run never reaches that layer: a ``spawn_task`` worker can loop
+    for dozens of tool-calling steps inside a single ``AgentRuntime.run()``, so the same strategy
+    has to apply to the live message list.
     """
 
     def __init__(self, *, llm_client: Any, threshold_tokens: int, logger: logging.Logger) -> None:
@@ -117,8 +117,18 @@ def build_compactor(
 ) -> RuntimeCompactor | None:
     """``None`` whenever the threshold is unknown — a model with no catalog entry gives us
     nothing to compare against, and guessing a window is worse than not compacting."""
-    if not threshold_tokens or threshold_tokens <= 0:
+    armed = bool(threshold_tokens and threshold_tokens > 0)
+    logger.debug(
+        "runtime compaction armed" if armed else "runtime compaction unavailable: no known context limit",
+        extra={
+            "threshold_tokens": threshold_tokens,
+            "provider": getattr(llm_client, "provider_name", lambda: None)(),
+            "model": getattr(llm_client, "model_name", lambda: None)(),
+        },
+    )
+    if not armed:
         return None
+    assert threshold_tokens is not None
     return RuntimeCompactor(llm_client=llm_client, threshold_tokens=threshold_tokens, logger=logger)
 
 

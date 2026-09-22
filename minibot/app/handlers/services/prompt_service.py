@@ -79,10 +79,9 @@ class PromptService:
     def _capability_status_fragment(self) -> str:
         tool_names = {binding.tool.name for binding in self._tools}
         task_tools_available = {"spawn_task", "cancel_task", "list_tasks"}.issubset(tool_names)
-        invoke_agent_available = "invoke_agent" in tool_names
         fetch_agent_info_available = "fetch_agent_info" in tool_names
         specialist_count = 0
-        if invoke_agent_available and self._agent_registry is not None and not self._agent_registry.is_empty():
+        if task_tools_available and self._agent_registry is not None and not self._agent_registry.is_empty():
             specialist_count = len(self._agent_registry.names())
 
         lines = [
@@ -95,25 +94,23 @@ class PromptService:
         if task_tools_available:
             if "get_task" in tool_names:
                 lines.append(
-                    "- Asynchronous delegation is available now via `spawn_task`, with `list_tasks`, `get_task`, "
+                    "- Delegation is available now via `spawn_task`, with `list_tasks`, `get_task`, "
                     "and `cancel_task` for tracking, retrieval, and cancellation."
                 )
             else:
                 lines.append(
-                    "- Asynchronous delegation is available now via `spawn_task`, with `list_tasks` and "
+                    "- Delegation is available now via `spawn_task`, with `list_tasks` and "
                     "`cancel_task` for tracking and cancellation."
                 )
+            if specialist_count > 0:
+                lines.append(
+                    f"- `spawn_task` targets one of {specialist_count} listed specialist agents via exact "
+                    "`agent_name`, or omits it to run a general worker."
+                )
             lines.append(
-                "- `spawn_task` can also target a listed specialist via exact `agent_name`"
-                " for long-running async work."
+                "- Delegation is asynchronous: `spawn_task` returns a `task_id` and the worker's answer reaches "
+                "the user as a later message, so do not wait for it or claim to have its result."
             )
-            if invoke_agent_available and specialist_count > 0:
-                lines.append("- `invoke_agent` is also available as a local fallback when task tools are unsuitable.")
-        elif invoke_agent_available and specialist_count > 0:
-            lines.append(
-                f"- Delegation is available now via `invoke_agent` with {specialist_count} listed specialist agents."
-            )
-            lines.append("- Prefer delegation for non-trivial specialist work; keep trivial requests local.")
         else:
             lines.append("- Delegation is unavailable in this turn; continue locally with available tools.")
         if fetch_agent_info_available and specialist_count > 0:
@@ -135,7 +132,7 @@ class PromptService:
         if self._agent_registry is None or self._agent_registry.is_empty():
             return ""
         tool_names = {binding.tool.name for binding in self._tools}
-        if "invoke_agent" not in tool_names:
+        if "spawn_task" not in tool_names:
             return ""
         roster = self._agent_registry.prompt_roster()
         if not roster:

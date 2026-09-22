@@ -24,6 +24,11 @@ from minibot.adapters.config.environment import expand_environment, expand_secre
 
 _BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
 
+# Mirrors the keys of minibot.llm.services.provider_registry.LLM_PROVIDERS plus chatgpt_codex,
+# spelled out here so config validation stays free of llm_async imports.
+ProviderApiFormat = Literal["openai", "openai_responses", "openrouter", "claude", "google", "chatgpt_codex"]
+PROVIDER_API_FORMATS: tuple[str, ...] = get_args(ProviderApiFormat)
+
 
 def _coerce_byte_size(value: Any) -> int:
     if isinstance(value, bool):
@@ -337,6 +342,13 @@ class ProviderConfig(BaseModel):
     - ``auth_path`` — used only by ``[providers.chatgpt_codex]``: path to the ChatGPT Codex OAuth
       credentials file written by ``minibot codex login``. Defaults to
       ``~/.minibot/auth_codex.json`` when unset.
+    - ``api_format`` — which API dialect this endpoint speaks, and therefore which client is built:
+      ``"openai"``, ``"openai_responses"``, ``"openrouter"``, ``"claude"``, ``"google"`` or
+      ``"chatgpt_codex"``. Required unless the section name is itself one of those values, which lets
+      several endpoints of the same format coexist: ``[providers.opencode_go]`` with
+      ``api_format = "openai_responses"`` alongside ``[providers.zai]`` with ``api_format = "openai"``.
+    - ``models`` — advisory list of model ids this endpoint serves. Not validated against the
+      endpoint; it is what agents and runtime delegation overrides are offered to choose from.
 
     OpenAI-compatible third-party endpoints (set under ``[providers.openai]`` with
     ``[llm].provider = "openai"``, or ``[providers.openai_responses]`` with
@@ -359,6 +371,8 @@ class ProviderConfig(BaseModel):
     base_url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     auth_path: str | None = None
+    api_format: ProviderApiFormat | None = None
+    models: list[str] = Field(default_factory=list)
 
 
 class AgentDefinitionConfig(BaseModel):
@@ -431,20 +445,15 @@ class OrchestrationConfig(BaseModel):
     """Multi-agent orchestration settings. TOML section: ``[orchestration]``
 
     - ``directory`` — path to agent definition files (default: ``"./agents"``).
-    - ``default_timeout_seconds`` — per-agent-call timeout (default: ``90``).
     - ``tool_ownership_mode`` — how tools are shared between agents:
       ``"shared"`` (default), ``"exclusive"``, or ``"exclusive_mcp"``.
-    - ``delegated_tool_call_policy`` — whether delegated agents may call tools:
-      ``"auto"`` (default), ``"always"``, or ``"never"``.
     - ``main_tool_use_guardrail`` — optional guardrail before tool execution:
       ``"disabled"`` (default) or ``"llm_classifier"``.
     - ``main_agent`` — tool allow/deny policy for the main agent (``[orchestration.main_agent]``).
     """
 
     directory: str = "./agents"
-    default_timeout_seconds: PositiveInt = 90
     tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
-    delegated_tool_call_policy: Literal["auto", "always", "never"] = "auto"
     main_tool_use_guardrail: Literal["disabled", "llm_classifier"] = "disabled"
     main_agent: MainAgentConfig = MainAgentConfig()
 
@@ -855,8 +864,11 @@ class TasksConfig(BaseModel):
     """Async task system settings. TOML section: ``[tasks]``
 
     Gates both the task consumer service and the ``spawn_task``/``cancel_task``/``list_tasks``/``get_task`` tools.
+    ``spawn_task`` is also the only way to delegate to a specialist agent, so disabling this
+    section turns multi-agent orchestration off entirely.
 
-    - ``enabled`` — enable the async task system (default: ``false``).
+    - ``enabled`` — enable the async task system (default: ``true``; the ``sqlite`` backend
+      needs no broker and no extra).
     - ``backend`` — queue backend: ``"sqlite"`` (default; no broker required) or
       ``"rabbitmq"`` (see ``[rabbitmq]``).
     - ``worker_timeout_seconds`` — hard per-task processing timeout (default: ``1800``).
@@ -866,7 +878,7 @@ class TasksConfig(BaseModel):
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
-    enabled: bool = False
+    enabled: bool = True
     backend: Literal["rabbitmq", "sqlite"] = "sqlite"
     worker_timeout_seconds: PositiveInt = 1800
     worker_max_steps: TaskLimitValue = "unlimited"
@@ -1000,6 +1012,23 @@ class Settings(BaseModel):
     extensions: ExtensionsConfig = ExtensionsConfig()
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_provider_api_formats(self) -> Settings:
+        """A provider section must name a real API format, by its own name or by ``api_format``.
+
+        Without this, an unrecognized section name falls through to the OpenAI Chat Completions
+        client, and the delegation roster then offers the model a provider whose advertised format
+        does not exist. A load failure naming the valid values is the lesser evil.
+        """
+        for name, provider_cfg in self.providers.items():
+            if provider_cfg.api_format is not None or name.strip().lower() in PROVIDER_API_FORMATS:
+                continue
+            valid = ", ".join(PROVIDER_API_FORMATS)
+            raise ValueError(
+                f"[providers.{name}] must set api_format (one of {valid}) because its name is not an API format"
+            )
+        return self
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], secrets: Mapping[str, str] | None = None) -> Settings:

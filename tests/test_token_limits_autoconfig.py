@@ -290,6 +290,7 @@ async def test_apply_runtime_token_autoconfig_respects_agent_own_max_new_tokens(
     assert adjusted_specs[0].max_new_tokens == 500
 
 
+@pytest.mark.allow_catalog_fetch
 @pytest.mark.asyncio
 async def test_fetch_models_catalog_uses_aiosonic(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -302,6 +303,7 @@ async def test_fetch_models_catalog_uses_aiosonic(monkeypatch: pytest.MonkeyPatc
     assert payload == {"openai": {"models": {}}}
 
 
+@pytest.mark.allow_catalog_fetch
 @pytest.mark.asyncio
 async def test_fetch_models_catalog_returns_none_for_non_object_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -312,3 +314,123 @@ async def test_fetch_models_catalog_returns_none_for_non_object_payload(monkeypa
     logger = logging.getLogger("test.token_limits.fetch_invalid")
     payload = await token_limits_autoconfig._fetch_models_catalog(logger)
     assert payload is None
+
+
+_FIREWORKS_CATALOG = {
+    "fireworks-ai": {"models": {"deepseek-v4p1": {"limit": {"context": 163840, "output": 16384}}}},
+}
+
+
+def _fireworks_settings() -> Settings:
+    settings = Settings()
+    settings.providers["fireworks"] = ProviderConfig(
+        api_key="k",
+        api_format="openai",
+        base_url="https://api.fireworks.ai/inference/v1",
+        models=["deepseek-v4p1"],
+    )
+    return settings
+
+
+@pytest.mark.asyncio
+async def test_ensure_model_limits_caches_the_resolved_entry_not_the_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetches = 0
+
+    async def _catalog(_logger: object) -> dict[str, object]:
+        nonlocal fetches
+        fetches += 1
+        return _FIREWORKS_CATALOG
+
+    monkeypatch.setattr(token_limits_autoconfig, "_fetch_models_catalog", _catalog)
+    logger = logging.getLogger("test.token_limits.ensure")
+    kwargs = {"settings": _fireworks_settings(), "provider_name": "fireworks", "model_name": "deepseek-v4p1"}
+
+    first = await token_limits_autoconfig.ensure_model_limits(logger=logger, **kwargs)
+    second = await token_limits_autoconfig.ensure_model_limits(logger=logger, **kwargs)
+
+    assert first == second == {"catalog_provider": "fireworks-ai", "context": 163840, "output": 16384}
+    assert fetches == 1
+    assert token_limits_autoconfig.cached_model_limits("fireworks", "deepseek-v4p1") == first
+
+
+@pytest.mark.asyncio
+async def test_ensure_model_limits_caches_an_uncatalogued_model_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a sentinel, `cache.get` can't tell a stored None from a miss and every delegation
+    to an unknown model would re-download the catalog."""
+    fetches = 0
+
+    async def _catalog(_logger: object) -> dict[str, object]:
+        nonlocal fetches
+        fetches += 1
+        return _FIREWORKS_CATALOG
+
+    monkeypatch.setattr(token_limits_autoconfig, "_fetch_models_catalog", _catalog)
+    logger = logging.getLogger("test.token_limits.ensure_missing")
+    kwargs = {"settings": _fireworks_settings(), "provider_name": "fireworks", "model_name": "who-knows"}
+
+    assert await token_limits_autoconfig.ensure_model_limits(logger=logger, **kwargs) is None
+    assert await token_limits_autoconfig.ensure_model_limits(logger=logger, **kwargs) is None
+    assert fetches == 1
+
+
+@pytest.mark.asyncio
+async def test_ensure_model_limits_does_not_cache_a_failed_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Caching a network failure would pin 'no compaction' for the whole ttl."""
+    payloads: list[dict[str, object] | None] = [None, _FIREWORKS_CATALOG]
+
+    async def _catalog(_logger: object) -> dict[str, object] | None:
+        return payloads.pop(0)
+
+    monkeypatch.setattr(token_limits_autoconfig, "_fetch_models_catalog", _catalog)
+    logger = logging.getLogger("test.token_limits.ensure_failed")
+    kwargs = {"settings": _fireworks_settings(), "provider_name": "fireworks", "model_name": "deepseek-v4p1"}
+
+    assert await token_limits_autoconfig.ensure_model_limits(logger=logger, **kwargs) is None
+    assert await token_limits_autoconfig.ensure_model_limits(logger=logger, **kwargs) is not None
+
+
+@pytest.mark.asyncio
+async def test_startup_prewarms_every_model_a_delegation_may_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _catalog(_logger: object) -> dict[str, object]:
+        return _FIREWORKS_CATALOG
+
+    monkeypatch.setattr(token_limits_autoconfig, "_fetch_models_catalog", _catalog)
+
+    await token_limits_autoconfig.apply_runtime_token_autoconfig_async(
+        settings=_fireworks_settings(),
+        agent_specs=[],
+        logger=logging.getLogger("test.token_limits.prewarm"),
+    )
+
+    # No agent spec named it, so only the providers pass could have cached it.
+    assert token_limits_autoconfig.cached_model_limits("fireworks", "deepseek-v4p1") == {
+        "catalog_provider": "fireworks-ai",
+        "context": 163840,
+        "output": 16384,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_limits_maps_fireworks_base_url_to_its_catalog_key() -> None:
+    # models.dev files Fireworks under "fireworks-ai"; the `[providers.fireworks]` section name
+    # alone finds nothing.
+    payload = {
+        "fireworks-ai": {
+            "models": {
+                "accounts/fireworks/models/deepseek-v4p1-flash": {"limit": {"context": 163840, "output": 16384}}
+            }
+        }
+    }
+
+    result = await token_limits_autoconfig._resolve_limits(
+        payload=payload,
+        provider_name="fireworks",
+        model_name="accounts/fireworks/models/deepseek-v4p1-flash",
+        base_url="https://api.fireworks.ai/inference/v1",
+        auth_path=None,
+        logger=logging.getLogger("test.token_limits.fireworks"),
+    )
+
+    assert result == {"catalog_provider": "fireworks-ai", "context": 163840, "output": 16384}

@@ -5,13 +5,18 @@ Async Tasks
    :description: Offload long-running work in Minibot to a background task worker queue backed by SQLite or RabbitMQ, with progress, results, and retention.
    :keywords: AI agent background tasks, async task queue, SQLite task queue, RabbitMQ AI agent
 
-MiniBot can hand long-running work to a background worker instead of blocking the turn. The
+MiniBot hands long-running work to a background worker instead of blocking the turn. The
 ``[tasks]`` section gates both the consumer service and the task tools: when it is disabled, the
 model never sees them.
 
 .. note::
 
-   Async tasks are disabled by default (``[tasks].enabled = false``). The default SQLite backend
+   ``spawn_task`` is also the only way to delegate to a specialist agent (see :doc:`agents`), so
+   disabling this section disables multi-agent orchestration too.
+
+.. note::
+
+   Async tasks are enabled by default (``[tasks].enabled = true``). The default SQLite backend
    needs no broker and no extra; ``backend = "rabbitmq"`` requires the ``rabbitmq`` extra and a
    broker configured in ``[rabbitmq]``.
 
@@ -45,7 +50,8 @@ Tool Surface
    * - ``spawn_task``
      - Queue a worker task from a ``prompt``. Optionally target a specialist with ``agent_name``,
        pass structured ``context_json``, and cap ``timeout_seconds``, ``max_steps``, and
-       ``max_tool_calls`` (each may not exceed the configured worker ceiling).
+       ``max_tool_calls`` (each may not exceed the configured worker ceiling). Without
+       ``timeout_seconds``, a named specialist's own ``timeout_seconds`` applies.
    * - ``cancel_task``
      - Cancel an active task by ``task_id``.
    * - ``list_tasks``

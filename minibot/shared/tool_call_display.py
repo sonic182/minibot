@@ -72,7 +72,6 @@ _DETAILS: dict[str, _Detail] = {
     "graph": _Detail(("action", "node", "query"), labelled=True),
     "grep": _Detail(("pattern", "path"), labelled=True),
     "http_request": _Detail(("method", "url")),
-    "invoke_agent": _Detail(("agent_name",)),
     "list_skills": _Detail(("query",)),
     "memory": _Detail(("action", "title", "query"), labelled=True),
     "python_execute": _Detail(("code",)),

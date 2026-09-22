@@ -285,11 +285,12 @@ both of which hold the registry, not a snapshot — pick the change up with no f
 
 **Three things to get right:**
 
-- **`invoke_agent` must exist even when the roster started empty.** `build_enabled_tools` only
-  builds `AgentDelegateTool` when `not agent_registry.is_empty()` (`llm/tools/factory.py:67`).
-  Starting with zero agents and reloading one in would leave nothing able to delegate to it.
+- **`fetch_agent_info` must exist even when the roster started empty.** `build_enabled_tools` only
+  builds `AgentInfoTool` when `not agent_registry.is_empty()` (`llm/tools/factory.py:67`).
+  Starting with zero agents and reloading one in would leave nothing able to inspect it.
   Drop the emptiness gate (the tool already handles an unknown name) or build it whenever
-  `reload_agents` is built.
+  `reload_agents` is built. `spawn_task` itself is unaffected: it comes from the tasks extension
+  and is gated on `[tasks].enabled`, not on the roster.
 - **Token auto-config.** Startup runs `apply_runtime_token_autoconfig_async`
   (`app/token_limits_autoconfig.py:20`) over the specs before the swap; it fetches the models.dev
   catalog. Reloaded specs need the same treatment or a reloaded agent runs with unadjusted
@@ -525,8 +526,8 @@ are genuinely counterintuitive and documented nowhere the agent can see:
   `mcp_servers` membership plus deny patterns only
 - `tools_allow` and `tools_deny` are mutually exclusive (enforced twice: `tool_policy_utils.py`
   and a pydantic validator in `schema.py`)
-- these names are always stripped from a delegated agent (`agent_policies.py:10`):
-  `invoke_agent`, `fetch_agent_info`, `spawn_task`, `list_tasks`, `cancel_task`
+- these names are always stripped from a delegated agent (`agent_policies.py:15`):
+  `fetch_agent_info`, `spawn_task`, `list_tasks`, `get_task`, `cancel_task`
 - an empty Markdown body is **fatal**, not a warning (unlike skills, where it is a silent drop)
 
 An agent writing a specialist without knowing this produces a broken specialist that looks

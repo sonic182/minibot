@@ -93,6 +93,7 @@ class SQLiteTaskConsumerService:
                 prompt=request.prompt,
                 agent_name=request.agent_name,
                 context=request.context,
+                model_overrides=request.model_overrides,
                 chat_id=request.chat_id,
                 user_id=request.user_id,
                 owner_id=request.owner_id,

@@ -1,10 +1,89 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from minibot.adapters.config.schema import LLMMConfig, OpenRouterProviderRoutingConfig, Settings
 from minibot.core.agents import AgentSpec
 from minibot.llm.provider_factory import LLMClient
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderOption:
+    """A provider an agent or a runtime delegation override may target."""
+
+    name: str
+    api_format: str
+    base_url: str | None
+    models: tuple[str, ...]
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "api_format": self.api_format,
+            "base_url": self.base_url,
+            "models": list(self.models),
+        }
+
+
+def available_providers(settings: Settings) -> list[ProviderOption]:
+    """Providers with usable credentials, by the name `model_provider` must reference.
+
+    A provider without credentials is excluded on purpose: `LLMClient.generate` degrades to an
+    `Echo:` reply when the key is missing, which reads like a model answer instead of a failure.
+    """
+    options: list[ProviderOption] = []
+    seen: set[str] = set()
+    for name, provider_cfg in settings.providers.items():
+        normalized = name.strip().lower()
+        api_format = provider_cfg.api_format or normalized
+        if not _has_credentials(api_format=api_format, api_key=provider_cfg.api_key, auth_path=provider_cfg.auth_path):
+            continue
+        options.append(
+            ProviderOption(
+                name=normalized,
+                api_format=api_format,
+                base_url=provider_cfg.base_url or None,
+                models=tuple(provider_cfg.models),
+            )
+        )
+        seen.add(normalized)
+    main_provider = settings.llm.provider.strip().lower()
+    if main_provider not in seen and _has_credentials(
+        api_format=main_provider, api_key=settings.llm.api_key, auth_path=settings.llm.auth_path
+    ):
+        options.append(
+            ProviderOption(
+                name=main_provider,
+                api_format=main_provider,
+                base_url=settings.llm.base_url or None,
+                models=(settings.llm.model,),
+            )
+        )
+    return sorted(options, key=lambda option: option.name)
+
+
+def _has_credentials(*, api_format: str, api_key: str | None, auth_path: str | None) -> bool:
+    if api_format != "chatgpt_codex":
+        return bool(api_key)
+    # Codex authenticates with an OAuth file, not a key. Its presence is not enough: an empty
+    # `[providers.chatgpt_codex]` section would otherwise be advertised and queue work that only
+    # fails once the worker builds the client.
+    from minibot.llm.services.codex_setup import CodexSetupError, load_credentials, resolve_auth_path
+
+    try:
+        return load_credentials(resolve_auth_path(auth_path)) is not None
+    except (CodexSetupError, OSError):
+        return False
+
+
+def find_provider(name: str, options: Sequence[ProviderOption]) -> ProviderOption | None:
+    normalized = name.strip().lower()
+    for option in options:
+        if option.name == normalized:
+            return option
+    return None
 
 
 class LLMClientFactory:
@@ -61,6 +140,13 @@ class LLMClientFactory:
         self._cache[key] = client
         return client
 
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
+    def available_providers(self) -> list[ProviderOption]:
+        return available_providers(self._settings)
+
     def _resolved_config(self, base: LLMMConfig, provider_override: str | None) -> LLMMConfig:
         config = base.model_copy(deep=True)
         if provider_override:
@@ -74,6 +160,8 @@ class LLMClientFactory:
             config.base_url = provider_cfg.base_url
             config.extra_headers = {**config.extra_headers, **provider_cfg.headers}
             config.auth_path = provider_cfg.auth_path
+            if provider_cfg.api_format:
+                config.provider = provider_cfg.api_format
         return config
 
     @staticmethod

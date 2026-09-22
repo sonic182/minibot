@@ -30,6 +30,7 @@ def write_config(
     orchestration_dir: Path | None = None,
     tool_ownership_mode: str = "shared",
     main_agent_tools_allow: list[str] | None = None,
+    tasks_enabled: bool = False,
 ) -> Path:
     config_path = tmp_path / "config.toml"
     sqlite_url = f"sqlite+aiosqlite:///{(tmp_path / db_name).as_posix()}"
@@ -42,9 +43,19 @@ def write_config(
         orchestration_block = (
             "\n[orchestration]\n"
             f'directory = "{orchestration_dir.as_posix()}"\n'
-            "default_timeout_seconds = 30\n"
             f'tool_ownership_mode = "{tool_ownership_mode}"\n'
         ) + "\n".join(main_agent_lines)
+    # An hour-long poll interval keeps the consumer from leasing what a test enqueues: the loop
+    # polls once at start, before the turn runs, and a real worker subprocess would call a real
+    # provider. Tests assert on the queued row instead.
+    tasks_block = (
+        "\n\n[tasks]\n"
+        f"enabled = {'true' if tasks_enabled else 'false'}\n"
+        'backend = "sqlite"\n'
+        "\n[tasks.sqlite]\n"
+        f'sqlite_url = "sqlite+aiosqlite:///{(tmp_path / "tasks.db").as_posix()}"\n'
+        "poll_interval_seconds = 3600\n"
+    )
     config_path.write_text(
         "\n".join(
             [
@@ -72,6 +83,7 @@ def write_config(
             ]
         )
         + orchestration_block
+        + tasks_block
         + "\n",
         encoding="utf-8",
     )
@@ -128,11 +140,16 @@ async def run_console_turn(
         dispatcher = Dispatcher(bus)
         console_service = ConsoleService(bus, chat_id=chat_id, user_id=user_id)
         await dispatcher.start()
+        # The task queue's schema is created by the extension's own service, exactly as the daemon
+        # does it; without this an enqueue hits "no such table: tasks".
+        extensions = AppContainer.get_extensions()
+        await extensions.start()
         await console_service.start()
         try:
             await console_service.publish_user_message(text)
             return await console_service.wait_for_response(3.0)
         finally:
             await console_service.stop()
+            await extensions.stop()
             await dispatcher.stop()
             reset_container()

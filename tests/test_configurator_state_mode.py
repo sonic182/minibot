@@ -7,8 +7,36 @@ import pytest
 from minibot.adapters.config import configurator
 
 
+def _stub_wizard(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    targets: set[str],
+    use_responses_api: bool = False,
+    main_target: str | None = None,
+    models: list[str] | None = None,
+) -> tuple[dict[tuple[str, ...], Any], set[tuple[str, ...]]]:
+    written: dict[tuple[str, ...], Any] = {}
+    removed: set[tuple[str, ...]] = set()
+
+    monkeypatch.setattr(configurator, "_write", lambda *_, **__: None)
+    monkeypatch.setattr(configurator, "_ask_multiselect", lambda *_, **__: targets)
+    monkeypatch.setattr(configurator, "_ask_bool", lambda *_, **__: use_responses_api)
+    monkeypatch.setattr(configurator, "_ask_secret", lambda *_, **__: "key")
+    monkeypatch.setattr(configurator, "_provider_models", lambda *_, **__: list(models or ["some-model"]))
+    monkeypatch.setattr(configurator, "_ask_models", lambda available, _current: list(available))
+    monkeypatch.setattr(configurator, "_choose_model", lambda *_, **__: "some-model")
+    monkeypatch.setattr(
+        configurator,
+        "_ask_main_provider",
+        lambda configured, _default: main_target or next(iter(configured)),
+    )
+    monkeypatch.setattr(configurator, "_set_value", lambda _doc, path, value: written.__setitem__(path, value))
+    monkeypatch.setattr(configurator, "_unset_value", lambda _doc, path: removed.add(path))
+    return written, removed
+
+
 @pytest.mark.parametrize(
-    ("target", "use_responses_api", "expected_provider", "expected_mode"),
+    ("target", "use_responses_api", "expected_api_format", "expected_mode"),
     [
         # Responses API keeps turn state server-side, so a tool loop can send just the delta.
         ("opencode_go", True, "openai_responses", "previous_response_id"),
@@ -23,33 +51,84 @@ def test_wizard_picks_the_state_mode_the_provider_can_actually_use(
     monkeypatch: pytest.MonkeyPatch,
     target: str,
     use_responses_api: bool,
-    expected_provider: str,
+    expected_api_format: str,
     expected_mode: str,
 ) -> None:
-    written: dict[tuple[str, ...], Any] = {}
-    removed: set[tuple[str, ...]] = set()
-
     monkeypatch.setattr(configurator, "_current_llm_target", lambda _: target)
-    monkeypatch.setattr(configurator, "_ask_llm_target", lambda _: target)
-    monkeypatch.setattr(configurator, "_ask_bool", lambda *_, **__: use_responses_api)
-    monkeypatch.setattr(configurator, "_ask_secret", lambda *_, **__: "key")
-    monkeypatch.setattr(configurator, "_ask_model", lambda *_, **__: "some-model")
-    monkeypatch.setattr(configurator, "_set_value", lambda _doc, path, value: written.__setitem__(path, value))
-    monkeypatch.setattr(configurator, "_unset_value", lambda _doc, path: removed.add(path))
+    written, removed = _stub_wizard(monkeypatch, targets={target}, use_responses_api=use_responses_api)
 
     configurator._configure_llm(object(), configurator.Settings())
 
-    assert written[("llm", "provider")] == expected_provider
+    # The main agent references the section name, and the section declares the API it speaks.
+    assert written[("llm", "provider")] == target
+    assert written[("providers", target, "api_format")] == expected_api_format
     assert written[("llm", "main_responses_state_mode")] == expected_mode
     assert written[("llm", "agent_responses_state_mode")] == expected_mode
 
     # OpenCode Go rejects requests without a session id; every other target must not carry a stale one.
-    session_header = ("providers", expected_provider, "headers", "x-opencode-session")
+    session_header = ("providers", target, "headers", "x-opencode-session")
     if target == "opencode_go":
         assert written[session_header] == "minibot"
     else:
         assert session_header not in written
         assert session_header in removed
+
+
+def test_wizard_configures_several_providers_and_one_main_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Delegation to another provider only works if more than one is set up."""
+    monkeypatch.setattr(configurator, "_current_llm_target", lambda _: "openai")
+    written, _ = _stub_wizard(
+        monkeypatch,
+        targets={"openai", "opencode_go"},
+        main_target="opencode_go",
+        models=["deepseek-v3.6", "mimo-v2.5"],
+    )
+
+    configurator._configure_llm(object(), configurator.Settings())
+
+    assert written[("providers", "openai", "api_format")] == "openai"
+    assert written[("providers", "opencode_go", "api_format")] == "openai"
+    assert written[("providers", "opencode_go", "base_url")] == "https://opencode.ai/zen/go/v1"
+    assert written[("providers", "opencode_go", "models")] == ["deepseek-v3.6", "mimo-v2.5"]
+    assert written[("llm", "provider")] == "opencode_go"
+
+
+def test_wizard_moves_a_third_party_endpoint_out_of_its_format_named_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pre-alias wizard put z.ai in [providers.openai]; leaving it there fakes a provider."""
+    settings = configurator.Settings(
+        providers={
+            "openai": configurator.ProviderConfig(
+                api_key="zai-key",
+                base_url="https://api.z.ai/api/coding/paas/v4",
+            )
+        }
+    )
+    monkeypatch.setattr(configurator, "_current_llm_target", lambda _: "zai")
+    written, removed = _stub_wizard(monkeypatch, targets={"zai"})
+
+    configurator._configure_llm(object(), settings)
+
+    assert ("providers", "openai", "api_key") in removed
+    assert ("providers", "openai", "base_url") in removed
+    assert written[("providers", "zai", "base_url")] == "https://api.z.ai/api/coding/paas/v4"
+    assert written[("providers", "zai", "api_format")] == "openai"
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("", ["gpt-5.6-luna", "deepseek-v3.6", "glm-5.3"]),
+        ("GLM", ["glm-5.3"]),
+        ("deep 3.6", ["deepseek-v3.6"]),
+        ("nothing-here", []),
+    ],
+)
+def test_filter_models_narrows_a_long_catalog(query: str, expected: list[str]) -> None:
+    models = ["gpt-5.6-luna", "deepseek-v3.6", "glm-5.3"]
+
+    assert configurator._filter_models(models, query) == expected
 
 
 def test_wizard_makes_enabled_skills_visible_to_the_model(monkeypatch: pytest.MonkeyPatch) -> None:

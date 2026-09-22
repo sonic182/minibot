@@ -1,12 +1,17 @@
-Queue a new background worker task and continue the current turn.
+Delegate work to a background worker agent.
 
-Use this when work can run asynchronously and the main agent should not block on it immediately.
+This is the only way to delegate. Use it for non-trivial work: multi-step tasks, investigations, code/file/browser workflows, or anything likely to need several tool calls. Keep trivial requests local.
 
 Provide:
-- prompt: clear worker instruction.
-- agent_name: optional exact specialist agent name for asynchronous specialist execution. Must match a
-  registered agent's `name` exactly (check the specialist roster or fetch_agent_info first) — an unknown
-  name is rejected before the task is queued.
+- prompt: clear, concrete worker instruction.
+- agent_name: optional exact specialist agent name from the roster in your system prompt. Must match a
+  registered agent's `name` exactly (check the roster or fetch_agent_info first) — an unknown name is
+  rejected before the task is queued. Omit it to run a general worker agent.
 - context_json: optional JSON object string the worker should receive as structured context.
+- timeout_seconds, max_steps, max_tool_calls: optional per-task budget. Each may not exceed the configured
+  worker ceiling. Without timeout_seconds a named specialist uses its own configured timeout.
+- model_provider, model, reasoning_effort: optional, for this task only. Use them when the request names a
+  provider, model or thinking budget. Check fetch_agent_info for the providers that have credentials
+  configured — an unconfigured provider is rejected before the task is queued.
 
-Each spawned task keeps the current channel/chat routing so its result returns to the same conversation as a later task_worker message.
+This returns a task_id immediately, not the answer: the worker runs asynchronously and its result, including any files it produced, reaches the same conversation as a later message. Tell the user the work was handed off; never invent the outcome. Use get_task to retrieve it, list_tasks to see what is running, and cancel_task to stop one.

@@ -26,12 +26,12 @@ def any_tool_call_truncated(tool_calls: Sequence[Any]) -> bool:
     return False
 
 
-def assistant_message_for_followup(message: Any) -> dict[str, Any]:
+def assistant_message_for_followup(message: Any, *, replay_text: bool = False) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "role": getattr(message, "role", "assistant") or "assistant",
         "content": getattr(message, "content", "") or "",
     }
-    payload = apply_reasoning_replay(payload, extract_reasoning_replay(message))
+    payload = apply_reasoning_replay(payload, extract_reasoning_replay(message), replay_text=replay_text)
     tool_calls = getattr(message, "tool_calls", None)
     if tool_calls:
         payload["tool_calls"] = [tool_call_to_payload(call) for call in tool_calls]

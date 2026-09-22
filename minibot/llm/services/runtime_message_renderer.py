@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
-from minibot.llm.services.reasoning_replay import apply_reasoning_replay, extract_reasoning_replay
+from minibot.llm.services.reasoning_replay import ReasoningReplay, apply_reasoning_replay, extract_reasoning_replay
 
 
 class RuntimeMessageRenderer:
@@ -17,11 +17,13 @@ class RuntimeMessageRenderer:
         *,
         media_input_mode: str,
         is_responses_provider: bool = False,
+        replay_reasoning_text: bool = False,
         managed_files_root: str | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._media_input_mode = media_input_mode
         self._is_responses_provider = is_responses_provider
+        self._replay_reasoning_text = replay_reasoning_text
         self._managed_files_root = Path(managed_files_root).resolve() if managed_files_root else None
         self._logger = logger or logging.getLogger("minibot.runtime_message_renderer")
 
@@ -31,6 +33,7 @@ class RuntimeMessageRenderer:
         replay = extract_reasoning_replay(message)
         if replay.reasoning:
             metadata["reasoning"] = replay.reasoning
+            metadata["reasoning_key"] = replay.reasoning_key
         if replay.reasoning_details:
             metadata["reasoning_details"] = replay.reasoning_details
         if replay.original_had_reasoning:
@@ -86,6 +89,7 @@ class RuntimeMessageRenderer:
             ]
         if replay.reasoning:
             metadata["reasoning"] = replay.reasoning
+            metadata["reasoning_key"] = replay.reasoning_key
         if replay.reasoning_details:
             metadata["reasoning_details"] = replay.reasoning_details
         if replay.original_had_reasoning:
@@ -129,24 +133,15 @@ class RuntimeMessageRenderer:
                     else self._render_non_tool_content(message.content)
                 ),
             }
-            reasoning = message.metadata.get("reasoning") if message.metadata else None
-            reasoning_details = message.metadata.get("reasoning_details") if message.metadata else None
-            replay_payload = apply_reasoning_replay(
-                {},
-                extract_reasoning_replay(
-                    _ReplayMessage(
-                        reasoning=reasoning,
-                        reasoning_details=reasoning_details,
-                        original={
-                            "reasoning": reasoning,
-                            "reasoning_details": reasoning_details,
-                        }
-                        if message.metadata and message.metadata.get("had_reasoning_context")
-                        else None,
-                    )
-                ),
+            metadata = message.metadata or {}
+            replay = ReasoningReplay(
+                reasoning=metadata.get("reasoning"),
+                reasoning_details=metadata.get("reasoning_details"),
+                original_had_reasoning=bool(metadata.get("had_reasoning_context")),
+                source=metadata.get("reasoning_source"),
+                reasoning_key=metadata.get("reasoning_key") or "reasoning",
             )
-            payload.update(replay_payload)
+            payload.update(apply_reasoning_replay({}, replay, replay_text=self._replay_reasoning_text))
             tool_calls = message.metadata.get("tool_calls") if message.metadata else None
             if tool_calls:
                 payload["tool_calls"] = tool_calls
@@ -247,16 +242,3 @@ class RuntimeMessageRenderer:
         if len(parts) == 1 and parts[0].type == "json":
             return json.dumps(parts[0].value, ensure_ascii=True, default=str)
         return json.dumps([part.to_dict() for part in parts], ensure_ascii=True, default=str)
-
-
-class _ReplayMessage:
-    def __init__(
-        self,
-        *,
-        reasoning: str | None,
-        reasoning_details: list[dict[str, Any] | str] | None,
-        original: dict[str, Any] | None,
-    ) -> None:
-        self.reasoning = reasoning
-        self.reasoning_details = reasoning_details
-        self.original = original

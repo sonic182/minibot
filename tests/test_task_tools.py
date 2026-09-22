@@ -6,7 +6,9 @@ from typing import Any, cast
 
 import pytest
 
+from minibot.adapters.config.schema import TasksConfig
 from minibot.app.agent_registry import AgentRegistry
+from minibot.app.llm_client_factory import ProviderOption
 from minibot.core.agents import AgentSpec
 from minibot.core.tasks import TaskRequest
 from minibot.llm.tools.base import ToolContext
@@ -139,6 +141,80 @@ async def test_spawn_task_accepts_registered_agent_name() -> None:
 
 
 @pytest.mark.asyncio
+async def test_spawn_task_defaults_the_timeout_to_the_specialists_own() -> None:
+    producer = _ProducerStub()
+    registry = AgentRegistry(
+        [
+            AgentSpec(
+                name="slow_agent",
+                description="",
+                system_prompt="",
+                source_path=Path("agents/slow.md"),
+                timeout_seconds=120,
+            )
+        ]
+    )
+    bindings = _build_tools(producer, _TaskManagerStub(), agent_registry=registry)
+
+    result = await bindings["spawn_task"].handler(
+        {"prompt": "Summarize logs", "agent_name": "slow_agent"},
+        ToolContext(channel="console"),
+    )
+
+    assert result["limits"]["timeout_seconds"] == 120
+    assert producer.enqueued[0].limits is not None
+    assert producer.enqueued[0].limits.timeout_seconds == 120
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_payload_timeout_wins_over_the_specialists_own() -> None:
+    producer = _ProducerStub()
+    registry = AgentRegistry(
+        [
+            AgentSpec(
+                name="slow_agent",
+                description="",
+                system_prompt="",
+                source_path=Path("agents/slow.md"),
+                timeout_seconds=120,
+            )
+        ]
+    )
+    bindings = _build_tools(producer, _TaskManagerStub(), agent_registry=registry)
+
+    result = await bindings["spawn_task"].handler(
+        {"prompt": "Summarize logs", "agent_name": "slow_agent", "timeout_seconds": 45},
+        ToolContext(channel="console"),
+    )
+
+    assert result["limits"]["timeout_seconds"] == 45
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_clamps_a_specialist_timeout_above_the_worker_ceiling() -> None:
+    producer = _ProducerStub()
+    registry = AgentRegistry(
+        [
+            AgentSpec(
+                name="greedy_agent",
+                description="",
+                system_prompt="",
+                source_path=Path("agents/greedy.md"),
+                timeout_seconds=99_999,
+            )
+        ]
+    )
+    bindings = _build_tools(producer, _TaskManagerStub(), agent_registry=registry)
+
+    result = await bindings["spawn_task"].handler(
+        {"prompt": "Summarize logs", "agent_name": "greedy_agent"},
+        ToolContext(channel="console"),
+    )
+
+    assert result["limits"]["timeout_seconds"] == TasksConfig().worker_timeout_seconds
+
+
+@pytest.mark.asyncio
 async def test_cancel_task_returns_cancelled_flag() -> None:
     task_manager = _TaskManagerStub()
     task_manager.cancel_result = True
@@ -162,3 +238,47 @@ async def test_list_tasks_returns_active_tasks() -> None:
     assert result["tasks"][0]["task_id"] == "task-1"
     assert result["tasks"][0]["channel"] == "telegram"
     assert isinstance(result["tasks"][0]["started_at"], str)
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_carries_model_overrides_to_the_queue() -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(
+        cast(Any, producer),
+        cast(Any, _TaskManagerStub()),
+        providers=[ProviderOption(name="opencode_go", api_format="openai_responses", base_url=None, models=())],
+    )
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+
+    result = await bindings["spawn_task"].handler(
+        {
+            "prompt": "Summarize logs",
+            "model_provider": "opencode_go",
+            "model": "deepseek-v3.6",
+            "reasoning_effort": "high",
+        },
+        ToolContext(channel="console"),
+    )
+
+    overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6", "reasoning_effort": "high"}
+    assert result["model_overrides"] == overrides
+    assert producer.enqueued[0].model_overrides == overrides
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_rejects_provider_without_configured_credentials() -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(
+        cast(Any, producer),
+        cast(Any, _TaskManagerStub()),
+        providers=[ProviderOption(name="opencode_go", api_format="openai_responses", base_url=None, models=())],
+    )
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+
+    with pytest.raises(ValueError, match="opencode_go"):
+        await bindings["spawn_task"].handler(
+            {"prompt": "Summarize logs", "model_provider": "zai"},
+            ToolContext(channel="console"),
+        )
+
+    assert producer.enqueued == []

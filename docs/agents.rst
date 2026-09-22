@@ -13,15 +13,18 @@ specialists at runtime.
 Delegation Tools
 ----------------
 
-Always enabled — no config flag required. Available to the main agent when specialist
-definitions exist:
+- ``fetch_agent_info`` — inspect a specialist's name, description, defaults and system prompt.
+  Always enabled when specialist definitions exist.
+- ``spawn_task`` — delegate to a specialist by exact ``agent_name``. Requires ``[tasks].enabled``
+  (on by default; the SQLite backend needs no broker). See :doc:`tasks`.
 
-- ``fetch_agent_info`` — inspect a specialist's name, description, and system prompt.
-- ``invoke_agent`` — run a specialist with a ``task`` and optional ``context``; returns
-  the specialist's final text plus metadata (tokens, tool call count, attachments).
+Delegation is **asynchronous**: ``spawn_task`` returns a ``task_id`` and the worker's answer,
+including any files it produced, reaches the conversation as a later message. The main agent does
+not wait for it and cannot fold the result into the same turn; use ``get_task`` to retrieve it,
+``list_tasks`` to see what is running, and ``cancel_task`` to stop one.
 
-Delegation policy (whether tool use is required from the specialist) is controlled by
-``[orchestration].delegated_tool_call_policy``.
+Turning ``[tasks]`` off therefore turns multi-agent orchestration off: the specialist roster is
+dropped from the system prompt along with the tool that could act on it.
 
 Agent Definitions
 -----------------
@@ -49,8 +52,9 @@ Minimal example:
 Frontmatter fields: ``name``, ``description``, ``mode`` (always ``"agent"``), ``enabled``
 (default ``true``), ``model_provider``, ``model``, ``temperature``, ``max_new_tokens``,
 ``omit_temperature`` (send no temperature at all, for models that reject the parameter),
-``reasoning_effort``, ``max_tool_iterations``, ``timeout_seconds`` (per-agent wall-clock budget, overrides
-``orchestration.default_timeout_seconds``; values below 30 seconds use the 30-second minimum), ``tools_allow``,
+``reasoning_effort``, ``max_tool_iterations``, ``timeout_seconds`` (per-agent wall-clock budget; it is the
+default when a ``spawn_task`` call names no ``timeout_seconds`` of its own, capped by
+``[tasks].worker_timeout_seconds``), ``tools_allow``,
 ``tools_deny``, ``mcp_servers``.
 
 Tool Scoping
@@ -81,12 +85,6 @@ Main-agent tool policy is set under ``[orchestration.main_agent]``:
 - ``shared`` (default) — all agents share tools.
 - ``exclusive`` — specialist-owned tools are removed from the main agent.
 - ``exclusive_mcp`` — only specialist-owned MCP tools are removed from the main agent.
-
-``delegated_tool_call_policy``:
-
-- ``auto`` (default) — requires at least one tool call when the agent has scoped tools.
-- ``always`` — requires a tool call for every delegation.
-- ``never`` — disables enforcement.
 
 Assigning an MCP server to an agent:
 
@@ -161,3 +159,21 @@ only; use whatever your provider lists.
 ``reasoning_effort`` is unset by default, which leaves the provider's own default in place. Set it
 per agent when you want to steer that: higher for agents that plan multi-step work, lower for agents
 that mostly call one tool and summarize.
+
+Retargeting One Call
+--------------------
+
+The frontmatter above is the agent's default, not a fixed binding. ``spawn_task`` accepts
+``model_provider``, ``model`` and ``reasoning_effort`` for a single task, so the main agent can
+honour a request like *"run that on the deepseek subagent, high effort"* without a config change or
+a restart. The specialist's prompt, tool scope and timeouts are unchanged; only the target model is.
+
+``fetch_agent_info`` is the discovery surface: besides the specialist's prompt it returns that
+agent's own defaults and the providers that actually have credentials configured, with their
+``api_format``, ``base_url`` and advisory ``models`` list (see :ref:`providers-aliases`). A provider
+that is not on that list is rejected before the task is queued, because a provider without a key
+would otherwise answer with MiniBot's local echo fallback.
+
+A retargeted task keeps its budget: the context window and output cap are re-derived from the target
+model's own limits rather than inherited from the agent's frontmatter, so mid-run compaction stays
+armed. A model that models.dev does not list has no known window and runs without compaction.

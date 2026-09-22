@@ -208,27 +208,30 @@ def _worker_agent_registry() -> AgentRegistry:
     )
 
 
-def test_prompt_service_prefers_task_delegation_guidance_when_task_tools_available() -> None:
-    tools = _tool_bindings("spawn_task", "cancel_task", "list_tasks", "invoke_agent")
+def test_prompt_service_announces_spawn_task_delegation_and_the_specialist_roster() -> None:
+    tools = _tool_bindings("spawn_task", "cancel_task", "list_tasks", "fetch_agent_info")
     prompt_service = _prompt_service(tools=tools, agent_registry=_worker_agent_registry())
 
     prompt = prompt_service.compose_system_prompt("telegram")
 
-    assert "Asynchronous delegation is available now via `spawn_task`" in prompt
-    assert "`invoke_agent` is also available as a local fallback" in prompt
+    assert "Delegation is available now via `spawn_task`" in prompt
+    assert "`spawn_task` targets one of 1 listed specialist agents" in prompt
+    assert "`fetch_agent_info` is available" in prompt
     assert 'metadata.source == "task_worker"' in prompt
     assert "Use `list_tasks` to verify which tasks are still active." in prompt
+    # The roster itself is what makes agent_name usable; it hangs off spawn_task being attached.
+    assert "worker" in prompt
 
 
-def test_prompt_service_uses_invoke_agent_guidance_when_task_tools_unavailable() -> None:
-    tools = _tool_bindings("invoke_agent", "fetch_agent_info")
+def test_prompt_service_drops_delegation_and_roster_without_task_tools() -> None:
+    tools = _tool_bindings("fetch_agent_info")
     prompt_service = _prompt_service(tools=tools, agent_registry=_worker_agent_registry())
 
     prompt = prompt_service.compose_system_prompt("telegram")
 
-    assert "Delegation is available now via `invoke_agent`" in prompt
-    assert "`fetch_agent_info` is available" in prompt
-    assert "Asynchronous delegation is available now via `spawn_task`" not in prompt
+    assert "Delegation is unavailable in this turn" in prompt
+    assert "Delegation is available now via `spawn_task`" not in prompt
+    assert "Does work" not in prompt
     assert 'metadata.source == "task_worker"' not in prompt
 
 
@@ -519,32 +522,28 @@ async def test_runtime_service_calls_guardrail_when_no_tool_messages() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_service_does_not_retry_when_delegation_times_out() -> None:
-    class _TimeoutDelegationRuntime:
+async def test_runtime_service_does_not_retry_when_a_tool_reported_a_failure() -> None:
+    """A tool that ran and failed still counts as a tool call: retrying would run it twice."""
+
+    class _FailingDelegationRuntime:
         def __init__(self) -> None:
             self.calls = 0
 
         async def run(self, **_: Any) -> RuntimeResult:
             self.calls += 1
             return RuntimeResult(
-                payload="delegate timeout surfaced",
+                payload="delegate failure surfaced",
                 response_id="resp-1",
                 state=AgentState(
                     messages=[
                         AgentMessage(role="assistant", content=[MessagePart(type="text", text="delegating")]),
                         AgentMessage(
                             role="tool",
-                            name="invoke_agent",
+                            name="spawn_task",
                             content=[
                                 MessagePart(
                                     type="json",
-                                    value={
-                                        "ok": False,
-                                        "agent": "playwright_mcp_agent",
-                                        "result_status": "timeout",
-                                        "error_code": "delegated_timeout",
-                                        "error": "delegated agent timed out waiting for provider response",
-                                    },
+                                    value={"error": "agent_name 'nope' is not a registered agent"},
                                 )
                             ],
                         ),
@@ -553,20 +552,12 @@ async def test_runtime_service_does_not_retry_when_delegation_times_out() -> Non
                 total_tokens=3,
             )
 
-    runtime = _TimeoutDelegationRuntime()
-    service = _runtime_service(runtime, _CountingGuardrail())
+    runtime = _FailingDelegationRuntime()
+    guardrail = _CountingGuardrail()
+    service = _runtime_service(runtime, guardrail)
 
     result = await _run_with_agent_runtime(service, model_text="delegate this")
 
     assert runtime.calls == 1
-    assert result.render.text == "delegate timeout surfaced"
-    assert result.agent_trace == [
-        {
-            "agent": "minibot",
-            "decision": "invoke_agent",
-            "target": "playwright_mcp_agent",
-            "ok": False,
-            "result_status": "timeout",
-            "error": "delegated agent timed out waiting for provider response",
-        }
-    ]
+    assert guardrail.calls == 0
+    assert result.render.text == "delegate failure surfaced"

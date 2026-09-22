@@ -58,9 +58,7 @@ base_url = ""
 
 [orchestration]
 directory = "./agents"
-default_timeout_seconds = 90
 tool_ownership_mode = "exclusive"
-# include_agent_trace_in_metadata = true
 
 [orchestration.main_agent]
 name = "minibot"

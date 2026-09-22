@@ -10,6 +10,27 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent))
 
 
+@pytest.fixture(autouse=True)
+def isolated_model_limits_cache(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the models.dev catalog off the test suite, and the cache from leaking between tests.
+
+    A cache miss in `ensure_model_limits` downloads the real ~60MB catalog, so any test that
+    retargets an agent would hit the network. Patching `aiosonic.HTTPClient` instead would reach
+    every other aiosonic user in the process, so the stub sits on the catalog fetch itself; tests
+    that drive that function mark themselves `allow_catalog_fetch` and stub the transport.
+    """
+    from minibot.app import token_limits_autoconfig
+
+    token_limits_autoconfig.reset_model_limits_cache()
+    if request.node.get_closest_marker("allow_catalog_fetch"):
+        return
+    monkeypatch.setattr(token_limits_autoconfig, "_fetch_models_catalog", _no_catalog)
+
+
+async def _no_catalog(_logger: object) -> None:
+    return None
+
+
 @pytest.fixture
 def numeric_tokenizer(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     tokenizer = MagicMock()

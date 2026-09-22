@@ -49,7 +49,8 @@ def test_all_builtin_descriptions_load() -> None:
         "memory",
         "bash",
         "apply_patch",
-        "invoke_agent",
+        "spawn_task",
+        "fetch_agent_info",
         "transcribe_audio",
     ]
     for name in names:

@@ -12,7 +12,7 @@ Fragments are joined with blank lines in exactly this order:
 |---|---|---|---|
 | 0 | base system prompt | `prompts/main_agent_system.md` via `[llm].system_prompt_file` | always |
 | 1 | **every** policy file | `load_policy_prompts` → `prompts/policies/*.md` | **nothing — all files, always** |
-| 2 | specialist roster | `_specialist_roster_fragment` `:125` | `invoke_agent` attached + registry non-empty |
+| 2 | specialist roster | `_specialist_roster_fragment` `:125` | `spawn_task` attached + registry non-empty |
 | 3 | skill catalog | `_skill_catalog_fragment` `:142` | `activate_skill` attached |
 | 4 | runtime capability status | `_capability_status_fragment` `:76` | always emitted; **contents** vary by attached tools |
 | 5 | channel fragment | `load_channel_prompt` → `prompts/channels/<channel>.md` | the active channel |

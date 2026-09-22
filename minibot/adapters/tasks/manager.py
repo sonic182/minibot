@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from multiprocessing import Process
@@ -15,8 +15,10 @@ from aiopipe import aioduplex
 
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.tasks.worker import worker_entry
+from minibot.app.agent_policies import is_retargeted, resolve_delegation_target
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.token_limits_autoconfig import ensure_model_limits
 from minibot.core.channels import ChannelFileResponse, ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundEvent, OutboundFileEvent
 from minibot.core.tasks import TaskLimits, TaskRepository, TaskResult, TaskStatus, TaskStopReason
@@ -27,19 +29,70 @@ _MAX_RETRYABLE_ATTEMPTS = 2
 _SUPERVISOR_GRACE_SECONDS = 10
 
 
-def compact_threshold_for_agent(registry: AgentRegistry, settings: Settings, agent_name: str | None) -> int | None:
-    """Token budget a worker may reach before compacting its own transcript.
+@dataclass(frozen=True)
+class DelegationBudget:
+    """What a worker is allowed to spend, resolved against the model it will actually call."""
 
-    Resolved on the daemon side rather than in the worker: the subprocess reloads specs from disk
-    and never sees what token auto-config derived at boot. A task with no agent runs the default
-    worker on the main model, whose budget auto-config already wrote to ``memory.max_history_tokens``.
+    compact_threshold_tokens: int | None = None
+    max_new_tokens: int | None = None
+
+
+async def resolve_delegation_budget(
+    registry: AgentRegistry,
+    settings: Settings,
+    agent_name: str | None,
+    overrides: Mapping[str, Any] | None = None,
+) -> DelegationBudget:
+    """Token budget for one delegated task.
+
+    Resolved on the daemon side rather than in the worker: the subprocess reloads specs from disk,
+    never sees what token auto-config derived at boot, and starts with a cold limits cache that a
+    lookup there would have to refill with a full catalog download per task. That cold cache is
+    also why ``max_new_tokens`` travels in the payload instead of being re-derived over there.
     """
-    if not agent_name:
-        return settings.memory.max_history_tokens
-    spec = registry.get(agent_name)
-    if spec is None:
+    spec = registry.get(agent_name) if agent_name else None
+    if agent_name and spec is None:
+        return DelegationBudget()
+    if not is_retargeted(spec, overrides):
+        # Untouched target: auto-config already wrote the main model's budget to
+        # `memory.max_history_tokens`, and a named spec carries its own window from boot.
+        context_limit = spec.context_limit if spec else None
+        threshold = (
+            threshold_from_context_limit(context_limit, settings.memory.context_ratio_before_compact)
+            if spec
+            else settings.memory.max_history_tokens
+        )
+        return DelegationBudget(compact_threshold_tokens=threshold)
+    provider_name, model_name = resolve_delegation_target(settings, spec, overrides)
+    limits = await ensure_model_limits(
+        settings=settings,
+        provider_name=provider_name,
+        model_name=model_name,
+        logger=logging.getLogger("minibot.tasks"),
+    )
+    context_limit = limits["context"] if limits else None
+    ratio = settings.memory.context_ratio_before_compact
+    return DelegationBudget(
+        compact_threshold_tokens=threshold_from_context_limit(context_limit, ratio),
+        max_new_tokens=_target_output_ceiling(limits, ratio),
+    )
+
+
+def _target_output_ceiling(limits: dict[str, Any] | None, context_ratio: float) -> int | None:
+    """What the target model itself allows — never a cap the user configured.
+
+    Both caps this process could reach for describe another model: boot's auto-config overwrites
+    ``settings.llm.max_new_tokens`` with one derived for the main model, and swaps every registered
+    spec for one carrying a cap derived from *its* configured model. The worker loads settings and
+    specs from disk itself, so its copies are still the ones the user wrote; it is the side that
+    combines them with this ceiling.
+    """
+    if not limits:
         return None
-    return threshold_from_context_limit(spec.context_limit, settings.memory.context_ratio_before_compact)
+    budget = max(1, int(limits["context"] * context_ratio)) if context_ratio > 0 else None
+    # `if value` drops the None output limit the chatgpt_codex branch returns.
+    ceilings = [value for value in (limits.get("output"), budget) if value]
+    return max(1, min(ceilings)) if ceilings else None
 
 
 class _LeaseLostError(Exception):
@@ -69,20 +122,25 @@ class TaskManager:
         task_repository: TaskRepository | None = None,
         lease_timeout_seconds: int | None = None,
         secrets: Mapping[str, str] | None = None,
-        compact_threshold_for: Callable[[str | None], int | None] | None = None,
+        budget_for: Callable[[str | None, Mapping[str, Any]], Awaitable[DelegationBudget]] | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._worker_timeout_seconds = worker_timeout_seconds
         self._lease_timeout_seconds = lease_timeout_seconds or max(1, int(worker_timeout_seconds))
         self._task_repository = task_repository
-        # Workers reload agent specs from disk, so the context budget derived at daemon boot
-        # never reaches them. Resolve it here and send it along with the task.
-        self._compact_threshold_for = compact_threshold_for
+        # Workers reload agent specs from disk, so the token budget derived at daemon boot never
+        # reaches them. Resolve it here and send it along with the task.
+        self._budget_for = budget_for
         # Workers reload config themselves, so they need the vault map to resolve ${secret:NAME}.
         # It travels over the in-memory pipe only — never the queue row, never the environment.
         self._secrets = dict(secrets) if secrets else None
         self._tasks: dict[str, Task] = {}
         self._logger = logging.getLogger("minibot.tasks")
+
+    async def _budget(self, agent_name: str | None, overrides: Mapping[str, Any]) -> DelegationBudget:
+        if self._budget_for is None:
+            return DelegationBudget()
+        return await self._budget_for(agent_name, overrides)
 
     async def spawn(
         self,
@@ -94,6 +152,7 @@ class TaskManager:
         context: dict[str, Any],
         chat_id: int | None,
         user_id: int | None,
+        model_overrides: dict[str, str] | None = None,
         owner_id: str = "primary",
         limits: TaskLimits | None = None,
         expected_status: TaskStatus | None = None,
@@ -109,6 +168,12 @@ class TaskManager:
             self._lease_timeout_seconds,
             int(resolved_limits.timeout_seconds) + _SUPERVISOR_GRACE_SECONDS + 1,
         )
+        overrides = dict(model_overrides or {})
+        # Before the lease, not after: a target outside the advisory roster makes this download the
+        # models.dev catalog, and the lease only covers the worker's own timeout plus grace. Those
+        # seconds would come straight out of it and let a second consumer reclaim a running task.
+        # It also avoids paying for a catalog fetch on a task another consumer already owns.
+        budget = await self._budget(agent_name, overrides)
         active_lease_token: str | None = None
         if self._task_repository is not None:
             active_lease_token = await self._task_repository.claim_execution(
@@ -127,13 +192,13 @@ class TaskManager:
             "prompt": prompt,
             "agent_name": agent_name,
             "context": context,
+            "model_overrides": overrides,
             "chat_id": chat_id,
             "user_id": user_id,
             "owner_id": owner_id,
             "limits": asdict(resolved_limits),
-            "compact_threshold_tokens": (
-                self._compact_threshold_for(agent_name) if self._compact_threshold_for else None
-            ),
+            "compact_threshold_tokens": budget.compact_threshold_tokens,
+            "max_new_tokens": budget.max_new_tokens,
         }
         mainpipe, proc = self._start_worker_process()
         reader = asyncio.create_task(

@@ -126,10 +126,6 @@ Tool Surface
      - ``fetch_agent_info``
      - Enabled when agent definitions exist
      - Inspect a specialist agent definition.
-   * - Delegation
-     - ``invoke_agent``
-     - Enabled when agent definitions exist
-     - Delegate a task to a specialist agent.
    * - Skills
      - ``list_skills``
      - ``[tools.skills]``
@@ -145,7 +141,7 @@ Tool Surface
    * - Async tasks
      - ``spawn_task``
      - ``[tasks]``
-     - Queue a background worker task.
+     - Queue a background worker task; the only way to delegate to a specialist agent.
    * - Async tasks
      - ``cancel_task``
      - ``[tasks]``

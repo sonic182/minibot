@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 from uuid import uuid4
 
@@ -8,7 +9,9 @@ from llm_async.models import Tool
 
 from minibot.adapters.config.schema import TasksConfig
 from minibot.adapters.tasks.manager import TaskManager
+from minibot.app.agent_policies import normalize_model_overrides
 from minibot.app.agent_registry import AgentRegistry
+from minibot.app.llm_client_factory import ProviderOption, find_provider
 from minibot.core.tasks import TaskLimits, TaskProducer, TaskRecord, TaskRepository, TaskRequest, TaskStatus
 from minibot.llm.tools.arg_utils import (
     optional_int,
@@ -30,6 +33,7 @@ class TaskTools:
         task_repository: TaskRepository | AgentRegistry | None = None,
         config: TasksConfig | None = None,
         agent_registry: AgentRegistry | None = None,
+        providers: Sequence[ProviderOption] = (),
     ) -> None:
         if isinstance(task_repository, AgentRegistry) and agent_registry is None:
             agent_registry = task_repository
@@ -39,6 +43,7 @@ class TaskTools:
         self._task_repository = task_repository
         self._config = config or TasksConfig()
         self._agent_registry = agent_registry
+        self._providers = list(providers)
 
     def bindings(self) -> list[ToolBinding]:
         return [
@@ -77,6 +82,18 @@ class TaskTools:
                     },
                     "max_steps": {**limit_property, "description": "Optional execution-step limit or unlimited."},
                     "max_tool_calls": {**limit_property, "description": "Optional tool-call limit or unlimited."},
+                    "model_provider": {
+                        "type": ["string", "null"],
+                        "description": "Optional provider name with configured credentials to run this task on.",
+                    },
+                    "model": {
+                        "type": ["string", "null"],
+                        "description": "Optional model id served by that provider.",
+                    },
+                    "reasoning_effort": {
+                        "type": ["string", "null"],
+                        "description": "Optional reasoning budget for this task (provider-specific).",
+                    },
                 },
                 required=["prompt"],
             ),
@@ -128,11 +145,19 @@ class TaskTools:
         prompt = require_non_empty_str(payload, "prompt")
         agent_name = optional_str(payload.get("agent_name"), error_message="agent_name must be a string or null")
         registry = self._agent_registry
-        if agent_name is not None and registry is not None and registry.get(agent_name) is None:
+        spec = None if agent_name is None or registry is None else registry.get(agent_name)
+        if agent_name is not None and registry is not None and spec is None:
             available = ", ".join(registry.names()) or "none registered"
             raise ValueError(f"agent_name '{agent_name}' is not a registered agent. Available: {available}")
+        model_overrides = normalize_model_overrides(payload)
+        requested_provider = model_overrides.get("model_provider")
+        if requested_provider is not None and find_provider(requested_provider, self._providers) is None:
+            available = ", ".join(option.name for option in self._providers) or "none configured"
+            raise ValueError(
+                f"model_provider '{requested_provider}' has no configured credentials. Available: {available}"
+            )
         task_context = _coerce_task_context(payload)
-        limits = _resolve_limits(payload, self._config)
+        limits = _resolve_limits(payload, self._config, spec_timeout_seconds=spec.timeout_seconds if spec else None)
         await self._producer.enqueue(
             TaskRequest(
                 task_id=task_id,
@@ -140,6 +165,7 @@ class TaskTools:
                 prompt=prompt,
                 agent_name=agent_name,
                 context=task_context,
+                model_overrides=model_overrides,
                 chat_id=context.chat_id,
                 user_id=context.user_id,
                 owner_id=owner_id,
@@ -160,6 +186,7 @@ class TaskTools:
             "chat_id": context.chat_id,
             "user_id": context.user_id,
             "agent_name": agent_name,
+            "model_overrides": model_overrides,
             "limits": _limits_payload(limits),
         }
 
@@ -218,8 +245,19 @@ class TaskTools:
         return records
 
 
-def _resolve_limits(payload: dict[str, Any], config: TasksConfig) -> TaskLimits:
+def _resolve_limits(
+    payload: dict[str, Any], config: TasksConfig, *, spec_timeout_seconds: int | None = None
+) -> TaskLimits:
+    """Resolve this task's budget.
+
+    The agent's own ``timeout_seconds`` is the default when the call names none. It is resolved
+    here and not in the worker because the daemon-side supervisor derives its deadline from the
+    same ``TaskLimits`` (``adapters/tasks/manager.py``); deciding it in the subprocess would let
+    the two disagree.
+    """
     timeout_seconds = optional_int(payload.get("timeout_seconds"), field="timeout_seconds", min_value=1)
+    if timeout_seconds is None and spec_timeout_seconds:
+        timeout_seconds = min(spec_timeout_seconds, config.worker_timeout_seconds)
     effective_timeout = config.worker_timeout_seconds if timeout_seconds is None else timeout_seconds
     if effective_timeout > config.worker_timeout_seconds:
         raise ValueError("timeout_seconds may not exceed tasks.worker_timeout_seconds")

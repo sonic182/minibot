@@ -89,6 +89,7 @@ class AgentRuntime:
         self._message_renderer = RuntimeMessageRenderer(
             media_input_mode=llm_client.media_input_mode(),
             is_responses_provider=llm_client.is_responses_provider(),
+            replay_reasoning_text=llm_client.provider_name() == "openrouter",
             managed_files_root=managed_files_root,
             logger=self._logger,
         )

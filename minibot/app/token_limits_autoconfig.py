@@ -7,6 +7,7 @@ from logging import Logger
 from typing import Any
 
 import aiosonic
+from onecache import LRUCache
 
 from minibot.adapters.config.schema import Settings
 from minibot.core.agents import AgentSpec
@@ -15,6 +16,77 @@ from minibot.shared.utils import summarize_items
 
 _MODELS_API_URL = "https://models.dev/api.json"
 _REQUEST_TIMEOUT_SECONDS = 20
+
+# The catalog payload is ~60MB, so only the resolved per-model limits are kept — a few dozen bytes
+# each, keyed by provider and model. Delegation overrides retarget an agent at a model nobody
+# resolved at boot, and without this every such call would mean another 60MB download.
+_MODEL_LIMITS_TTL_MS = 24 * 60 * 60 * 1000  # onecache measures ttl in milliseconds
+_MODEL_LIMITS_CACHE_SIZE = 256
+_MODEL_LIMITS_CACHE = LRUCache(size=_MODEL_LIMITS_CACHE_SIZE, timeout=_MODEL_LIMITS_TTL_MS)
+# A model the catalog doesn't list is cached too: `cache.get` can't tell a stored None from a miss,
+# so without a sentinel an unknown model would re-download the catalog on every single delegation.
+_NOT_IN_CATALOG = object()
+
+
+def _model_limits_key(provider_name: str, model_name: str) -> str:
+    return f"{provider_name.strip().lower()}:{model_name.strip()}"
+
+
+def cached_model_limits(provider_name: str | None, model_name: str | None) -> dict[str, Any] | None:
+    """Resolved limits for a provider/model, from cache only. ``None`` when absent or uncatalogued."""
+    if not provider_name or not model_name:
+        return None
+    cached = _MODEL_LIMITS_CACHE.get(_model_limits_key(provider_name, model_name))
+    return cached if isinstance(cached, dict) else None
+
+
+def prime_model_limits(provider_name: str | None, model_name: str | None, limits: dict[str, Any] | None) -> None:
+    if not provider_name or not model_name:
+        return
+    _MODEL_LIMITS_CACHE.set(_model_limits_key(provider_name, model_name), limits or _NOT_IN_CATALOG)
+
+
+def reset_model_limits_cache() -> None:
+    global _MODEL_LIMITS_CACHE
+    _MODEL_LIMITS_CACHE = LRUCache(size=_MODEL_LIMITS_CACHE_SIZE, timeout=_MODEL_LIMITS_TTL_MS)
+
+
+async def ensure_model_limits(
+    *,
+    settings: Settings,
+    provider_name: str | None,
+    model_name: str | None,
+    logger: Logger,
+) -> dict[str, Any] | None:
+    """Cache-first resolution for an ad-hoc delegation target.
+
+    Boot pre-warms every model ``available_providers`` offers, so a miss means someone named a
+    model outside the configured lists. That fetches the catalog once, keeps the handful of bytes
+    that matter and drops the payload.
+    """
+    if not provider_name or not model_name:
+        return None
+    key = _model_limits_key(provider_name, model_name)
+    cached = _MODEL_LIMITS_CACHE.get(key)
+    if cached is not None:
+        return cached if isinstance(cached, dict) else None
+    payload = await _fetch_models_catalog(logger)
+    limits = await _resolve_limits(
+        payload=payload,
+        provider_name=provider_name,
+        model_name=model_name,
+        base_url=effective_base_url(settings, provider_name=provider_name),
+        auth_path=_effective_auth_path(settings, provider_name=provider_name),
+        logger=logger,
+    )
+    # A failed fetch is not an answer: caching it would pin "no compaction" for the whole ttl.
+    if payload is not None or limits is not None:
+        _MODEL_LIMITS_CACHE.set(key, limits or _NOT_IN_CATALOG)
+    logger.debug(
+        "model limits resolved on demand",
+        extra={"provider": provider_name, "model": model_name, "found": limits is not None},
+    )
+    return limits
 
 
 async def apply_runtime_token_autoconfig_async(
@@ -41,6 +113,7 @@ async def apply_runtime_token_autoconfig_async(
         auth_path=main_auth_path,
         logger=logger,
     )
+    prime_model_limits(main_provider, main_model, main_limits)
     if main_limits is not None:
         derived_budget = max(1, int(main_limits["context"] * ratio))
         previous_history = settings.memory.max_history_tokens
@@ -92,6 +165,7 @@ async def apply_runtime_token_autoconfig_async(
             auth_path=auth_path,
             logger=logger,
         )
+        prime_model_limits(provider_name, model_name, limits)
         if limits is None:
             adjusted_specs.append(spec)
             continue
@@ -135,7 +209,43 @@ async def apply_runtime_token_autoconfig_async(
         if had_mixed_agent_targets:
             extra["mixed_agent_targets"] = True
         logger.info("token auto-config applied for agent models", extra=extra)
+    await _prewarm_delegation_targets(settings=settings, payload=payload, logger=logger)
     return adjusted_specs
+
+
+async def _prewarm_delegation_targets(
+    *,
+    settings: Settings,
+    payload: dict[str, Any] | None,
+    logger: Logger,
+) -> None:
+    """Resolve every model a delegation override may name, off the payload already in hand.
+
+    ``available_providers`` is the same list ``fetch_agent_info`` offers the model, so this covers
+    the reachable targets by construction and costs no extra fetch.
+    """
+    from minibot.app.llm_client_factory import available_providers
+
+    primed = 0
+    for option in available_providers(settings):
+        for model_name in option.models:
+            if cached_model_limits(option.name, model_name) is not None:
+                continue
+            limits = await _resolve_limits(
+                payload=payload,
+                provider_name=option.name,
+                model_name=model_name,
+                base_url=effective_base_url(settings, provider_name=option.name),
+                auth_path=_effective_auth_path(settings, provider_name=option.name),
+                logger=logger,
+            )
+            prime_model_limits(option.name, model_name, limits)
+            if limits is not None:
+                primed += 1
+    logger.debug(
+        "delegation target limits pre-warmed",
+        extra={"component": "startup", "models_resolved": primed},
+    )
 
 
 def apply_runtime_token_autoconfig(

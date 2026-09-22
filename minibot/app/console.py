@@ -169,9 +169,20 @@ async def _wait_for_response_or_warn(
     logger: logging.Logger,
     console: CompatConsole,
 ) -> bool:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
     try:
-        await console_service.wait_for_response(timeout_seconds)
-        return True
+        response = (await console_service.wait_for_response(timeout_seconds)).response
+        if not response.metadata.get("task_handoff"):
+            return True
+        # A delegated turn only acknowledges; its answer is a later `task_worker` message. Returning
+        # here would shut the extensions down and cancel the worker that is still running.
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError
+            metadata = (await console_service.wait_for_response(remaining)).response.metadata
+            if metadata.get("source") == "task_worker" and metadata.get("status") != "retrying":
+                return True
     except TimeoutError:
         logger.warning("timed out waiting for console response", extra={"timeout_seconds": timeout_seconds})
         console.print(

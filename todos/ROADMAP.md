@@ -212,8 +212,8 @@ Three supporting changes, each small, in delivery order:
   registry's identity), and because the loader *raises* on a bad file, the
   error comes back to the agent that just wrote it instead of being
   swallowed — the old roster is kept on failure. Must also drop the
-  `is_empty()` gate on `invoke_agent` (`llm/tools/factory.py:67`), or a
-  first specialist reloaded into an empty roster has no way to be called.
+  `is_empty()` gate on `fetch_agent_info` (`llm/tools/factory.py:67`), or a
+  first specialist reloaded into an empty roster has no way to be inspected.
 - **`get_settings`** — a read-only core tool answering "what am I actually
   running?", sibling to `chat_history_info`. Emits only sections that are
   enabled, so absence is itself the answer.

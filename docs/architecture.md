@@ -52,10 +52,10 @@ minibot/
    ownership mode) and invokes `LLMMessageHandler`.
 5. The handler loads history, composes system prompt fragments, and builds tool context.
 6. The main agent (`minibot`) runs its tool loop in `AgentRuntime`.
-7. Delegation is tool-driven: `invoke_agent` resolves a specialist, applies its tool
-   policy, and runs an ephemeral in-turn runtime; the result returns to the main agent.
-8. The handler returns `ChannelResponse` with metadata (`primary_agent`, `agent_trace`,
-   `delegation_fallback_used`, token trace).
+7. Delegation is tool-driven and asynchronous: `spawn_task` enqueues the work, the task
+   consumer leases it, and a worker subprocess applies the specialist's tool policy and
+   runs it. Its answer is published later as its own `OutboundEvent`.
+8. The handler returns `ChannelResponse` with metadata (`primary_agent`, token trace).
 9. The dispatcher publishes `OutboundEvent`; the active channel renders it to the user.
 
 ## Console agent invocation
@@ -70,13 +70,16 @@ flowchart TD
     H --> SUP[Main Agent Runtime]
     SUP --> DEC{Need specialist?}
     DEC -->|no| FINAL[Main agent final answer]
-    DEC -->|yes| IA[invoke_agent tool]
-    IA --> AR[AgentRegistry lookup]
-    AR --> S[Specialist AgentRuntime]
-    S --> T[Specialist tool calls + output]
-    T --> SUP
-    FINAL --> RESP[ChannelResponse + metadata]
+    DEC -->|yes| ST[spawn_task tool]
+    ST --> Q[(Task queue)]
+    ST --> ACK[task_id acknowledged, turn ends]
+    Q --> CON[Task consumer leases]
+    CON --> W[Worker subprocess: AgentRegistry lookup + specialist runtime]
+    W --> RES[TaskManager publishes result]
+    ACK --> RESP[ChannelResponse + metadata]
+    FINAL --> RESP
     RESP --> EB2[(OutboundEvent)]
+    RES --> EB2
     EB2 --> C
     C --> U2[Rendered response in terminal]
 ```
