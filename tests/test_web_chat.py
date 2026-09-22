@@ -289,10 +289,11 @@ async def test_chat_socket_pages_older_history_on_request() -> None:
             assert [message["html"] for message in older["messages"]] == [f"message {i}" for i in range(5)]
             assert older["before_id"] is None
 
-            await websocket.send(json.dumps({"kind": "history_before", "before_id": 0}))
-            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {
-                "error": "invalid history request"
-            }
+            for before_id in (0, 2**63):
+                await websocket.send(json.dumps({"kind": "history_before", "before_id": before_id}))
+                assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {
+                    "error": "invalid history request"
+                }
     finally:
         await server.stop()
         await service.stop()

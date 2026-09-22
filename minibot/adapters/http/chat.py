@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.requests import Request
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from minibot.adapters.http.server import RouteSpec, WebSocketSpec, render
+from minibot.adapters.http.server import MAX_QUERY_INT, RouteSpec, WebSocketSpec, render
 from minibot.adapters.http.uploads import ChatCapabilities, UploadError, WebUploadManager, WebUploadSession
 from minibot.adapters.messaging.web import WebChannelService
 from minibot.adapters.messaging.web.service import WebChatSubscription
@@ -30,7 +30,7 @@ class _IncomingChatMessage(BaseModel):
 
 
 class _HistoryRequest(BaseModel):
-    before_id: int = Field(gt=0)
+    before_id: int = Field(gt=0, le=MAX_QUERY_INT)
 
 
 class _UploadStart(BaseModel):

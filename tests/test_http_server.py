@@ -302,6 +302,7 @@ async def test_history_links_the_next_page_and_rejects_bad_cursors() -> None:
             first = await (await client.get(f"{base}?session=web:1&q=message", headers=headers)).text()
             older = await (await client.get(f"{base}?session=web:1&q=message&before=2", headers=headers)).text()
             bad_before = await client.get(f"{base}?session=web:1&before=x", headers=headers)
+            huge_before = await client.get(f"{base}?session=web:1&before={2**63}", headers=headers)
             bad_cursor = await client.get(f"{base}?cursor=unknown", headers=headers)
     finally:
         await instance.stop()
@@ -311,6 +312,7 @@ async def test_history_links_the_next_page_and_rejects_bad_cursors() -> None:
     assert "message 0" in older
     assert "data-pager-next" not in older
     assert bad_before.status_code == 400
+    assert huge_before.status_code == 400
     assert bad_cursor.status_code == 400
 
 

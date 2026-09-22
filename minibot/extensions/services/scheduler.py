@@ -55,17 +55,18 @@ def _build_page(service: ScheduledPromptService, owner_id: str) -> Any:
     # Imported here so the starlette/jinja extra is only required when the server is switched on.
     from starlette.responses import PlainTextResponse, RedirectResponse
 
-    from minibot.adapters.http import page_url, render
+    from minibot.adapters.http import page_url, query_int, render
 
     async def _page(request: Any) -> Any:
         show_all = request.query_params.get("status") == "all"
         query = request.query_params.get("q", "").strip()
         try:
-            offset = max(0, int(request.query_params.get("offset", 0) or 0))
+            offset = query_int(request, "offset", 0) or 0
         except ValueError:
-            return PlainTextResponse("offset must be an integer", status_code=400)
+            return PlainTextResponse("offset must be a non-negative integer", status_code=400)
         # Offset rather than a cursor: a recurring job's run_at, the sort key, moves on every fire.
-        current_url = page_url(request, offset=offset)
+        # A cancel lands back on the first page, which is where infinite scroll starts over.
+        action_url = page_url(request, offset=0)
         if request.method == "POST":
             form = await request.form()
             job_id = str(form.get("id") or "")
@@ -73,7 +74,7 @@ def _build_page(service: ScheduledPromptService, owner_id: str) -> Any:
                 # The service checks the job belongs to this owner; the raw store method does not.
                 await service.cancel_prompt(job_id=job_id, owner_id=owner_id)
             # Redirect so a reload does not resubmit the cancel.
-            return RedirectResponse(current_url, status_code=303)
+            return RedirectResponse(action_url, status_code=303)
 
         jobs = await service.list_prompts(
             owner_id=owner_id, active_only=not show_all, limit=_PAGE_SIZE + 1, offset=offset, query=query or None
@@ -83,7 +84,7 @@ def _build_page(service: ScheduledPromptService, owner_id: str) -> Any:
             "jobs": [_row(job) for job in jobs[:_PAGE_SIZE]],
             "show_all": show_all,
             "q": query,
-            "current_url": current_url,
+            "action_url": action_url,
             "next_url": page_url(request, offset=offset + _PAGE_SIZE) if len(jobs) > _PAGE_SIZE else None,
         }
         return render(request, "scheduled.html", context)

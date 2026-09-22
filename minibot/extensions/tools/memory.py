@@ -35,18 +35,20 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
 
     from starlette.responses import PlainTextResponse, RedirectResponse
 
-    from minibot.adapters.http import page_url, render
+    from minibot.adapters.http import page_url, query_int, render
 
     csrf_token = token_urlsafe()
 
     async def _page(request: Any) -> Any:
         try:
-            offset = max(0, int(request.query_params.get("offset", 0) or 0))
+            offset = query_int(request, "offset", 0) or 0
         except ValueError:
-            return PlainTextResponse("offset must be an integer", status_code=400)
+            return PlainTextResponse("offset must be a non-negative integer", status_code=400)
         query = request.query_params.get("q", "").strip()
         # Offset rather than a cursor: search results are ranked by relevance, not by a stable key.
-        current_url = page_url(request, offset=offset)
+        # Writes land back on the first page: rows appended by infinite scroll come from later
+        # pages, and redirecting to one of those would leave the reader with no way back up.
+        action_url = page_url(request, offset=0)
         if request.method == "POST":
             form = await request.form()
             submitted_token = str(form.get("csrf_token") or "")
@@ -62,7 +64,7 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
             else:
                 return PlainTextResponse("invalid memory action", status_code=400)
             # Redirect so a reload does not resubmit the edit or the delete.
-            return RedirectResponse(current_url, status_code=303)
+            return RedirectResponse(action_url, status_code=303)
         if query:
             result = await memory.search_entries(owner_id, query=query, offset=offset)
         else:
@@ -74,7 +76,7 @@ def _build_page(memory: SQLAlchemyKeyValueMemory, owner_id: str) -> Any:
             "total": result.total,
             "offset": offset,
             "q": query,
-            "current_url": current_url,
+            "action_url": action_url,
             "next_url": page_url(request, offset=shown) if shown < result.total else None,
             "csrf_token": csrf_token,
         }

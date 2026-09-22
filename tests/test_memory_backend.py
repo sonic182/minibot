@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
 
 from minibot.adapters.config.schema import MemoryConfig
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
@@ -87,6 +88,27 @@ async def test_existing_history_is_indexed_and_trim_leaves_the_index(tmp_path: P
 
     await reopened.trim_history("web:1", keep_latest=0)
     assert (await reopened.list_sessions(query="milk")).sessions == []
+
+
+@pytest.mark.asyncio
+async def test_an_index_left_unfilled_is_rebuilt_on_the_next_boot(tmp_path: Path) -> None:
+    backend = await _backend(tmp_path)
+    await backend.append_history("web:1", "user", "remember the milk")
+    # What an interrupted first rebuild leaves behind: the FTS table exists but indexes nothing.
+    async with backend._engine.begin() as connection:
+        await connection.execute(text("INSERT INTO messages_fts(messages_fts) VALUES('delete-all')"))
+    assert (await backend.get_history_page("web:1", query="milk")).entries == []
+
+    reopened = await _backend(tmp_path)
+    assert len((await reopened.get_history_page("web:1", query="milk")).entries) == 1
+
+
+@pytest.mark.asyncio
+async def test_punctuation_only_terms_do_not_empty_a_search(tmp_path: Path) -> None:
+    backend = await _backend(tmp_path)
+    await backend.append_history("web:1", "user", "pizza order for tonight")
+
+    assert len((await backend.get_history_page("web:1", query="pizza - order")).entries) == 1
 
 
 @pytest.mark.asyncio

@@ -102,6 +102,8 @@ window.webChat = () => ({
     this.$nextTick(() => {
       // Older pages keep the reader where they were instead of jumping by the prepended height.
       list.scrollTop = page.initial ? list.scrollHeight : list.scrollTop + list.scrollHeight - previousHeight;
+      // A page that does not overflow never fires a scroll event, so ask for the next one directly.
+      this.loadOlder();
     });
   },
 

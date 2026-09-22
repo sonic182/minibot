@@ -27,7 +27,7 @@
       <div class="entry-actions">
         <details>
           <summary>Edit</summary>
-          <form method="post" action="{{ current_url }}">
+          <form method="post" action="{{ action_url }}">
             <input type="hidden" name="action" value="update">
             <input type="hidden" name="id" value="{{ entry.id }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -45,7 +45,7 @@
   {% if next_url %}<p class="pager"><a href="{{ next_url }}" data-pager-next>older &rarr;</a></p>{% endif %}
 
   <dialog id="confirm-delete">
-    <form method="post" action="{{ current_url }}">
+    <form method="post" action="{{ action_url }}">
       <input type="hidden" name="action" value="delete">
       <input type="hidden" name="id" data-confirm-id>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

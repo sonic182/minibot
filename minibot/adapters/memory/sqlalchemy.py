@@ -54,9 +54,7 @@ class SQLAlchemyMemoryBackend(MemoryBackend):
 
     @staticmethod
     async def _initialize_fts(connection: Any) -> bool:
-        exists_sql = text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
         try:
-            existed = (await connection.execute(exists_sql)).first() is not None
             await connection.execute(
                 text(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING "
@@ -82,9 +80,12 @@ class SQLAlchemyMemoryBackend(MemoryBackend):
                     "INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content); END"
                 )
             )
-            # Only a freshly created index needs filling from the existing history; the triggers
-            # keep it current afterwards, so a large history is not re-indexed on every boot.
-            if not existed:
+            # Rebuild only when the index is out of step with the table: a fresh index, or one whose
+            # first fill was interrupted (SQLite keeps the DDL even when the rebuild fails). The
+            # triggers keep it current afterwards, so a large history is not re-indexed every boot.
+            indexed = (await connection.execute(text("SELECT count(*) FROM messages_fts_docsize"))).scalar_one()
+            stored = (await connection.execute(text("SELECT count(*) FROM messages"))).scalar_one()
+            if indexed != stored:
                 await connection.execute(text("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')"))
         except SQLAlchemyError:
             return False

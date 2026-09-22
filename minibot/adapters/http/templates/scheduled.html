@@ -43,7 +43,7 @@
   {% if next_url %}<p class="pager"><a href="{{ next_url }}" data-pager-next>later &rarr;</a></p>{% endif %}
 
   <dialog id="confirm-cancel">
-    <form method="post" action="{{ current_url }}">
+    <form method="post" action="{{ action_url }}">
       <input type="hidden" name="action" value="cancel">
       <input type="hidden" name="id" data-confirm-id>
       <p>Cancel the prompt scheduled for <strong data-confirm-title></strong>?</p>

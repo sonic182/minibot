@@ -68,6 +68,21 @@ def render(request: Request, template_name: str, context: dict[str, Any] | None 
     return _templates.TemplateResponse(request, template_name, context or {})
 
 
+MAX_QUERY_INT = 2**63 - 1  # SQLite's INTEGER range; the driver raises OverflowError past it.
+
+
+def query_int(request: Request, name: str, default: int | None = None) -> int | None:
+    """Read a non-negative integer query parameter, or ``default`` when absent. Raises ``ValueError``
+    for anything else, including values SQLite cannot bind, so pages answer 400 instead of 500."""
+    raw = request.query_params.get(name)
+    if raw is None or raw == "":
+        return default
+    value = int(raw)
+    if not 0 <= value <= MAX_QUERY_INT:
+        raise ValueError(f"{name} is out of range")
+    return value
+
+
 def page_url(request: Request, **params: Any) -> str:
     """The current path and query with ``params`` replaced, host-relative so it survives a proxy.
     Pages use it for their "next page" links, which keeps the search and filters in the URL."""
@@ -186,9 +201,9 @@ def build_history_route(memory: Any) -> RouteSpec:
             context = {"sessions": page.sessions, "q": query, "next_url": next_url}
             return _templates.TemplateResponse(request, "history.html", context)
         try:
-            before_id = int(request.query_params["before"]) if "before" in request.query_params else None
+            before_id = query_int(request, "before")
         except ValueError:
-            return PlainTextResponse("before must be an integer", status_code=400)
+            return PlainTextResponse("before must be a non-negative integer", status_code=400)
         page = await memory.get_history_page(session_id, before_id=before_id, query=query or None)
         next_url = page_url(request, before=page.next_before_id) if page.next_before_id else None
         context = {"session_id": session_id, "entries": page.entries, "q": query, "next_url": next_url}

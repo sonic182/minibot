@@ -7,6 +7,7 @@ from minibot.adapters.http.server import (
     build_dashboard_route,
     build_history_route,
     page_url,
+    query_int,
     render,
     set_nav_entries,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "build_dashboard_route",
     "build_history_route",
     "page_url",
+    "query_int",
     "render",
     "set_nav_entries",
 ]
