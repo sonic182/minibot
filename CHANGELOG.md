@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Transcribe audio on a whisper.cpp server.** Set `[tools.audio_transcription] server_url` to a
+  whisper.cpp server's `/inference` endpoint and `transcribe_audio` posts the file there instead of
+  loading faster-whisper, so the `stt` extra is not needed. `beam_size`, the language hint and translate
+  mode are forwarded; `model`, `device`, `compute_type` and `vad_filter` are left to the server. A request
+  waits up to 10 minutes, since the server sends nothing until inference finishes. The URL must be
+  http(s), or a `${secret:NAME}` reference resolved from the vault.
+
 ### Fixed
+
+- **History compaction works on the ChatGPT Codex provider.** Codex only streams, and the streamed
+  response lost its final event, which carries token usage and the response id. Every Codex step counted
+  0 tokens, so a conversation never reached `max_history_tokens` and was never compacted. Usage, response
+  id and status now come through.
+- **A continued response no longer double-counts its context.** When an incomplete response was
+  auto-continued, its input tokens were added to the first request's, although the continuation already
+  covers the stored context; compaction could run early. Input and cached-input tokens are now the last
+  request's, as the agent runtime already reported them.
 
 - **Specialist agents can load skills again.** Since 0.20 delegation runs in a task worker, which built
   its tools without `list_skills` and `activate_skill`, so a specialist listing them in `tools_allow`
