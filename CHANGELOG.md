@@ -13,9 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its tools without `list_skills` and `activate_skill`, so a specialist listing them in `tools_allow`
   silently lost them. The worker now attaches both, scoped by the agent's `tools_allow`/`tools_deny`
   like every other tool; the default worker gets them too. `install_skill` stays with the main agent.
-- **Skill instructions are never spilled to a file.** `activate_skill` results always come back inline:
-  a large skill used to arrive as a file pointer, and the agent spent its tool calls reading it back.
+- **Skill instructions come back inline.** `activate_skill` results spill to a file only past 64,000
+  characters instead of the general 8,000: a 16 KB skill used to arrive as a file pointer, and the agent
+  spent its tool calls reading it back.
 - **Task workers get `wait`.** A specialist listing it in `tools_allow` silently lost it, as with skills.
+  A specialist scoped with `tools_deny` now gets `wait`, `list_skills` and `activate_skill` unless it
+  denies them.
 
 ### Changed
 

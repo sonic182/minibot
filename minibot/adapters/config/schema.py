@@ -107,6 +107,11 @@ ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
 TaskLimitValue = PositiveInt | Literal["unlimited"]
 
 
+def task_limit(value: TaskLimitValue) -> int | None:
+    """``None`` for ``"unlimited"``, the number otherwise."""
+    return None if value == "unlimited" else int(value)
+
+
 ENVIRONMENT_CHOICES: tuple[str, ...] = ("development", "debug", "production")
 # Environments where the HTTP server serves /static with Cache-Control: no-store so a normal
 # reload picks up dashboard edits. Kept here so the configurator and the server share one set.
@@ -610,7 +615,9 @@ class ToolOutputSpillConfig(BaseModel):
 
     Applies to every tool except those listed in ``exclude_tools``, and only when
     file storage is enabled and the agent also has a read-back tool available
-    (``grep``, ``code_read``, ``read_file`` or ``bash``).
+    (``grep``, ``code_read``, ``read_file`` or ``bash``). ``activate_skill`` spills only
+    past 64,000 characters (or ``spill_after_chars``, if larger), so skill instructions
+    normally arrive inline.
     """
 
     enabled: bool = True

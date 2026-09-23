@@ -171,7 +171,9 @@ async def test_spawn_task_leaves_step_and_tool_call_budgets_to_config() -> None:
     producer = _ProducerStub()
     bindings = _build_tools(producer, _TaskManagerStub())
 
-    assert "max_tool_calls" not in bindings["spawn_task"].tool.parameters["properties"]
+    properties = bindings["spawn_task"].tool.parameters["properties"]
+    assert "max_steps" not in properties
+    assert "max_tool_calls" not in properties
     result = await bindings["spawn_task"].handler(
         {"prompt": "Browse", "max_steps": 20, "max_tool_calls": 10},
         ToolContext(channel="console"),

@@ -418,6 +418,8 @@ preview_chars = 800
 subdir = "tool_output/tmp"
 # `bash` is deliberately absent: it has no spill of its own, only an inline truncation, so an
 # oversized result would ride along in every later step of a tool loop.
+# `activate_skill` spills only past 64000 chars (or spill_after_chars, if larger), so skill
+# instructions normally arrive inline.
 exclude_tools = ["http_request", "pre_response"]
 
 # Structured file patch tool (opencode-style apply_patch format).
@@ -567,6 +569,7 @@ backend = "sqlite"
 # Seconds to wait for a spawned worker process to return a result before it is terminated.
 worker_timeout_seconds = 1800
 # Worker execution limits accept a positive integer or "unlimited". A finite timeout is always required.
+# These are the only step/tool-call bounds: `spawn_task` itself takes just a timeout_seconds.
 worker_max_steps = "unlimited"
 worker_max_tool_calls = "unlimited"
 # Max subprocesses running simultaneously; excess tasks wait in the queue.

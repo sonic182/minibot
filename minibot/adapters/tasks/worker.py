@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from minibot.adapters.config.loader import load_settings
-from minibot.adapters.config.schema import Settings
+from minibot.adapters.config.schema import Settings, task_limit
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
 from minibot.app.agent_definitions_loader import load_agent_specs
@@ -439,8 +439,8 @@ def _stop_reason_for_error(exc: Exception) -> TaskStopReason:
 
 def _task_limits(task: dict[str, Any], settings: Settings) -> TaskLimits:
     configured_timeout = settings.tasks.worker_timeout_seconds
-    configured_max_steps = _config_limit(settings.tasks.worker_max_steps)
-    configured_max_tool_calls = _config_limit(settings.tasks.worker_max_tool_calls)
+    configured_max_steps = task_limit(settings.tasks.worker_max_steps)
+    configured_max_tool_calls = task_limit(settings.tasks.worker_max_tool_calls)
     raw_limits = task.get("limits")
     if not isinstance(raw_limits, dict):
         return TaskLimits(
@@ -462,10 +462,6 @@ def _task_limits(task: dict[str, Any], settings: Settings) -> TaskLimits:
         max_steps=max_steps,
         max_tool_calls=max_tool_calls,
     )
-
-
-def _config_limit(value: int | str) -> int | None:
-    return None if value == "unlimited" else int(value)
 
 
 def _payload_limit(value: Any, field: str) -> int | None:

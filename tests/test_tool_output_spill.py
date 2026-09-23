@@ -62,14 +62,16 @@ async def test_small_output_is_untouched(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_skill_instructions_are_never_spilled(tmp_path) -> None:
-    big = {"ok": True, "instructions": "x" * 20_000}
+@pytest.mark.parametrize(("size", "spilled"), [(20_000, False), (70_000, True)])
+async def test_skill_instructions_spill_only_past_a_larger_ceiling(tmp_path, size: int, spilled: bool) -> None:
+    big = {"ok": True, "instructions": "x" * size}
     wrapped = apply_tool_output_spill(
         [_binding("activate_skill", big), _readback_binding()],
         storage=_storage(tmp_path),
         config=ToolOutputSpillConfig(exclude_tools=[]),
     )
-    assert await _call(wrapped[0]) == big
+    result = cast(ToolResult, await _call(wrapped[0]))
+    assert (result.content != big) is spilled
 
 
 @pytest.mark.asyncio

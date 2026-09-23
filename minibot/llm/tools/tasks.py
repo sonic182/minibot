@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from llm_async.models import Tool
 
-from minibot.adapters.config.schema import TasksConfig
+from minibot.adapters.config.schema import TasksConfig, task_limit
 from minibot.adapters.tasks.manager import TaskManager
 from minibot.app.agent_policies import normalize_model_overrides
 from minibot.app.agent_registry import AgentRegistry
@@ -254,13 +254,9 @@ def _resolve_limits(
         raise ValueError("timeout_seconds may not exceed tasks.worker_timeout_seconds")
     return TaskLimits(
         timeout_seconds=effective_timeout,
-        max_steps=_config_limit(config.worker_max_steps),
-        max_tool_calls=_config_limit(config.worker_max_tool_calls),
+        max_steps=task_limit(config.worker_max_steps),
+        max_tool_calls=task_limit(config.worker_max_tool_calls),
     )
-
-
-def _config_limit(ceiling: int | str) -> int | None:
-    return None if ceiling == "unlimited" else int(ceiling)
 
 
 def _status_filter(value: Any) -> list[TaskStatus] | None:

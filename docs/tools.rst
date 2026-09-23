@@ -177,7 +177,8 @@ Runtime Notes
   agents, and task workers), not just ``http_request``: an oversized result is swapped for a preview
   plus a managed-file pointer the agent can read back with ``grep``, ``code_read``, ``read_file``, or
   ``bash``. Tools in ``exclude_tools`` (``http_request`` and ``pre_response`` by default) are
-  skipped since they already manage their own output size.
+  skipped since they already manage their own output size. ``activate_skill`` spills only past
+  64,000 characters (or ``spill_after_chars``, if larger), so skill instructions normally arrive inline.
 - ``[tools.audio_transcription]`` requires the ``stt`` extra: ``pip install "minibot[stt]"``.
 - ``[tools.http_client]`` needs no extra: selectolax ships with the base install and renders HTML
   as compact semantic text instead of plain-text extraction.
