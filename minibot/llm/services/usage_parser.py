@@ -120,6 +120,8 @@ class UsageAccumulator:
         if usage.input_tokens is not None:
             self.latest_input_tokens = usage.input_tokens
             self.saw_input_tokens = True
+            self.latest_cached_input_tokens = 0
+            self.saw_cached_input_tokens = False
         if usage.output_tokens is not None:
             self.output_tokens_used += usage.output_tokens
             self.saw_output_tokens = True
@@ -139,6 +141,8 @@ class UsageAccumulator:
         if generation.input_tokens is not None:
             self.latest_input_tokens = generation.input_tokens
             self.saw_input_tokens = True
+            self.latest_cached_input_tokens = 0
+            self.saw_cached_input_tokens = False
         if generation.output_tokens is not None:
             self.output_tokens_used += generation.output_tokens
             self.saw_output_tokens = True

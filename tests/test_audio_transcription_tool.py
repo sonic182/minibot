@@ -293,6 +293,11 @@ async def test_audio_transcription_tool_reports_whisper_server_errors(
     assert result == {"ok": False, "path": "uploads/voice.ogg", "error": expected_error}
 
 
-def test_audio_transcription_config_rejects_non_http_server_url() -> None:
+@pytest.mark.parametrize("server_url", ["ftp://whisper/inference", "whisper:8080/inference", "http://"])
+def test_audio_transcription_config_rejects_non_http_server_url(server_url: str) -> None:
     with pytest.raises(ValueError):
-        AudioTranscriptionToolConfig(server_url="ftp://whisper/inference")
+        AudioTranscriptionToolConfig(server_url=server_url)
+
+
+def test_audio_transcription_config_defers_secret_server_url_to_vault_pass() -> None:
+    assert AudioTranscriptionToolConfig(server_url="${secret:WHISPER_URL}").server_url == "${secret:WHISPER_URL}"

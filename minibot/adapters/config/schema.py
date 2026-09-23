@@ -7,14 +7,15 @@ from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from urllib.parse import urlsplit
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     BeforeValidator,
     ByteSize,
     ConfigDict,
     Field,
-    HttpUrl,
     PositiveInt,
     TypeAdapter,
     ValidationError,
@@ -104,7 +105,18 @@ def _normalize_for_annotation(value: Any, annotation: Any) -> Any:
     return value
 
 
+def _check_http_url(value: str) -> str:
+    # ${secret:NAME} stays literal until the vault pass, so only check resolved values.
+    if has_secret_references(value):
+        return value
+    parts = urlsplit(value)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise ValueError(f"must be an http(s) URL, got {value!r}")
+    return value
+
+
 ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
+HttpUrlValue = Annotated[str, AfterValidator(_check_http_url)]
 TaskLimitValue = PositiveInt | Literal["unlimited"]
 
 
@@ -696,7 +708,7 @@ class AudioTranscriptionToolConfig(BaseModel):
     auto_transcribe_max_duration_seconds: PositiveInt = 45
     # whisper.cpp server inference URL (e.g. http://10.0.1.22:8080/inference). When set, audio is
     # sent there instead of loading faster-whisper locally; model/device/compute_type are ignored.
-    server_url: HttpUrl | None = None
+    server_url: HttpUrlValue | None = None
 
 
 class SkillsToolConfig(BaseModel):
