@@ -244,3 +244,55 @@ async def test_audio_transcription_tool_uses_whisper_server_when_configured(
     assert b'name="language"' not in body
     assert b'name="translate"\r\n\r\ntrue\r\n' in body
     assert b'name="response_format"\r\n\r\nverbose_json\r\n' in body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "body", "expected_error"),
+    [
+        (502, ValueError("Expecting value"), "HTTP 502: unexpected response body"),
+        (200, ["not", "a", "dict"], "HTTP 200: unexpected response body"),
+        (400, {"error": "bad audio"}, "bad audio"),
+    ],
+)
+async def test_audio_transcription_tool_reports_whisper_server_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status_code: int, body: Any, expected_error: str
+) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    (tmp_path / "uploads").mkdir()
+    (tmp_path / "uploads" / "voice.ogg").write_bytes(b"fake-audio")
+
+    class _FakeResponse:
+        async def json(self) -> Any:
+            if isinstance(body, Exception):
+                raise body
+            return body
+
+    _FakeResponse.status_code = status_code
+
+    class _FakeClient:
+        async def __aenter__(self) -> _FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def post(self, *_args: Any, **_kwargs: Any) -> _FakeResponse:
+            return _FakeResponse()
+
+    monkeypatch.setattr("minibot.llm.tools.audio_transcription_facade.aiosonic.HTTPClient", _FakeClient)
+    tool = AudioTranscriptionTool(
+        config=AudioTranscriptionToolConfig(enabled=True, server_url="http://whisper:8080/inference"),
+        storage=storage,
+    )
+
+    result = await tool.bindings()[0].handler(
+        {"path": "uploads/voice.ogg", "language": None, "task": None}, ToolContext(owner_id="1")
+    )
+
+    assert result == {"ok": False, "path": "uploads/voice.ogg", "error": expected_error}
+
+
+def test_audio_transcription_config_rejects_non_http_server_url() -> None:
+    with pytest.raises(ValueError):
+        AudioTranscriptionToolConfig(server_url="ftp://whisper/inference")

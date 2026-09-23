@@ -64,11 +64,11 @@ class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
                 if chunk_type == "response.output_item.done" and isinstance(chunk.get("item"), dict):
                     accumulated_items.append(chunk["item"])
                 elif chunk_type in _TERMINAL_EVENTS and isinstance(chunk.get("response"), dict):
-                    response.original = chunk["response"]
+                    response.original = {**chunk["response"], "output": accumulated_items}
                 delta_text = self._extract_stream_text(chunk)
                 if delta_text:
                     yield StreamChunk(delta_text, chunk)
-            response.main_response = self._parse_response({**response.original, "output": accumulated_items})
+            response.main_response = self._parse_response(response.original or {"output": accumulated_items})
 
         response.stream_generator = _gen()
         return response

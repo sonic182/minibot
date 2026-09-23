@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from collections.abc import Callable
 from io import IOBase
@@ -104,7 +105,6 @@ class AudioTranscriptionFacade:
     ) -> dict[str, Any]:
         server_url = str(self._config.server_url)
         form = _MultipartForm()
-        form.add_file("file", resolved_path)
         form.add_field("response_format", "verbose_json")
         form.add_field("beam_size", str(self._config.beam_size))
         if language:
@@ -112,13 +112,20 @@ class AudioTranscriptionFacade:
         if task == "translate":
             form.add_field("translate", "true")
         try:
-            async with aiosonic.HTTPClient() as client:
-                # whisper.cpp sends nothing until inference finishes, so sock_read must cover the whole run.
-                timeouts = Timeouts(sock_read=_REMOTE_TIMEOUT_SECONDS, request_timeout=_REMOTE_TIMEOUT_SECONDS)
-                response = await client.post(server_url, data=form, timeouts=timeouts)
-                body = await response.json()
+            with open(resolved_path, "rb") as audio_file:
+                form.add_field("file", audio_file, os.path.basename(resolved_path))
+                async with aiosonic.HTTPClient() as client:
+                    # whisper.cpp sends nothing until inference finishes, so sock_read must cover the whole run.
+                    timeouts = Timeouts(sock_read=_REMOTE_TIMEOUT_SECONDS, request_timeout=_REMOTE_TIMEOUT_SECONDS)
+                    response = await client.post(server_url, data=form, timeouts=timeouts)
+                    try:
+                        body = await response.json()
+                    except ValueError:
+                        body = None
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "path": path, "error": str(exc) or type(exc).__name__}
+        if not isinstance(body, dict):
+            return {"ok": False, "path": path, "error": f"HTTP {response.status_code}: unexpected response body"}
         if response.status_code != 200 or "error" in body:
             return {"ok": False, "path": path, "error": str(body.get("error", f"HTTP {response.status_code}"))}
 
@@ -139,7 +146,6 @@ class AudioTranscriptionFacade:
             "duration_seconds": body.get("duration"),
             "segments": segments,
             "segment_count": len(segments),
-            "server_url": server_url,
         }
 
     def _get_model(self) -> Any:

@@ -14,6 +14,7 @@ from pydantic import (
     ByteSize,
     ConfigDict,
     Field,
+    HttpUrl,
     PositiveInt,
     TypeAdapter,
     ValidationError,
@@ -695,7 +696,7 @@ class AudioTranscriptionToolConfig(BaseModel):
     auto_transcribe_max_duration_seconds: PositiveInt = 45
     # whisper.cpp server inference URL (e.g. http://10.0.1.22:8080/inference). When set, audio is
     # sent there instead of loading faster-whisper locally; model/device/compute_type are ignored.
-    server_url: str | None = None
+    server_url: HttpUrl | None = None
 
 
 class SkillsToolConfig(BaseModel):

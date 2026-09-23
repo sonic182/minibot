@@ -146,4 +146,5 @@ async def test_codex_stream_keeps_completed_response_usage(monkeypatch: pytest.M
 
     assert response.original["usage"]["total_tokens"] == 42
     assert response.original["id"] == "resp_1"
+    assert response.original["output"] == [item]
     assert response.main_response.content == "hi"
