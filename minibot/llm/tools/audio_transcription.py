@@ -35,6 +35,8 @@ class AudioTranscriptionTool:
     - ``device`` — ``auto``, ``cpu``, or ``cuda``.
     - ``compute_type`` — quantization (``int8``, ``float16``, etc.).
     - ``beam_size``, ``vad_filter``.
+    - ``server_url`` — whisper.cpp server inference URL; when set, audio is sent there instead of
+      loading faster-whisper locally.
     """
 
     def __init__(

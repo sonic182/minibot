@@ -303,7 +303,7 @@ Tool Configuration
      - ``output_dir`` for browser/MCP-generated artifacts
    * - ``[tools.audio_transcription]``
      - ``AudioTranscriptionToolConfig``
-     - ``enabled``, ``model``, ``device``, ``compute_type``, ``beam_size``, VAD and auto-transcription settings
+     - ``enabled``, ``model``, ``device``, ``compute_type``, ``beam_size``, VAD and auto-transcription settings, ``server_url`` (remote whisper.cpp server)
    * - ``[tools.mcp]``
      - ``MCPToolConfig``
      - ``enabled``, ``name_prefix``, ``timeout_seconds``, ``servers``

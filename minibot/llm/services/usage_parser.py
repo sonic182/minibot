@@ -103,9 +103,9 @@ def should_auto_continue_incomplete(usage: UsageSnapshot) -> bool:
 @dataclass
 class UsageAccumulator:
     total_tokens_used: int = 0
-    input_tokens_used: int = 0
+    latest_input_tokens: int = 0
     output_tokens_used: int = 0
-    cached_input_tokens_used: int = 0
+    latest_cached_input_tokens: int = 0
     reasoning_output_tokens_used: int = 0
     provider_tool_calls_used: int = 0
     saw_input_tokens: bool = False
@@ -118,13 +118,15 @@ class UsageAccumulator:
         if usage_tokens is not None:
             self.total_tokens_used += usage_tokens
         if usage.input_tokens is not None:
-            self.input_tokens_used += usage.input_tokens
+            self.latest_input_tokens = usage.input_tokens
             self.saw_input_tokens = True
+            self.latest_cached_input_tokens = 0
+            self.saw_cached_input_tokens = False
         if usage.output_tokens is not None:
             self.output_tokens_used += usage.output_tokens
             self.saw_output_tokens = True
         if usage.cached_input_tokens is not None:
-            self.cached_input_tokens_used += usage.cached_input_tokens
+            self.latest_cached_input_tokens = usage.cached_input_tokens
             self.saw_cached_input_tokens = True
         if usage.reasoning_output_tokens is not None:
             self.reasoning_output_tokens_used += usage.reasoning_output_tokens
@@ -137,13 +139,15 @@ class UsageAccumulator:
         if generation.total_tokens is not None:
             self.total_tokens_used += generation.total_tokens
         if generation.input_tokens is not None:
-            self.input_tokens_used += generation.input_tokens
+            self.latest_input_tokens = generation.input_tokens
             self.saw_input_tokens = True
+            self.latest_cached_input_tokens = 0
+            self.saw_cached_input_tokens = False
         if generation.output_tokens is not None:
             self.output_tokens_used += generation.output_tokens
             self.saw_output_tokens = True
         if generation.cached_input_tokens is not None:
-            self.cached_input_tokens_used += generation.cached_input_tokens
+            self.latest_cached_input_tokens = generation.cached_input_tokens
             self.saw_cached_input_tokens = True
         if generation.reasoning_output_tokens is not None:
             self.reasoning_output_tokens_used += generation.reasoning_output_tokens
@@ -164,9 +168,9 @@ class UsageAccumulator:
             payload,
             response_id,
             total_tokens=self.total_tokens_used or None,
-            input_tokens=self.input_tokens_used if self.saw_input_tokens else None,
+            input_tokens=self.latest_input_tokens if self.saw_input_tokens else None,
             output_tokens=self.output_tokens_used if self.saw_output_tokens else None,
-            cached_input_tokens=self.cached_input_tokens_used if self.saw_cached_input_tokens else None,
+            cached_input_tokens=self.latest_cached_input_tokens if self.saw_cached_input_tokens else None,
             reasoning_output_tokens=self.reasoning_output_tokens_used if self.saw_reasoning_output_tokens else None,
             provider_tool_calls=self.provider_tool_calls_used if self.saw_provider_tool_calls else None,
             status=status,

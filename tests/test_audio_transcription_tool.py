@@ -184,3 +184,120 @@ async def test_audio_transcription_tool_offloads_transcription_with_to_thread(
     assert result["text"] == "ok"
     assert "_get_model" in to_thread_calls
     assert "_transcribe_sync" in to_thread_calls
+
+
+@pytest.mark.asyncio
+async def test_audio_transcription_tool_uses_whisper_server_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    audio_file = tmp_path / "uploads" / "voice.ogg"
+    audio_file.parent.mkdir(parents=True, exist_ok=True)
+    audio_file.write_bytes(b"fake-audio")
+    captured: dict[str, Any] = {}
+
+    class _FakeResponse:
+        status_code = 200
+
+        async def json(self) -> dict[str, Any]:
+            return {
+                "text": " Hola\n mundo\n",
+                "language": "spanish",
+                "detected_language_probability": 0.9,
+                "duration": 1.5,
+                "segments": [{"start": 0.0, "end": 1.5, "text": " Hola mundo"}],
+            }
+
+    class _FakeClient:
+        async def __aenter__(self) -> _FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def post(self, url: str, *, data: Any, **_kwargs: Any) -> _FakeResponse:
+            captured["url"] = url
+            captured["body"] = b"".join([chunk async for chunk in data.get_buffer()])
+            captured["boundary"] = data.boundary
+            return _FakeResponse()
+
+    monkeypatch.setattr("minibot.llm.tools.audio_transcription_facade.aiosonic.HTTPClient", _FakeClient)
+    monkeypatch.setattr(AudioTranscriptionTool, "_load_whisper_model_class", staticmethod(lambda: 1 / 0))
+    tool = AudioTranscriptionTool(
+        config=AudioTranscriptionToolConfig(enabled=True, server_url="http://whisper:8080/inference"),
+        storage=storage,
+    )
+
+    result = await tool.bindings()[0].handler(
+        {"path": "uploads/voice.ogg", "language": None, "task": "translate"},
+        ToolContext(owner_id="1"),
+    )
+
+    assert result["ok"] is True
+    assert result["text"] == "Hola mundo"
+    assert result["language"] == "spanish"
+    assert result["duration_seconds"] == 1.5
+    assert result["segments"] == [{"start": 0.0, "end": 1.5, "text": "Hola mundo"}]
+    assert captured["url"] == "http://whisper:8080/inference"
+    body = captured["body"]
+    assert b"fake-audio\r\n--" + captured["boundary"].encode() in body
+    assert b'name="language"' not in body
+    assert b'name="translate"\r\n\r\ntrue\r\n' in body
+    assert b'name="response_format"\r\n\r\nverbose_json\r\n' in body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "body", "expected_error"),
+    [
+        (502, ValueError("Expecting value"), "HTTP 502: unexpected response body"),
+        (200, ["not", "a", "dict"], "HTTP 200: unexpected response body"),
+        (400, {"error": "bad audio"}, "bad audio"),
+    ],
+)
+async def test_audio_transcription_tool_reports_whisper_server_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status_code: int, body: Any, expected_error: str
+) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    (tmp_path / "uploads").mkdir()
+    (tmp_path / "uploads" / "voice.ogg").write_bytes(b"fake-audio")
+
+    class _FakeResponse:
+        async def json(self) -> Any:
+            if isinstance(body, Exception):
+                raise body
+            return body
+
+    _FakeResponse.status_code = status_code
+
+    class _FakeClient:
+        async def __aenter__(self) -> _FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def post(self, *_args: Any, **_kwargs: Any) -> _FakeResponse:
+            return _FakeResponse()
+
+    monkeypatch.setattr("minibot.llm.tools.audio_transcription_facade.aiosonic.HTTPClient", _FakeClient)
+    tool = AudioTranscriptionTool(
+        config=AudioTranscriptionToolConfig(enabled=True, server_url="http://whisper:8080/inference"),
+        storage=storage,
+    )
+
+    result = await tool.bindings()[0].handler(
+        {"path": "uploads/voice.ogg", "language": None, "task": None}, ToolContext(owner_id="1")
+    )
+
+    assert result == {"ok": False, "path": "uploads/voice.ogg", "error": expected_error}
+
+
+@pytest.mark.parametrize("server_url", ["ftp://whisper/inference", "whisper:8080/inference", "http://"])
+def test_audio_transcription_config_rejects_non_http_server_url(server_url: str) -> None:
+    with pytest.raises(ValueError):
+        AudioTranscriptionToolConfig(server_url=server_url)
+
+
+def test_audio_transcription_config_defers_secret_server_url_to_vault_pass() -> None:
+    assert AudioTranscriptionToolConfig(server_url="${secret:WHISPER_URL}").server_url == "${secret:WHISPER_URL}"

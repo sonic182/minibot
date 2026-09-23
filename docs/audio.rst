@@ -59,6 +59,20 @@ The automatic-ingest knobs default to transcribing short incoming voice/audio me
 - ``auto_transcribe_short_incoming`` — transcribe short Telegram voice/audio attachments automatically (default: ``true``).
 - ``auto_transcribe_max_duration_seconds`` — cap for automatic transcription (default: ``45``); longer files must be transcribed explicitly.
 
+Remote whisper.cpp Server
+-------------------------
+
+Set ``server_url`` to a `whisper.cpp server <https://github.com/ggml-org/whisper.cpp/tree/master/examples/server>`_
+``/inference`` endpoint to transcribe there instead of loading faster-whisper locally. The ``stt`` extra is not
+needed, and ``model``, ``device``, ``compute_type`` and ``vad_filter`` are ignored (the server's own model and flags
+apply); ``beam_size``, ``language`` and translate mode are forwarded. Requests wait up to 10 minutes for a result.
+
+.. code-block:: toml
+
+   [tools.audio_transcription]
+   enabled = true
+   server_url = "http://whisper:8080/inference"
+
 GPU Runtime Dependencies
 ------------------------
 
