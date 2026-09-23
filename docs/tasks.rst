@@ -49,9 +49,9 @@ Tool Surface
      - Purpose
    * - ``spawn_task``
      - Queue a worker task from a ``prompt``. Optionally target a specialist with ``agent_name``,
-       pass structured ``context_json``, and cap ``timeout_seconds``, ``max_steps``, and
-       ``max_tool_calls`` (each may not exceed the configured worker ceiling). Without
-       ``timeout_seconds``, a named specialist's own ``timeout_seconds`` applies.
+       pass structured ``context_json``, and cap ``timeout_seconds`` (no greater than the configured
+       worker timeout). Without it, a named specialist's own ``timeout_seconds`` applies. Steps and
+       tool calls are bounded only by ``worker_max_steps`` / ``worker_max_tool_calls``.
    * - ``cancel_task``
      - Cancel an active task by ``task_id``.
    * - ``list_tasks``

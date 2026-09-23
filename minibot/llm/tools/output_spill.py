@@ -11,6 +11,9 @@ from minibot.llm.services.tool_executor import canonical_tool_name, normalize_to
 from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
 
 _READBACK_TOOLS = frozenset({"code_read", "grep", "read_file", "bash"})
+# Skill instructions are the point of the call: a pointer to them makes the agent spend its tool
+# calls reading the file back instead of doing the task.
+_NEVER_SPILLED = frozenset({"activate_skill"})
 _logger = logging.getLogger("minibot.tool_output_spill")
 
 
@@ -34,7 +37,7 @@ def apply_tool_output_spill(
     if not readback:
         return list(bindings)
 
-    excluded = {canonical_tool_name(name) for name in config.exclude_tools}
+    excluded = {canonical_tool_name(name) for name in config.exclude_tools} | _NEVER_SPILLED
     return [
         binding
         if canonical_tool_name(binding.tool.name) in excluded

@@ -219,12 +219,14 @@ def test_build_worker_tools_excludes_orchestration_tools() -> None:
     settings.tools.apply_patch.enabled = True
     settings.tools.file_storage.enabled = True
     settings.tools.grep.enabled = True
+    settings.tools.wait.enabled = True
 
     spec = worker._build_worker_spec(system_prompt="You are Minibot.", environment_prompt_fragment="")
     bindings = worker._build_worker_tools(settings=settings, spec=spec)
     tool_names = {binding.tool.name for binding in bindings}
 
     assert "current_datetime" in tool_names
+    assert "wait" in tool_names
     assert "calculate_expression" in tool_names
     assert "python_execute" in tool_names
     assert "http_request" in tool_names

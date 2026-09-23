@@ -62,6 +62,17 @@ async def test_small_output_is_untouched(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_skill_instructions_are_never_spilled(tmp_path) -> None:
+    big = {"ok": True, "instructions": "x" * 20_000}
+    wrapped = apply_tool_output_spill(
+        [_binding("activate_skill", big), _readback_binding()],
+        storage=_storage(tmp_path),
+        config=ToolOutputSpillConfig(exclude_tools=[]),
+    )
+    assert await _call(wrapped[0]) == big
+
+
+@pytest.mark.asyncio
 async def test_no_readback_tool_disables_spill(tmp_path) -> None:
     big = {"ok": True, "stdout": "x" * 20_000}
     wrapped = apply_tool_output_spill(

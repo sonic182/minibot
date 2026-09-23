@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its tools without `list_skills` and `activate_skill`, so a specialist listing them in `tools_allow`
   silently lost them. The worker now attaches both, scoped by the agent's `tools_allow`/`tools_deny`
   like every other tool; the default worker gets them too. `install_skill` stays with the main agent.
+- **Skill instructions are never spilled to a file.** `activate_skill` results always come back inline:
+  a large skill used to arrive as a file pointer, and the agent spent its tool calls reading it back.
+- **Task workers get `wait`.** A specialist listing it in `tools_allow` silently lost it, as with skills.
+
+### Changed
+
+- **`spawn_task` only takes a timeout as a budget.** `max_steps` and `max_tool_calls` are gone from the
+  tool: the main agent set them too tight (a browser task capped at 10 calls failed half-way). Workers are
+  bounded by the timeout and by `[tasks] worker_max_steps` / `worker_max_tool_calls`, unlimited by default.
 
 ## [0.21.0] - 2026-09-22
 

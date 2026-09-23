@@ -42,6 +42,7 @@ from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.skill_loader import SkillLoaderTool
 from minibot.llm.tools.time import CurrentTimeTool
+from minibot.llm.tools.wait import WaitTool
 from minibot.shared.utils import session_identifier, validate_attachments
 
 _LOGGER = logging.getLogger("minibot.task_worker")
@@ -49,6 +50,7 @@ _WORKER_SPEC_PATH = Path("<task_worker>")
 _WORKER_TOOL_ALLOWLIST = [
     "current_datetime",
     "calculate_expression",
+    "wait",
     "http_request",
     "filesystem",
     "glob_files",
@@ -244,6 +246,8 @@ def _build_worker_tools(
                 max_exponent_abs=settings.tools.calculator.max_exponent_abs,
             ).bindings()
         )
+    if settings.tools.wait.enabled:
+        bindings.extend(WaitTool(max_milliseconds=settings.tools.wait.max_milliseconds).bindings())
     if settings.tools.http_client.enabled:
         bindings.extend(HTTPClientTool(settings.tools.http_client, storage=managed_storage).bindings())
     if settings.tools.python_exec.enabled:

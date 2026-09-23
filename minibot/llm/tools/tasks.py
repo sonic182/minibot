@@ -54,13 +54,6 @@ class TaskTools:
         ]
 
     def _spawn_schema(self) -> Tool:
-        limit_property = {
-            "anyOf": [
-                {"type": "integer", "minimum": 1},
-                {"type": "string", "enum": ["unlimited"]},
-                {"type": "null"},
-            ]
-        }
         return Tool(
             name="spawn_task",
             description=load_tool_description("spawn_task"),
@@ -80,8 +73,6 @@ class TaskTools:
                         "minimum": 1,
                         "description": "Optional timeout no greater than the configured task-worker timeout.",
                     },
-                    "max_steps": {**limit_property, "description": "Optional execution-step limit or unlimited."},
-                    "max_tool_calls": {**limit_property, "description": "Optional tool-call limit or unlimited."},
                     "model_provider": {
                         "type": ["string", "null"],
                         "description": "Optional provider name with configured credentials to run this task on.",
@@ -263,23 +254,13 @@ def _resolve_limits(
         raise ValueError("timeout_seconds may not exceed tasks.worker_timeout_seconds")
     return TaskLimits(
         timeout_seconds=effective_timeout,
-        max_steps=_resolve_limit(payload.get("max_steps"), config.worker_max_steps, "max_steps"),
-        max_tool_calls=_resolve_limit(payload.get("max_tool_calls"), config.worker_max_tool_calls, "max_tool_calls"),
+        max_steps=_config_limit(config.worker_max_steps),
+        max_tool_calls=_config_limit(config.worker_max_tool_calls),
     )
 
 
-def _resolve_limit(value: Any, ceiling: int | str, field: str) -> int | None:
-    if value is None:
-        return None if ceiling == "unlimited" else int(ceiling)
-    if value == "unlimited":
-        if ceiling != "unlimited":
-            raise ValueError(f"{field} may not be unlimited for this task system")
-        return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError(f"{field} must be a positive integer, unlimited, or null")
-    if ceiling != "unlimited" and value > ceiling:
-        raise ValueError(f"{field} may not exceed the configured task-worker limit")
-    return value
+def _config_limit(ceiling: int | str) -> int | None:
+    return None if ceiling == "unlimited" else int(ceiling)
 
 
 def _status_filter(value: Any) -> list[TaskStatus] | None:
