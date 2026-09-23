@@ -542,7 +542,7 @@ async def test_generate_auto_continues_incomplete_response_once(monkeypatch: pyt
                 original={
                     "id": "resp-2",
                     "status": "completed",
-                    "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+                    "usage": {"input_tokens": 26, "output_tokens": 4, "total_tokens": 30},
                 },
             )
 
@@ -554,8 +554,9 @@ async def test_generate_auto_continues_incomplete_response_once(monkeypatch: pyt
 
     assert result.payload == '{"answer":"hello world","should_continue":false}'
     assert result.response_id == "resp-2"
-    assert result.total_tokens == 32
-    assert result.input_tokens == 23
+    assert result.total_tokens == 55
+    # The continuation's input already covers the stored context; summing would double-count it.
+    assert result.input_tokens == 26
     assert result.output_tokens == 9
 
 
