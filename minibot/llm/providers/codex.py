@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from aiosonic import HeadersType  # type: ignore[import-untyped]
 from llm_async.models import Response
+from llm_async.models.response import StreamChunk
+from llm_async.utils.http import stream_json
 from llm_async_codex import CodexProvider
 
 from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvider
@@ -13,6 +16,7 @@ from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvide
 # an empty or partial list). Track the current Codex CLI release so new models stay unlocked as
 # their floor rises; bump this if a model goes missing from get_model_capabilities().
 _MODELS_CLIENT_VERSION = "0.154.0"
+_TERMINAL_EVENTS = {"response.completed", "response.incomplete", "response.failed"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +47,30 @@ class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
         if response.stream_generator is not None:
             async for _ in response.stream_generator:
                 pass
+        return response
+
+    def _stream_responses_request(self, url: str, payload: dict[str, Any], headers: HeadersType) -> Response:
+        # ponytail: copy of llm_async's version, which drops the terminal response.completed event and
+        # leaves `original` empty (no id, usage, status), so minibot counted 0 tokens and never compacted.
+        # Delete once llm_async stores that event's `response` in `original`.
+        response = Response({}, self.__class__.name(), stream=True, stream_generator=None)
+
+        async def _gen():
+            accumulated_items: list[dict[str, Any]] = []
+            async for chunk in stream_json(self.client, url, payload, headers, retry_config=self.retry_config):
+                if not isinstance(chunk, dict):
+                    continue
+                chunk_type = chunk.get("type")
+                if chunk_type == "response.output_item.done" and isinstance(chunk.get("item"), dict):
+                    accumulated_items.append(chunk["item"])
+                elif chunk_type in _TERMINAL_EVENTS and isinstance(chunk.get("response"), dict):
+                    response.original = chunk["response"]
+                delta_text = self._extract_stream_text(chunk)
+                if delta_text:
+                    yield StreamChunk(delta_text, chunk)
+            response.main_response = self._parse_response({**response.original, "output": accumulated_items})
+
+        response.stream_generator = _gen()
         return response
 
     async def _ensure_models_cache(self) -> list[dict[str, Any]]:

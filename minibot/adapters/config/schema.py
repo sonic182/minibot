@@ -693,6 +693,9 @@ class AudioTranscriptionToolConfig(BaseModel):
     vad_filter: bool = True
     auto_transcribe_short_incoming: bool = True
     auto_transcribe_max_duration_seconds: PositiveInt = 45
+    # whisper.cpp server inference URL (e.g. http://10.0.1.22:8080/inference). When set, audio is
+    # sent there instead of loading faster-whisper locally; model/device/compute_type are ignored.
+    server_url: str | None = None
 
 
 class SkillsToolConfig(BaseModel):

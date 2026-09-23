@@ -351,6 +351,8 @@ beam_size = 5
 vad_filter = true
 auto_transcribe_short_incoming = true
 auto_transcribe_max_duration_seconds = 45
+# Send audio to a whisper.cpp server instead of loading faster-whisper (no stt extra needed).
+# server_url = "http://whisper:8080/inference"
 # Telegram STT example:
 # 1) set [tools.file_storage].enabled = true
 # 2) optionally set allowed_document_mime_types to audio MIME types above

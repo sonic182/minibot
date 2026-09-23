@@ -184,3 +184,63 @@ async def test_audio_transcription_tool_offloads_transcription_with_to_thread(
     assert result["text"] == "ok"
     assert "_get_model" in to_thread_calls
     assert "_transcribe_sync" in to_thread_calls
+
+
+@pytest.mark.asyncio
+async def test_audio_transcription_tool_uses_whisper_server_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    audio_file = tmp_path / "uploads" / "voice.ogg"
+    audio_file.parent.mkdir(parents=True, exist_ok=True)
+    audio_file.write_bytes(b"fake-audio")
+    captured: dict[str, Any] = {}
+
+    class _FakeResponse:
+        status_code = 200
+
+        async def json(self) -> dict[str, Any]:
+            return {
+                "text": " Hola\n mundo\n",
+                "language": "spanish",
+                "detected_language_probability": 0.9,
+                "duration": 1.5,
+                "segments": [{"start": 0.0, "end": 1.5, "text": " Hola mundo"}],
+            }
+
+    class _FakeClient:
+        async def __aenter__(self) -> _FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def post(self, url: str, *, data: Any, **_kwargs: Any) -> _FakeResponse:
+            captured["url"] = url
+            captured["body"] = b"".join([chunk async for chunk in data.get_buffer()])
+            captured["boundary"] = data.boundary
+            return _FakeResponse()
+
+    monkeypatch.setattr("minibot.llm.tools.audio_transcription_facade.aiosonic.HTTPClient", _FakeClient)
+    monkeypatch.setattr(AudioTranscriptionTool, "_load_whisper_model_class", staticmethod(lambda: 1 / 0))
+    tool = AudioTranscriptionTool(
+        config=AudioTranscriptionToolConfig(enabled=True, server_url="http://whisper:8080/inference"),
+        storage=storage,
+    )
+
+    result = await tool.bindings()[0].handler(
+        {"path": "uploads/voice.ogg", "language": None, "task": "translate"},
+        ToolContext(owner_id="1"),
+    )
+
+    assert result["ok"] is True
+    assert result["text"] == "Hola mundo"
+    assert result["language"] == "spanish"
+    assert result["duration_seconds"] == 1.5
+    assert result["segments"] == [{"start": 0.0, "end": 1.5, "text": "Hola mundo"}]
+    assert captured["url"] == "http://whisper:8080/inference"
+    body = captured["body"]
+    assert b"fake-audio\r\n--" + captured["boundary"].encode() in body
+    assert b'name="language"' not in body
+    assert b'name="translate"\r\n\r\ntrue\r\n' in body
+    assert b'name="response_format"\r\n\r\nverbose_json\r\n' in body

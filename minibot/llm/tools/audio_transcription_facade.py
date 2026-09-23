@@ -3,10 +3,26 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Callable
+from io import IOBase
 from typing import Any
+
+import aiosonic
+from aiosonic.multipart import MultipartForm
+from aiosonic.timeout import Timeouts
 
 from minibot.adapters.config.schema import AudioTranscriptionToolConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
+
+_REMOTE_TIMEOUT_SECONDS = 600
+
+
+class _MultipartForm(MultipartForm):
+    # ponytail: aiosonic 1.0.6 omits the CRLF between file content and the next boundary, so
+    # servers drop every field after the file. Delete this subclass once aiosonic#593 is fixed.
+    async def _read_file(self, file_obj: IOBase):  # type: ignore[override]
+        async for data in super()._read_file(file_obj):
+            yield data
+        yield b"\r\n"
 
 
 class AudioTranscriptionFacade:
@@ -31,6 +47,10 @@ class AudioTranscriptionFacade:
         task: str | None,
     ) -> dict[str, Any]:
         resolved_path = self._storage.resolve_existing_file(path)
+        if self._config.server_url:
+            return await self._transcribe_remote(
+                path=path, resolved_path=str(resolved_path), language=language, task=task
+            )
         model = await asyncio.to_thread(self._get_model)
         options: dict[str, Any] = {
             "beam_size": self._config.beam_size,
@@ -72,6 +92,54 @@ class AudioTranscriptionFacade:
             "model": self._config.model,
             "device": self._config.device,
             "compute_type": self._config.compute_type,
+        }
+
+    async def _transcribe_remote(
+        self,
+        *,
+        path: str,
+        resolved_path: str,
+        language: str | None,
+        task: str | None,
+    ) -> dict[str, Any]:
+        server_url = str(self._config.server_url)
+        form = _MultipartForm()
+        form.add_file("file", resolved_path)
+        form.add_field("response_format", "verbose_json")
+        form.add_field("beam_size", str(self._config.beam_size))
+        if language:
+            form.add_field("language", language)
+        if task == "translate":
+            form.add_field("translate", "true")
+        try:
+            async with aiosonic.HTTPClient() as client:
+                # whisper.cpp sends nothing until inference finishes, so sock_read must cover the whole run.
+                timeouts = Timeouts(sock_read=_REMOTE_TIMEOUT_SECONDS, request_timeout=_REMOTE_TIMEOUT_SECONDS)
+                response = await client.post(server_url, data=form, timeouts=timeouts)
+                body = await response.json()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "path": path, "error": str(exc) or type(exc).__name__}
+        if response.status_code != 200 or "error" in body:
+            return {"ok": False, "path": path, "error": str(body.get("error", f"HTTP {response.status_code}"))}
+
+        segments = [
+            {
+                "start": float(segment.get("start", 0.0)),
+                "end": float(segment.get("end", 0.0)),
+                "text": str(segment.get("text", "")).strip(),
+            }
+            for segment in body.get("segments", [])
+        ]
+        return {
+            "ok": True,
+            "path": path,
+            "text": " ".join(str(body.get("text", "")).split()),
+            "language": body.get("language"),
+            "language_probability": body.get("detected_language_probability"),
+            "duration_seconds": body.get("duration"),
+            "segments": segments,
+            "segment_count": len(segments),
+            "server_url": server_url,
         }
 
     def _get_model(self) -> Any:
