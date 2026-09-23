@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-23
+
 ### Added
 
 - **Transcribe audio on a whisper.cpp server.** Set `[tools.audio_transcription] server_url` to a
@@ -1042,7 +1044,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.21.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.22.0...HEAD
+[0.22.0]: https://github.com/sonic182/minibot/compare/0.21.0..0.22.0
 [0.21.0]: https://github.com/sonic182/minibot/compare/0.20.0..0.21.0
 [0.20.0]: https://github.com/sonic182/minibot/compare/0.19.0..0.20.0
 [0.19.0]: https://github.com/sonic182/minibot/compare/0.18.0..0.19.0
