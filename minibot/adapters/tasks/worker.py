@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from minibot.adapters.config.loader import load_settings
-from minibot.adapters.config.schema import Settings
+from minibot.adapters.config.schema import Settings, task_limit
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
 from minibot.app.agent_definitions_loader import load_agent_specs
@@ -22,6 +22,7 @@ from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.response_parser import extract_answer, resolve_reply_render
+from minibot.app.skill_registry import SkillRegistry
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentSpec
 from minibot.core.tasks import TaskLimits, TaskStopReason
@@ -39,7 +40,9 @@ from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.mcp_bridge import build_mcp_bindings
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
+from minibot.llm.tools.skill_loader import SkillLoaderTool
 from minibot.llm.tools.time import CurrentTimeTool
+from minibot.llm.tools.wait import WaitTool
 from minibot.shared.utils import session_identifier, validate_attachments
 
 _LOGGER = logging.getLogger("minibot.task_worker")
@@ -47,6 +50,7 @@ _WORKER_SPEC_PATH = Path("<task_worker>")
 _WORKER_TOOL_ALLOWLIST = [
     "current_datetime",
     "calculate_expression",
+    "wait",
     "http_request",
     "filesystem",
     "glob_files",
@@ -58,6 +62,8 @@ _WORKER_TOOL_ALLOWLIST = [
     "python_environment_info",
     "apply_patch",
     "transcribe_audio",
+    "list_skills",
+    "activate_skill",
 ]
 _WORKER_SYSTEM_PROMPT_SUFFIX = (
     "You are an isolated task worker.\n"
@@ -240,6 +246,8 @@ def _build_worker_tools(
                 max_exponent_abs=settings.tools.calculator.max_exponent_abs,
             ).bindings()
         )
+    if settings.tools.wait.enabled:
+        bindings.extend(WaitTool(max_milliseconds=settings.tools.wait.max_milliseconds).bindings())
     if settings.tools.http_client.enabled:
         bindings.extend(HTTPClientTool(settings.tools.http_client, storage=managed_storage).bindings())
     if settings.tools.python_exec.enabled:
@@ -260,6 +268,9 @@ def _build_worker_tools(
                     storage=managed_storage,
                 ).bindings()
             )
+    if settings.tools.skills.enabled:
+        registry = SkillRegistry.from_config(settings.tools.skills)
+        bindings.extend(SkillLoaderTool(registry, managed_storage, settings.tools.bash.enabled).bindings())
     if settings.tools.mcp.enabled and spec.mcp_servers:
         for server in settings.tools.mcp.servers:
             if server.name not in spec.mcp_servers:
@@ -428,8 +439,8 @@ def _stop_reason_for_error(exc: Exception) -> TaskStopReason:
 
 def _task_limits(task: dict[str, Any], settings: Settings) -> TaskLimits:
     configured_timeout = settings.tasks.worker_timeout_seconds
-    configured_max_steps = _config_limit(settings.tasks.worker_max_steps)
-    configured_max_tool_calls = _config_limit(settings.tasks.worker_max_tool_calls)
+    configured_max_steps = task_limit(settings.tasks.worker_max_steps)
+    configured_max_tool_calls = task_limit(settings.tasks.worker_max_tool_calls)
     raw_limits = task.get("limits")
     if not isinstance(raw_limits, dict):
         return TaskLimits(
@@ -451,10 +462,6 @@ def _task_limits(task: dict[str, Any], settings: Settings) -> TaskLimits:
         max_steps=max_steps,
         max_tool_calls=max_tool_calls,
     )
-
-
-def _config_limit(value: int | str) -> int | None:
-    return None if value == "unlimited" else int(value)
 
 
 def _payload_limit(value: Any, field: str) -> int | None:

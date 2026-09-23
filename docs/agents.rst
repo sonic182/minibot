@@ -115,9 +115,14 @@ Agent Skills
 ------------
 
 Skills are reusable instruction packs the model loads on demand, and they are shared with the
-main agent rather than being an orchestration feature. A specialist can be pointed at one the
-same way the main agent is — the ``browser_agent`` above is driven by a skill rather than an
-MCP server.
+main agent rather than being an orchestration feature. The ``browser_agent`` above is driven by a
+skill rather than an MCP server.
+
+With ``tools_allow``, a specialist gets skill tools only when listed: ``activate_skill``, plus
+``list_skills`` if it should discover skills on its own. A ``tools_deny`` specialist gets both
+(and ``wait``, when enabled) unless it denies them. Unlike the main
+agent, a specialist receives no skill catalog in its prompt, so without ``list_skills`` its prompt
+must name the skill to activate. ``install_skill`` is never available to a specialist.
 
 See :doc:`skills` for the format, discovery order, and configuration.
 

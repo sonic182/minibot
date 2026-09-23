@@ -8,8 +8,9 @@ Provide:
   registered agent's `name` exactly (check the roster or fetch_agent_info first) — an unknown name is
   rejected before the task is queued. Omit it to run a general worker agent.
 - context_json: optional JSON object string the worker should receive as structured context.
-- timeout_seconds, max_steps, max_tool_calls: optional per-task budget. Each may not exceed the configured
-  worker ceiling. Without timeout_seconds a named specialist uses its own configured timeout.
+- timeout_seconds: optional per-task budget, no greater than the configured worker timeout. Without it a
+  named specialist uses its own configured timeout. The timeout is the only budget you set: steps and
+  tool calls are bounded by configuration alone.
 - model_provider, model, reasoning_effort: optional, for this task only. Use them when the request names a
   provider, model or thinking budget. Check fetch_agent_info for the providers that have credentials
   configured — an unconfigured provider is rejected before the task is queued.

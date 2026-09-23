@@ -57,16 +57,7 @@ class AppContainer:
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
         cls._agent_registry = AgentRegistry(agent_specs)
-        if cls._settings.tools.skills.enabled:
-            skills_config = cls._settings.tools.skills
-            cls._skill_registry = SkillRegistry(
-                paths=list(skills_config.paths) or None,
-                native=skills_config.native,
-                native_disabled=skills_config.disabled_native_skills,
-                write_path=skills_config.write_path,
-            )
-        else:
-            cls._skill_registry = SkillRegistry([])
+        cls._skill_registry = SkillRegistry.from_config(cls._settings.tools.skills)
         cls._token_autoconfig_applied = False
         # Last, so an extension's register() sees a fully built container even though the
         # context handed to it exposes only settings, the bus and a logger.
