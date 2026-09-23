@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+from minibot.adapters.config.schema import SkillsToolConfig
 from minibot.app.skill_definitions_loader import (
     fingerprint_skill_paths,
     load_skill_specs,
@@ -38,6 +39,18 @@ class SkillRegistry:
         self._fingerprint = fingerprint_skill_paths(self._resolved_paths)
         self._by_name: dict[str, SkillSpec] = {}
         self._replace_specs(specs if specs is not None else self._load_specs())
+
+    @classmethod
+    def from_config(cls, config: SkillsToolConfig) -> SkillRegistry:
+        """Build the registry ``[tools.skills]`` describes; empty when skills are disabled."""
+        if not config.enabled:
+            return cls([])
+        return cls(
+            paths=list(config.paths) or None,
+            native=config.native,
+            native_disabled=config.disabled_native_skills,
+            write_path=config.write_path,
+        )
 
     def _resolve_paths(self) -> list[tuple[Path, SkillSource]]:
         return resolve_skill_discovery_paths(self._paths, native=self._native, write_path=self._write_path)

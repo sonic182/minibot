@@ -282,15 +282,16 @@ async def test_build_worker_tools_scopes_skill_tools_to_the_spec(tmp_path: Path)
     assert "Run the deploy." in result["instructions"]
 
 
-def test_build_worker_tools_omits_skill_tools_when_skills_disabled() -> None:
+@pytest.mark.parametrize("enabled", [True, False])
+def test_default_worker_gets_skill_tools_only_when_skills_enabled(enabled: bool) -> None:
     settings = Settings()
-    settings.tools.skills.enabled = False
+    settings.tools.skills.enabled = enabled
     spec = worker._build_worker_spec(system_prompt="You are Minibot.", environment_prompt_fragment="")
 
     tool_names = {binding.tool.name for binding in worker._build_worker_tools(settings=settings, spec=spec)}
 
-    assert "list_skills" not in tool_names
-    assert "activate_skill" not in tool_names
+    assert ({"list_skills", "activate_skill"} <= tool_names) is enabled
+    assert "install_skill" not in tool_names
 
 
 def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:

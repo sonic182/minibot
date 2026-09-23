@@ -180,9 +180,9 @@ way the main agent is"), and why adding `list_skills` / `activate_skill` to an a
 - **Not** `install_skill`: installing pulls remote instructions into the agent's instruction set
   and needs the owner's confirmation, which a background worker has no channel for. It stays on
   the main agent.
-- Optional: append the skill catalog to a specialist's prompt when it ends up with
-  `activate_skill`; without it the specialist has to call `list_skills` first or already know the
-  skill's name from its own prompt.
+- Deferred, documented in `docs/agents.rst` instead: append the skill catalog to a specialist's
+  prompt when it ends up with `activate_skill`; without it the specialist has to call `list_skills`
+  first or already know the skill's name from its own prompt.
 - Test in `tests/test_task_worker.py`: a spec with `tools_allow: [activate_skill]` receives it; one
   without does not.
 

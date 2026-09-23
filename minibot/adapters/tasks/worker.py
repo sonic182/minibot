@@ -265,13 +265,7 @@ def _build_worker_tools(
                 ).bindings()
             )
     if settings.tools.skills.enabled:
-        skills_config = settings.tools.skills
-        registry = SkillRegistry(
-            paths=list(skills_config.paths) or None,
-            native=skills_config.native,
-            native_disabled=skills_config.disabled_native_skills,
-            write_path=skills_config.write_path,
-        )
+        registry = SkillRegistry.from_config(settings.tools.skills)
         bindings.extend(SkillLoaderTool(registry, managed_storage, settings.tools.bash.enabled).bindings())
     if settings.tools.mcp.enabled and spec.mcp_servers:
         for server in settings.tools.mcp.servers:
