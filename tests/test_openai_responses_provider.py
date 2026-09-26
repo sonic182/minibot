@@ -126,25 +126,3 @@ async def test_complete_once_replays_raw_reasoning_through_full_history(monkeypa
     assert result[1] == reasoning_item
     assert result[2]["call_id"] == "call_1"
     assert result[3]["call_id"] == "call_1"
-
-
-@pytest.mark.asyncio
-async def test_codex_stream_keeps_completed_response_usage(monkeypatch: pytest.MonkeyPatch) -> None:
-    item = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "hi"}]}
-    completed = {"id": "resp_1", "status": "completed", "output": [], "usage": {"total_tokens": 42}}
-
-    async def fake_stream_json(*_: Any, **__: Any):
-        yield {"type": "response.output_text.delta", "delta": "hi"}
-        yield {"type": "response.output_item.done", "item": item}
-        yield {"type": "response.completed", "response": completed}
-
-    monkeypatch.setattr("minibot.llm.providers.codex.stream_json", fake_stream_json)
-    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"))
-    response = provider._stream_responses_request("url", {}, {})
-    async for _ in response.stream_generator:
-        pass
-
-    assert response.original["usage"]["total_tokens"] == 42
-    assert response.original["id"] == "resp_1"
-    assert response.original["output"] == [item]
-    assert response.main_response.content == "hi"

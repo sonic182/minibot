@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The ChatGPT Codex model catalog identifies as Codex CLI 0.157.1,** keeping newly gated models
+  available when the server raises their minimum supported client version.
+
 ## [0.22.0] - 2026-09-23
 
 ### Added
