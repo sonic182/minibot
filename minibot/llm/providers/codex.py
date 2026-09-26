@@ -15,7 +15,7 @@ from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvide
 # string against each model's `minimal_client_version` (verified empirically: low values return
 # an empty or partial list). Track the current Codex CLI release so new models stay unlocked as
 # their floor rises; bump this if a model goes missing from get_model_capabilities().
-_MODELS_CLIENT_VERSION = "0.154.0"
+_MODELS_CLIENT_VERSION = "0.157.1"
 _TERMINAL_EVENTS = {"response.completed", "response.incomplete", "response.failed"}
 
 
