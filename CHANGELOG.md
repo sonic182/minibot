@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-09-26
+
 ### Changed
 
 - **Remote audio transcription now uses aiosonic's fixed multipart encoder.** The minimum aiosonic
@@ -1052,7 +1054,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.22.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.22.1...HEAD
+[0.22.1]: https://github.com/sonic182/minibot/compare/0.22.0..0.22.1
 [0.22.0]: https://github.com/sonic182/minibot/compare/0.21.0..0.22.0
 [0.21.0]: https://github.com/sonic182/minibot/compare/0.20.0..0.21.0
 [0.20.0]: https://github.com/sonic182/minibot/compare/0.19.0..0.20.0
