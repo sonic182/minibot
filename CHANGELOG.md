@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Remote audio transcription now uses aiosonic's fixed multipart encoder.** The minimum aiosonic
+  version is 1.0.7, so MiniBot no longer carries its own multipart subclass.
 - **The ChatGPT Codex model catalog identifies as Codex CLI 0.157.1,** keeping newly gated models
   available when the server raises their minimum supported client version.
 

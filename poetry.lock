@@ -268,14 +268,14 @@ typing-extensions = {version = ">=4.2", markers = "python_version < \"3.13\""}
 
 [[package]]
 name = "aiosonic"
-version = "1.0.6"
+version = "1.0.7"
 description = "Async HTTP/WebSocket client"
 optional = false
 python-versions = ">=3.10.0"
 groups = ["main"]
 files = [
-    {file = "aiosonic-1.0.6-py3-none-any.whl", hash = "sha256:0e5d8a085a53fbb3c6a25dbb0d6c6407d4a97d991f0e9f037864225825290271"},
-    {file = "aiosonic-1.0.6.tar.gz", hash = "sha256:36c1db8514558de993728f64010660fd6e82597e00dc1ad6fd03b463aded98b6"},
+    {file = "aiosonic-1.0.7-py3-none-any.whl", hash = "sha256:25ed833c873cd1db81d4993978f859d31578649f862f8235db6b71c29abc7d95"},
+    {file = "aiosonic-1.0.7.tar.gz", hash = "sha256:56d720a56e134e697f9c0efc418ba8e5ee91a212aac751f7370ac327242e3b53"},
 ]
 
 [package.dependencies]
@@ -4265,4 +4265,4 @@ vault = ["cryptography"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "1d99f4a003b47935768bad0c5cc2ccd5124fb6084c7d0c9e2d4f9be477fde87c"
+content-hash = "55657e79cb1a632de98f8bb3804bab606acf50eeeacf668fdc814782d4ecb47c"

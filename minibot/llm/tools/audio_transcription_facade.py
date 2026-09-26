@@ -4,7 +4,6 @@ import asyncio
 import os
 import threading
 from collections.abc import Callable
-from io import IOBase
 from typing import Any
 
 import aiosonic
@@ -15,15 +14,6 @@ from minibot.adapters.config.schema import AudioTranscriptionToolConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 
 _REMOTE_TIMEOUT_SECONDS = 600
-
-
-class _MultipartForm(MultipartForm):
-    # ponytail: aiosonic 1.0.6 omits the CRLF between file content and the next boundary, so
-    # servers drop every field after the file. Delete this subclass once aiosonic#593 is fixed.
-    async def _read_file(self, file_obj: IOBase):  # type: ignore[override]
-        async for data in super()._read_file(file_obj):
-            yield data
-        yield b"\r\n"
 
 
 class AudioTranscriptionFacade:
@@ -104,7 +94,7 @@ class AudioTranscriptionFacade:
         task: str | None,
     ) -> dict[str, Any]:
         server_url = str(self._config.server_url)
-        form = _MultipartForm()
+        form = MultipartForm()
         form.add_field("response_format", "verbose_json")
         form.add_field("beam_size", str(self._config.beam_size))
         if language:
