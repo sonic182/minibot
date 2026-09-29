@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import unicodedata
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 from uuid import uuid4
@@ -18,6 +19,7 @@ from minibot.shared.errors import ToolInputError
 Approver = Callable[[str, dict[str, Any], ToolContext], Awaitable[bool]]
 
 _DETAIL_MAX_CHARS = 3000
+_VALUE_MAX_CHARS = 1000
 _LAZY_MCP_CALL_SUFFIX = "__call_tool"
 _logger = logging.getLogger("minibot.tool_approval")
 
@@ -45,8 +47,9 @@ def apply_tool_approval(
 def effective_tool_name(tool_name: str, payload: ToolPayload) -> str:
     name = canonical_tool_name(tool_name)
     remote = payload.get("tool_name") if isinstance(payload, dict) else None
-    if name.endswith(_LAZY_MCP_CALL_SUFFIX) and isinstance(remote, str) and remote:
-        return f"{name.removesuffix(_LAZY_MCP_CALL_SUFFIX)}__{remote}"
+    # Stripped exactly like MCPLazyToolBridge does before dispatching, or padding would dodge the patterns.
+    if name.endswith(_LAZY_MCP_CALL_SUFFIX) and isinstance(remote, str) and remote.strip():
+        return f"{name.removesuffix(_LAZY_MCP_CALL_SUFFIX)}__{remote.strip()}"
     return name
 
 
@@ -58,8 +61,9 @@ def _may_need_approval(tool_name: str, patterns: Sequence[str]) -> bool:
 def _wrap(binding: ToolBinding, patterns: Sequence[str], approve: Approver) -> ToolBinding:
     async def handler(payload: ToolPayload, context: ToolContext) -> Any:
         name = effective_tool_name(binding.tool.name, payload)
-        if matches_any(name, patterns):
-            is_lazy_call = name != canonical_tool_name(binding.tool.name)
+        binding_name = canonical_tool_name(binding.tool.name)
+        if matches_any(name, patterns) or matches_any(binding_name, patterns):
+            is_lazy_call = name != binding_name
             arguments = payload.get("arguments") if is_lazy_call else payload
             if not await approve(name, dict(arguments) if isinstance(arguments, dict) else {}, context):
                 raise ToolInputError(
@@ -85,6 +89,7 @@ async def request_tool_approval(
         _logger.warning("tool approval unavailable on this channel", extra={"tool": tool_name, "channel": channel})
         return False
     approval_id = uuid4().hex
+    resolved = False
     # Subscribe before publishing so a fast answer cannot slip past.
     subscription = event_bus.subscribe(types=(ToolApprovalResolvedEvent,))
     try:
@@ -100,6 +105,7 @@ async def request_tool_approval(
         async with asyncio.timeout(timeout_seconds):
             async for event in subscription:
                 if isinstance(event, ToolApprovalResolvedEvent) and event.approval_id == approval_id:
+                    resolved = True
                     _logger.info(
                         "tool approval resolved",
                         extra={"tool": tool_name, "approved": event.approved, "user_id": event.user_id},
@@ -109,16 +115,33 @@ async def request_tool_approval(
         _logger.warning("tool approval timed out", extra={"tool": tool_name})
     finally:
         await subscription.close()
-    # No user_id marks the expiry, so the channel can retire the buttons of the unanswered prompt.
-    with contextlib.suppress(RuntimeError):
-        await event_bus.publish(ToolApprovalResolvedEvent(approval_id=approval_id, approved=False))
+        if not resolved:
+            # Also on cancellation (turn timeout, task cancel): without this the prompt keeps live
+            # buttons, and a late tap would show "approved" for a call that never runs. No user_id
+            # marks the expiry.
+            with contextlib.suppress(Exception):
+                await event_bus.publish(ToolApprovalResolvedEvent(approval_id=approval_id, approved=False))
     return False
 
 
 def format_approval_detail(arguments: dict[str, Any]) -> str:
-    text = json.dumps(_redact(arguments), indent=2, ensure_ascii=False, default=str)
+    """One line per argument, shortest first, each value capped on its own.
+
+    The model controls argument order and size, so a long body must never push a recipient out of
+    view. Unicode format characters (bidi overrides, zero-width) are escaped so text cannot be shown
+    reordered or hidden.
+    """
+    lines = sorted((f"{key}: {_render_value(value)}" for key, value in _redact(arguments).items()), key=len)
+    text = "".join(f"\\u{ord(char):04x}" if unicodedata.category(char) == "Cf" else char for char in "\n".join(lines))
     if len(text) > _DETAIL_MAX_CHARS:
         return f"{text[:_DETAIL_MAX_CHARS]}\n…(truncated)"
+    return text
+
+
+def _render_value(value: Any) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    if len(text) > _VALUE_MAX_CHARS:
+        return f"{text[:_VALUE_MAX_CHARS]}…(+{len(text) - _VALUE_MAX_CHARS} chars)"
     return text
 
 

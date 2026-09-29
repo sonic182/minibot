@@ -457,14 +457,19 @@ class TaskManager:
                             raise _LeaseLostError
                     continue
                 if event.get("type") == "approval_request":
-                    approved = await request_tool_approval(
-                        self._event_bus,
-                        tool_name=str(event.get("tool_name") or ""),
-                        arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else {},
-                        channel=event.get("channel") if isinstance(event.get("channel"), str) else None,
-                        chat_id=event.get("chat_id") if isinstance(event.get("chat_id"), int) else None,
-                        timeout_seconds=min(self._approval_timeout_seconds, max(remaining, 0)),
-                    )
+                    approved = False
+                    try:
+                        approved = await request_tool_approval(
+                            self._event_bus,
+                            tool_name=str(event.get("tool_name") or ""),
+                            arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else {},
+                            channel=event.get("channel") if isinstance(event.get("channel"), str) else None,
+                            chat_id=event.get("chat_id") if isinstance(event.get("chat_id"), int) else None,
+                            timeout_seconds=min(self._approval_timeout_seconds, max(remaining, 0)),
+                        )
+                    except Exception:
+                        # A stopped bus must deny the call, not escape _reader and skip its cleanup.
+                        self._logger.exception("tool approval request failed", extra={"task_id": payload["task_id"]})
                     reply = {"type": "approval_result", "approval_id": event.get("approval_id"), "approved": approved}
                     tx.write(json.dumps(reply).encode() + b"\n")
                     continue

@@ -8,7 +8,7 @@ import pytest
 from llm_async.models import Tool
 
 from minibot.app.event_bus import EventBus
-from minibot.app.tool_approval import apply_tool_approval, request_tool_approval
+from minibot.app.tool_approval import apply_tool_approval, format_approval_detail, request_tool_approval
 from minibot.core.events import ToolApprovalRequestedEvent, ToolApprovalResolvedEvent
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.errors import ToolInputError
@@ -20,10 +20,18 @@ def _binding(name: str, handler: AsyncMock) -> ToolBinding:
     return ToolBinding(tool=Tool(name=name, description="", parameters={}), handler=handler)
 
 
-async def _call(binding_name: str, payload: dict[str, Any], *, approved: bool) -> tuple[AsyncMock, AsyncMock]:
+async def _call(
+    binding_name: str,
+    payload: dict[str, Any],
+    *,
+    approved: bool,
+    patterns: list[str] | None = None,
+) -> tuple[AsyncMock, AsyncMock]:
     handler = AsyncMock(return_value="ran")
     approve = AsyncMock(return_value=approved)
-    [wrapped] = apply_tool_approval([_binding(binding_name, handler)], patterns=["mcp_mail__smtp_*"], approve=approve)
+    [wrapped] = apply_tool_approval(
+        [_binding(binding_name, handler)], patterns=patterns or ["mcp_mail__smtp_*"], approve=approve
+    )
     await wrapped.handler(payload, _CONTEXT)
     return handler, approve
 
@@ -53,8 +61,9 @@ async def test_denied_tool_raises_typed_error_and_does_not_run() -> None:
 
 
 @pytest.mark.asyncio
-async def test_lazy_mcp_call_is_gated_by_the_remote_tool_name() -> None:
-    payload = {"tool_name": "smtp_forward_message", "arguments": {"to": "x@evil.com"}}
+@pytest.mark.parametrize("remote_name", ["smtp_forward_message", " smtp_forward_message\n"])
+async def test_lazy_mcp_call_is_gated_by_the_remote_tool_name(remote_name: str) -> None:
+    payload = {"tool_name": remote_name, "arguments": {"to": "x@evil.com"}}
 
     handler, approve = await _call("mcp_mail__call_tool", payload, approved=True)
 
@@ -62,11 +71,45 @@ async def test_lazy_mcp_call_is_gated_by_the_remote_tool_name() -> None:
     handler.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_pattern_on_the_lazy_binding_name_gates_every_remote_call() -> None:
+    payload = {"tool_name": "imap_get_message", "arguments": {}}
+
+    _, approve = await _call("mcp_mail__call_tool", payload, approved=True, patterns=["mcp_mail__call_tool"])
+
+    approve.assert_awaited_once()
+
+
+def test_detail_keeps_every_argument_visible_and_escapes_format_characters() -> None:
+    detail = format_approval_detail({"body": "x" * 5000, "to": "attacker‮@evil.com", "api_key": "k"})
+
+    lines = detail.splitlines()
+    assert lines[0] == "api_key: ***"
+    assert lines[1] == "to: attacker\\u202e@evil.com"
+    assert lines[2].endswith("…(+4000 chars)")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_request_announces_expiry() -> None:
+    bus = EventBus()
+    resolved = bus.subscribe(types=(ToolApprovalResolvedEvent,))
+    request = asyncio.create_task(_request(bus, timeout=10))
+    await asyncio.sleep(0.01)
+
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+
+    expiry = await asyncio.wait_for(anext(aiter(resolved)), timeout=1)
+    assert isinstance(expiry, ToolApprovalResolvedEvent)
+    assert expiry.user_id is None
+
+
 async def _answer_first_request(bus: EventBus, *, approved: bool) -> None:
     subscription = bus.subscribe(types=(ToolApprovalRequestedEvent,))
     async for event in subscription:
         assert isinstance(event, ToolApprovalRequestedEvent)
-        assert '"password": "***"' in event.detail
+        assert "password: ***" in event.detail
         await bus.publish(ToolApprovalResolvedEvent(approval_id=event.approval_id, approved=approved, user_id=2))
         break
     await subscription.close()
