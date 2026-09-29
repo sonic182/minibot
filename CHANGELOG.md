@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: `[memory] notify_compaction_updates` takes `"off"`, `"brief"` or `"full"`.** `"off"` (the
+  default) sends nothing to the chat, `"brief"` sends only the `running compaction...` and
+  `done compacting` notices, and `"full"` adds the compaction summary. The old booleans are no longer
+  accepted and fail config loading with an error listing the valid modes: replace `false` with `"off"` and
+  `true` with `"full"`.
+- **Invalid memory tool arguments come back with an actionable error.** The `memory` tool now returns
+  `memory:invalid_arguments:*` codes (`category_required`, `invalid_category`, `entry_id_required`,
+  `category_in_metadata`, `invalid_metadata`, `nothing_to_update`) and messages that say how to fix the
+  call, such as the valid categories or where to get an `entry_id`. These rejections are logged as
+  warnings without a traceback.
+
+### Fixed
+
+- **History compaction fires on the real context size with Chat Completions providers.** Pressure was the
+  sum of every step's tokens across turns, so a 40k-token context could compact once the running total
+  passed the threshold. It is now the last measured input plus the last output, for every provider; the
+  accumulated total is only a fallback when the provider reports no usage. The measured values are cleared
+  after each compaction.
+- **Chat Completions usage reports input tokens.** `prompt_tokens` was only read when `total_tokens` was
+  missing, which providers like Fireworks always send, so the input size stayed unknown and the mid-run
+  compactor never ran. `prompt_tokens` and `completion_tokens` are now always read, along with
+  `prompt_tokens_details.cached_tokens`.
+
 ## [0.22.1] - 2026-09-26
 
 ### Changed
