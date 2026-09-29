@@ -7,8 +7,21 @@ import tomlkit
 
 from minibot.adapters.config.configurator import _set_value
 from minibot.adapters.config.loader import load_settings
-from minibot.adapters.config.schema import RagToolConfig, Settings, SkillsToolConfig
+from minibot.adapters.config.schema import MemoryConfig, RagToolConfig, Settings, SkillsToolConfig
 from minibot.adapters.container.app_container import AppContainer
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("off", "off"), ("brief", "brief"), ("full", "full"), (False, "off"), (True, "full")],
+)
+def test_memory_notify_compaction_updates_modes(value: object, expected: str) -> None:
+    assert MemoryConfig(notify_compaction_updates=value).notify_compaction_updates == expected  # type: ignore[arg-type]
+
+
+def test_memory_notify_compaction_updates_rejects_unknown_mode() -> None:
+    with pytest.raises(ValueError):
+        MemoryConfig(notify_compaction_updates="loud")  # type: ignore[arg-type]
 
 
 def test_load_settings_from_file(tmp_path: Path) -> None:

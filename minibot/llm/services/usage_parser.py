@@ -48,22 +48,18 @@ def extract_usage_from_payload(original: dict[str, Any]) -> UsageSnapshot:
     total_tokens = opt_int(usage.get("total_tokens"))
     input_tokens = opt_int(usage.get("input_tokens"))
     output_tokens = opt_int(usage.get("output_tokens"))
+    if input_tokens is None:
+        input_tokens = opt_int(usage.get("prompt_tokens"))
+    if output_tokens is None:
+        output_tokens = opt_int(usage.get("completion_tokens"))
     if total_tokens is None and input_tokens is not None and output_tokens is not None:
         total_tokens = input_tokens + output_tokens
-    if total_tokens is None:
-        prompt_tokens = opt_int(usage.get("prompt_tokens"))
-        completion_tokens = opt_int(usage.get("completion_tokens"))
-        if prompt_tokens is not None and completion_tokens is not None:
-            total_tokens = prompt_tokens + completion_tokens
-        if input_tokens is None:
-            input_tokens = prompt_tokens
-        if output_tokens is None:
-            output_tokens = completion_tokens
 
     cached_input_tokens = None
-    input_details = usage.get("input_tokens_details")
-    if isinstance(input_details, dict):
-        cached_input_tokens = opt_int(input_details.get("cached_tokens"))
+    for details_key in ("input_tokens_details", "prompt_tokens_details"):
+        input_details = usage.get(details_key)
+        if isinstance(input_details, dict) and cached_input_tokens is None:
+            cached_input_tokens = opt_int(input_details.get("cached_tokens"))
 
     reasoning_output_tokens = None
     output_details = usage.get("output_tokens_details")

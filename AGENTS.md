@@ -18,6 +18,8 @@
 - **NEVER classify LLM intent/state by regex, substring, or ad-hoc text matching.**
 - Use structured schema fields (typed status/error fields) or model-native/tool-native structured outputs. Reference implementation: the tool-use guardrail returns an `extra="forbid"` pydantic payload (`app/tool_guardrail_validator.py`, `app/tool_use_guardrail.py`).
 - Text matching is acceptable only for deterministic protocol/format parsing (for example markdown fences, SSE framing), not for semantic decision-making.
+- **Provider failures follow the same rule.** Classify HTTP/provider errors (quota, rate limit, context overflow) by the HTTP status plus the provider's structured `error.code`/`error.type`, never by message text. The same status or code can mean different things per provider, so interpret it knowing which provider returned it (reference: `ProviderHTTPError` in `llm/errors.py`).
+- If a provider exposes no structured code for a case, leave it unclassified (generic failure) and record the gap; do not fall back to matching its message.
 
 ## Code Style
 - **Line length**: 119 characters.

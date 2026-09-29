@@ -92,7 +92,7 @@ class _FakeSettings:
     class _Memory:
         max_history_messages = None
         max_history_tokens = None
-        notify_compaction_updates = False
+        notify_compaction_updates = "off"
 
     class _Runtime:
         agent_timeout_seconds = 120

@@ -249,7 +249,7 @@ async def test_turn_service_compaction_endpoint_updates_previous_response_id() -
         provider="openai_responses",
         responses_state_mode="previous_response_id",
         max_history_tokens=50,
-        notify_compaction_updates=True,
+        notify_compaction_updates="brief",
     )
     client.total_tokens = 60
     client.compact_response_id = "cmp-42"
@@ -270,7 +270,6 @@ async def test_turn_service_compaction_endpoint_updates_previous_response_id() -
     assert response.metadata.get("compaction_updates") == [
         "running compaction...",
         "done compacting",
-        "compacted via endpoint",
     ]
 
 
@@ -310,7 +309,7 @@ async def test_turn_service_fallback_compaction_updates_previous_response_id() -
         memory=cast(Any, memory),
         llm_client=cast(LLMClient, client),
         max_history_tokens=50,
-        notify_compaction_updates=True,
+        notify_compaction_updates="brief",
         tool_use_guardrail=NoopToolUseGuardrail(),
     )
 

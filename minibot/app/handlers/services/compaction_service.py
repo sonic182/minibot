@@ -3,12 +3,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from minibot.app.handlers.services.prompt_service import PromptService
 from minibot.app.handlers.services.session_state_service import SessionStateService
 from minibot.app.response_parser import extract_answer, plain_render
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
+
+CompactionNotifyMode = Literal["off", "brief", "full"]
 
 
 @dataclass(frozen=True)
@@ -46,7 +49,7 @@ class HistoryCompactionService:
         *,
         prompt_cache_key: str,
         system_prompt: str,
-        notify: bool,
+        notify: CompactionNotifyMode,
         responses_state_mode: str,
     ) -> CompactionResult:
         updates: list[str] = []
@@ -58,11 +61,11 @@ class HistoryCompactionService:
                 session_total_tokens_before_compaction=None,
                 session_total_tokens_after_compaction=self._session_state.current_tokens(session_id),
             )
+        # Providers that report no usage leave no measured input, so the accumulated total is the fallback.
         pressure_tokens = self._session_state.current_tokens(session_id)
-        if self._llm_client.is_responses_provider():
-            latest_input_tokens = self._session_state.latest_input_tokens(session_id)
-            if latest_input_tokens is not None:
-                pressure_tokens = latest_input_tokens
+        latest_input_tokens = self._session_state.latest_input_tokens(session_id)
+        if latest_input_tokens is not None:
+            pressure_tokens = latest_input_tokens
         if pressure_tokens < self._max_history_tokens:
             return CompactionResult(
                 updates=updates,
@@ -75,6 +78,7 @@ class HistoryCompactionService:
         if not history:
             session_before_reset = pressure_tokens
             self._session_state.session_total_tokens[session_id] = 0
+            self._session_state.set_latest_input_tokens(session_id, None)
             return CompactionResult(
                 updates=updates,
                 performed=False,
@@ -82,7 +86,7 @@ class HistoryCompactionService:
                 session_total_tokens_before_compaction=session_before_reset,
                 session_total_tokens_after_compaction=0,
             )
-        if notify:
+        if notify != "off":
             updates.append("running compaction...")
         compaction_tokens = 0
         try:
@@ -101,14 +105,16 @@ class HistoryCompactionService:
                         await self._memory.append_history(session_id, "user", self._compaction_user_request)
                         await self._memory.append_history(session_id, "assistant", compaction_text)
                         self._session_state.session_total_tokens[session_id] = 0
+                        self._session_state.set_latest_input_tokens(session_id, None)
                         self._session_state.set_previous_response_id(
                             session_id,
                             compacted.response_id,
                             system_prompt=system_prompt,
                         )
-                        if notify:
+                        if notify != "off":
                             updates.append("done compacting")
-                            updates.append(compaction_text)
+                            if notify == "full":
+                                updates.append(compaction_text)
                         return CompactionResult(
                             updates=updates,
                             performed=True,
@@ -143,6 +149,7 @@ class HistoryCompactionService:
             await self._memory.append_history(session_id, "user", self._compaction_user_request)
             await self._memory.append_history(session_id, "assistant", compact_render.text)
             self._session_state.session_total_tokens[session_id] = 0
+            self._session_state.set_latest_input_tokens(session_id, None)
             if responses_state_mode == "previous_response_id":
                 fallback_response_id = getattr(compact_generation, "response_id", None)
                 if isinstance(fallback_response_id, str) and fallback_response_id:
@@ -154,9 +161,10 @@ class HistoryCompactionService:
                     )
                 else:
                     self._session_state.clear_previous_response_id(session_id)
-            if notify:
+            if notify != "off":
                 updates.append("done compacting")
-                updates.append(compact_render.text)
+                if notify == "full":
+                    updates.append(compact_render.text)
             return CompactionResult(
                 updates=updates,
                 performed=True,
@@ -166,7 +174,7 @@ class HistoryCompactionService:
             )
         except Exception as exc:
             self._logger.exception("history compaction failed", exc_info=exc)
-            if notify:
+            if notify != "off":
                 updates.append("error compacting")
             return CompactionResult(
                 updates=updates,

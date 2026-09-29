@@ -21,6 +21,7 @@ from minibot.llm.services.tool_executor import (
     stringify_result,
     tool_failure_signature,
 )
+from minibot.llm.services.usage_parser import extract_usage_from_payload
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
@@ -128,6 +129,24 @@ async def test_generate_captures_total_tokens_from_openai_usage(monkeypatch: pyt
     result = await client.generate([], "hello")
 
     assert result.total_tokens == 29
+
+
+def test_usage_parser_reads_chat_completions_input_when_total_is_reported() -> None:
+    usage = extract_usage_from_payload(
+        {
+            "usage": {
+                "prompt_tokens": 19,
+                "completion_tokens": 10,
+                "total_tokens": 29,
+                "prompt_tokens_details": {"cached_tokens": 8},
+            }
+        }
+    )
+
+    assert usage.input_tokens == 19
+    assert usage.output_tokens == 10
+    assert usage.total_tokens == 29
+    assert usage.cached_input_tokens == 8
 
 
 @pytest.mark.asyncio

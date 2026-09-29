@@ -113,7 +113,7 @@ backend = "sqlite"
 sqlite_url = "sqlite+aiosqlite:///./data/minibot.db"
 max_history_messages = 200
 max_history_tokens = 140000
-notify_compaction_updates = false
+notify_compaction_updates = "off"
 
 [scheduler.prompts]
 enabled = true
