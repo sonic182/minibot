@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-09-29
+
 ### Fixed
 
 - **`memory` create with an empty `title` or `data` comes back with an actionable error.** A `null`, blank or
@@ -1091,7 +1093,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.23.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.23.1...HEAD
+[0.23.1]: https://github.com/sonic182/minibot/compare/0.23.0..0.23.1
 [0.23.0]: https://github.com/sonic182/minibot/compare/0.22.1..0.23.0
 [0.22.1]: https://github.com/sonic182/minibot/compare/0.22.0..0.22.1
 [0.22.0]: https://github.com/sonic182/minibot/compare/0.21.0..0.22.0
