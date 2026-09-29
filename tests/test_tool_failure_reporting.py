@@ -32,6 +32,26 @@ def test_missing_folder_raises_actionable_typed_error(tmp_path: Any) -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_input_error_is_logged_as_warning_without_traceback(caplog: pytest.LogCaptureFixture) -> None:
+    async def handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        raise ToolInputError("bad argument", error_code="demo:bad_argument")
+
+    with caplog.at_level(logging.WARNING, logger="test.tool_input"):
+        records = await execute_tool_calls_for_runtime(
+            [ToolCall(id="call_1", type="function", name="demo", function={"name": "demo", "arguments": "{}"})],
+            [ToolBinding(tool=Tool(name="demo", description="d", parameters={"type": "object"}), handler=handler)],
+            ToolContext(owner_id="primary"),
+            responses_mode=False,
+            logger=logging.getLogger("test.tool_input"),
+        )
+
+    assert records[0].result.content["error_code"] == "demo:bad_argument"
+    logged = [record for record in caplog.records if record.name == "test.tool_input"]
+    assert [record.levelno for record in logged] == [logging.WARNING]
+    assert logged[0].exc_info is None
+
+
+@pytest.mark.asyncio
 async def test_tool_failure_reaches_the_model_with_the_typed_error_code(tmp_path: Any) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1024)
 

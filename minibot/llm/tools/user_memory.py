@@ -15,6 +15,7 @@ from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_string, pagination_properties, strict_object
 from minibot.shared.datetime_utils import parse_optional_iso_datetime_utc
+from minibot.shared.errors import ToolInputError
 
 MEMORY_CATEGORIES = (
     "finanzas",
@@ -124,18 +125,20 @@ async def _create_entry(memory: KeyValueMemory, payload: dict[str, Any], context
 
 async def _update_entry(memory: KeyValueMemory, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     owner_id = require_owner(context)
-    entry_id = require_non_empty_str(payload, "entry_id")
+    entry_id = _require_entry_id(payload, "update")
     data = optional_str(payload.get("data"))
     metadata = _coerce_metadata(payload.get("metadata"))
     category = _optional_category(payload.get("category"))
     if metadata is not None and "category" in metadata:
-        raise ValueError("metadata.category is managed by the category field")
+        raise _category_in_metadata_error()
     if category:
         metadata = _metadata_with_category(metadata, category)
     source = optional_str(payload.get("source"))
     expires_at = _parse_datetime(payload.get("expires_at"), field="expires_at")
     if data is None and metadata is None and source is None and expires_at is None:
-        raise ValueError("update requires at least one mutable field")
+        raise _input_error(
+            "nothing_to_update", "update requires at least one of data, category, metadata, source or expires_at."
+        )
     entry = await memory.update_entry(
         owner_id=owner_id,
         entry_id=entry_id,
@@ -151,7 +154,7 @@ async def _update_entry(memory: KeyValueMemory, payload: dict[str, Any], context
 
 async def _get_entry(memory: KeyValueMemory, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     owner_id = require_owner(context)
-    entry_id = require_non_empty_str(payload, "entry_id")
+    entry_id = _require_entry_id(payload, "get")
     entry = await memory.get_entry(owner_id=owner_id, entry_id=entry_id)
     if entry is None:
         return {"ok": False, "error": "Entry not found", "entry_id": entry_id}
@@ -172,7 +175,7 @@ async def _search_entries(memory: KeyValueMemory, payload: dict[str, Any], conte
 
 async def _delete_entry(memory: KeyValueMemory, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     owner_id = require_owner(context)
-    entry_id = require_non_empty_str(payload, "entry_id")
+    entry_id = _require_entry_id(payload, "delete")
     deleted = await memory.delete_entry(owner_id=owner_id, entry_id=entry_id)
     return {"owner_id": owner_id, "deleted": deleted, "entry_id": entry_id}
 
@@ -269,23 +272,29 @@ def _coerce_metadata(value: Any) -> dict[str, Any] | None:
     if isinstance(value, dict):
         return dict(value)
     if isinstance(value, str):
-        parsed = json.loads(value)
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise _invalid_metadata_error() from exc
         if not isinstance(parsed, dict):
-            raise ValueError("metadata must deserialize to an object")
+            raise _invalid_metadata_error()
         return parsed
-    raise ValueError("metadata must be an object or JSON string")
+    raise _invalid_metadata_error()
 
 
 def _metadata_with_category(metadata: dict[str, Any] | None, category: str) -> dict[str, Any]:
     if metadata is not None and "category" in metadata:
-        raise ValueError("metadata.category is managed by the category field")
+        raise _category_in_metadata_error()
     return {**(metadata or {}), "category": category}
 
 
 def _require_category(payload: dict[str, Any]) -> str:
     category = _optional_category(payload.get("category"))
     if category is None:
-        raise ValueError("category is required")
+        raise _input_error(
+            "category_required",
+            f"category is required for create. Use exactly one of: {', '.join(MEMORY_CATEGORIES)}.",
+        )
     return category
 
 
@@ -294,8 +303,37 @@ def _optional_category(value: Any) -> str | None:
     if category is None:
         return None
     if category not in MEMORY_CATEGORIES:
-        raise ValueError(f"category must be one of: {', '.join(MEMORY_CATEGORIES)}")
+        raise _input_error(
+            "invalid_category",
+            f"category {category!r} is not valid. Use exactly one of: {', '.join(MEMORY_CATEGORIES)}.",
+        )
     return category
+
+
+def _input_error(code: str, message: str) -> ToolInputError:
+    return ToolInputError(message, error_code=f"memory:invalid_arguments:{code}")
+
+
+def _require_entry_id(payload: dict[str, Any], action: str) -> str:
+    entry_id = payload.get("entry_id")
+    if not isinstance(entry_id, str) or not entry_id.strip():
+        raise _input_error(
+            "entry_id_required",
+            f"{action} requires entry_id. Get it from a previous search or list_titles result; "
+            "to add a new entry use action=create instead.",
+        )
+    return entry_id.strip()
+
+
+def _category_in_metadata_error() -> ToolInputError:
+    return _input_error(
+        "category_in_metadata",
+        "metadata must not contain category: pass it as the top-level category field and remove it from metadata.",
+    )
+
+
+def _invalid_metadata_error() -> ToolInputError:
+    return _input_error("invalid_metadata", 'metadata must be a JSON object, for example {"note": "text"}.')
 
 
 def _parse_datetime(value: Any, *, field: str) -> datetime | None:
