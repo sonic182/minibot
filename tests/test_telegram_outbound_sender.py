@@ -80,6 +80,45 @@ async def test_send_parse_mode_chunks_sets_markdown_mode(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_markdown_is_split_before_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
+    sender, bot, _ = _sender()
+    monkeypatch.setattr(outbound_sender_module, "telegram_markdownify", lambda value: f"<{value}>")
+    source = "\n".join(["a" * 3000, "b" * 3000])
+
+    await sender._send_parse_mode_chunks(chat_id=1, render=RenderableResponse(kind="markdown", text=source))
+
+    assert [call["text"] for call in bot.send_message_calls] == [f"<{'a' * 3000}>", f"<{'b' * 3000}>"]
+
+
+@pytest.mark.asyncio
+async def test_failed_later_chunk_sends_only_the_rest_as_plain_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    sender, bot, event_bus = _sender()
+    monkeypatch.setattr(outbound_sender_module, "telegram_markdownify", lambda value: f"<{value}>")
+    sent: list[tuple[str, Any]] = []
+
+    async def _send_message(**kwargs: Any) -> None:
+        if kwargs["text"].startswith("<b"):
+            raise RuntimeError("Bad Request: can't parse entities")
+        sent.append((kwargs["text"], kwargs["parse_mode"]))
+
+    bot.send_message = _send_message  # type: ignore[method-assign]
+    source = "\n".join(["a" * 3000, "b" * 3000, "c" * 3000])
+
+    await sender.send_text_response(
+        ChannelResponse(
+            channel="telegram",
+            chat_id=1,
+            text=source,
+            render=RenderableResponse(kind="markdown", text=source, meta={"disable_link_preview": True}),
+        )
+    )
+
+    assert [text[:2] for text, _ in sent] == ["<a", "bb", "cc"]
+    assert [mode for _, mode in sent][1:] == [None, None]
+    assert not event_bus.events
+
+
+@pytest.mark.asyncio
 async def test_send_parse_mode_chunks_falls_back_to_plain_text_when_markdownify_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

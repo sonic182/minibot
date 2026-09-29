@@ -20,6 +20,9 @@ telegram_markdownify: Any | None = None
 
 class TelegramOutboundSender:
     _MAX_MESSAGE_LENGTH = 4000
+    # Fixed headroom for MarkdownV2 escaping (~12% seen in practice); an escape-heavy chunk
+    # can still overflow 4096 and then falls back to plain text for the rest of the message.
+    _MARKDOWN_SOURCE_CHUNK_LENGTH = 3500
 
     def __init__(
         self,
@@ -139,14 +142,17 @@ class TelegramOutboundSender:
         return True, None
 
     async def _send_parse_mode_chunks(self, chat_id: int, render: RenderableResponse) -> tuple[bool, str | None]:
-        text_to_send = render.text
-        parse_mode: ParseMode | None = None
-        if render.kind == "html":
-            parse_mode = ParseMode.HTML
-        elif render.kind == "markdown":
-            text_to_send, parse_mode = self._prepare_markdown_payload(chat_id=chat_id, markdown_text=render.text)
+        # Split the source before converting it: slicing converted MarkdownV2 can cut through an
+        # entity and make a later chunk unparseable after earlier ones were already delivered.
+        chunks: list[tuple[str, str, ParseMode | None]] = []
+        if render.kind == "markdown":
+            for source in chunk_text(render.text, self._MARKDOWN_SOURCE_CHUNK_LENGTH):
+                converted, parse_mode = self._prepare_markdown_payload(chat_id=chat_id, markdown_text=source)
+                chunks.append((source, converted, parse_mode))
+        else:
+            parse_mode = ParseMode.HTML if render.kind == "html" else None
+            chunks = [(chunk, chunk, parse_mode) for chunk in chunk_text(render.text, self._MAX_MESSAGE_LENGTH)]
 
-        chunks = chunk_text(text_to_send, self._MAX_MESSAGE_LENGTH)
         disable_preview = bool(render.meta.get("disable_link_preview", False))
         self._logger.debug(
             "prepared telegram response chunks",
@@ -154,14 +160,14 @@ class TelegramOutboundSender:
                 "chat_id": chat_id,
                 "kind": render.kind,
                 "chunk_count": len(chunks),
-                "text_length": len(text_to_send),
+                "text_length": sum(len(text) for _, text, _ in chunks),
             },
         )
-        for index, chunk in enumerate(chunks, start=1):
+        for index, (_, text, parse_mode) in enumerate(chunks, start=1):
             try:
                 send_kwargs: dict[str, Any] = {
                     "chat_id": chat_id,
-                    "text": chunk,
+                    "text": text,
                     "parse_mode": parse_mode,
                     "disable_web_page_preview": disable_preview,
                 }
@@ -180,11 +186,21 @@ class TelegramOutboundSender:
                         "chat_id": chat_id,
                         "kind": render.kind,
                         "chunk_index": index,
-                        "chunk_length": len(chunk),
+                        "chunk_length": len(text),
                         "chunk_count": len(chunks),
                     },
                 )
-                return False, str(exc)
+                if index == 1 or parse_mode is None:
+                    return False, str(exc)
+                # Earlier chunks are already on screen: repairing or resending the whole response
+                # would duplicate them, so only the rest goes out, as plain text.
+                remaining = "\n".join(source for source, _, _ in chunks[index - 1 :])
+                return await self._send_parse_mode_chunks(
+                    chat_id=chat_id,
+                    render=RenderableResponse(
+                        kind="text", text=remaining, meta={"disable_link_preview": disable_preview}
+                    ),
+                )
         return True, None
 
     def _prepare_markdown_payload(self, *, chat_id: int, markdown_text: str) -> tuple[str, ParseMode | None]:
