@@ -10,7 +10,7 @@ from llm_async.models import Tool
 
 from minibot.core.memory import KeyValueEntry, KeyValueMemory, KeyValueMemoryFilter
 from minibot.llm.tools.action_dispatcher import dispatch_action
-from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str, require_owner
+from minibot.llm.tools.arg_utils import optional_int, optional_str, require_owner
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_string, pagination_properties, strict_object
@@ -106,8 +106,8 @@ async def _create_entry(memory: KeyValueMemory, payload: dict[str, Any], context
     metadata = _metadata_with_category(_coerce_metadata(payload.get("metadata")), _require_category(payload))
     result = await memory.create_entry(
         owner_id=owner_id,
-        title=require_non_empty_str(payload, "title"),
-        data=require_non_empty_str(payload, "data"),
+        title=_require_create_text(payload, "title"),
+        data=_require_create_text(payload, "data"),
         metadata=metadata,
         source=optional_str(payload.get("source")),
         expires_at=_parse_datetime(payload.get("expires_at"), field="expires_at"),
@@ -312,6 +312,13 @@ def _optional_category(value: Any) -> str | None:
 
 def _input_error(code: str, message: str) -> ToolInputError:
     return ToolInputError(message, error_code=f"memory:invalid_arguments:{code}")
+
+
+def _require_create_text(payload: dict[str, Any], field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise _input_error(f"{field}_required", f"{field} is required for create and must be a non-empty string.")
+    return value.strip()
 
 
 def _require_entry_id(payload: dict[str, Any], action: str) -> str:

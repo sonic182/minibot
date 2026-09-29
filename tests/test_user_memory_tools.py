@@ -90,6 +90,9 @@ _CREATE = {"action": "create", "title": "Doc", "data": "text"}
         ),
         ({**_CREATE, "category": "finanzas", "metadata": "not json"}, "invalid_metadata", "JSON object"),
         ({"action": "update", "entry_id": "abc"}, "nothing_to_update", "at least one of"),
+        ({**_CREATE, "category": "finanzas", "title": None}, "title_required", "non-empty string"),
+        ({**_CREATE, "category": "finanzas", "title": "  "}, "title_required", "non-empty string"),
+        ({**_CREATE, "category": "finanzas", "data": None}, "data_required", "non-empty string"),
     ],
 )
 async def test_user_memory_input_errors_carry_actionable_codes(

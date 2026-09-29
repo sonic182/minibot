@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`memory` create with an empty `title` or `data` comes back with an actionable error.** A `null`, blank or
+  non-string `title` or `data` raised a bare `ValueError` with no error code, so the model retried the same
+  call. It now returns `memory:invalid_arguments:title_required` or `data_required` with a message saying
+  the field is required for create.
+
 ## [0.23.0] - 2026-09-29
 
 ### Changed
