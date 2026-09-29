@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-29
+
 ### Changed
 
 - **Breaking: `[memory] notify_compaction_updates` takes `"off"`, `"brief"` or `"full"`.** `"off"` (the
@@ -1082,7 +1084,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.22.1...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.23.0...HEAD
+[0.23.0]: https://github.com/sonic182/minibot/compare/0.22.1..0.23.0
 [0.22.1]: https://github.com/sonic182/minibot/compare/0.22.0..0.22.1
 [0.22.0]: https://github.com/sonic182/minibot/compare/0.21.0..0.22.0
 [0.21.0]: https://github.com/sonic182/minibot/compare/0.20.0..0.21.0
