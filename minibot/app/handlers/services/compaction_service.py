@@ -65,7 +65,7 @@ class HistoryCompactionService:
         pressure_tokens = self._session_state.current_tokens(session_id)
         latest_input_tokens = self._session_state.latest_input_tokens(session_id)
         if latest_input_tokens is not None:
-            pressure_tokens = latest_input_tokens
+            pressure_tokens = latest_input_tokens + (self._session_state.latest_output_tokens(session_id) or 0)
         if pressure_tokens < self._max_history_tokens:
             return CompactionResult(
                 updates=updates,
@@ -79,6 +79,7 @@ class HistoryCompactionService:
             session_before_reset = pressure_tokens
             self._session_state.session_total_tokens[session_id] = 0
             self._session_state.set_latest_input_tokens(session_id, None)
+            self._session_state.set_latest_output_tokens(session_id, None)
             return CompactionResult(
                 updates=updates,
                 performed=False,
@@ -106,6 +107,7 @@ class HistoryCompactionService:
                         await self._memory.append_history(session_id, "assistant", compaction_text)
                         self._session_state.session_total_tokens[session_id] = 0
                         self._session_state.set_latest_input_tokens(session_id, None)
+                        self._session_state.set_latest_output_tokens(session_id, None)
                         self._session_state.set_previous_response_id(
                             session_id,
                             compacted.response_id,
@@ -150,6 +152,7 @@ class HistoryCompactionService:
             await self._memory.append_history(session_id, "assistant", compact_render.text)
             self._session_state.session_total_tokens[session_id] = 0
             self._session_state.set_latest_input_tokens(session_id, None)
+            self._session_state.set_latest_output_tokens(session_id, None)
             if responses_state_mode == "previous_response_id":
                 fallback_response_id = getattr(compact_generation, "response_id", None)
                 if isinstance(fallback_response_id, str) and fallback_response_id:

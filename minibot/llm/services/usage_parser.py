@@ -101,6 +101,7 @@ class UsageAccumulator:
     total_tokens_used: int = 0
     latest_input_tokens: int = 0
     output_tokens_used: int = 0
+    latest_output_tokens: int | None = None
     latest_cached_input_tokens: int = 0
     reasoning_output_tokens_used: int = 0
     provider_tool_calls_used: int = 0
@@ -118,6 +119,7 @@ class UsageAccumulator:
             self.saw_input_tokens = True
             self.latest_cached_input_tokens = 0
             self.saw_cached_input_tokens = False
+        self.latest_output_tokens = usage.output_tokens
         if usage.output_tokens is not None:
             self.output_tokens_used += usage.output_tokens
             self.saw_output_tokens = True
@@ -139,6 +141,7 @@ class UsageAccumulator:
             self.saw_input_tokens = True
             self.latest_cached_input_tokens = 0
             self.saw_cached_input_tokens = False
+        self.latest_output_tokens = generation.output_tokens
         if generation.output_tokens is not None:
             self.output_tokens_used += generation.output_tokens
             self.saw_output_tokens = True
@@ -166,6 +169,7 @@ class UsageAccumulator:
             total_tokens=self.total_tokens_used or None,
             input_tokens=self.latest_input_tokens if self.saw_input_tokens else None,
             output_tokens=self.output_tokens_used if self.saw_output_tokens else None,
+            latest_output_tokens=self.latest_output_tokens,
             cached_input_tokens=self.latest_cached_input_tokens if self.saw_cached_input_tokens else None,
             reasoning_output_tokens=self.reasoning_output_tokens_used if self.saw_reasoning_output_tokens else None,
             provider_tool_calls=self.provider_tool_calls_used if self.saw_provider_tool_calls else None,

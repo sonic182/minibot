@@ -80,8 +80,9 @@ class _StubClient:
 
 
 class _StubRuntime:
-    def __init__(self, input_tokens: int | None = 12) -> None:
+    def __init__(self, input_tokens: int | None = 12, output_tokens: int | None = 2) -> None:
         self._input_tokens = input_tokens
+        self._output_tokens = output_tokens
 
     async def run(self, **_: Any) -> RuntimeResult:
         return RuntimeResult(
@@ -90,6 +91,7 @@ class _StubRuntime:
             state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
             total_tokens=4,
             input_tokens=self._input_tokens,
+            output_tokens=self._output_tokens,
         )
 
 
@@ -467,6 +469,24 @@ async def test_compaction_service_chat_completions_ignores_accumulated_tokens() 
 
 
 @pytest.mark.asyncio
+async def test_compaction_service_chat_completions_counts_new_response_tokens() -> None:
+    _, state, service = await _build_compaction_service(_ChatCompletionsClient(), max_history_tokens=100)
+    state.track_tokens("s1", 500)
+    state.track_usage(
+        "s1",
+        input_tokens=90,
+        output_tokens=15,
+        total_tokens=105,
+        cached_input_tokens=None,
+        reasoning_output_tokens=None,
+    )
+
+    result = await _compact_history(service)
+
+    assert result.performed is True
+
+
+@pytest.mark.asyncio
 async def test_compaction_service_chat_completions_compacts_on_latest_input_tokens() -> None:
     _, state, service = await _build_compaction_service(_ChatCompletionsClient(), max_history_tokens=100)
     state.set_latest_input_tokens("s1", 120)
@@ -525,17 +545,22 @@ async def test_runtime_service_returns_guardrail_resolved_text() -> None:
     assert result.tokens_used == 7
     assert session_state.current_tokens("s1") == 7
     assert session_state.latest_input_tokens("s1") == 12
+    assert session_state.latest_output_tokens("s1") == 2
 
 
 @pytest.mark.asyncio
 async def test_runtime_service_clears_stale_input_tokens_when_runtime_omits_usage() -> None:
     session_state = SessionStateService()
     session_state.set_latest_input_tokens("s1", 120)
-    service = _runtime_service(_StubRuntime(input_tokens=None), _ResolvedGuardrail(), session_state)
+    session_state.set_latest_output_tokens("s1", 20)
+    service = _runtime_service(
+        _StubRuntime(input_tokens=None, output_tokens=None), _ResolvedGuardrail(), session_state
+    )
 
     await _run_with_agent_runtime(service)
 
     assert session_state.latest_input_tokens("s1") is None
+    assert session_state.latest_output_tokens("s1") is None
 
 
 @pytest.mark.asyncio

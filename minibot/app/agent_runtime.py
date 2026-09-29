@@ -62,6 +62,7 @@ class RuntimeResult:
     provider_tool_calls: int = 0
     pre_response_meta: dict[str, Any] | None = field(default=None)
     stop_reason: TaskStopReason = TaskStopReason.COMPLETED
+    output_tokens: int | None = None
 
 
 class AgentRuntime:
@@ -136,6 +137,7 @@ class AgentRuntime:
         responses_followup_messages: list[dict[str, Any]] | None = None
         total_tokens = 0
         input_tokens: int | None = None
+        output_tokens: int | None = None
         provider_tool_calls = 0
         repeated_failure_counts: dict[str, int] = {}
         repeated_iteration_count = 0
@@ -151,6 +153,7 @@ class AgentRuntime:
                         state=state,
                         total_tokens=total_tokens,
                         input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                         provider_tool_calls=provider_tool_calls,
                         stop_reason=TaskStopReason.MAX_STEPS,
                     )
@@ -239,6 +242,7 @@ class AgentRuntime:
                 if isinstance(completion.total_tokens, int) and completion.total_tokens > 0:
                     total_tokens += completion.total_tokens
                 input_tokens = completion.input_tokens
+                output_tokens = completion.output_tokens
                 if isinstance(completion.provider_tool_calls, int) and completion.provider_tool_calls > 0:
                     provider_tool_calls += completion.provider_tool_calls
                 responses_followup_messages = None
@@ -284,6 +288,7 @@ class AgentRuntime:
                                 state=state,
                                 total_tokens=total_tokens,
                                 input_tokens=input_tokens,
+                                output_tokens=output_tokens,
                                 provider_tool_calls=provider_tool_calls,
                                 stop_reason=TaskStopReason.TRUNCATED_TOOL_CALL,
                             )
@@ -315,6 +320,7 @@ class AgentRuntime:
                         state=state,
                         total_tokens=total_tokens,
                         input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                         provider_tool_calls=provider_tool_calls,
                         pre_response_meta=extract_pre_response_meta(state),
                     )
@@ -335,6 +341,7 @@ class AgentRuntime:
                         state=state,
                         total_tokens=total_tokens,
                         input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                         provider_tool_calls=provider_tool_calls,
                         stop_reason=TaskStopReason.MAX_TOOL_CALLS,
                     )
@@ -446,6 +453,7 @@ class AgentRuntime:
                         state=state,
                         total_tokens=total_tokens,
                         input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                         provider_tool_calls=provider_tool_calls,
                         stop_reason=TaskStopReason.REPEATED_ITERATION,
                     )

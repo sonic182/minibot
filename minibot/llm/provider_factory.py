@@ -227,6 +227,7 @@ class LLMClient:
             response_id=extract_response_id(response),
             total_tokens=usage_tokens,
             input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
             provider_tool_calls=usage.provider_tool_calls,
         )
 

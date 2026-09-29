@@ -140,6 +140,11 @@ See :doc:`providers` for setup examples and compatible endpoint guidance.
 Memory
 ------
 
+``[memory].notify_compaction_updates`` accepts ``"off"`` (no notices), ``"brief"``
+(running and done notices), or ``"full"`` (notices plus the summary). Existing
+configurations must replace ``false`` with ``"off"`` and ``true`` with ``"full"``;
+the old boolean values now fail validation at startup.
+
 .. autoclass:: minibot.adapters.config.schema.MemoryConfig
    :no-members:
 

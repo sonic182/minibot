@@ -189,6 +189,7 @@ async def test_complete_once_captures_total_tokens_from_usage(monkeypatch: pytes
     assert result.response_id == "resp-step"
     assert result.total_tokens == 8
     assert result.input_tokens == 5
+    assert result.output_tokens == 3
 
 
 @pytest.mark.asyncio
@@ -577,6 +578,7 @@ async def test_generate_auto_continues_incomplete_response_once(monkeypatch: pyt
     # The continuation's input already covers the stored context; summing would double-count it.
     assert result.input_tokens == 26
     assert result.output_tokens == 9
+    assert result.latest_output_tokens == 4
 
 
 @pytest.mark.asyncio

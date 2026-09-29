@@ -188,6 +188,8 @@ class LLMTurnService:
                     previous_response_id=previous_response_id,
                     system_prompt_override=system_prompt,
                 )
+                self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
+                self._session_state.set_latest_output_tokens(session_id, generation.latest_output_tokens)
                 self._session_state.track_usage(
                     session_id,
                     input_tokens=getattr(generation, "input_tokens", None),

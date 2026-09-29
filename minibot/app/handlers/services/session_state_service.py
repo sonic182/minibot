@@ -102,6 +102,15 @@ class SessionStateService:
     def latest_input_tokens(self, session_id: str) -> int | None:
         return self.session_latest_input_tokens.get(session_id)
 
+    def set_latest_output_tokens(self, session_id: str, output_tokens: int | None) -> None:
+        if output_tokens is None:
+            self.session_latest_output_tokens.pop(session_id, None)
+        elif output_tokens >= 0:
+            self.session_latest_output_tokens[session_id] = output_tokens
+
+    def latest_output_tokens(self, session_id: str) -> int | None:
+        return self.session_latest_output_tokens.get(session_id)
+
     def latest_usage_trace(self, session_id: str) -> dict[str, int | None]:
         return {
             "input_tokens": self.session_latest_input_tokens.get(session_id),
