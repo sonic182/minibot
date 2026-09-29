@@ -16,6 +16,9 @@ from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundFileEvent, OutboundFormatRepairEvent
 
 telegram_markdownify: Any | None = None
+# The Bot API reports markup errors as a bare 400 with no subcode; its fixed description is the only
+# discriminator (see the Telegram exception in AGENTS.md).
+_TELEGRAM_PARSE_ENTITIES_ERROR = "can't parse entities"
 
 
 class TelegramOutboundSender:
@@ -278,7 +281,7 @@ class TelegramOutboundSender:
             return False
         if render.kind not in {"html", "markdown"}:
             return False
-        if not parse_error or "can't parse entities" not in parse_error.lower():
+        if not parse_error or _TELEGRAM_PARSE_ENTITIES_ERROR not in parse_error.lower():
             return False
         attempt = int(response.metadata.get("format_repair_attempt", 0))
         return attempt < self._config.format_repair_max_attempts

@@ -20,6 +20,7 @@
 - Text matching is acceptable only for deterministic protocol/format parsing (for example markdown fences, SSE framing), not for semantic decision-making.
 - **Provider failures follow the same rule.** Classify HTTP/provider errors (quota, rate limit, context overflow) by the HTTP status plus the provider's structured `error.code`/`error.type`, never by message text. The same status or code can mean different things per provider, so interpret it knowing which provider returned it (reference: `ProviderHTTPError` in `llm/errors.py`).
 - If a provider exposes no structured code for a case, leave it unclassified (generic failure) and record the gap; do not fall back to matching its message.
+- **Exception — Telegram Bot API:** it returns only `error_code` 400 with a fixed, human-written `description` and no subcode. Matching a documented description (e.g. `can't parse entities`) is allowed there, kept to one named constant per case. Never extend this to LLM output or to providers that expose structured codes.
 
 ## Code Style
 - **Line length**: 119 characters.
