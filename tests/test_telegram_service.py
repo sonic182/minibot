@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -10,7 +11,7 @@ from minibot.adapters.config.schema import TelegramChannelConfig
 from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelResponse, IncomingFileRef
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.events import MessageEvent, OutboundEvent, ToolApprovalResolvedEvent
 
 
 @dataclass
@@ -160,3 +161,52 @@ async def test_outgoing_loop_survives_a_failing_send() -> None:
 
     assert sender.failed == ["boom"]
     assert sender.sent == ["delivered"]
+
+
+@dataclass
+class _Callback:
+    data: str
+    message: _Message
+    from_user: _User
+    answer: AsyncMock = field(default_factory=AsyncMock)
+
+
+def _approval_service(**config: Any) -> tuple[TelegramService, _EventBusStub, _Callback]:
+    service, _, event_bus, _ = _service(TelegramChannelConfig(bot_token="token", **config))
+    service._pending_approvals = {"a1": (1, 7)}
+    message = _Message(chat=_Chat(1), from_user=None, message_id=7)
+    callback = _Callback(data="approval:a1:y", message=message, from_user=_User(2))
+    return service, event_bus, callback
+
+
+@pytest.mark.asyncio
+async def test_approval_callback_publishes_the_answer() -> None:
+    service, event_bus, callback = _approval_service(allowed_user_ids=[2])
+
+    await service._handle_approval_callback(callback)  # type: ignore[arg-type]
+
+    [event] = event_bus.events
+    assert isinstance(event, ToolApprovalResolvedEvent)
+    assert (event.approval_id, event.approved, event.user_id) == ("a1", True, 2)
+    assert "a1" not in service._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_approval_callback_from_unauthorized_user_is_ignored() -> None:
+    service, event_bus, callback = _approval_service(allowed_user_ids=[99])
+
+    await service._handle_approval_callback(callback)  # type: ignore[arg-type]
+
+    assert not event_bus.events
+    assert "a1" in service._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_approval_callback_for_expired_request_is_not_published() -> None:
+    service, event_bus, callback = _approval_service(allowed_user_ids=[2])
+    service._pending_approvals.clear()
+
+    await service._handle_approval_callback(callback)  # type: ignore[arg-type]
+
+    assert not event_bus.events
+    callback.answer.assert_awaited_once_with("Expirado")

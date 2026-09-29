@@ -116,3 +116,21 @@ class ToolCallEvent(BaseEvent):
     chat_id: int | None = None
     detail: str = ""
     error: str | None = None
+
+
+class ToolApprovalRequestedEvent(BaseEvent):
+    """A dangerous tool call waits for the user. ``detail`` is redacted like ``ToolCallEvent``'s."""
+
+    event_type: str = "tool_approval_requested"
+    approval_id: str
+    tool_name: str
+    channel: str
+    chat_id: int
+    detail: str = ""
+
+
+class ToolApprovalResolvedEvent(BaseEvent):
+    event_type: str = "tool_approval_resolved"
+    approval_id: str
+    approved: bool
+    user_id: int | None = None

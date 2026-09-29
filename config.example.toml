@@ -364,6 +364,13 @@ auto_transcribe_max_duration_seconds = 45
 [tools.browser]
 output_dir = "./data/files/browser"
 
+# Ask for approval on Telegram (approve/deny buttons) before these tools run. fnmatch patterns over
+# exposed tool names; empty disables it. Denied on timeout or when the turn is not on Telegram.
+[tools.approval]
+require_approval = []
+# require_approval = ["mcp_mail__smtp_*"]
+timeout_seconds = 300
+
 # Optional sleep/wait tool.
 [tools.wait]
 enabled = false

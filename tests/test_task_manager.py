@@ -715,3 +715,51 @@ async def test_budget_is_resolved_before_the_execution_lease_is_claimed() -> Non
     await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert order == ["budget", "claim"]
+
+
+class _PipeScripted:
+    """Fake pipe: replays worker lines in order and records what the manager writes back."""
+
+    def __init__(self, *events: dict) -> None:
+        self._lines = [json.dumps(event).encode() + b"\n" for event in events]
+        self.written: list[dict] = []
+
+    @asynccontextmanager
+    async def open(self):
+        lines = self._lines
+        written = self.written
+
+        class _RX:
+            async def readline(self) -> bytes:
+                return lines.pop(0) if lines else b""
+
+        class _TX:
+            def write(self, data: bytes) -> None:
+                written.append(json.loads(data))
+
+        yield _RX(), _TX()
+
+
+@pytest.mark.asyncio
+async def test_worker_approval_request_is_answered_over_the_pipe() -> None:
+    manager = _make_manager(EventBus())
+    pipe = _PipeScripted(
+        {
+            "type": "approval_request",
+            "approval_id": "a1",
+            "tool_name": "mcp_mail__smtp_send_message",
+            "arguments": {"to": "a@b.c"},
+            "channel": "telegram",
+            "chat_id": 1,
+        },
+        {"type": "result", "task_id": "t1", "status": "done", "text": "ok"},
+    )
+    approve = AsyncMock(return_value=True)
+
+    with patch("minibot.adapters.tasks.manager.request_tool_approval", approve):
+        result = await manager._read_worker_result(pipe, {"task_id": "t1"}, 5.0, None, 5)
+
+    assert result["text"] == "ok"
+    assert approve.await_args.kwargs["tool_name"] == "mcp_mail__smtp_send_message"
+    assert approve.await_args.kwargs["chat_id"] == 1
+    assert pipe.written[-1] == {"type": "approval_result", "approval_id": "a1", "approved": True}

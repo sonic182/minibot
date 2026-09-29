@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+from llm_async.models import Tool
+
+from minibot.app.event_bus import EventBus
+from minibot.app.tool_approval import apply_tool_approval, request_tool_approval
+from minibot.core.events import ToolApprovalRequestedEvent, ToolApprovalResolvedEvent
+from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.shared.errors import ToolInputError
+
+_CONTEXT = ToolContext(channel="telegram", chat_id=1)
+
+
+def _binding(name: str, handler: AsyncMock) -> ToolBinding:
+    return ToolBinding(tool=Tool(name=name, description="", parameters={}), handler=handler)
+
+
+async def _call(binding_name: str, payload: dict[str, Any], *, approved: bool) -> tuple[AsyncMock, AsyncMock]:
+    handler = AsyncMock(return_value="ran")
+    approve = AsyncMock(return_value=approved)
+    [wrapped] = apply_tool_approval([_binding(binding_name, handler)], patterns=["mcp_mail__smtp_*"], approve=approve)
+    await wrapped.handler(payload, _CONTEXT)
+    return handler, approve
+
+
+@pytest.mark.asyncio
+async def test_unmatched_tool_runs_without_asking() -> None:
+    handler, approve = await _call("mcp_mail__imap_get_message", {"id": 1}, approved=False)
+
+    handler.assert_awaited_once()
+    approve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_approved_tool_runs() -> None:
+    handler, approve = await _call("mcp_mail__smtp_send_message", {"to": "a@b.c"}, approved=True)
+
+    approve.assert_awaited_once_with("mcp_mail__smtp_send_message", {"to": "a@b.c"}, _CONTEXT)
+    handler.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_denied_tool_raises_typed_error_and_does_not_run() -> None:
+    with pytest.raises(ToolInputError) as exc_info:
+        await _call("mcp_mail__smtp_send_message", {"to": "a@b.c"}, approved=False)
+
+    assert exc_info.value.error_code == "tool_approval:denied"
+
+
+@pytest.mark.asyncio
+async def test_lazy_mcp_call_is_gated_by_the_remote_tool_name() -> None:
+    payload = {"tool_name": "smtp_forward_message", "arguments": {"to": "x@evil.com"}}
+
+    handler, approve = await _call("mcp_mail__call_tool", payload, approved=True)
+
+    approve.assert_awaited_once_with("mcp_mail__smtp_forward_message", {"to": "x@evil.com"}, _CONTEXT)
+    handler.assert_awaited_once()
+
+
+async def _answer_first_request(bus: EventBus, *, approved: bool) -> None:
+    subscription = bus.subscribe(types=(ToolApprovalRequestedEvent,))
+    async for event in subscription:
+        assert isinstance(event, ToolApprovalRequestedEvent)
+        assert '"password": "***"' in event.detail
+        await bus.publish(ToolApprovalResolvedEvent(approval_id=event.approval_id, approved=approved, user_id=2))
+        break
+    await subscription.close()
+
+
+async def _request(bus: EventBus, *, channel: str = "telegram", timeout: float = 1) -> bool:
+    return await request_tool_approval(
+        bus,
+        tool_name="mcp_mail__smtp_send_message",
+        arguments={"to": "a@b.c", "password": "hunter2"},
+        channel=channel,
+        chat_id=1,
+        timeout_seconds=timeout,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approved", [True, False])
+async def test_request_returns_the_user_answer(approved: bool) -> None:
+    bus = EventBus()
+    answerer = asyncio.create_task(_answer_first_request(bus, approved=approved))
+    await asyncio.sleep(0)
+
+    assert await _request(bus) is approved
+    await answerer
+
+
+@pytest.mark.asyncio
+async def test_request_times_out_as_denied_and_announces_expiry() -> None:
+    bus = EventBus()
+    resolved = bus.subscribe(types=(ToolApprovalResolvedEvent,))
+
+    assert await _request(bus, timeout=0.01) is False
+
+    expiry = await asyncio.wait_for(anext(aiter(resolved)), timeout=1)
+    assert isinstance(expiry, ToolApprovalResolvedEvent)
+    assert expiry.approved is False
+    assert expiry.user_id is None
+
+
+@pytest.mark.asyncio
+async def test_request_outside_telegram_is_denied_without_asking() -> None:
+    bus = EventBus()
+    requested = bus.subscribe(types=(ToolApprovalRequestedEvent,))
+
+    assert await _request(bus, channel="console") is False
+    assert requested._queue.empty()

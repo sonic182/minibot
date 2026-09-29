@@ -797,7 +797,25 @@ class RagToolConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ToolApprovalConfig(BaseModel):
+    """Human approval before dangerous tool calls. TOML section: ``[tools.approval]``
+
+    - ``require_approval`` — fnmatch patterns of tool names that need a Telegram approval before
+      running (default: empty, feature off). MCP tools match their exposed name, e.g.
+      ``mcp_mail__smtp_send_message``, also when the server runs in ``lazy`` mode.
+    - ``timeout_seconds`` — how long to wait for an answer before denying (default: ``300``). A
+      delegated agent's wait counts against its task timeout, so keep this below it.
+
+    Calls are denied when nobody answers, when the turn has no Telegram chat, or when the user taps
+    Deny; the model then receives a ``tool_approval:denied`` error.
+    """
+
+    require_approval: list[str] = Field(default_factory=list)
+    timeout_seconds: PositiveInt = 300
+
+
 class ToolsConfig(BaseModel):
+    approval: ToolApprovalConfig = ToolApprovalConfig()
     kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
     http_client: HTTPClientToolConfig = HTTPClientToolConfig()
     time: TimeToolConfig = TimeToolConfig()

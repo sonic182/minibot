@@ -19,6 +19,7 @@ from minibot.app.agent_policies import is_retargeted, resolve_delegation_target
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.token_limits_autoconfig import ensure_model_limits
+from minibot.app.tool_approval import request_tool_approval
 from minibot.core.channels import ChannelFileResponse, ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundEvent, OutboundFileEvent
 from minibot.core.tasks import TaskLimits, TaskRepository, TaskResult, TaskStatus, TaskStopReason
@@ -123,8 +124,10 @@ class TaskManager:
         lease_timeout_seconds: int | None = None,
         secrets: Mapping[str, str] | None = None,
         budget_for: Callable[[str | None, Mapping[str, Any]], Awaitable[DelegationBudget]] | None = None,
+        approval_timeout_seconds: float = 300,
     ) -> None:
         self._event_bus = event_bus
+        self._approval_timeout_seconds = approval_timeout_seconds
         self._worker_timeout_seconds = worker_timeout_seconds
         self._lease_timeout_seconds = lease_timeout_seconds or max(1, int(worker_timeout_seconds))
         self._task_repository = task_repository
@@ -452,6 +455,18 @@ class TaskManager:
                             raise _LeaseLostError
                         if not await self._task_repository.update_progress(task_id, lease_token, progress):
                             raise _LeaseLostError
+                    continue
+                if event.get("type") == "approval_request":
+                    approved = await request_tool_approval(
+                        self._event_bus,
+                        tool_name=str(event.get("tool_name") or ""),
+                        arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else {},
+                        channel=event.get("channel") if isinstance(event.get("channel"), str) else None,
+                        chat_id=event.get("chat_id") if isinstance(event.get("chat_id"), int) else None,
+                        timeout_seconds=min(self._approval_timeout_seconds, max(remaining, 0)),
+                    )
+                    reply = {"type": "approval_result", "approval_id": event.get("approval_id"), "approved": approved}
+                    tx.write(json.dumps(reply).encode() + b"\n")
                     continue
                 if event.get("type") == "result":
                     return event

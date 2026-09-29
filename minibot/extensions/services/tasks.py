@@ -37,6 +37,7 @@ def register(mb: ExtensionContext) -> None:
         settings.tasks.sqlite.lease_timeout_seconds,
         secrets=mb.vault.as_mapping() if mb.vault else None,
         budget_for=lambda name, ov: resolve_delegation_budget(agent_registry, settings, name, ov),
+        approval_timeout_seconds=settings.tools.approval.timeout_seconds,
     )
     producer = SQLiteTaskProducer(store)
     consumer = SQLiteTaskConsumerService(
