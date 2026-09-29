@@ -48,22 +48,18 @@ def extract_usage_from_payload(original: dict[str, Any]) -> UsageSnapshot:
     total_tokens = opt_int(usage.get("total_tokens"))
     input_tokens = opt_int(usage.get("input_tokens"))
     output_tokens = opt_int(usage.get("output_tokens"))
+    if input_tokens is None:
+        input_tokens = opt_int(usage.get("prompt_tokens"))
+    if output_tokens is None:
+        output_tokens = opt_int(usage.get("completion_tokens"))
     if total_tokens is None and input_tokens is not None and output_tokens is not None:
         total_tokens = input_tokens + output_tokens
-    if total_tokens is None:
-        prompt_tokens = opt_int(usage.get("prompt_tokens"))
-        completion_tokens = opt_int(usage.get("completion_tokens"))
-        if prompt_tokens is not None and completion_tokens is not None:
-            total_tokens = prompt_tokens + completion_tokens
-        if input_tokens is None:
-            input_tokens = prompt_tokens
-        if output_tokens is None:
-            output_tokens = completion_tokens
 
     cached_input_tokens = None
-    input_details = usage.get("input_tokens_details")
-    if isinstance(input_details, dict):
-        cached_input_tokens = opt_int(input_details.get("cached_tokens"))
+    for details_key in ("input_tokens_details", "prompt_tokens_details"):
+        input_details = usage.get(details_key)
+        if isinstance(input_details, dict) and cached_input_tokens is None:
+            cached_input_tokens = opt_int(input_details.get("cached_tokens"))
 
     reasoning_output_tokens = None
     output_details = usage.get("output_tokens_details")
@@ -105,6 +101,7 @@ class UsageAccumulator:
     total_tokens_used: int = 0
     latest_input_tokens: int = 0
     output_tokens_used: int = 0
+    latest_output_tokens: int | None = None
     latest_cached_input_tokens: int = 0
     reasoning_output_tokens_used: int = 0
     provider_tool_calls_used: int = 0
@@ -122,6 +119,7 @@ class UsageAccumulator:
             self.saw_input_tokens = True
             self.latest_cached_input_tokens = 0
             self.saw_cached_input_tokens = False
+        self.latest_output_tokens = usage.output_tokens
         if usage.output_tokens is not None:
             self.output_tokens_used += usage.output_tokens
             self.saw_output_tokens = True
@@ -143,6 +141,7 @@ class UsageAccumulator:
             self.saw_input_tokens = True
             self.latest_cached_input_tokens = 0
             self.saw_cached_input_tokens = False
+        self.latest_output_tokens = generation.output_tokens
         if generation.output_tokens is not None:
             self.output_tokens_used += generation.output_tokens
             self.saw_output_tokens = True
@@ -170,6 +169,7 @@ class UsageAccumulator:
             total_tokens=self.total_tokens_used or None,
             input_tokens=self.latest_input_tokens if self.saw_input_tokens else None,
             output_tokens=self.output_tokens_used if self.saw_output_tokens else None,
+            latest_output_tokens=self.latest_output_tokens,
             cached_input_tokens=self.latest_cached_input_tokens if self.saw_cached_input_tokens else None,
             reasoning_output_tokens=self.reasoning_output_tokens_used if self.saw_reasoning_output_tokens else None,
             provider_tool_calls=self.provider_tool_calls_used if self.saw_provider_tool_calls else None,

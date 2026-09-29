@@ -72,6 +72,15 @@ def test_should_compact_only_at_or_above_the_threshold() -> None:
     assert compactor.should_compact(101) is True
     assert compactor.should_compact(99) is False
     assert compactor.should_compact(None) is False
+    assert compactor.should_compact(None, 500) is False
+
+
+def test_should_compact_counts_the_last_output() -> None:
+    compactor = RuntimeCompactor(llm_client=_ClientStub(native=True), threshold_tokens=100, logger=LOGGER)
+
+    assert compactor.should_compact(60, 40) is True
+    assert compactor.should_compact(60, 39) is False
+    assert compactor.should_compact(60, None) is False
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ class LLMGeneration:
     provider_tool_calls: int | None = None
     status: str | None = None
     incomplete_reason: str | None = None
+    latest_output_tokens: int | None = None
 
 
 @dataclass
@@ -27,6 +28,7 @@ class LLMCompletionStep:
     total_tokens: int | None = None
     input_tokens: int | None = None
     provider_tool_calls: int | None = None
+    output_tokens: int | None = None
 
 
 @dataclass

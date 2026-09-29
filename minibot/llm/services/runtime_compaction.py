@@ -42,10 +42,10 @@ class RuntimeCompactor:
     def threshold_tokens(self) -> int:
         return self._threshold_tokens
 
-    def should_compact(self, input_tokens: int | None) -> bool:
-        """``input_tokens`` is the pressure signal, not the accumulated total: it is what the
-        provider actually had in context for the last call."""
-        return isinstance(input_tokens, int) and input_tokens >= self._threshold_tokens
+    def should_compact(self, input_tokens: int | None, output_tokens: int | None = None) -> bool:
+        """The pressure signal is what the provider had in context for the last call plus what it
+        answered, since the next request replays that answer. It is not the accumulated total."""
+        return isinstance(input_tokens, int) and input_tokens + (output_tokens or 0) >= self._threshold_tokens
 
     async def compact(
         self,

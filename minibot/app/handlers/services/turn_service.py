@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.handlers.services.audio_transcription_service import AudioAutoTranscriptionService
-from minibot.app.handlers.services.compaction_service import HistoryCompactionService
+from minibot.app.handlers.services.compaction_service import CompactionNotifyMode, HistoryCompactionService
 from minibot.app.handlers.services.input_service import UserInputService
 from minibot.app.handlers.services.metadata_service import ResponseMetadataService
 from minibot.app.handlers.services.prompt_service import PromptService
@@ -41,7 +41,7 @@ class LLMTurnService:
         tools: Sequence[ToolBinding],
         owner_id: str,
         max_history_messages: int | None,
-        notify_compaction_updates: bool,
+        notify_compaction_updates: CompactionNotifyMode,
         tool_use_guardrail: ToolUseGuardrail,
         audio_auto_transcription_service: AudioAutoTranscriptionService | None,
         session_state: SessionStateService,
@@ -188,6 +188,7 @@ class LLMTurnService:
                     previous_response_id=previous_response_id,
                     system_prompt_override=system_prompt,
                 )
+                self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
                 self._session_state.track_usage(
                     session_id,
                     input_tokens=getattr(generation, "input_tokens", None),
@@ -197,6 +198,7 @@ class LLMTurnService:
                     reasoning_output_tokens=getattr(generation, "reasoning_output_tokens", None),
                     provider_tool_calls=getattr(generation, "provider_tool_calls", None),
                 )
+                self._session_state.set_latest_output_tokens(session_id, generation.latest_output_tokens)
                 turn_total_tokens += self._session_state.track_tokens(
                     session_id,
                     getattr(generation, "total_tokens", None),
@@ -362,7 +364,7 @@ class LLMTurnService:
             session_id,
             prompt_cache_key=f"{channel}:{chat_id}:format-repair",
             system_prompt=system_prompt,
-            notify=False,
+            notify="off",
             responses_state_mode=self._profile.responses_state_mode,
         )
         turn_total_tokens += compaction_result.tokens_used
@@ -493,7 +495,7 @@ def build_llm_turn_service(
     owner_id: str = "primary",
     max_history_messages: int | None = None,
     max_history_tokens: int | None = None,
-    notify_compaction_updates: bool = False,
+    notify_compaction_updates: CompactionNotifyMode = "off",
     agent_timeout_seconds: int = 120,
     environment_prompt_fragment: str = "",
     tool_use_guardrail: ToolUseGuardrail,

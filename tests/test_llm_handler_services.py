@@ -80,8 +80,9 @@ class _StubClient:
 
 
 class _StubRuntime:
-    def __init__(self, input_tokens: int | None = 12) -> None:
+    def __init__(self, input_tokens: int | None = 12, output_tokens: int | None = 2) -> None:
         self._input_tokens = input_tokens
+        self._output_tokens = output_tokens
 
     async def run(self, **_: Any) -> RuntimeResult:
         return RuntimeResult(
@@ -90,6 +91,7 @@ class _StubRuntime:
             state=AgentState(messages=[AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")])]),
             total_tokens=4,
             input_tokens=self._input_tokens,
+            output_tokens=self._output_tokens,
         )
 
 
@@ -333,7 +335,7 @@ async def _compact_history(service: HistoryCompactionService, **overrides: Any):
     kwargs: dict[str, Any] = {
         "prompt_cache_key": "telegram:1",
         "system_prompt": "system",
-        "notify": True,
+        "notify": "full",
         "responses_state_mode": "previous_response_id",
     }
     kwargs.update(overrides)
@@ -347,6 +349,11 @@ class _UnsupportedCompactionClient(_StubClient):
     async def generate(self, *args: Any, **kwargs: Any) -> LLMGeneration:
         _ = args, kwargs
         return LLMGeneration("summary via fallback", response_id="cmp-fallback", total_tokens=7)
+
+
+class _ChatCompletionsClient(_UnsupportedCompactionClient):
+    def is_responses_provider(self) -> bool:
+        return False
 
 
 class _FallbackCompactionClient(_StubClient):
@@ -433,6 +440,90 @@ async def test_compaction_service_uses_latest_input_tokens_for_responses_thresho
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("notify", "expected_updates"),
+    [
+        ("off", []),
+        ("brief", ["running compaction...", "done compacting"]),
+        ("full", ["running compaction...", "done compacting", "compacted text"]),
+    ],
+)
+async def test_compaction_service_notify_modes(notify: str, expected_updates: list[str]) -> None:
+    _, _, service = await _build_compaction_service(_StubClient())
+
+    result = await _compact_history(service, notify=notify)
+
+    assert result.performed is True
+    assert result.updates == expected_updates
+
+
+@pytest.mark.asyncio
+async def test_compaction_service_chat_completions_ignores_accumulated_tokens() -> None:
+    _, state, service = await _build_compaction_service(_ChatCompletionsClient(), max_history_tokens=100)
+    state.track_tokens("s1", 500)
+    state.set_latest_input_tokens("s1", 30)
+
+    result = await _compact_history(service)
+
+    assert result.performed is False
+
+
+@pytest.mark.asyncio
+async def test_compaction_service_chat_completions_counts_new_response_tokens() -> None:
+    _, state, service = await _build_compaction_service(_ChatCompletionsClient(), max_history_tokens=100)
+    state.track_tokens("s1", 500)
+    state.track_usage(
+        "s1",
+        input_tokens=90,
+        output_tokens=15,
+        total_tokens=105,
+        cached_input_tokens=None,
+        reasoning_output_tokens=None,
+    )
+
+    result = await _compact_history(service)
+
+    assert result.performed is True
+
+
+@pytest.mark.asyncio
+async def test_compaction_service_chat_completions_compacts_on_latest_input_tokens() -> None:
+    _, state, service = await _build_compaction_service(_ChatCompletionsClient(), max_history_tokens=100)
+    state.set_latest_input_tokens("s1", 120)
+
+    first = await _compact_history(service)
+    second = await _compact_history(service)
+
+    assert first.performed is True
+    assert state.latest_input_tokens("s1") is None
+    assert second.performed is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("client_factory", [_StubClient, _ChatCompletionsClient, _FallbackCompactionClient])
+async def test_compaction_service_clears_measured_usage_on_every_compaction_path(client_factory: Any) -> None:
+    _, state, service = await _build_compaction_service(client_factory(), max_history_tokens=100)
+    state.set_latest_input_tokens("s1", 90)
+    state.set_latest_output_tokens("s1", 20)
+
+    result = await _compact_history(service)
+
+    assert result.performed is True
+    assert state.latest_input_tokens("s1") is None
+    assert state.latest_output_tokens("s1") is None
+
+
+@pytest.mark.asyncio
+async def test_compaction_service_chat_completions_falls_back_to_accumulated_without_usage() -> None:
+    _, state, service = await _build_compaction_service(_ChatCompletionsClient(), max_history_tokens=10)
+
+    result = await _compact_history(service)
+
+    assert state.latest_input_tokens("s1") is None
+    assert result.performed is True
+
+
+@pytest.mark.asyncio
 async def test_compaction_service_fallback_summary_updates_previous_response_id() -> None:
     client = _FallbackCompactionClient()
     memory, state, service = await _build_compaction_service(client)
@@ -468,17 +559,22 @@ async def test_runtime_service_returns_guardrail_resolved_text() -> None:
     assert result.tokens_used == 7
     assert session_state.current_tokens("s1") == 7
     assert session_state.latest_input_tokens("s1") == 12
+    assert session_state.latest_output_tokens("s1") == 2
 
 
 @pytest.mark.asyncio
 async def test_runtime_service_clears_stale_input_tokens_when_runtime_omits_usage() -> None:
     session_state = SessionStateService()
     session_state.set_latest_input_tokens("s1", 120)
-    service = _runtime_service(_StubRuntime(input_tokens=None), _ResolvedGuardrail(), session_state)
+    session_state.set_latest_output_tokens("s1", 20)
+    service = _runtime_service(
+        _StubRuntime(input_tokens=None, output_tokens=None), _ResolvedGuardrail(), session_state
+    )
 
     await _run_with_agent_runtime(service)
 
     assert session_state.latest_input_tokens("s1") is None
+    assert session_state.latest_output_tokens("s1") is None
 
 
 @pytest.mark.asyncio

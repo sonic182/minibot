@@ -9,6 +9,7 @@ from minibot.adapters.config.schema import KeyValueMemoryConfig
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.user_memory import build_kv_tools
+from minibot.shared.errors import ToolInputError
 
 
 @pytest_asyncio.fixture()
@@ -70,10 +71,34 @@ async def test_user_memory_list_titles_returns_ids_and_categories(kv_memory: SQL
     assert set(listed["titles"][0]) == {"id", "title", "category", "updated_at", "source"}
 
 
+_CREATE = {"action": "create", "title": "Doc", "data": "text"}
+
+
 @pytest.mark.asyncio
-async def test_user_memory_requires_categories_and_ids(kv_memory: SQLAlchemyKeyValueMemory) -> None:
+@pytest.mark.parametrize(
+    ("payload", "code", "hint"),
+    [
+        (_CREATE, "category_required", "finanzas"),
+        ({**_CREATE, "category": "deudas"}, "invalid_category", "'deudas'"),
+        ({"action": "update", "data": "text"}, "entry_id_required", "search or list_titles"),
+        ({"action": "get"}, "entry_id_required", "search or list_titles"),
+        ({"action": "delete", "entry_id": " "}, "entry_id_required", "search or list_titles"),
+        (
+            {**_CREATE, "category": "finanzas", "metadata": '{"category": "finanzas"}'},
+            "category_in_metadata",
+            "top-level",
+        ),
+        ({**_CREATE, "category": "finanzas", "metadata": "not json"}, "invalid_metadata", "JSON object"),
+        ({"action": "update", "entry_id": "abc"}, "nothing_to_update", "at least one of"),
+    ],
+)
+async def test_user_memory_input_errors_carry_actionable_codes(
+    kv_memory: SQLAlchemyKeyValueMemory, payload: dict[str, str], code: str, hint: str
+) -> None:
     memory = _memory_binding(kv_memory)
-    with pytest.raises(ValueError, match="category is required"):
-        await _invoke(memory, {"action": "create", "title": "Doc", "data": "text"})
-    with pytest.raises(ValueError, match="entry_id must be a non-empty string"):
-        await _invoke(memory, {"action": "update", "data": "text"})
+
+    with pytest.raises(ToolInputError) as excinfo:
+        await _invoke(memory, payload)
+
+    assert excinfo.value.error_code == f"memory:invalid_arguments:{code}"
+    assert hint in str(excinfo.value)

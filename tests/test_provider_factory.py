@@ -21,6 +21,7 @@ from minibot.llm.services.tool_executor import (
     stringify_result,
     tool_failure_signature,
 )
+from minibot.llm.services.usage_parser import extract_usage_from_payload
 from minibot.llm.tools.base import ToolBinding, ToolContext
 
 
@@ -130,6 +131,50 @@ async def test_generate_captures_total_tokens_from_openai_usage(monkeypatch: pyt
     assert result.total_tokens == 29
 
 
+def test_usage_parser_reads_chat_completions_input_when_total_is_reported() -> None:
+    usage = extract_usage_from_payload(
+        {
+            "usage": {
+                "prompt_tokens": 19,
+                "completion_tokens": 10,
+                "total_tokens": 29,
+                "prompt_tokens_details": {"cached_tokens": 8},
+            }
+        }
+    )
+
+    assert usage.input_tokens == 19
+    assert usage.output_tokens == 10
+    assert usage.total_tokens == 29
+    assert usage.cached_input_tokens == 8
+
+
+def test_usage_parser_prefers_responses_fields_over_chat_completions_ones() -> None:
+    usage = extract_usage_from_payload(
+        {
+            "usage": {
+                "input_tokens": 7,
+                "output_tokens": 3,
+                "prompt_tokens": 19,
+                "completion_tokens": 10,
+                "total_tokens": 10,
+            }
+        }
+    )
+
+    assert usage.input_tokens == 7
+    assert usage.output_tokens == 3
+
+
+def test_usage_parser_ignores_prompt_details_without_cached_tokens() -> None:
+    usage = extract_usage_from_payload(
+        {"usage": {"prompt_tokens": 19, "completion_tokens": 10, "prompt_tokens_details": {"audio_tokens": 2}}}
+    )
+
+    assert usage.input_tokens == 19
+    assert usage.cached_input_tokens is None
+
+
 @pytest.mark.asyncio
 async def test_generate_captures_total_tokens_from_responses_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm.services import provider_registry
@@ -170,6 +215,7 @@ async def test_complete_once_captures_total_tokens_from_usage(monkeypatch: pytes
     assert result.response_id == "resp-step"
     assert result.total_tokens == 8
     assert result.input_tokens == 5
+    assert result.output_tokens == 3
 
 
 @pytest.mark.asyncio
@@ -558,6 +604,7 @@ async def test_generate_auto_continues_incomplete_response_once(monkeypatch: pyt
     # The continuation's input already covers the stored context; summing would double-count it.
     assert result.input_tokens == 26
     assert result.output_tokens == 9
+    assert result.latest_output_tokens == 4
 
 
 @pytest.mark.asyncio

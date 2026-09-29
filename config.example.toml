@@ -238,7 +238,9 @@ max_history_messages = 200
 # If lookup fails, configured values are kept.
 context_ratio_before_compact = 0.95
 max_history_tokens = 140000
-notify_compaction_updates = false
+# What the chat receives on compaction: "off" (nothing), "brief" (only the short running/done
+# notices), or "full" (those notices plus the compaction summary).
+notify_compaction_updates = "off"
 
 # Scheduled prompt storage and polling.
 [scheduler.prompts]

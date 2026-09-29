@@ -12,6 +12,7 @@ from llm_async.models.tool_call import ToolCall
 from minibot.core.agent_runtime import ToolResult
 from minibot.llm.services.models import ToolExecutionRecord
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.shared.errors import ToolInputError
 from minibot.shared.parse_utils import parse_json_maybe_python_object
 
 _MAX_LOG_ARGUMENT_STRING_CHARS = 300
@@ -318,6 +319,17 @@ async def execute_tool_calls_for_runtime(
                     "owner_id": context.owner_id,
                 },
             )
+        except ToolInputError as exc:
+            logger.warning(
+                "tool rejected invalid arguments",
+                extra={
+                    "tool": tool_name,
+                    "owner_id": context.owner_id,
+                    "error_code": exc.error_code,
+                    "error": str(exc),
+                },
+            )
+            result = _build_failure_result(tool_name=tool_name, arguments=arguments, exc=exc)
         except Exception as exc:
             logger.exception(
                 "tool execution failed",

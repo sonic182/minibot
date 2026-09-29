@@ -77,6 +77,7 @@ class RuntimeOrchestrationService:
         )
         tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
         self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
+        self._session_state.set_latest_output_tokens(session_id, generation.output_tokens)
         tool_messages_count = count_tool_messages(generation.state)
         provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
 
@@ -131,6 +132,7 @@ class RuntimeOrchestrationService:
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
             self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
+            self._session_state.set_latest_output_tokens(session_id, generation.output_tokens)
             provider_tool_calls = int(getattr(generation, "provider_tool_calls", 0) or 0)
             if count_tool_messages(generation.state) == 0 and provider_tool_calls == 0:
                 return AgentRuntimeResult(
