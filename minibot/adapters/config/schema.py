@@ -476,12 +476,6 @@ class OrchestrationConfig(BaseModel):
     main_agent: MainAgentConfig = MainAgentConfig()
 
 
-def _legacy_bool_to_notify_mode(value: Any) -> Any:
-    if isinstance(value, bool):
-        return "full" if value else "off"
-    return value
-
-
 class MemoryConfig(BaseModel):
     """Conversation history memory settings. TOML section: ``[memory]``
 
@@ -493,8 +487,7 @@ class MemoryConfig(BaseModel):
       automatic compaction (default: ``0.95``).
     - ``notify_compaction_updates`` — what the chat receives when history is compacted:
       ``"off"`` nothing (default), ``"brief"`` only the short "running" and "done" notices,
-      ``"full"`` those notices plus the compaction summary. Legacy booleans still load
-      (``false`` = ``"off"``, ``true`` = ``"full"``).
+      ``"full"`` those notices plus the compaction summary.
     """
 
     backend: str = "sqlite"
@@ -502,9 +495,7 @@ class MemoryConfig(BaseModel):
     max_history_messages: int | None = Field(default=None, ge=1)
     max_history_tokens: int | None = Field(default=None, ge=1)
     context_ratio_before_compact: float = Field(default=0.95, gt=0, le=1)
-    notify_compaction_updates: Annotated[
-        Literal["off", "brief", "full"], BeforeValidator(_legacy_bool_to_notify_mode)
-    ] = "off"
+    notify_compaction_updates: Literal["off", "brief", "full"] = "off"
 
 
 class KeyValueMemoryConfig(BaseModel):

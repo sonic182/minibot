@@ -13,15 +13,18 @@ from minibot.adapters.container.app_container import AppContainer
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [("off", "off"), ("brief", "brief"), ("full", "full"), (False, "off"), (True, "full")],
+    [("off", "off"), ("brief", "brief"), ("full", "full")],
 )
-def test_memory_notify_compaction_updates_modes(value: object, expected: str) -> None:
+def test_memory_notify_compaction_updates_modes(value: str, expected: str) -> None:
     assert MemoryConfig(notify_compaction_updates=value).notify_compaction_updates == expected  # type: ignore[arg-type]
 
 
-def test_memory_notify_compaction_updates_rejects_unknown_mode() -> None:
-    with pytest.raises(ValueError):
-        MemoryConfig(notify_compaction_updates="loud")  # type: ignore[arg-type]
+@pytest.mark.parametrize("value", ["loud", True, False])
+def test_memory_notify_compaction_updates_rejects_invalid_values(value: object) -> None:
+    with pytest.raises(ValueError, match="notify_compaction_updates") as excinfo:
+        MemoryConfig(notify_compaction_updates=value)  # type: ignore[arg-type]
+
+    assert "'off', 'brief' or 'full'" in str(excinfo.value)
 
 
 def test_load_settings_from_file(tmp_path: Path) -> None:
