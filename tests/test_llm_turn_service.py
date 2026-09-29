@@ -60,8 +60,10 @@ class StubLLMClient:
         reasoning_output_tokens: int | None = None,
         responses_state_mode: str = "full_messages",
         prompt_cache_enabled: bool = True,
+        latest_output_tokens: int | None = None,
     ) -> None:
         self.payload = payload
+        self.latest_output_tokens = latest_output_tokens
         self.response_id = response_id
         self.calls: list[dict[str, Any]] = []
         self._is_responses = is_responses
@@ -96,6 +98,7 @@ class StubLLMClient:
             output_tokens=self.output_tokens,
             cached_input_tokens=self.cached_input_tokens,
             reasoning_output_tokens=self.reasoning_output_tokens,
+            latest_output_tokens=self.latest_output_tokens,
         )
 
     def is_responses_provider(self) -> bool:
@@ -238,6 +241,20 @@ async def test_turn_service_includes_usage_trace_metadata() -> None:
         "cached_input_tokens": 8,
         "reasoning_output_tokens": 3,
     }
+
+
+@pytest.mark.asyncio
+async def test_turn_service_keeps_the_last_step_output_as_compaction_pressure() -> None:
+    stub_client = StubLLMClient("hello", input_tokens=20, output_tokens=30, latest_output_tokens=5)
+    service = build_llm_turn_service(
+        memory=cast(Any, StubMemory()),
+        llm_client=cast(LLMClient, stub_client),
+        tool_use_guardrail=NoopToolUseGuardrail(),
+    )
+
+    await service.handle(_message_event("ping"))
+
+    assert list(service._session_state.session_latest_output_tokens.values()) == [5]
 
 
 @pytest.mark.asyncio

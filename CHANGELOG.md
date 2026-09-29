@@ -26,7 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sum of every step's tokens across turns, so a 40k-token context could compact once the running total
   passed the threshold. It is now the last measured input plus the last output, for every provider; the
   accumulated total is only a fallback when the provider reports no usage. The measured values are cleared
-  after each compaction.
+  after each compaction. The mid-run compactor of delegated tasks, which never fired on these providers,
+  now runs on the same signal, and after a summary compaction the request ends with a user "continue"
+  message instead of the assistant summary. Responses providers now count the last output too, which can
+  overestimate on reasoning models since reasoning tokens are not replayed.
 - **Chat Completions usage reports input tokens.** `prompt_tokens` was only read when `total_tokens` was
   missing, which providers like Fireworks always send, so the input size stayed unknown and the mid-run
   compactor never ran. `prompt_tokens` and `completion_tokens` are now always read, along with

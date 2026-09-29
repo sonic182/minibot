@@ -500,6 +500,20 @@ async def test_compaction_service_chat_completions_compacts_on_latest_input_toke
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("client_factory", [_StubClient, _ChatCompletionsClient, _FallbackCompactionClient])
+async def test_compaction_service_clears_measured_usage_on_every_compaction_path(client_factory: Any) -> None:
+    _, state, service = await _build_compaction_service(client_factory(), max_history_tokens=100)
+    state.set_latest_input_tokens("s1", 90)
+    state.set_latest_output_tokens("s1", 20)
+
+    result = await _compact_history(service)
+
+    assert result.performed is True
+    assert state.latest_input_tokens("s1") is None
+    assert state.latest_output_tokens("s1") is None
+
+
+@pytest.mark.asyncio
 async def test_compaction_service_chat_completions_falls_back_to_accumulated_without_usage() -> None:
     _, state, service = await _build_compaction_service(_ChatCompletionsClient(), max_history_tokens=10)
 

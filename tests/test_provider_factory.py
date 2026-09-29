@@ -149,6 +149,32 @@ def test_usage_parser_reads_chat_completions_input_when_total_is_reported() -> N
     assert usage.cached_input_tokens == 8
 
 
+def test_usage_parser_prefers_responses_fields_over_chat_completions_ones() -> None:
+    usage = extract_usage_from_payload(
+        {
+            "usage": {
+                "input_tokens": 7,
+                "output_tokens": 3,
+                "prompt_tokens": 19,
+                "completion_tokens": 10,
+                "total_tokens": 10,
+            }
+        }
+    )
+
+    assert usage.input_tokens == 7
+    assert usage.output_tokens == 3
+
+
+def test_usage_parser_ignores_prompt_details_without_cached_tokens() -> None:
+    usage = extract_usage_from_payload(
+        {"usage": {"prompt_tokens": 19, "completion_tokens": 10, "prompt_tokens_details": {"audio_tokens": 2}}}
+    )
+
+    assert usage.input_tokens == 19
+    assert usage.cached_input_tokens is None
+
+
 @pytest.mark.asyncio
 async def test_generate_captures_total_tokens_from_responses_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm.services import provider_registry

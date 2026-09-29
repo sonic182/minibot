@@ -11,6 +11,7 @@ from minibot.core.agent_runtime import (
     AgentState,
     AppendMessageDirective,
     MessagePart,
+    RuntimeLimits,
     ToolResult,
 )
 from minibot.core.tasks import TaskStopReason
@@ -360,8 +361,8 @@ class _RecordingCompactor:
         self._response_id = response_id
         self.calls: list[int] = []
 
-    def should_compact(self, input_tokens: int | None) -> bool:
-        return isinstance(input_tokens, int) and input_tokens >= self.threshold_tokens
+    def should_compact(self, input_tokens: int | None, output_tokens: int | None = None) -> bool:
+        return isinstance(input_tokens, int) and input_tokens + (output_tokens or 0) >= self.threshold_tokens
 
     async def compact(self, state: AgentState, **_: Any) -> Any:
         self.calls.append(len(state.messages))
@@ -391,6 +392,74 @@ async def test_runtime_compacts_once_the_provider_reports_pressure() -> None:
 
     assert compactor.calls, "compaction never ran despite input_tokens above the threshold"
     assert result.payload == "done"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("output_tokens", "compacts"), [(30, False), (40, True)])
+async def test_runtime_counts_the_last_output_as_compaction_pressure(output_tokens: int, compacts: bool) -> None:
+    tool_call = _http_tool_call()
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="r1",
+            total_tokens=3,
+            input_tokens=60,
+            output_tokens=output_tokens,
+        ),
+        _final_step("r2"),
+    ]
+    llm_client = _StubRuntimeLLMClient(steps, [[_http_record(content="ok")]])
+    compactor = _RecordingCompactor()
+    runtime = _runtime(llm_client, compactor=compactor)
+
+    await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="primary"))
+
+    assert bool(compactor.calls) is compacts
+
+
+@pytest.mark.asyncio
+async def test_runtime_closes_the_summary_with_a_user_turn_when_not_chaining_responses() -> None:
+    tool_call = _http_tool_call()
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="r1",
+            total_tokens=3,
+            input_tokens=150,
+        ),
+        _final_step("r2"),
+    ]
+    llm_client = _StubRuntimeLLMClient(steps, [[_http_record(content="ok")]])
+    runtime = _runtime(llm_client, compactor=_RecordingCompactor(response_id=None))
+
+    await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="primary"))
+
+    assert llm_client.complete_once_kwargs[1]["messages"][-1] == {
+        "role": "user",
+        "content": _CONTINUE_AFTER_COMPACTION,
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_reports_the_last_step_output_when_it_stops_at_max_steps() -> None:
+    tool_call = _http_tool_call()
+    steps = [
+        LLMCompletionStep(
+            message=_FakeMessage(content="", tool_calls=[tool_call]),
+            response_id="r1",
+            total_tokens=3,
+            input_tokens=10,
+            output_tokens=7,
+        )
+    ]
+    llm_client = _StubRuntimeLLMClient(steps, [[_http_record(content="ok")]])
+    runtime = _runtime(llm_client, limits=RuntimeLimits(max_steps=1))
+
+    result = await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="primary"))
+
+    assert result.stop_reason is TaskStopReason.MAX_STEPS
+    assert result.input_tokens == 10
+    assert result.output_tokens == 7
 
 
 @pytest.mark.asyncio

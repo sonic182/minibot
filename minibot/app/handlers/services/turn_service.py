@@ -189,7 +189,6 @@ class LLMTurnService:
                     system_prompt_override=system_prompt,
                 )
                 self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
-                self._session_state.set_latest_output_tokens(session_id, generation.latest_output_tokens)
                 self._session_state.track_usage(
                     session_id,
                     input_tokens=getattr(generation, "input_tokens", None),
@@ -199,6 +198,8 @@ class LLMTurnService:
                     reasoning_output_tokens=getattr(generation, "reasoning_output_tokens", None),
                     provider_tool_calls=getattr(generation, "provider_tool_calls", None),
                 )
+                if generation.latest_output_tokens is not None:
+                    self._session_state.set_latest_output_tokens(session_id, generation.latest_output_tokens)
                 turn_total_tokens += self._session_state.track_tokens(
                     session_id,
                     getattr(generation, "total_tokens", None),

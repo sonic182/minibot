@@ -52,6 +52,10 @@ _REPEATED_FAILURE_NUDGE = (
 )
 
 
+def _continue_after_compaction_message() -> AgentMessage:
+    return AgentMessage(role="user", content=[MessagePart(type="text", text=_CONTINUE_AFTER_COMPACTION)])
+
+
 @dataclass(frozen=True)
 class RuntimeResult:
     payload: Any
@@ -161,7 +165,7 @@ class AgentRuntime:
                 # Top of the loop on purpose: every tool call from the previous step already has
                 # its result appended, so the transcript is consistent and rewriting it can't
                 # orphan a tool_call the provider is still expecting an answer for.
-                if self._compactor is not None and self._compactor.should_compact(input_tokens):
+                if self._compactor is not None and self._compactor.should_compact(input_tokens, output_tokens):
                     outcome = await self._compactor.compact(
                         state,
                         previous_response_id=previous_response_id,
@@ -186,19 +190,16 @@ class AgentRuntime:
                             # local render here would duplicate it right after compacting
                             # specifically to shrink it.
                             responses_followup_messages = self._message_renderer.render_messages(
-                                AgentState(
-                                    messages=[
-                                        AgentMessage(
-                                            role="user",
-                                            content=[MessagePart(type="text", text=_CONTINUE_AFTER_COMPACTION)],
-                                        )
-                                    ]
-                                )
+                                AgentState(messages=[_continue_after_compaction_message()])
                             )
                         else:
+                            # The rewritten state ends with the summary as an assistant message,
+                            # which some providers read as a prefill; close it with a user turn.
+                            state.messages.append(_continue_after_compaction_message())
                             responses_followup_messages = None
                     # Either way, wait for a fresh measurement before considering it again.
                     input_tokens = None
+                    output_tokens = None
 
                 call_messages = self._message_renderer.render_messages(state)
                 if (
