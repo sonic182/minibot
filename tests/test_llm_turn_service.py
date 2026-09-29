@@ -223,6 +223,7 @@ async def test_turn_service_includes_usage_trace_metadata() -> None:
         total_tokens=33,
         input_tokens=21,
         output_tokens=12,
+        latest_output_tokens=12,
         cached_input_tokens=8,
         reasoning_output_tokens=3,
     )
@@ -255,6 +256,29 @@ async def test_turn_service_keeps_the_last_step_output_as_compaction_pressure() 
     await service.handle(_message_event("ping"))
 
     assert list(service._session_state.session_latest_output_tokens.values()) == [5]
+
+
+@pytest.mark.asyncio
+async def test_turn_service_ignores_accumulated_output_when_last_step_output_is_missing() -> None:
+    stub_client = StubLLMClient(
+        "hello",
+        total_tokens=120,
+        input_tokens=70,
+        output_tokens=35,
+        latest_output_tokens=None,
+    )
+    service = build_llm_turn_service(
+        memory=cast(Any, StubMemory()),
+        llm_client=cast(LLMClient, stub_client),
+        max_history_tokens=100,
+        tool_use_guardrail=NoopToolUseGuardrail(),
+    )
+
+    response = await service.handle(_message_event("ping"))
+
+    assert response.metadata["token_trace"]["compaction_performed"] is False
+    assert response.metadata["token_trace"]["session_total_tokens"] == 70
+    assert response.metadata["token_trace"]["turn_total_tokens"] == 120
 
 
 @pytest.mark.asyncio

@@ -198,8 +198,7 @@ class LLMTurnService:
                     reasoning_output_tokens=getattr(generation, "reasoning_output_tokens", None),
                     provider_tool_calls=getattr(generation, "provider_tool_calls", None),
                 )
-                if generation.latest_output_tokens is not None:
-                    self._session_state.set_latest_output_tokens(session_id, generation.latest_output_tokens)
+                self._session_state.set_latest_output_tokens(session_id, generation.latest_output_tokens)
                 turn_total_tokens += self._session_state.track_tokens(
                     session_id,
                     getattr(generation, "total_tokens", None),
