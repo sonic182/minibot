@@ -88,7 +88,8 @@ Main-agent tool policy is set under ``[orchestration.main_agent]``:
 
 ``shared_mcp_servers`` lists MCP servers that stay visible to the main agent in both exclusive modes,
 even when a specialist also claims them — for example a read-only web search server that both the
-main agent and a research specialist use:
+main agent and a research specialist use. The ``[orchestration.main_agent]`` ``tools_allow`` and
+``tools_deny`` policy still applies first, so ``tools_deny = ["mcp*"]`` hides a shared server too:
 
 .. code-block:: toml
 

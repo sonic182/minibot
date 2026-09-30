@@ -124,7 +124,7 @@ class TaskManager:
         lease_timeout_seconds: int | None = None,
         secrets: Mapping[str, str] | None = None,
         budget_for: Callable[[str | None, Mapping[str, Any]], Awaitable[DelegationBudget]] | None = None,
-        approval_timeout_seconds: float = 300,
+        approval_timeout_seconds: float = 90,
     ) -> None:
         self._event_bus = event_bus
         self._approval_timeout_seconds = approval_timeout_seconds
@@ -465,7 +465,7 @@ class TaskManager:
                             arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else {},
                             channel=event.get("channel") if isinstance(event.get("channel"), str) else None,
                             chat_id=event.get("chat_id") if isinstance(event.get("chat_id"), int) else None,
-                            timeout_seconds=min(self._approval_timeout_seconds, max(remaining, 0)),
+                            timeout_seconds=min(self._approval_timeout_seconds, max(deadline - loop.time(), 0)),
                         )
                     except Exception:
                         # A stopped bus must deny the call, not escape _reader and skip its cleanup.

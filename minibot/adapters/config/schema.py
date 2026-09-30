@@ -806,17 +806,21 @@ class ToolApprovalConfig(BaseModel):
     - ``require_approval`` — fnmatch patterns of tool names that need a Telegram approval before
       running (default: empty, feature off). MCP tools match their exposed name, e.g.
       ``mcp_mail__smtp_send_message``, also when the server runs in ``lazy`` mode.
-    - ``timeout_seconds`` — how long to wait for an answer before denying (default: ``300``). The
+    - ``timeout_seconds`` — how long to wait for an answer before denying (default: ``90``). The
       wait counts against the surrounding deadline, ``runtime.agent_timeout_seconds`` for the main
       agent and the task timeout for a delegated one, so keep this below both. While the main agent
       waits, other chats' turns queue behind it.
 
     Calls are denied when nobody answers, when the turn has no Telegram chat, or when the user taps
-    Deny; the model then receives a ``tool_approval:denied`` error.
+    Deny; the model then receives a ``tool_approval:denied`` error. Patterns match the canonical tool
+    name (``http_request``, not an alias), and unknown keys are rejected so a typo cannot silently
+    turn the gate off.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     require_approval: list[str] = Field(default_factory=list)
-    timeout_seconds: PositiveInt = 300
+    timeout_seconds: PositiveInt = 90
 
 
 class ToolsConfig(BaseModel):

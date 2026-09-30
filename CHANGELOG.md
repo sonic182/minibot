@@ -11,11 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Telegram approval for dangerous tool calls.** Tools matching `[tools.approval] require_approval`
   (fnmatch patterns over exposed tool names) wait for an approve/deny answer on Telegram before running,
-  for the main agent and for delegated agents. Deny, timeout (`timeout_seconds`, default 300),
-  cancellation or a turn outside Telegram fails the call with the error code `tool_approval:denied`.
-  Lazy-mode MCP `call_tool` is gated by the remote tool name. The prompt shows one line per argument,
-  with sensitive keys redacted and control and format characters escaped, so a value cannot fake extra
-  arguments. Empty `require_approval` (the default) disables it.
+  for the main agent and for delegated agents. Deny, timeout (`timeout_seconds`, default 90) or a turn
+  outside Telegram fails the call with the error code `tool_approval:denied`, and so does a prompt that
+  cannot be delivered; cancelling the turn or task aborts it instead. Lazy-mode MCP `call_tool` is gated
+  by the remote tool name. The prompt shows one line per argument, with sensitive keys redacted and
+  control and format characters escaped (in the tool name too), so a value cannot fake extra arguments.
+  Empty `require_approval` (the default) disables it, and unknown keys under `[tools.approval]` are
+  rejected so a typo cannot turn it off. The buttons and outcomes are in English.
 - **`[orchestration] shared_mcp_servers`.** MCP servers listed there stay visible to the main agent under
   `exclusive` and `exclusive_mcp` ownership even when a specialist claims them, so a read-only server such
   as web search can be used by both.
@@ -30,7 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parse and format repair resent the whole reply as plain text. The source is now split before conversion,
   and once the first chunk is delivered nothing already on screen is resent: a later chunk that fails on
   markup gets one plain-text try for the rest, and any other failure drops the rest.
-
 - **`memory` create with an empty `title` or `data` comes back with an actionable error.** A `null`, blank or
   non-string `title` or `data` raised a bare `ValueError` with no error code, so the model retried the same
   call. It now returns `memory:invalid_arguments:title_required` or `data_required` with a message saying

@@ -120,6 +120,8 @@ async def _worker_async(pipe: Any) -> None:
             while line := await rx.readline():
                 with contextlib.suppress(json.JSONDecodeError):
                     event = json.loads(line)
+                    if not isinstance(event, dict):
+                        continue
                     future = pending_approvals.get(str(event.get("approval_id")))
                     if event.get("type") == "approval_result" and future is not None and not future.done():
                         future.set_result(event.get("approved") is True)

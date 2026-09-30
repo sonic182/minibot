@@ -186,19 +186,26 @@ class TelegramService:
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="✅ Aprobar", callback_data=f"{_APPROVAL_CALLBACK_PREFIX}:{event.approval_id}:y"
+                        text="✅ Approve", callback_data=f"{_APPROVAL_CALLBACK_PREFIX}:{event.approval_id}:y"
                     ),
                     InlineKeyboardButton(
-                        text="❌ Denegar", callback_data=f"{_APPROVAL_CALLBACK_PREFIX}:{event.approval_id}:n"
+                        text="❌ Deny", callback_data=f"{_APPROVAL_CALLBACK_PREFIX}:{event.approval_id}:n"
                     ),
                 ]
             ]
         )
-        sent = await self._bot.send_message(
-            chat_id=event.chat_id,
-            text=f"Approval required: {event.tool_name}\n\n{event.detail}",
-            reply_markup=keyboard,
-        )
+        try:
+            sent = await self._bot.send_message(
+                chat_id=event.chat_id,
+                text=f"Approval required: {event.tool_name}\n\n{event.detail}",
+                reply_markup=keyboard,
+            )
+        except Exception:
+            # Nobody can answer a prompt that never arrived: deny now instead of making the requester
+            # wait out the whole timeout.
+            self._logger.exception("failed to send tool approval prompt", extra={"chat_id": event.chat_id})
+            await self._event_bus.publish(ToolApprovalResolvedEvent(approval_id=event.approval_id, approved=False))
+            return
         self._pending_approvals[event.approval_id] = (event.chat_id, sent.message_id)
 
     async def _handle_approval_callback(self, callback: CallbackQuery) -> None:
@@ -218,19 +225,19 @@ class TelegramService:
             return
         pending = self._pending_approvals.pop(approval_id, None)
         if pending is None:
-            await callback.answer("Expirado")
+            await callback.answer("Expired")
             return
         approved = answer == "y"
         await self._event_bus.publish(
             ToolApprovalResolvedEvent(approval_id=approval_id, approved=approved, user_id=callback.from_user.id)
         )
         await callback.answer()
-        await self._close_approval_prompt(*pending, "✅ Aprobado" if approved else "❌ Denegado")
+        await self._close_approval_prompt(*pending, "✅ Approved" if approved else "❌ Denied")
 
     async def _expire_approval(self, approval_id: str) -> None:
         pending = self._pending_approvals.pop(approval_id, None)
         if pending is not None:
-            await self._close_approval_prompt(*pending, "⌛ Sin respuesta: denegado")
+            await self._close_approval_prompt(*pending, "⌛ No answer: denied")
 
     async def _close_approval_prompt(self, chat_id: int, message_id: int, outcome: str) -> None:
         with contextlib.suppress(Exception):

@@ -11,7 +11,12 @@ from minibot.adapters.config.schema import TelegramChannelConfig
 from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelResponse, IncomingFileRef
-from minibot.core.events import MessageEvent, OutboundEvent, ToolApprovalResolvedEvent
+from minibot.core.events import (
+    MessageEvent,
+    OutboundEvent,
+    ToolApprovalRequestedEvent,
+    ToolApprovalResolvedEvent,
+)
 
 
 @dataclass
@@ -209,4 +214,24 @@ async def test_approval_callback_for_expired_request_is_not_published() -> None:
     await service._handle_approval_callback(callback)  # type: ignore[arg-type]
 
     assert not event_bus.events
-    callback.answer.assert_awaited_once_with("Expirado")
+    callback.answer.assert_awaited_once_with("Expired")
+
+
+@pytest.mark.asyncio
+async def test_approval_prompt_that_fails_to_send_is_denied_at_once() -> None:
+    service, bot, event_bus, _ = _service(TelegramChannelConfig(bot_token="token"))
+
+    async def _fail(**_kwargs: Any) -> None:
+        raise RuntimeError("message is too long")
+
+    bot.send_message = _fail
+    service._pending_approvals = {}
+
+    await service._send_approval_request(
+        ToolApprovalRequestedEvent(approval_id="a1", tool_name="t", channel="telegram", chat_id=1, detail="d")
+    )
+
+    [event] = event_bus.events
+    assert isinstance(event, ToolApprovalResolvedEvent)
+    assert (event.approval_id, event.approved, event.user_id) == ("a1", False, None)
+    assert "a1" not in service._pending_approvals

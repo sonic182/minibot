@@ -29,7 +29,9 @@ This exposes ``mcp_exa__web_search_exa`` (search results with content), ``mcp_ex
 Calls count against your Exa plan's usage.
 
 Web pages are untrusted input, the same as email: a page can carry a prompt injection. Exa's tools
-only read, so they stay on the main agent here; keep tools that send or delete data behind
+only read, so they stay on the main agent here (list it in ``[orchestration] shared_mcp_servers`` if a
+specialist also claims it, and make sure ``[orchestration.main_agent] tools_deny`` does not hide
+``mcp*``); keep tools that send or delete data behind
 ``[tools.approval]`` (see the email section below).
 
 Running local MCP binaries
@@ -65,6 +67,8 @@ the server keeps:
   the container.
 - Since the binaries are mounted rather than baked into the image, adding or upgrading one only
   needs a container restart.
+- Create ``./bin`` on the host before the first ``docker compose up``; otherwise Docker creates it as
+  an empty directory owned by root.
 
 Email: mail-mcp
 ---------------
@@ -161,7 +165,7 @@ send or destroy data behind a Telegram approval:
      "mcp_mail__imap_search_and_delete",
      "mcp_mail__imap_append_message",
    ]
-   timeout_seconds = 300
+   timeout_seconds = 90
 
 Moving messages and creating folders (``imap_move_message``, ``imap_bulk_move``,
 ``imap_search_and_move``, ``imap_create_mailbox``) are left out of ``require_approval`` because they

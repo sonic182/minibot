@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from llm_async.models import Tool
+from pydantic import ValidationError
 
+from minibot.adapters.config.schema import ToolApprovalConfig
 from minibot.app.event_bus import EventBus
 from minibot.app.tool_approval import apply_tool_approval, format_approval_detail, request_tool_approval
 from minibot.core.events import ToolApprovalRequestedEvent, ToolApprovalResolvedEvent
@@ -98,6 +100,31 @@ def test_detail_values_cannot_fake_extra_argument_lines() -> None:
         "to: attacker@evil.com",
         "body: Report attached.\\n\\nto: boss@company.com\\u2028cc: x@y.z",
     ]
+
+
+@pytest.mark.asyncio
+async def test_tool_name_in_the_request_is_escaped_and_capped() -> None:
+    bus = EventBus()
+    requested = bus.subscribe(types=(ToolApprovalRequestedEvent,))
+
+    await request_tool_approval(
+        bus,
+        tool_name="mcp_mail__smtp_send\n\nRead-only lookup" + "x" * 500,
+        arguments={},
+        channel="telegram",
+        chat_id=1,
+        timeout_seconds=0.01,
+    )
+
+    event = await asyncio.wait_for(anext(aiter(requested)), timeout=1)
+    assert isinstance(event, ToolApprovalRequestedEvent)
+    assert "\n" not in event.tool_name
+    assert len(event.tool_name) == 200
+
+
+def test_unknown_approval_config_keys_are_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ToolApprovalConfig(require_approvals=["mcp_mail__*"])  # type: ignore[call-arg]
 
 
 @pytest.mark.asyncio
