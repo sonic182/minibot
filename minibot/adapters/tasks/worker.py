@@ -382,8 +382,10 @@ async def _build_worker_mcp_bindings(
 
 async def _close_mcp_clients(clients: Sequence[MCPClient]) -> None:
     for client in clients:
-        with contextlib.suppress(Exception):
+        try:
             await client.aclose()
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("failed to close mcp client", exc_info=True)
 
 
 def _build_worker_spec(

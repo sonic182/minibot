@@ -30,6 +30,7 @@ from minibot.shared.utils import validate_attachments
 _MAX_RETRYABLE_ATTEMPTS = 2
 _SUPERVISOR_GRACE_SECONDS = 10
 _CONTINUATION_MAX_CHARS = 12_000
+_CONTINUATION_MAX_ATTACHMENTS = 50
 _TASK_OUTPUT_MARKER = re.compile(r"<(/?task_output)", re.IGNORECASE)
 
 
@@ -546,10 +547,11 @@ class TaskManager:
         attachments: list[dict[str, Any]] | None = None,
     ) -> None:
         chat_id = payload.get("chat_id")
+        task_id = str(payload.get("task_id"))
         if not isinstance(chat_id, int):
+            self._logger.warning("dropped continuation result: task has no chat", extra={"task_id": task_id})
             return
         user_id = payload.get("user_id")
-        task_id = str(payload.get("task_id"))
         await self._event_bus.publish(
             MessageEvent(
                 message=ChannelMessage(
@@ -714,7 +716,11 @@ def _continuation_text(
         excerpt = (
             f"{excerpt[:_CONTINUATION_MAX_CHARS]}\n...[truncated {omitted} chars; call get_task for the full result]"
         )
-    excerpt = _TASK_OUTPUT_MARKER.sub(r"&lt;\1", _with_attachment_list(excerpt, attachments))
+    listed = attachments[:_CONTINUATION_MAX_ATTACHMENTS]
+    excerpt = _with_attachment_list(excerpt, listed)
+    if len(attachments) > len(listed):
+        excerpt = f"{excerpt}\n- ...and {len(attachments) - len(listed)} more; call get_task for the full list"
+    excerpt = _TASK_OUTPUT_MARKER.sub(r"&lt;\1", excerpt)
     label = f"Background task {task_id}"
     if isinstance(agent_name, str) and agent_name:
         label = f"{label} (agent {agent_name})"

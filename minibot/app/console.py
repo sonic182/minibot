@@ -174,9 +174,8 @@ async def _wait_for_response_or_warn(
         response = (await console_service.wait_for_response(timeout_seconds)).response
         if not response.metadata.get("task_handoff"):
             return True
-        # A delegated turn only acknowledges; its answer is a later `task_worker` message, or the
-        # reply of a continuation turn. Returning here would shut the extensions down and cancel the
-        # worker that is still running.
+        # A delegated turn only acknowledges; its answer is a later `task_worker` message. Returning
+        # here would shut the extensions down and cancel the worker that is still running.
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:

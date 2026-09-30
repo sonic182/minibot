@@ -320,7 +320,7 @@ async def test_reader_success_with_continuation_hands_the_result_back_to_the_orc
 
 
 @pytest.mark.asyncio
-async def test_reader_continuation_keeps_the_artifact_list_when_the_text_is_truncated() -> None:
+async def test_reader_continuation_keeps_a_capped_artifact_list_when_the_text_is_truncated() -> None:
     bus = EventBus()
     sub = bus.subscribe()
     manager = _make_manager(bus)
@@ -328,7 +328,7 @@ async def test_reader_continuation_keeps_the_artifact_list_when_the_text_is_trun
         {
             "task_id": "t1",
             "text": "x" * 13_000,
-            "attachments": [{"path": "browser/shot.png", "type": "image/png"}],
+            "attachments": [{"path": f"browser/shot{index}.png", "type": "image/png"} for index in range(60)],
         }
     )
 
@@ -339,7 +339,10 @@ async def test_reader_continuation_keeps_the_artifact_list_when_the_text_is_trun
     assert isinstance(message_event, MessageEvent)
     text = message_event.message.text
     assert "truncated" in text
-    assert "browser/shot.png" in text
+    assert "browser/shot0.png" in text
+    assert "browser/shot49.png" in text
+    assert "browser/shot50.png" not in text
+    assert "...and 10 more" in text
     assert text.count("</task_output>") == 1
     await sub.close()
 
