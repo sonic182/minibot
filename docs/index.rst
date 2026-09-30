@@ -74,6 +74,7 @@ Why self-host
    agents
    prompts
    mcp
+   mcp_servers
 
 .. toctree::
    :maxdepth: 2

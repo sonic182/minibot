@@ -465,6 +465,8 @@ class OrchestrationConfig(BaseModel):
     - ``directory`` — path to agent definition files (default: ``"./agents"``).
     - ``tool_ownership_mode`` — how tools are shared between agents:
       ``"shared"`` (default), ``"exclusive"``, or ``"exclusive_mcp"``.
+    - ``shared_mcp_servers`` — MCP server names whose tools stay visible to the main agent even when a
+      specialist claims them under an exclusive ownership mode (default: empty).
     - ``main_tool_use_guardrail`` — optional guardrail before tool execution:
       ``"disabled"`` (default) or ``"llm_classifier"``.
     - ``main_agent`` — tool allow/deny policy for the main agent (``[orchestration.main_agent]``).
@@ -472,6 +474,7 @@ class OrchestrationConfig(BaseModel):
 
     directory: str = "./agents"
     tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
+    shared_mcp_servers: list[str] = Field(default_factory=list)
     main_tool_use_guardrail: Literal["disabled", "llm_classifier"] = "disabled"
     main_agent: MainAgentConfig = MainAgentConfig()
 

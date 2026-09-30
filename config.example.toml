@@ -165,6 +165,8 @@ directory = "./agents"
 # - "exclusive_mcp": only specialist-claimed MCP tools are hidden from main; built-in tools stay shared.
 #   Recommended when browser MCP tools should be specialist-only but main should keep filesystem/memory/etc.
 tool_ownership_mode = "exclusive_mcp"
+# MCP servers kept visible to main even when a specialist claims them (exclusive modes only).
+shared_mcp_servers = []
 # Tool-use guardrail for the main agent.
 # - "disabled": no guardrail — the handler trusts the model's output directly (default, simpler).
 # - "llm_classifier": before returning, runs a secondary LLM call to decide whether the request

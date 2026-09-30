@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Telegram approval for dangerous tool calls.** Tools matching `[tools.approval] require_approval`
+  (fnmatch patterns over exposed tool names) wait for an approve/deny answer on Telegram before running,
+  for the main agent and for delegated agents. Deny, timeout (`timeout_seconds`, default 300),
+  cancellation or a turn outside Telegram fails the call with the error code `tool_approval:denied`.
+  Lazy-mode MCP `call_tool` is gated by the remote tool name. The prompt shows one line per argument,
+  with sensitive keys redacted and control and format characters escaped, so a value cannot fake extra
+  arguments. Empty `require_approval` (the default) disables it.
+- **`[orchestration] shared_mcp_servers`.** MCP servers listed there stay visible to the main agent under
+  `exclusive` and `exclusive_mcp` ownership even when a specialist claims them, so a read-only server such
+  as web search can be used by both.
+- **Suggested MCP servers docs.** A new page covers running local MCP binaries (including a read-only
+  `./bin` mount under Docker) and example setups for Exa web search, mail-mcp email with a dedicated agent
+  and approvals, and graphmem as an alternative or complement to `memory` and `graph`.
+
 ### Fixed
+
+- **Long markdown replies on Telegram are no longer delivered twice.** The markdown was converted before
+  being split into 4000-character chunks, which could cut through an entity; the later chunk failed to
+  parse and format repair resent the whole reply as plain text. The source is now split before conversion,
+  and once the first chunk is delivered nothing already on screen is resent: a later chunk that fails on
+  markup gets one plain-text try for the rest, and any other failure drops the rest.
 
 - **`memory` create with an empty `title` or `data` comes back with an actionable error.** A `null`, blank or
   non-string `title` or `data` raised a bare `ValueError` with no error code, so the model retried the same

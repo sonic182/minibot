@@ -14,6 +14,9 @@ It is not a replacement for the :doc:`tools` ``memory`` tool. Store notes, dates
 facts about one entity in memory. Store only relationships with the graph. The model receives
 instructions to keep the same fact out of both stores.
 
+For memories and relationships in one store with semantic recall, see the graphmem MCP server in
+:doc:`mcp_servers`.
+
 Enable it
 ---------
 

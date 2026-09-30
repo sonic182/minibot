@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from minibot.adapters.config.schema import MainAgentConfig, OrchestrationConfig
 from minibot.app.agent_policies import filter_tools_for_agent
-from minibot.app.mcp_tool_name import is_mcp_tool_name
+from minibot.app.mcp_tool_name import extract_mcp_server, is_mcp_tool_name
 from minibot.app.tool_policy_utils import apply_allow_deny, normalize_patterns
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
@@ -27,11 +27,14 @@ def main_agent_tool_view(
     if orchestration_config.tool_ownership_mode not in {"exclusive", "exclusive_mcp"}:
         return MainAgentToolView(tools=main_agent_tools, hidden_tool_names=[])
 
+    shared_servers = set(orchestration_config.shared_mcp_servers)
     reserved_tool_names: set[str] = set()
     for spec in agent_specs:
         for binding in filter_tools_for_agent(main_agent_tools, spec):
             tool_name = binding.tool.name
             if orchestration_config.tool_ownership_mode == "exclusive_mcp" and not is_mcp_tool_name(tool_name):
+                continue
+            if extract_mcp_server(tool_name) in shared_servers:
                 continue
             reserved_tool_names.add(tool_name)
 

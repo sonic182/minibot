@@ -32,6 +32,7 @@ services:
     volumes:
       - ./docker-requirements.txt:/app/docker-requirements.txt:ro
       - ./config.toml:/app/config.toml:ro
+      - ./bin:/app/bin:ro
       - ./logs:/app/logs
       - ./data:/app/data
       - ./minibot:/app/minibot

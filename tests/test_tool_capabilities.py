@@ -66,6 +66,23 @@ def test_main_agent_tool_view_exclusive_mcp_hides_only_agent_owned_mcp_tools() -
     assert view.hidden_tool_names == ["mcp_playwright-cli__browser_navigate"]
 
 
+def test_main_agent_tool_view_keeps_shared_mcp_servers_visible() -> None:
+    tools = [_binding("mcp_exa__web_search_exa"), _binding("mcp_mail__smtp_send_message")]
+    spec = AgentSpec(
+        name="worker",
+        description="worker",
+        system_prompt="worker",
+        source_path=Path("worker.md"),
+        mcp_servers=["exa", "mail"],
+    )
+    config = OrchestrationConfig(tool_ownership_mode="exclusive_mcp", shared_mcp_servers=["exa"])
+
+    view = main_agent_tool_view(tools=tools, orchestration_config=config, agent_specs=[spec])
+
+    assert [binding.tool.name for binding in view.tools] == ["mcp_exa__web_search_exa"]
+    assert view.hidden_tool_names == ["mcp_mail__smtp_send_message"]
+
+
 def test_summarize_agent_capabilities_includes_tool_hints() -> None:
     spec = AgentSpec(
         name="browser",
