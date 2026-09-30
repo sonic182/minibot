@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `./bin` mount under Docker) and example setups for Exa web search, mail-mcp email with a dedicated agent
   and approvals, and graphmem as an alternative or complement to `memory` and `graph`.
 
+## [0.23.1] - 2026-09-29
+
 ### Fixed
 
 - **Long markdown replies on Telegram are no longer delivered twice.** The markdown was converted before
@@ -1114,7 +1116,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.23.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.23.1...HEAD
+[0.23.1]: https://github.com/sonic182/minibot/compare/0.23.0..0.23.1
 [0.23.0]: https://github.com/sonic182/minibot/compare/0.22.1..0.23.0
 [0.22.1]: https://github.com/sonic182/minibot/compare/0.22.0..0.22.1
 [0.22.0]: https://github.com/sonic182/minibot/compare/0.21.0..0.22.0
