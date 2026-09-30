@@ -40,7 +40,7 @@ from minibot.llm.tools.code_read import CodeReadTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
-from minibot.llm.tools.mcp_bridge import build_mcp_bindings
+from minibot.llm.tools.mcp_bridge import build_mcp_bindings_async
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.skill_loader import SkillLoaderTool
@@ -178,8 +178,11 @@ async def run_agent_loop(
             extension_tool_names=[binding.tool.name for binding in extensions.tools],
         )
         llm_client = llm_factory.create_for_agent(spec)
+        mcp_bindings = await _build_worker_mcp_bindings(settings=settings, spec=spec)
         tools = apply_tool_approval(
-            _build_worker_tools(settings=settings, spec=spec, extension_tools=extensions.tools),
+            _build_worker_tools(
+                settings=settings, spec=spec, extension_tools=extensions.tools, mcp_bindings=mcp_bindings
+            ),
             patterns=settings.tools.approval.require_approval,
             approve=approval_callback or _deny_approval,
         )
@@ -284,7 +287,11 @@ async def _deny_approval(tool_name: str, arguments: dict[str, Any], context: Too
 
 
 def _build_worker_tools(
-    *, settings: Settings, spec: AgentSpec, extension_tools: Sequence[ToolBinding] = ()
+    *,
+    settings: Settings,
+    spec: AgentSpec,
+    extension_tools: Sequence[ToolBinding] = (),
+    mcp_bindings: Sequence[ToolBinding] = (),
 ) -> list[ToolBinding]:
     bindings: list[ToolBinding] = []
     managed_storage = _build_managed_storage(settings)
@@ -324,32 +331,7 @@ def _build_worker_tools(
     if settings.tools.skills.enabled:
         registry = SkillRegistry.from_config(settings.tools.skills)
         bindings.extend(SkillLoaderTool(registry, managed_storage, settings.tools.bash.enabled).bindings())
-    if settings.tools.mcp.enabled and spec.mcp_servers:
-        for server in settings.tools.mcp.servers:
-            if server.name not in spec.mcp_servers:
-                continue
-            client = MCPClient(
-                server_name=server.name,
-                transport=server.transport,
-                timeout_seconds=settings.tools.mcp.timeout_seconds,
-                command=server.command,
-                args=server.args,
-                env=server.env or None,
-                cwd=server.cwd,
-                url=server.url,
-                headers=server.headers,
-            )
-            bindings.extend(
-                build_mcp_bindings(
-                    mode=server.mode,
-                    server_name=server.name,
-                    client=client,
-                    name_prefix=settings.tools.mcp.name_prefix,
-                    enabled_tools=server.enabled_tools,
-                    disabled_tools=server.disabled_tools,
-                    catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
-                )
-            )
+    bindings.extend(mcp_bindings)
 
     bindings.extend(extension_tools)
     scoped = strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))
@@ -358,6 +340,38 @@ def _build_worker_tools(
         storage=managed_storage,
         config=settings.tools.tool_output_spill,
     )
+
+
+async def _build_worker_mcp_bindings(*, settings: Settings, spec: AgentSpec) -> list[ToolBinding]:
+    bindings: list[ToolBinding] = []
+    if not settings.tools.mcp.enabled or not spec.mcp_servers:
+        return bindings
+    for server in settings.tools.mcp.servers:
+        if server.name not in spec.mcp_servers:
+            continue
+        client = MCPClient(
+            server_name=server.name,
+            transport=server.transport,
+            timeout_seconds=settings.tools.mcp.timeout_seconds,
+            command=server.command,
+            args=server.args,
+            env=server.env or None,
+            cwd=server.cwd,
+            url=server.url,
+            headers=server.headers,
+        )
+        bindings.extend(
+            await build_mcp_bindings_async(
+                mode=server.mode,
+                server_name=server.name,
+                client=client,
+                name_prefix=settings.tools.mcp.name_prefix,
+                enabled_tools=server.enabled_tools,
+                disabled_tools=server.disabled_tools,
+                catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
+            )
+        )
+    return bindings
 
 
 def _build_worker_spec(

@@ -66,7 +66,12 @@ class MCPToolBridge:
         self._logger = logging.getLogger("minibot.mcp.bridge")
 
     def build_bindings(self) -> list[ToolBinding]:
-        tools = self._client.list_tools_blocking()
+        return self._bindings_for(self._client.list_tools_blocking())
+
+    async def abuild_bindings(self) -> list[ToolBinding]:
+        return self._bindings_for(await self._client.list_tools())
+
+    def _bindings_for(self, tools: list[MCPToolDefinition]) -> list[ToolBinding]:
         bindings: list[ToolBinding] = []
         for tool in tools:
             if not self._is_allowed(tool.name):
@@ -151,7 +156,12 @@ class MCPLazyToolBridge:
         self._logger = logging.getLogger("minibot.mcp.lazy_bridge")
 
     def build_bindings(self) -> list[ToolBinding]:
-        metadata = self._load_server_metadata()
+        return self._bindings_for(self._load_server_metadata())
+
+    async def abuild_bindings(self) -> list[ToolBinding]:
+        return self._bindings_for(await self._aload_server_metadata())
+
+    def _bindings_for(self, metadata: MCPServerMetadata | None) -> list[ToolBinding]:
         summary = _build_server_summary(self._server_name, metadata)
         return [
             ToolBinding(
@@ -192,12 +202,22 @@ class MCPLazyToolBridge:
         try:
             return self._client.get_server_metadata_blocking()
         except Exception:
-            self._logger.warning(
-                "failed to load mcp server metadata; using configured fallback",
-                exc_info=True,
-                extra={"server": self._server_name},
-            )
+            self._log_metadata_failure()
             return None
+
+    async def _aload_server_metadata(self) -> MCPServerMetadata | None:
+        try:
+            return await self._client.get_server_metadata()
+        except Exception:
+            self._log_metadata_failure()
+            return None
+
+    def _log_metadata_failure(self) -> None:
+        self._logger.warning(
+            "failed to load mcp server metadata; using configured fallback",
+            exc_info=True,
+            extra={"server": self._server_name},
+        )
 
     async def _handle_list_tools(self, payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         del payload
@@ -322,6 +342,48 @@ def build_mcp_bindings(
     disabled_tools: list[str],
     catalog_cache_ttl_seconds: int,
 ) -> list[ToolBinding]:
+    return _make_bridge(
+        mode=mode,
+        server_name=server_name,
+        client=client,
+        name_prefix=name_prefix,
+        enabled_tools=enabled_tools,
+        disabled_tools=disabled_tools,
+        catalog_cache_ttl_seconds=catalog_cache_ttl_seconds,
+    ).build_bindings()
+
+
+async def build_mcp_bindings_async(
+    *,
+    mode: str,
+    server_name: str,
+    client: MCPClient,
+    name_prefix: str,
+    enabled_tools: list[str],
+    disabled_tools: list[str],
+    catalog_cache_ttl_seconds: int,
+) -> list[ToolBinding]:
+    return await _make_bridge(
+        mode=mode,
+        server_name=server_name,
+        client=client,
+        name_prefix=name_prefix,
+        enabled_tools=enabled_tools,
+        disabled_tools=disabled_tools,
+        catalog_cache_ttl_seconds=catalog_cache_ttl_seconds,
+    ).abuild_bindings()
+
+
+def _make_bridge(
+    *,
+    mode: str,
+    server_name: str,
+    client: MCPClient,
+    name_prefix: str,
+    enabled_tools: list[str],
+    disabled_tools: list[str],
+    catalog_cache_ttl_seconds: int,
+) -> MCPToolBridge | MCPLazyToolBridge:
     if mode == "lazy":
         return MCPLazyToolBridge(
             server_name=server_name,
@@ -330,7 +392,7 @@ def build_mcp_bindings(
             enabled_tools=enabled_tools,
             disabled_tools=disabled_tools,
             catalog_cache_ttl_seconds=catalog_cache_ttl_seconds,
-        ).build_bindings()
+        )
     if mode == "bridge":
         return MCPToolBridge(
             server_name=server_name,
@@ -338,7 +400,7 @@ def build_mcp_bindings(
             name_prefix=name_prefix,
             enabled_tools=enabled_tools,
             disabled_tools=disabled_tools,
-        ).build_bindings()
+        )
     raise ValueError(f"unsupported mcp mode: {mode}")
 
 

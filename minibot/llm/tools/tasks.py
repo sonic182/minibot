@@ -281,13 +281,19 @@ def _resolve_limits(
 def _resolve_continuation_depth(payload: dict[str, Any], context: ToolContext) -> int | None:
     continue_turn = payload.get("continue_turn")
     if continue_turn is not None and not isinstance(continue_turn, bool):
-        raise ValueError("continue_turn must be a boolean or null")
+        raise ToolInputError("continue_turn must be a boolean or null", error_code="invalid_tool_arguments")
     if not continue_turn:
         return None
     if context.task_chain_depth >= MAX_TASK_CONTINUATIONS:
         raise ToolInputError(
             f"This turn already continues from {context.task_chain_depth} chained tasks, which is the limit. "
             "Answer the user now, or spawn the task with continue_turn false.",
+            error_code="task:continuation_limit",
+        )
+    if context.claim_task_continuation is not None and not context.claim_task_continuation():
+        raise ToolInputError(
+            f"This turn already started {MAX_TASK_CONTINUATIONS} tasks with continue_turn, which is the limit. "
+            "Wait for their results, or spawn this task with continue_turn false.",
             error_code="task:continuation_limit",
         )
     return context.task_chain_depth + 1

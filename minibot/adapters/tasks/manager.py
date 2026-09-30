@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -29,6 +30,7 @@ from minibot.shared.utils import validate_attachments
 _MAX_RETRYABLE_ATTEMPTS = 2
 _SUPERVISOR_GRACE_SECONDS = 10
 _CONTINUATION_MAX_CHARS = 12_000
+_TASK_OUTPUT_MARKER = re.compile(r"<(/?task_output)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -692,11 +694,11 @@ def _continues_turn(payload: dict[str, Any]) -> bool:
 
 
 def _continuation_text(*, task_id: str, agent_name: Any, status: TaskStatus, body: str) -> str:
-    excerpt = body
-    if len(body) > _CONTINUATION_MAX_CHARS:
-        omitted = len(body) - _CONTINUATION_MAX_CHARS
+    excerpt = _TASK_OUTPUT_MARKER.sub(r"&lt;\1", body)
+    if len(excerpt) > _CONTINUATION_MAX_CHARS:
+        omitted = len(excerpt) - _CONTINUATION_MAX_CHARS
         excerpt = (
-            f"{body[:_CONTINUATION_MAX_CHARS]}\n...[truncated {omitted} chars; call get_task for the full result]"
+            f"{excerpt[:_CONTINUATION_MAX_CHARS]}\n...[truncated {omitted} chars; call get_task for the full result]"
         )
     label = f"Background task {task_id}"
     if isinstance(agent_name, str) and agent_name:

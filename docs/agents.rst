@@ -25,9 +25,10 @@ Pass ``continue_turn: true`` when the main agent needs the result to keep workin
 step that depends on it or a comparison: the result then comes back as a new turn, saved to the
 conversation history, and the main agent answers from it instead of the raw worker text. Failures
 and timeouts come back the same way, so the agent can explain or retry. Worker output reaches the
-model marked as untrusted data, and a chain of continuing tasks is limited to three. Use
-``get_task`` to retrieve a result, ``list_tasks`` to see what is running, and ``cancel_task`` to
-stop one.
+model marked as untrusted data. One turn can start at most three continuing tasks, and a chain of
+continuing tasks is limited to three levels. A rate-limit retry notice still goes straight to the
+user, and a continuing task that is cancelled does not report back. Use ``get_task`` to retrieve a
+result, ``list_tasks`` to see what is running, and ``cancel_task`` to stop one.
 
 Turning ``[tasks]`` off therefore turns multi-agent orchestration off: the specialist roster is
 dropped from the system prompt along with the tool that could act on it.

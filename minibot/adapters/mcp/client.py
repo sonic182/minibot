@@ -360,6 +360,27 @@ class MCPClient:
     def call_tool_blocking(self, tool_name: str, payload: dict[str, Any]) -> MCPToolCallResult:
         return self._blocking_runner.run(lambda: self.call_tool(tool_name, payload))
 
+    async def aclose(self) -> None:
+        process = self._stdio_process
+        drain_task = self._stderr_task
+        self._stdio_process = None
+        self._stderr_task = None
+        self._stdio_read_buffer.clear()
+        if process is None:
+            return
+        if process.returncode is None:
+            with suppress(ProcessLookupError):
+                process.kill()
+        if self._stdio_loop is not asyncio.get_running_loop():
+            return
+        await process.wait()
+        if drain_task is not None:
+            with suppress(Exception):
+                await drain_task
+
+    def close_blocking(self) -> None:
+        self._blocking_runner.run(self.aclose)
+
     def _store_server_metadata(self, response: dict[str, Any]) -> None:
         result = response.get("result", {})
         server_info = result.get("serverInfo", {})

@@ -20,6 +20,7 @@ class ToolContext:
     turn_id: str | None = None
     task_handoff_callback: Callable[[str], Awaitable[None]] | None = None
     task_chain_depth: int = 0
+    claim_task_continuation: Callable[[], bool] | None = None
 
 
 ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[ToolResult | Any]]

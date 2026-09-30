@@ -22,6 +22,7 @@ from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.channels import ChannelMessage, ChannelResponse
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
+from minibot.core.tasks import MAX_TASK_CONTINUATIONS
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
@@ -107,6 +108,15 @@ class LLMTurnService:
             if self._task_handoff_callback is not None:
                 await self._task_handoff_callback(turn_id)
 
+        continuations_claimed = 0
+
+        def _claim_task_continuation() -> bool:
+            nonlocal continuations_claimed
+            if continuations_claimed >= MAX_TASK_CONTINUATIONS:
+                return False
+            continuations_claimed += 1
+            return True
+
         tool_context = ToolContext(
             owner_id=owner_id,
             channel=message.channel,
@@ -115,6 +125,7 @@ class LLMTurnService:
             turn_id=event.event_id,
             task_handoff_callback=_on_task_handoff,
             task_chain_depth=_task_chain_depth(message),
+            claim_task_continuation=_claim_task_continuation,
         )
         input_message = message
         if self._audio_auto_transcription_service is not None:

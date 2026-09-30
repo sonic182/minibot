@@ -314,14 +314,32 @@ async def test_spawn_task_refuses_to_continue_past_the_chain_limit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_spawn_task_refuses_continuing_tasks_past_the_per_turn_claim() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub())
+    claims = iter([True, True, True, False])
+    context = ToolContext(channel="console", claim_task_continuation=lambda: next(claims))
+
+    for _ in range(3):
+        await bindings["spawn_task"].handler({"prompt": "fan out", "continue_turn": True}, context)
+    with pytest.raises(ToolInputError) as excinfo:
+        await bindings["spawn_task"].handler({"prompt": "one too many", "continue_turn": True}, context)
+
+    assert excinfo.value.error_code == "task:continuation_limit"
+    assert len(producer.enqueued) == 3
+
+
+@pytest.mark.asyncio
 async def test_spawn_task_rejects_a_non_boolean_continue_turn() -> None:
     bindings = _build_tools(_ProducerStub(), _TaskManagerStub())
 
-    with pytest.raises(ValueError, match="continue_turn"):
+    with pytest.raises(ToolInputError, match="continue_turn") as excinfo:
         await bindings["spawn_task"].handler(
             {"prompt": "x", "continue_turn": "yes"},
             ToolContext(channel="console"),
         )
+
+    assert excinfo.value.error_code == "invalid_tool_arguments"
 
 
 @pytest.mark.asyncio

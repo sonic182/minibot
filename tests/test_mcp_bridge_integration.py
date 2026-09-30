@@ -34,7 +34,7 @@ from minibot.adapters.mcp.client import MCPClient, MCPServerMetadata, MCPToolCal
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.base import ToolContext
-from minibot.llm.tools.mcp_bridge import MCPLazyToolBridge, MCPToolBridge
+from minibot.llm.tools.mcp_bridge import MCPLazyToolBridge, MCPToolBridge, build_mcp_bindings_async
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "mcp"
 
@@ -170,7 +170,10 @@ def test_mcp_bridge_stdio_discovery_and_call(stdio_server_args: list[str]) -> No
     assert parsed["value"] == 3
 
 
-def test_mcp_bridge_stdio_process_persists_across_calls(stdio_counter_server_args: list[str]) -> None:
+@pytest.mark.asyncio
+async def test_mcp_bridge_stdio_process_is_spawned_once_for_discovery_and_calls(
+    stdio_counter_server_args: list[str],
+) -> None:
     client = MCPClient(
         server_name="dice_cli",
         transport="stdio",
@@ -178,20 +181,25 @@ def test_mcp_bridge_stdio_process_persists_across_calls(stdio_counter_server_arg
         command=stdio_counter_server_args[0],
         args=stdio_counter_server_args[1:],
     )
-    bridge = MCPToolBridge(server_name="dice_cli", client=client)
-    bindings = {binding.tool.name: binding for binding in bridge.build_bindings()}
+    bindings = await build_mcp_bindings_async(
+        mode="bridge",
+        server_name="dice_cli",
+        client=client,
+        name_prefix="mcp",
+        enabled_tools=[],
+        disabled_tools=[],
+        catalog_cache_ttl_seconds=60,
+    )
+    counter_binding = {binding.tool.name: binding for binding in bindings}["mcp_dice_cli__counter"]
+    discovery_pid = client._stdio_process.pid
 
-    counter_binding = bindings["mcp_dice_cli__counter"]
-
-    async def call_twice():
-        first = await counter_binding.handler({}, ToolContext(owner_id="tester"))
-        second = await counter_binding.handler({}, ToolContext(owner_id="tester"))
-        return first, second
-
-    first, second = asyncio.run(call_twice())
+    first = await counter_binding.handler({}, ToolContext(owner_id="tester"))
+    second = await counter_binding.handler({}, ToolContext(owner_id="tester"))
 
     assert json.loads(first.content["result"])["count"] == 1
     assert json.loads(second.content["result"])["count"] == 2
+    assert client._stdio_process.pid == discovery_pid
+    await client.aclose()
 
 
 @pytest.mark.asyncio
