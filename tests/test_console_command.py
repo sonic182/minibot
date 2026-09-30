@@ -113,6 +113,32 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_console_run_once_waits_for_the_continuation_turn_after_a_delegation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from minibot.app import console as console_module
+
+    calls = _install_console_fakes(monkeypatch)
+    queued = [
+        SimpleNamespace(response=SimpleNamespace(metadata={"task_handoff": True})),
+        SimpleNamespace(response=SimpleNamespace(metadata={"task_continuation": True, "task_handoff": True})),
+        SimpleNamespace(response=SimpleNamespace(metadata={"task_continuation": True})),
+    ]
+    calls["responses"] = queued
+
+    async def _wait_for_response(self, timeout_seconds: float):
+        del self, timeout_seconds
+        calls["waits"] = calls.get("waits", 0) + 1
+        return queued.pop(0)
+
+    monkeypatch.setattr(console_module.ConsoleService, "wait_for_response", _wait_for_response, raising=False)
+
+    await console_module.run(once="delegate", chat_id=1, user_id=1, timeout_seconds=30.0, config_path=None)
+
+    assert calls["waits"] == 3
+
+
+@pytest.mark.asyncio
 async def test_console_run_once_waits_for_the_worker_after_a_delegation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returning on the handoff ack would stop the extensions and cancel the running worker."""
     from minibot.app import console as console_module

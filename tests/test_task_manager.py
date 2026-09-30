@@ -15,7 +15,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.token_limits_autoconfig import prime_model_limits
 from minibot.core.agents import AgentSpec
-from minibot.core.events import OutboundEvent, OutboundFileEvent
+from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
 
 # ---------------------------------------------------------------------------
 # Fake pipe helpers
@@ -130,6 +130,7 @@ async def _spawn(
     channel: str = "console",
     agent_name: str | None = None,
     model_overrides: dict[str, str] | None = None,
+    continuation_depth: int | None = None,
 ):
     """Spawn a task with a fake pipe and return the mocked callbacks + semaphore."""
     ack_cb = AsyncMock()
@@ -152,6 +153,7 @@ async def _spawn(
             model_overrides=model_overrides,
             chat_id=1,
             user_id=2,
+            continuation_depth=continuation_depth,
             ack_cb=ack_cb,
             nack_cb=nack_cb,
             semaphore=sem,
@@ -282,6 +284,54 @@ async def test_reader_success_appends_attachment_paths_for_console() -> None:
     assert isinstance(event, OutboundEvent)
     assert "Artifacts:" in event.response.text
     assert "browser/shot.png" in event.response.text
+    await sub.close()
+
+
+@pytest.mark.asyncio
+async def test_reader_success_with_continuation_hands_the_result_back_to_the_orchestrator() -> None:
+    bus = EventBus()
+    sub = bus.subscribe()
+    manager = _make_manager(bus)
+    pipe = _PipeSuccess(
+        {
+            "task_id": "t1",
+            "text": "worker result",
+            "attachments": [{"path": "browser/shot.png", "type": "image/png"}],
+        }
+    )
+
+    ack_cb, _, _, _, reader_task = await _spawn(manager, pipe, channel="telegram", continuation_depth=1)
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    file_event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    message_event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    assert isinstance(file_event, OutboundFileEvent)
+    assert isinstance(message_event, MessageEvent)
+    message = message_event.message
+    assert (message.channel, message.chat_id, message.user_id, message.message_id) == ("telegram", 1, 2, None)
+    assert "worker result" in message.text
+    assert "untrusted" in message.text.lower()
+    assert message.metadata == {"source": "task_result", "task_id": "t1", "status": "done", "task_chain_depth": 1}
+    assert sub._queue.empty()
+    ack_cb.assert_called_once()
+    await sub.close()
+
+
+@pytest.mark.asyncio
+async def test_reader_failure_with_continuation_reports_the_failure_to_the_orchestrator() -> None:
+    bus = EventBus()
+    sub = bus.subscribe()
+    manager = _make_manager(bus)
+
+    _, _, _, _, reader_task = await _spawn(manager, _PipeWorkerError("boom"), continuation_depth=2)
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    assert isinstance(event, MessageEvent)
+    assert "boom" in event.message.text
+    assert event.message.metadata["status"] == "failed"
+    assert event.message.metadata["task_chain_depth"] == 2
+    assert sub._queue.empty()
     await sub.close()
 
 

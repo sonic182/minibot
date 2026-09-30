@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`spawn_task` takes `continue_turn`.** By default a delegated task is still fire and forget: the worker's
+  answer goes straight to the chat and the main agent never sees it. With `continue_turn: true` the result
+  (or the failure or timeout) comes back to the main agent as a new turn, saved to the conversation history,
+  so it can answer from it, compare results or chain the next task. The worker's text is marked as untrusted
+  data and truncated, and chained continuations are limited to three (`task:continuation_limit`). The task
+  queue gains a nullable `continuation_depth` column, added to existing SQLite files on startup.
+
 ### Fixed
 
 - **MCP tool calls no longer freeze the bot in `bridge` mode.** The bridge waited for each remote call on a

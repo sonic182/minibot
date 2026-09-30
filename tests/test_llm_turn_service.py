@@ -214,6 +214,32 @@ async def test_turn_service_returns_structured_answer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_turn_service_runs_a_task_result_as_a_continuation_turn() -> None:
+    service, client, memory = _service("noted")
+    result_text = "Background task t1 finished. <task_output>\nthe answer\n</task_output>"
+    event = MessageEvent(
+        message=_message(
+            text=result_text,
+            user_id=1,
+            chat_id=1,
+            metadata={"source": "task_result", "task_id": "t1", "task_chain_depth": 2},
+        )
+    )
+
+    response = await service.handle(event)
+
+    assert client.calls[-1]["kwargs"]["tool_context"].task_chain_depth == 2
+    assert response.metadata["task_continuation"] is True
+    history = await memory.get_history(session_id_for(event.message))
+    assert [(entry.role, entry.content) for entry in history] == [("user", result_text), ("assistant", "noted")]
+
+    plain = await service.handle(_message_event("ping"))
+
+    assert "task_continuation" not in plain.metadata
+    assert client.calls[-1]["kwargs"]["tool_context"].task_chain_depth == 0
+
+
+@pytest.mark.asyncio
 async def test_turn_service_includes_usage_trace_metadata() -> None:
     memory = StubMemory()
     stub_client = StubLLMClient(

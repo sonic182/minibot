@@ -13,6 +13,7 @@ from minibot.core.agents import AgentSpec
 from minibot.core.tasks import TaskRequest
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.tasks import TaskTools
+from minibot.shared.errors import ToolInputError
 
 
 class _TaskManagerStub:
@@ -280,6 +281,47 @@ async def test_spawn_task_carries_model_overrides_to_the_queue() -> None:
     overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6", "reasoning_effort": "high"}
     assert result["model_overrides"] == overrides
     assert producer.enqueued[0].model_overrides == overrides
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_continue_turn_records_the_chain_depth() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub())
+
+    await bindings["spawn_task"].handler({"prompt": "fire and forget"}, ToolContext(channel="console"))
+    continued = await bindings["spawn_task"].handler(
+        {"prompt": "need the result", "continue_turn": True},
+        ToolContext(channel="console", task_chain_depth=1),
+    )
+
+    assert [task.continuation_depth for task in producer.enqueued] == [None, 2]
+    assert continued["continue_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_refuses_to_continue_past_the_chain_limit() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub())
+
+    with pytest.raises(ToolInputError) as excinfo:
+        await bindings["spawn_task"].handler(
+            {"prompt": "one more", "continue_turn": True},
+            ToolContext(channel="console", task_chain_depth=3),
+        )
+
+    assert excinfo.value.error_code == "task:continuation_limit"
+    assert producer.enqueued == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_rejects_a_non_boolean_continue_turn() -> None:
+    bindings = _build_tools(_ProducerStub(), _TaskManagerStub())
+
+    with pytest.raises(ValueError, match="continue_turn"):
+        await bindings["spawn_task"].handler(
+            {"prompt": "x", "continue_turn": "yes"},
+            ToolContext(channel="console"),
+        )
 
 
 @pytest.mark.asyncio

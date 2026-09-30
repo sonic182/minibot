@@ -112,6 +112,7 @@ class RabbitMQConsumerService:
             user_id=user_id if isinstance(user_id, int) else None,
             owner_id=str(body.get("owner_id") or "primary"),
             limits=limits,
+            continuation_depth=_continuation_depth(body.get("continuation_depth")),
         )
         if self._task_repository is None:
             if self._task_manager is None:
@@ -157,6 +158,7 @@ class RabbitMQConsumerService:
                     user_id=request.user_id,
                     owner_id=request.owner_id,
                     limits=request.limits,
+                    continuation_depth=request.continuation_depth,
                     expected_status=stored.status if stored is not None else TaskStatus.PENDING,
                     lease_token=stored.lease_token if stored is not None else None,
                     replace_lease=replace_lease,
@@ -174,6 +176,10 @@ class RabbitMQConsumerService:
             self._semaphore.release()
             self._logger.warning("no task manager configured, discarding message", extra={"task_id": task_id})
             await message.nack(requeue=False)
+
+
+def _continuation_depth(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def _task_limits(value: Any) -> TaskLimits:

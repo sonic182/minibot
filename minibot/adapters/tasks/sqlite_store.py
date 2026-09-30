@@ -31,6 +31,7 @@ class TaskModel(TaskBase):
     agent_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     context: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     model_overrides: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
+    continuation_depth: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
     lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -98,6 +99,7 @@ class SQLiteTaskStore:
             "max_steps": "INTEGER",
             "max_tool_calls": "INTEGER",
             "model_overrides": "JSON NOT NULL DEFAULT '{}'",
+            "continuation_depth": "INTEGER",
             "progress": "JSON NOT NULL DEFAULT '{}'",
             "result_text": "TEXT",
             "result_attachments": "JSON NOT NULL DEFAULT '[]'",
@@ -416,6 +418,7 @@ class SQLiteTaskStore:
             agent_name=task.agent_name,
             context=dict(task.context or {}),
             model_overrides=dict(task.model_overrides or {}),
+            continuation_depth=task.continuation_depth,
             status=TaskStatus.PENDING.value,
             retry_count=0,
             max_attempts=self._config.max_attempts,
@@ -458,6 +461,7 @@ def _to_domain(model: TaskModel) -> TaskRecord:
                 max_steps=model.max_steps,
                 max_tool_calls=model.max_tool_calls,
             ),
+            continuation_depth=model.continuation_depth,
         ),
         status=TaskStatus(model.status),
         retry_count=model.retry_count,

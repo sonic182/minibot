@@ -220,6 +220,8 @@ def test_prompt_service_announces_spawn_task_delegation_and_the_specialist_roste
     assert "`spawn_task` targets one of 1 listed specialist agents" in prompt
     assert "`fetch_agent_info` is available" in prompt
     assert 'metadata.source == "task_worker"' in prompt
+    assert "`continue_turn`" in prompt
+    assert 'metadata.source == "task_result"' in prompt
     assert "Use `list_tasks` to verify which tasks are still active." in prompt
     # The roster itself is what makes agent_name usable; it hangs off spawn_task being attached.
     assert "worker" in prompt

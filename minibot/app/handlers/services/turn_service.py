@@ -114,6 +114,7 @@ class LLMTurnService:
             user_id=message.user_id,
             turn_id=event.event_id,
             task_handoff_callback=_on_task_handoff,
+            task_chain_depth=_task_chain_depth(message),
         )
         input_message = message
         if self._audio_auto_transcription_service is not None:
@@ -287,6 +288,8 @@ class LLMTurnService:
         metadata["primary_agent"] = "minibot"
         if handed_off_to_task:
             metadata["task_handoff"] = True
+        if _is_task_result(message):
+            metadata["task_continuation"] = True
         if reasoning_text:
             metadata["reasoning"] = reasoning_text
         if compaction_result.updates:
@@ -420,6 +423,17 @@ class LLMTurnService:
                 detail = f"{detail[:200]}..."
             return f"LLM error ({error_name}): {detail}"
         return f"LLM error ({error_name})."
+
+
+def _is_task_result(message: ChannelMessage) -> bool:
+    return message.metadata.get("source") == "task_result"
+
+
+def _task_chain_depth(message: ChannelMessage) -> int:
+    depth = message.metadata.get("task_chain_depth")
+    if _is_task_result(message) and isinstance(depth, int) and not isinstance(depth, bool) and depth > 0:
+        return depth
+    return 0
 
 
 def _prompt_cache_key(message: ChannelMessage) -> str | None:

@@ -19,6 +19,7 @@ class ToolContext:
     user_id: int | None = None
     turn_id: str | None = None
     task_handoff_callback: Callable[[str], Awaitable[None]] | None = None
+    task_chain_depth: int = 0
 
 
 ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[ToolResult | Any]]
