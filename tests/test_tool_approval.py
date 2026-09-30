@@ -195,3 +195,23 @@ async def test_request_outside_telegram_is_denied_without_asking() -> None:
 
     assert await _request(bus, channel="console") is False
     assert requested._queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_detail_supplied_by_a_worker_is_capped() -> None:
+    bus = EventBus()
+    requested = bus.subscribe(types=(ToolApprovalRequestedEvent,))
+
+    await request_tool_approval(
+        bus,
+        tool_name="t",
+        arguments={},
+        channel="telegram",
+        chat_id=1,
+        timeout_seconds=0.01,
+        detail="x" * 10_000,
+    )
+
+    event = await asyncio.wait_for(anext(aiter(requested)), timeout=1)
+    assert isinstance(event, ToolApprovalRequestedEvent)
+    assert len(event.detail) <= 3000

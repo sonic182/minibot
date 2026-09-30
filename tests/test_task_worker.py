@@ -416,13 +416,13 @@ class _ApprovalPipe:
         yield _RX(), _TX()
 
 
-async def _run_worker_asking_approval(pipe: _ApprovalPipe) -> bool:
+async def _run_worker_asking_approval(pipe: _ApprovalPipe, tool_name: str = "mcp_mail__smtp_send_message") -> bool:
     outcome: list[bool] = []
 
     async def _fake_loop(_task, progress_callback=None, approval_callback=None):
         outcome.append(
             await approval_callback(
-                "mcp_mail__smtp_send_message",
+                tool_name,
                 {"body": "x" * 200_000, "password": "hunter2"},
                 ToolContext(channel="telegram", chat_id=1),
             )
@@ -449,3 +449,14 @@ async def test_worker_sends_a_capped_redacted_detail_and_returns_the_answer() ->
 @pytest.mark.asyncio
 async def test_worker_denies_a_pending_approval_when_the_manager_hangs_up() -> None:
     assert await _run_worker_asking_approval(_ApprovalPipe(answer=None)) is False
+
+
+@pytest.mark.asyncio
+async def test_worker_caps_the_tool_name_it_sends() -> None:
+    # A lazy MCP call_tool embeds a model-chosen remote name, so the name can overrun the pipe limit too.
+    pipe = _ApprovalPipe(answer=True)
+
+    await _run_worker_asking_approval(pipe, tool_name="mcp_mail__" + "x" * 70_000)
+
+    request_line = next(line for line in pipe.written if b"approval_request" in line)
+    assert len(request_line) < 10_000

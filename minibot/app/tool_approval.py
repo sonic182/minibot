@@ -20,7 +20,7 @@ Approver = Callable[[str, dict[str, Any], ToolContext], Awaitable[bool]]
 
 _DETAIL_MAX_CHARS = 3000
 _VALUE_MAX_CHARS = 1000
-_NAME_MAX_CHARS = 200
+NAME_MAX_CHARS = 200
 # Control, format (bidi overrides, zero-width), line- and paragraph-separator characters.
 _ESCAPED_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 _ESCAPED_CHARS = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
@@ -105,10 +105,10 @@ async def request_tool_approval(
         await event_bus.publish(
             ToolApprovalRequestedEvent(
                 approval_id=approval_id,
-                tool_name=_escape(tool_name)[:_NAME_MAX_CHARS],
+                tool_name=_escape(tool_name)[:NAME_MAX_CHARS],
                 channel=channel,
                 chat_id=chat_id,
-                detail=detail if detail is not None else format_approval_detail(arguments),
+                detail=detail[:_DETAIL_MAX_CHARS] if detail is not None else format_approval_detail(arguments),
             )
         )
         async with asyncio.timeout(timeout_seconds):

@@ -807,3 +807,29 @@ async def test_worker_approval_request_prefers_the_precomputed_detail() -> None:
         await manager._read_worker_result(pipe, {"task_id": "t1"}, 5.0, None, 5)
 
     assert approve.await_args.kwargs["detail"] == "to: a@b.c"
+
+
+@pytest.mark.asyncio
+async def test_oversized_worker_line_terminates_the_worker_and_acks() -> None:
+    # The manager, not the worker, ended this run: without terminate() the reader joins a worker that
+    # keeps running, holding the semaphore slot and letting the lease lapse.
+    class _OversizedPipe:
+        @asynccontextmanager
+        async def open(self):
+            class _RX:
+                async def readline(self) -> bytes:
+                    raise ValueError("Separator is not found, and chunk exceed the limit")
+
+            class _TX:
+                def write(self, data: bytes) -> None:
+                    pass
+
+            yield _RX(), _TX()
+
+    manager = _make_manager(EventBus())
+
+    ack_cb, _, _, proc, reader_task = await _spawn(manager, _OversizedPipe(), task_id="t1")
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    assert proc.terminate_calls == 1
+    ack_cb.assert_awaited_once()

@@ -289,6 +289,8 @@ class TaskManager:
                     lease_token,
                     lease_timeout_seconds,
                 )
+                if result.get("terminate_worker"):
+                    proc.terminate()
                 await loop.run_in_executor(None, proc.join)
                 metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
                 if result.get("status") == TaskStatus.DONE.value:
@@ -441,13 +443,13 @@ class TaskManager:
                     raw = await asyncio.wait_for(rx.readline(), timeout=remaining)
                 except ValueError:
                     # StreamReader raises it for a line over its 64 KiB limit.
-                    return {"status": TaskStatus.FAILED.value, "error": "worker sent an oversized message"}
+                    return _protocol_failure("worker sent an oversized message")
                 if not raw:
                     return {"status": TaskStatus.FAILED.value, "error": "worker closed without a result"}
                 try:
                     event = json.loads(raw)
                 except json.JSONDecodeError:
-                    return {"status": TaskStatus.FAILED.value, "error": "worker returned invalid JSON"}
+                    return _protocol_failure("worker returned invalid JSON")
                 if event.get("type") == "progress":
                     progress = event.get("progress")
                     if self._task_repository is not None and lease_token is not None and isinstance(progress, dict):
@@ -482,7 +484,7 @@ class TaskManager:
                     return event
                 if "type" not in event:
                     return _legacy_result_event(event)
-                return {"status": TaskStatus.FAILED.value, "error": "worker returned an invalid message"}
+                return _protocol_failure("worker returned an invalid message")
 
     async def _cancel_task(self, task_id: str, task: Task) -> None:
         loop = asyncio.get_running_loop()
@@ -579,6 +581,11 @@ def _stop_reason_from_result(result: dict[str, Any]) -> TaskStopReason:
         return TaskStopReason(value)
     except (TypeError, ValueError):
         return TaskStopReason.INVALID_RESULT
+
+
+def _protocol_failure(error: str) -> dict[str, Any]:
+    """The manager ended this run, so the worker may still be running: ``_reader`` must terminate it."""
+    return {"status": TaskStatus.FAILED.value, "error": error, "terminate_worker": True}
 
 
 def _legacy_result_event(event: dict[str, Any]) -> dict[str, Any]:

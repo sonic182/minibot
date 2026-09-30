@@ -29,6 +29,7 @@ from minibot.core.events import (
 )
 
 _TYPING_INTERVAL_SECONDS = 4
+_DENIAL_DRAIN_SECONDS = 1.0
 _APPROVAL_CALLBACK_PREFIX = "approval"
 
 
@@ -304,7 +305,12 @@ class TelegramService:
 
         denials = list(self._approval_denials)
         if denials:
-            await asyncio.gather(*denials, return_exceptions=True)
+            # A publish parked on a queue whose consumer is gone would never finish; the requester's
+            # timeout already denies the call, so an unfinished denial is cancelled, not awaited.
+            _, stuck = await asyncio.wait(denials, timeout=_DENIAL_DRAIN_SECONDS)
+            for denial in stuck:
+                denial.cancel()
+            await asyncio.gather(*stuck, return_exceptions=True)
 
         typing_tasks = list(self._typing_tasks.values())
         self._typing_tasks.clear()

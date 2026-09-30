@@ -278,3 +278,21 @@ async def test_outcome_is_still_sent_when_removing_the_buttons_fails() -> None:
     await service._close_approval_prompt(1, 7, "✅ Approved")
 
     assert [call["text"] for call in bot.calls] == ["✅ Approved"]
+
+
+@pytest.mark.asyncio
+async def test_stop_does_not_wait_forever_for_a_stuck_denial(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.adapters.messaging.telegram import service as service_module
+
+    monkeypatch.setattr(service_module, "_DENIAL_DRAIN_SECONDS", 0.05, raising=False)
+    service, bot, _, _ = _service(TelegramChannelConfig(bot_token="token"))
+    service._poll_task = None
+    service._outgoing_task = None
+    service._typing_tasks = {}
+    bot.session = type("_Session", (), {"close": AsyncMock()})()
+    stuck = asyncio.create_task(asyncio.Event().wait())
+    service._approval_denials = {stuck}
+
+    await asyncio.wait_for(service.stop(), timeout=2)
+
+    assert stuck.cancelled()

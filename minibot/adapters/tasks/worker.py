@@ -25,7 +25,7 @@ from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
-from minibot.app.tool_approval import Approver, apply_tool_approval, format_approval_detail
+from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentSpec
 from minibot.core.tasks import TaskLimits, TaskStopReason
@@ -105,7 +105,7 @@ async def _worker_async(pipe: Any) -> None:
             request = {
                 "type": "approval_request",
                 "approval_id": approval_id,
-                "tool_name": tool_name,
+                "tool_name": tool_name[:NAME_MAX_CHARS],
                 # The prompt shows a capped, redacted rendering anyway; the raw arguments of a long body
                 # would overrun the 64 KiB line limit of the manager's pipe reader.
                 "detail": format_approval_detail(arguments),
