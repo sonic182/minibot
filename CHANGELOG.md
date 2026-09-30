@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-30
+
 ### Added
 
 - **Telegram approval for dangerous tool calls.** Tools matching `[tools.approval] require_approval`
@@ -1116,7 +1118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.23.1...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.24.0...HEAD
+[0.24.0]: https://github.com/sonic182/minibot/compare/0.23.1..0.24.0
 [0.23.1]: https://github.com/sonic182/minibot/compare/0.23.0..0.23.1
 [0.23.0]: https://github.com/sonic182/minibot/compare/0.22.1..0.23.0
 [0.22.1]: https://github.com/sonic182/minibot/compare/0.22.0..0.22.1
