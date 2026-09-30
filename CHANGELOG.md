@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by the remote tool name. The prompt shows one line per argument, with sensitive keys redacted and
   control and format characters escaped (in the tool name too), so a value cannot fake extra arguments.
   Empty `require_approval` (the default) disables it, and unknown keys under `[tools.approval]` are
-  rejected so a typo cannot turn it off. The buttons and outcomes are in English.
+  rejected so a misspelled option cannot turn it off. The buttons and outcomes are in English.
 - **`[orchestration] shared_mcp_servers`.** MCP servers listed there stay visible to the main agent under
   `exclusive` and `exclusive_mcp` ownership even when a specialist claims them, so a read-only server such
   as web search can be used by both.

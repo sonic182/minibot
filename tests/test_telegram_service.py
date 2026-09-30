@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -226,10 +227,12 @@ async def test_approval_prompt_that_fails_to_send_is_denied_at_once() -> None:
 
     bot.send_message = _fail
     service._pending_approvals = {}
+    service._approval_denials = set()
 
     await service._send_approval_request(
         ToolApprovalRequestedEvent(approval_id="a1", tool_name="t", channel="telegram", chat_id=1, detail="d")
     )
+    await asyncio.gather(*service._approval_denials)
 
     [event] = event_bus.events
     assert isinstance(event, ToolApprovalResolvedEvent)

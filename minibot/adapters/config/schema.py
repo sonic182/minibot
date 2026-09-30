@@ -813,8 +813,9 @@ class ToolApprovalConfig(BaseModel):
 
     Calls are denied when nobody answers, when the turn has no Telegram chat, or when the user taps
     Deny; the model then receives a ``tool_approval:denied`` error. Patterns match the canonical tool
-    name (``http_request``, not an alias), and unknown keys are rejected so a typo cannot silently
-    turn the gate off.
+    name (``http_request``, not an alias), and unknown keys inside ``[tools.approval]`` are rejected so a
+    misspelled option cannot silently turn the gate off. The section name itself must be spelled exactly
+    ``[tools.approval]``.
     """
 
     model_config = ConfigDict(extra="forbid")

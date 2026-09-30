@@ -80,6 +80,7 @@ class TelegramService:
             )
         )
         self._pending_approvals: dict[str, tuple[int, int]] = {}
+        self._approval_denials: set[asyncio.Task[None]] = set()
 
         self._dp.message.register(self._handle_message)
         self._dp.callback_query.register(self._handle_approval_callback)
@@ -202,9 +203,14 @@ class TelegramService:
             )
         except Exception:
             # Nobody can answer a prompt that never arrived: deny now instead of making the requester
-            # wait out the whole timeout.
+            # wait out the whole timeout. Published from a task: this runs inside the outgoing consumer
+            # loop, and a blocking publish onto its own full queue would stall that loop for good.
             self._logger.exception("failed to send tool approval prompt", extra={"chat_id": event.chat_id})
-            await self._event_bus.publish(ToolApprovalResolvedEvent(approval_id=event.approval_id, approved=False))
+            denial = asyncio.create_task(
+                self._event_bus.publish(ToolApprovalResolvedEvent(approval_id=event.approval_id, approved=False))
+            )
+            self._approval_denials.add(denial)
+            denial.add_done_callback(self._approval_denials.discard)
             return
         self._pending_approvals[event.approval_id] = (event.chat_id, sent.message_id)
 
