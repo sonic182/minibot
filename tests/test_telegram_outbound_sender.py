@@ -255,3 +255,35 @@ async def test_later_chunk_failure_that_is_not_markup_is_not_retried(monkeypatch
 
     assert len(attempts) == 2
     assert not event_bus.events
+
+
+@pytest.mark.asyncio
+async def test_markdown_chunk_that_grows_past_the_limit_is_sent_as_plain_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender, bot, event_bus = _sender()
+    monkeypatch.setattr(
+        outbound_sender_module, "telegram_markdownify", lambda value: value * 2 if value.startswith("b") else value
+    )
+    sent: list[tuple[str, Any]] = []
+
+    async def _send_message(**kwargs: Any) -> None:
+        if len(kwargs["text"]) > 4096:
+            raise RuntimeError("Bad Request: message is too long")
+        sent.append((kwargs["text"], kwargs["parse_mode"]))
+
+    bot.send_message = _send_message  # type: ignore[method-assign]
+    source = "\n".join(["a" * 3000, "b" * 3000])
+
+    await sender.send_text_response(
+        ChannelResponse(
+            channel="telegram",
+            chat_id=1,
+            text=source,
+            render=RenderableResponse(kind="markdown", text=source, meta={"disable_link_preview": True}),
+        )
+    )
+
+    assert [text for text, _ in sent] == ["a" * 3000, "b" * 3000]
+    assert sent[1][1] is None
+    assert not event_bus.events

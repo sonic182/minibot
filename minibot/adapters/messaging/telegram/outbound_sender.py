@@ -145,6 +145,8 @@ class TelegramOutboundSender:
         if render.kind == "markdown":
             for source in chunk_text(render.text, self._MARKDOWN_SOURCE_CHUNK_LENGTH):
                 converted, parse_mode = self._prepare_markdown_payload(chat_id=chat_id, markdown_text=source)
+                if len(converted) > self._MAX_MESSAGE_LENGTH:
+                    converted, parse_mode = source, None
                 chunks.append((source, converted, parse_mode))
         else:
             parse_mode = ParseMode.HTML if render.kind == "html" else None
