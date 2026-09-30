@@ -75,7 +75,7 @@ def test_main_agent_tool_view_keeps_shared_mcp_servers_visible() -> None:
         source_path=Path("worker.md"),
         mcp_servers=["exa", "mail"],
     )
-    config = OrchestrationConfig(tool_ownership_mode="exclusive_mcp", shared_mcp_servers=["exa"])
+    config = OrchestrationConfig(tool_ownership_mode="exclusive_mcp", shared_mcp_servers=[" exa "])
 
     view = main_agent_tool_view(tools=tools, orchestration_config=config, agent_specs=[spec])
 

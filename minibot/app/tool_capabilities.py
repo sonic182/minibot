@@ -27,7 +27,7 @@ def main_agent_tool_view(
     if orchestration_config.tool_ownership_mode not in {"exclusive", "exclusive_mcp"}:
         return MainAgentToolView(tools=main_agent_tools, hidden_tool_names=[])
 
-    shared_servers = set(orchestration_config.shared_mcp_servers)
+    shared_servers = {name.strip() for name in orchestration_config.shared_mcp_servers if name.strip()}
     reserved_tool_names: set[str] = set()
     for spec in agent_specs:
         for binding in filter_tools_for_agent(main_agent_tools, spec):

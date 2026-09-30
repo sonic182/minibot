@@ -59,6 +59,8 @@ the server keeps:
 - The binary runs inside the container, so it must be a Linux build for the container's architecture.
 - Keep credentials out of ``config.toml``: pass them through ``env`` as ``${secret:NAME}`` (see
   :doc:`vault`) or ``${ENV_VAR}``.
+- A non-empty ``env`` replaces the server's whole environment rather than adding to MiniBot's, so the
+  process gets no ``PATH`` or ``HOME`` unless you list them. Add any variable the binary relies on.
 - Point the server's data directory at a mounted volume (``/app/data/...``) so it survives recreating
   the container.
 - Since the binaries are mounted rather than baked into the image, adding or upgrading one only
@@ -68,7 +70,7 @@ Email: mail-mcp
 ---------------
 
 `mail-mcp <https://github.com/tecnologicachile/mail-mcp>`_ gives the agent IMAP (search, read, move,
-copy, flags, delete) and SMTP (send, reply, forward) over one or more accounts.
+copy, flags, delete, folders) and SMTP (send, reply, forward) over one or more accounts.
 
 .. code-block:: toml
 
@@ -90,6 +92,14 @@ copy, flags, delete) and SMTP (send, reply, forward) over one or more accounts.
      "imap_update_message_flags",
      "imap_delete_message",
      "imap_bulk_delete",
+     "imap_create_mailbox",
+     "imap_rename_mailbox",
+     "imap_delete_mailbox",
+     "imap_bulk_move",
+     "imap_search_and_move",
+     "imap_bulk_update_flags",
+     "imap_search_and_delete",
+     "imap_append_message",
      "smtp_send_message",
      "smtp_reply_message",
      "smtp_forward_message",
@@ -111,7 +121,8 @@ copy, flags, delete) and SMTP (send, reply, forward) over one or more accounts.
    MAIL_IMAP_WRITE_ENABLED = "true"       # allow move/copy/flags/delete
 
 ``enabled_tools`` works as an allowlist: a tool added in a later server release stays hidden until
-you list it. To keep the mailbox read-only, drop the write tools and set
+you list it. The server also offers EWS and Microsoft Graph tools for Exchange and Microsoft 365
+accounts; list them only if you configure such an account. To keep the mailbox read-only, drop the write tools and set
 ``MAIL_IMAP_WRITE_ENABLED = "false"``; the server then refuses writes even if a tool is exposed.
 
 Email content is untrusted input. A message can carry a prompt injection asking the agent to
@@ -144,11 +155,18 @@ send or destroy data behind a Telegram approval:
      "mcp_mail__imap_update_message_flags",
      "mcp_mail__imap_delete_message",
      "mcp_mail__imap_bulk_delete",
+     "mcp_mail__imap_rename_mailbox",
+     "mcp_mail__imap_delete_mailbox",
+     "mcp_mail__imap_bulk_update_flags",
+     "mcp_mail__imap_search_and_delete",
+     "mcp_mail__imap_append_message",
    ]
    timeout_seconds = 300
 
-Moving a message is left out of ``require_approval`` because it is easy to undo; each approval is a
-separate Telegram prompt, and archiving a batch would otherwise ask once per message. See
+Moving messages and creating folders (``imap_move_message``, ``imap_bulk_move``,
+``imap_search_and_move``, ``imap_create_mailbox``) are left out of ``require_approval`` because they
+are easy to undo; each approval is a separate Telegram prompt, and archiving a batch would otherwise
+ask once per message. See
 :doc:`agents` for the agent file format and :doc:`config` for ``[tools.approval]``.
 
 Long-term memory: graphmem

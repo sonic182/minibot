@@ -82,3 +82,4 @@ testdata/
 docs/_build/
 
 .references/
+/bin/
