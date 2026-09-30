@@ -379,6 +379,8 @@ class MCPClient:
                 await drain_task
 
     def close_blocking(self) -> None:
+        if self._stdio_process is None:
+            return
         self._blocking_runner.run(self.aclose)
 
     def _store_server_metadata(self, response: dict[str, Any]) -> None:

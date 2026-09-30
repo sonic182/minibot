@@ -45,6 +45,11 @@ class _ProducerStub:
         self.enqueued.append(task)
 
 
+class _FailingProducer(_ProducerStub):
+    async def enqueue(self, task: TaskRequest) -> None:
+        raise RuntimeError("queue down")
+
+
 def _build_tools(
     producer: _ProducerStub,
     task_manager: _TaskManagerStub,
@@ -327,6 +332,22 @@ async def test_spawn_task_refuses_continuing_tasks_past_the_per_turn_claim() -> 
 
     assert excinfo.value.error_code == "task:continuation_limit"
     assert len(producer.enqueued) == 3
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_releases_the_continuation_claim_when_enqueue_fails() -> None:
+    bindings = _build_tools(_FailingProducer(), _TaskManagerStub())
+    released: list[None] = []
+    context = ToolContext(
+        channel="console",
+        claim_task_continuation=lambda: True,
+        release_task_continuation=lambda: released.append(None),
+    )
+
+    with pytest.raises(RuntimeError, match="queue down"):
+        await bindings["spawn_task"].handler({"prompt": "x", "continue_turn": True}, context)
+
+    assert len(released) == 1
 
 
 @pytest.mark.asyncio

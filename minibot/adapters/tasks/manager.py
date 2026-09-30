@@ -537,7 +537,14 @@ class TaskManager:
             )
         )
 
-    async def _publish_continuation(self, payload: dict[str, Any], *, status: TaskStatus, body: str) -> None:
+    async def _publish_continuation(
+        self,
+        payload: dict[str, Any],
+        *,
+        status: TaskStatus,
+        body: str,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> None:
         chat_id = payload.get("chat_id")
         if not isinstance(chat_id, int):
             return
@@ -551,7 +558,11 @@ class TaskManager:
                     chat_id=chat_id,
                     message_id=None,
                     text=_continuation_text(
-                        task_id=task_id, agent_name=payload.get("agent_name"), status=status, body=body
+                        task_id=task_id,
+                        agent_name=payload.get("agent_name"),
+                        status=status,
+                        body=body,
+                        attachments=attachments or [],
                     ),
                     metadata={
                         "source": "task_result",
@@ -568,7 +579,8 @@ class TaskManager:
             await self._publish_continuation(
                 payload,
                 status=TaskStatus.DONE,
-                body=_with_attachment_list(result.text, result.attachments),
+                body=result.text,
+                attachments=result.attachments,
             )
             return
         text = _append_attachment_paths(
@@ -693,13 +705,16 @@ def _continues_turn(payload: dict[str, Any]) -> bool:
     return payload.get("continuation_depth") is not None
 
 
-def _continuation_text(*, task_id: str, agent_name: Any, status: TaskStatus, body: str) -> str:
-    excerpt = _TASK_OUTPUT_MARKER.sub(r"&lt;\1", body)
+def _continuation_text(
+    *, task_id: str, agent_name: Any, status: TaskStatus, body: str, attachments: list[dict[str, Any]]
+) -> str:
+    excerpt = body
     if len(excerpt) > _CONTINUATION_MAX_CHARS:
         omitted = len(excerpt) - _CONTINUATION_MAX_CHARS
         excerpt = (
             f"{excerpt[:_CONTINUATION_MAX_CHARS]}\n...[truncated {omitted} chars; call get_task for the full result]"
         )
+    excerpt = _TASK_OUTPUT_MARKER.sub(r"&lt;\1", _with_attachment_list(excerpt, attachments))
     label = f"Background task {task_id}"
     if isinstance(agent_name, str) and agent_name:
         label = f"{label} (agent {agent_name})"

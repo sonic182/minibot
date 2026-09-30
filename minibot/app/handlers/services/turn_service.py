@@ -117,6 +117,10 @@ class LLMTurnService:
             continuations_claimed += 1
             return True
 
+        def _release_task_continuation() -> None:
+            nonlocal continuations_claimed
+            continuations_claimed = max(continuations_claimed - 1, 0)
+
         tool_context = ToolContext(
             owner_id=owner_id,
             channel=message.channel,
@@ -126,6 +130,7 @@ class LLMTurnService:
             task_handoff_callback=_on_task_handoff,
             task_chain_depth=_task_chain_depth(message),
             claim_task_continuation=_claim_task_continuation,
+            release_task_continuation=_release_task_continuation,
         )
         input_message = message
         if self._audio_auto_transcription_service is not None:

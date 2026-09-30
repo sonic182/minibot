@@ -5,11 +5,11 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from minibot.adapters.config.schema import Settings
+from minibot.adapters.config.schema import MCPServerConfig, Settings
 from minibot.adapters.tasks import worker
 from minibot.app.response_parser import EMPTY_REPLY_FALLBACK_TEXT
 from minibot.core.agents import AgentSpec
@@ -211,6 +211,51 @@ async def test_run_agent_loop_resolves_specialist_agent() -> None:
         )
 
     assert result["metadata"]["agent_name"] == "playwright_mcp_agent"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_closes_the_mcp_clients_it_started() -> None:
+    settings = Settings()
+    settings.tools.mcp.enabled = True
+    settings.tools.mcp.servers = [MCPServerConfig(name="playwright-cli", command="playwright-cli")]
+    specialist = AgentSpec(
+        name="playwright_mcp_agent",
+        description="browser specialist",
+        system_prompt="You are browser specialist.",
+        source_path=worker.Path("/tmp/agent.md"),
+        mcp_servers=["playwright-cli"],
+        tools_allow=["mcp_playwright-cli__*"],
+    )
+    clients: list[SimpleNamespace] = []
+
+    def _fake_client(**_: object) -> SimpleNamespace:
+        client = SimpleNamespace(aclose=AsyncMock())
+        clients.append(client)
+        return client
+
+    with (
+        patch("minibot.adapters.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.adapters.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.adapters.tasks.worker.load_agent_specs", return_value=[specialist]),
+        patch("minibot.adapters.tasks.worker.MCPClient", _fake_client),
+        patch("minibot.adapters.tasks.worker.build_mcp_bindings_async", AsyncMock(return_value=[])),
+        patch("minibot.adapters.tasks.worker._build_worker_tools", return_value=[]),
+        patch("minibot.adapters.tasks.worker.AgentRuntime", _FakeRuntime),
+    ):
+        result = await worker.run_agent_loop(
+            {
+                "task_id": "t1",
+                "channel": "console",
+                "prompt": "browse",
+                "agent_name": "playwright_mcp_agent",
+                "chat_id": 1,
+                "user_id": 2,
+            }
+        )
+
+    assert result["status"] == "done"
+    assert len(clients) == 1
+    clients[0].aclose.assert_awaited_once()
 
 
 def test_build_worker_tools_excludes_orchestration_tools() -> None:

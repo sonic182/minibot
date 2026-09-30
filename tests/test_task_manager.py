@@ -320,6 +320,31 @@ async def test_reader_success_with_continuation_hands_the_result_back_to_the_orc
 
 
 @pytest.mark.asyncio
+async def test_reader_continuation_keeps_the_artifact_list_when_the_text_is_truncated() -> None:
+    bus = EventBus()
+    sub = bus.subscribe()
+    manager = _make_manager(bus)
+    pipe = _PipeSuccess(
+        {
+            "task_id": "t1",
+            "text": "x" * 13_000,
+            "attachments": [{"path": "browser/shot.png", "type": "image/png"}],
+        }
+    )
+
+    _, _, _, _, reader_task = await _spawn(manager, pipe, channel="console", continuation_depth=1)
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    message_event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    assert isinstance(message_event, MessageEvent)
+    text = message_event.message.text
+    assert "truncated" in text
+    assert "browser/shot.png" in text
+    assert text.count("</task_output>") == 1
+    await sub.close()
+
+
+@pytest.mark.asyncio
 async def test_reader_failure_with_continuation_reports_the_failure_to_the_orchestrator() -> None:
     bus = EventBus()
     sub = bus.subscribe()

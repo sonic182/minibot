@@ -166,21 +166,26 @@ class TaskTools:
         task_context = _coerce_task_context(payload)
         limits = _resolve_limits(payload, self._config, spec_timeout_seconds=spec.timeout_seconds if spec else None)
         continuation_depth = _resolve_continuation_depth(payload, context)
-        await self._producer.enqueue(
-            TaskRequest(
-                task_id=task_id,
-                channel=channel,
-                prompt=prompt,
-                agent_name=agent_name,
-                context=task_context,
-                model_overrides=model_overrides,
-                chat_id=context.chat_id,
-                user_id=context.user_id,
-                owner_id=owner_id,
-                limits=limits,
-                continuation_depth=continuation_depth,
+        try:
+            await self._producer.enqueue(
+                TaskRequest(
+                    task_id=task_id,
+                    channel=channel,
+                    prompt=prompt,
+                    agent_name=agent_name,
+                    context=task_context,
+                    model_overrides=model_overrides,
+                    chat_id=context.chat_id,
+                    user_id=context.user_id,
+                    owner_id=owner_id,
+                    limits=limits,
+                    continuation_depth=continuation_depth,
+                )
             )
-        )
+        except Exception:
+            if continuation_depth is not None and context.release_task_continuation is not None:
+                context.release_task_continuation()
+            raise
         if (
             self._task_repository is not None
             and context.task_handoff_callback is not None

@@ -34,7 +34,12 @@ from minibot.adapters.mcp.client import MCPClient, MCPServerMetadata, MCPToolCal
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.base import ToolContext
-from minibot.llm.tools.mcp_bridge import MCPLazyToolBridge, MCPToolBridge, build_mcp_bindings_async
+from minibot.llm.tools.mcp_bridge import (
+    MCPLazyToolBridge,
+    MCPToolBridge,
+    build_mcp_bindings,
+    build_mcp_bindings_async,
+)
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "mcp"
 
@@ -199,6 +204,42 @@ async def test_mcp_bridge_stdio_process_is_spawned_once_for_discovery_and_calls(
     assert json.loads(first.content["result"])["count"] == 1
     assert json.loads(second.content["result"])["count"] == 2
     assert client._stdio_process.pid == discovery_pid
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_mcp_blocking_discovery_process_is_closed_before_the_first_call_on_the_main_loop(
+    stdio_counter_server_args: list[str],
+) -> None:
+    client = MCPClient(
+        server_name="dice_cli",
+        transport="stdio",
+        timeout_seconds=5,
+        command=stdio_counter_server_args[0],
+        args=stdio_counter_server_args[1:],
+    )
+    bindings = build_mcp_bindings(
+        mode="bridge",
+        server_name="dice_cli",
+        client=client,
+        name_prefix="mcp",
+        enabled_tools=[],
+        disabled_tools=[],
+        catalog_cache_ttl_seconds=60,
+    )
+    counter_binding = {binding.tool.name: binding for binding in bindings}["mcp_dice_cli__counter"]
+    discovery_pid = client._stdio_process.pid
+
+    client.close_blocking()
+
+    assert client._stdio_process is None
+    with pytest.raises(ProcessLookupError):
+        os.kill(discovery_pid, 0)
+
+    result = await counter_binding.handler({}, ToolContext(owner_id="tester"))
+
+    assert json.loads(result.content["result"])["count"] == 1
+    assert client._stdio_process.pid != discovery_pid
     await client.aclose()
 
 

@@ -159,6 +159,7 @@ async def run_agent_loop(
     approval_callback: Approver | None = None,
 ) -> dict[str, Any]:
     task_id = str(task.get("task_id") or "")
+    mcp_clients: list[MCPClient] = []
     try:
         channel = _require_string(task.get("channel"), "channel")
         prompt = _require_string(task.get("prompt"), "prompt")
@@ -178,7 +179,7 @@ async def run_agent_loop(
             extension_tool_names=[binding.tool.name for binding in extensions.tools],
         )
         llm_client = llm_factory.create_for_agent(spec)
-        mcp_bindings = await _build_worker_mcp_bindings(settings=settings, spec=spec)
+        mcp_bindings = await _build_worker_mcp_bindings(settings=settings, spec=spec, clients=mcp_clients)
         tools = apply_tool_approval(
             _build_worker_tools(
                 settings=settings, spec=spec, extension_tools=extensions.tools, mcp_bindings=mcp_bindings
@@ -280,6 +281,8 @@ async def run_agent_loop(
             "stop_reason": _stop_reason_for_error(exc).value,
             "metadata": _build_error_metadata(exc),
         }
+    finally:
+        await _close_mcp_clients(mcp_clients)
 
 
 async def _deny_approval(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
@@ -342,7 +345,9 @@ def _build_worker_tools(
     )
 
 
-async def _build_worker_mcp_bindings(*, settings: Settings, spec: AgentSpec) -> list[ToolBinding]:
+async def _build_worker_mcp_bindings(
+    *, settings: Settings, spec: AgentSpec, clients: list[MCPClient]
+) -> list[ToolBinding]:
     bindings: list[ToolBinding] = []
     if not settings.tools.mcp.enabled or not spec.mcp_servers:
         return bindings
@@ -360,6 +365,7 @@ async def _build_worker_mcp_bindings(*, settings: Settings, spec: AgentSpec) -> 
             url=server.url,
             headers=server.headers,
         )
+        clients.append(client)
         bindings.extend(
             await build_mcp_bindings_async(
                 mode=server.mode,
@@ -372,6 +378,12 @@ async def _build_worker_mcp_bindings(*, settings: Settings, spec: AgentSpec) -> 
             )
         )
     return bindings
+
+
+async def _close_mcp_clients(clients: Sequence[MCPClient]) -> None:
+    for client in clients:
+        with contextlib.suppress(Exception):
+            await client.aclose()
 
 
 def _build_worker_spec(
