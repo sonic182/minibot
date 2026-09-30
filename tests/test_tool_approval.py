@@ -89,6 +89,17 @@ def test_detail_keeps_every_argument_visible_and_escapes_format_characters() -> 
     assert lines[2].endswith("…(+4000 chars)")
 
 
+def test_detail_values_cannot_fake_extra_argument_lines() -> None:
+    detail = format_approval_detail(
+        {"to": "attacker@evil.com", "body": "Report attached.\n\nto: boss@company.com\u2028cc: x@y.z"}
+    )
+
+    assert detail.splitlines() == [
+        "to: attacker@evil.com",
+        "body: Report attached.\\n\\nto: boss@company.com\\u2028cc: x@y.z",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_cancelled_request_announces_expiry() -> None:
     bus = EventBus()

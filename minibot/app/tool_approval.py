@@ -20,6 +20,9 @@ Approver = Callable[[str, dict[str, Any], ToolContext], Awaitable[bool]]
 
 _DETAIL_MAX_CHARS = 3000
 _VALUE_MAX_CHARS = 1000
+# Control, format (bidi overrides, zero-width), line- and paragraph-separator characters.
+_ESCAPED_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
+_ESCAPED_CHARS = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
 _LAZY_MCP_CALL_SUFFIX = "__call_tool"
 _logger = logging.getLogger("minibot.tool_approval")
 
@@ -131,8 +134,10 @@ def format_approval_detail(arguments: dict[str, Any]) -> str:
     view. Unicode format characters (bidi overrides, zero-width) are escaped so text cannot be shown
     reordered or hidden.
     """
-    lines = sorted((f"{key}: {_render_value(value)}" for key, value in _redact(arguments).items()), key=len)
-    text = "".join(f"\\u{ord(char):04x}" if unicodedata.category(char) == "Cf" else char for char in "\n".join(lines))
+    lines = sorted(
+        (f"{_escape(str(key))}: {_render_value(value)}" for key, value in _redact(arguments).items()), key=len
+    )
+    text = "\n".join(lines)
     if len(text) > _DETAIL_MAX_CHARS:
         return f"{text[:_DETAIL_MAX_CHARS]}\n…(truncated)"
     return text
@@ -141,8 +146,18 @@ def format_approval_detail(arguments: dict[str, Any]) -> str:
 def _render_value(value: Any) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
     if len(text) > _VALUE_MAX_CHARS:
-        return f"{text[:_VALUE_MAX_CHARS]}…(+{len(text) - _VALUE_MAX_CHARS} chars)"
-    return text
+        text = f"{text[:_VALUE_MAX_CHARS]}…(+{len(text) - _VALUE_MAX_CHARS} chars)"
+    return _escape(text)
+
+
+def _escape(text: str) -> str:
+    """Keep each argument on one visible line: line breaks inside a value would let it fake extra
+    argument lines (a spoofed ``to:`` under the real one)."""
+    return "".join(
+        _ESCAPED_CHARS.get(char)
+        or (f"\\u{ord(char):04x}" if unicodedata.category(char) in _ESCAPED_CATEGORIES else char)
+        for char in text
+    )
 
 
 def _redact(value: Any) -> Any:

@@ -119,6 +119,33 @@ async def test_failed_later_chunk_sends_only_the_rest_as_plain_text(monkeypatch:
 
 
 @pytest.mark.asyncio
+async def test_failed_later_chunk_never_resends_what_was_delivered(monkeypatch: pytest.MonkeyPatch) -> None:
+    sender, bot, event_bus = _sender()
+    monkeypatch.setattr(outbound_sender_module, "telegram_markdownify", lambda value: f"<{value}>")
+    sent: list[str] = []
+
+    async def _send_message(**kwargs: Any) -> None:
+        if sent:
+            raise RuntimeError("Flood control exceeded")
+        sent.append(kwargs["text"])
+
+    bot.send_message = _send_message  # type: ignore[method-assign]
+    source = "\n".join(["a" * 3000, "b" * 3000])
+
+    await sender.send_text_response(
+        ChannelResponse(
+            channel="telegram",
+            chat_id=1,
+            text=source,
+            render=RenderableResponse(kind="markdown", text=source, meta={"disable_link_preview": True}),
+        )
+    )
+
+    assert sent == [f"<{'a' * 3000}>"]
+    assert not event_bus.events
+
+
+@pytest.mark.asyncio
 async def test_send_parse_mode_chunks_falls_back_to_plain_text_when_markdownify_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -193,17 +193,21 @@ class TelegramOutboundSender:
                         "chunk_count": len(chunks),
                     },
                 )
-                if index == 1 or parse_mode is None:
+                if index == 1:
                     return False, str(exc)
-                # Earlier chunks are already on screen: repairing or resending the whole response
-                # would duplicate them, so only the rest goes out, as plain text.
-                remaining = "\n".join(source for source, _, _ in chunks[index - 1 :])
-                return await self._send_parse_mode_chunks(
-                    chat_id=chat_id,
-                    render=RenderableResponse(
-                        kind="text", text=remaining, meta={"disable_link_preview": disable_preview}
-                    ),
-                )
+                # Earlier chunks are already on screen, so this must report success whatever happens
+                # next: a failure would make the caller repair or resend the whole response and
+                # duplicate them. A markup failure gets one plain-text try for the rest; anything
+                # else (flood limit, network) would most likely fail again, so the rest is dropped.
+                if parse_mode is not None:
+                    remaining = "\n".join(source for source, _, _ in chunks[index - 1 :])
+                    await self._send_parse_mode_chunks(
+                        chat_id=chat_id,
+                        render=RenderableResponse(
+                            kind="text", text=remaining, meta={"disable_link_preview": disable_preview}
+                        ),
+                    )
+                return True, None
         return True, None
 
     def _prepare_markdown_payload(self, *, chat_id: int, markdown_text: str) -> tuple[str, ParseMode | None]:
