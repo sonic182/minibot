@@ -13,11 +13,12 @@ from llm_async.models import Tool
 from pydantic import BaseModel, ValidationError
 
 from minibot.adapters.config.schema import Settings
-from minibot.adapters.vault import Vault
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus, EventSubscription
 from minibot.core.events import BaseEvent
-from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
+from minibot.core.secrets import SecretVault
+from minibot.core.tools import ToolContext, ToolPayload
+from minibot.llm.tools.base import ToolBinding
 from minibot.shared.errors import ToolInputError
 
 EventHandler = Callable[[Any], Awaitable[None]]
@@ -82,7 +83,7 @@ class ExtensionContext:
     event_bus: EventBus
     logger: logging.Logger
     entrypoint: ExtensionEntrypoint = "daemon"
-    vault: Vault | None = None
+    vault: SecretVault | None = None
     # The container's own registry, updated in place by token auto-config after registration —
     # so read specs off it when they are needed, not at register() time.
     agent_registry: AgentRegistry | None = None
@@ -294,7 +295,7 @@ def load_extensions(
     event_bus: EventBus,
     logger: logging.Logger | None = None,
     entrypoint: ExtensionEntrypoint = "daemon",
-    vault: Vault | None = None,
+    vault: SecretVault | None = None,
     agent_registry: AgentRegistry | None = None,
 ) -> ExtensionRegistry:
     """Import and register the bundled extensions, then every ``[extensions] modules`` entry.

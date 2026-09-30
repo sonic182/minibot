@@ -16,8 +16,8 @@ from minibot.adapters.http.server import MAX_QUERY_INT, RouteSpec, WebSocketSpec
 from minibot.adapters.http.uploads import ChatCapabilities, UploadError, WebUploadManager, WebUploadSession
 from minibot.adapters.messaging.web import WebChannelService
 from minibot.adapters.messaging.web.service import WebChatSubscription
+from minibot.core.channels import session_identifier
 from minibot.core.memory import MemoryBackend
-from minibot.shared.utils import session_identifier
 
 _HISTORY_PAGE_SIZE = 50
 _MAX_MESSAGE_CHARS = 8_000

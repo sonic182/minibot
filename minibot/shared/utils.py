@@ -2,22 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from minibot.core.channels import ChannelMessage
-
-
-def session_id_for(message: ChannelMessage) -> str:
-    return session_identifier(message.channel, message.chat_id)
-
-
-def session_identifier(channel: str, chat_id: int | None) -> str:
-    """Readable key for one chat session.
-
-    MiniBot assists a single owner, so a session identifies a conversation, never a person. The
-    sender's ``user_id`` is deliberately not part of the key: every chat belongs to the one owner
-    configured in ``[runtime].owner_id``.
-    """
-    return f"{channel}:{chat_id or 0}"
-
 
 def humanize_token_count(value: int) -> str:
     if abs(value) <= 9999:

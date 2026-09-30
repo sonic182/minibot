@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
+
+from minibot.core.agent_runtime import ToolResult
+
+ToolPayload = dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolContext:
+    owner_id: str | None = None
+    channel: str | None = None
+    chat_id: int | None = None
+    user_id: int | None = None
+    turn_id: str | None = None
+    task_handoff_callback: Callable[[str], Awaitable[None]] | None = None
+    task_chain_depth: int = 0
+    claim_task_continuation: Callable[[], bool] | None = None
+    release_task_continuation: Callable[[], None] | None = None
+
+
+ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[ToolResult | Any]]

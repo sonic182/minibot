@@ -61,3 +61,17 @@ class ChannelFileResponse(BaseModel):
     file_path: str
     caption: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def session_id_for(message: ChannelMessage) -> str:
+    return session_identifier(message.channel, message.chat_id)
+
+
+def session_identifier(channel: str, chat_id: int | None) -> str:
+    """Readable key for one chat session.
+
+    MiniBot assists a single owner, so a session identifies a conversation, never a person. The
+    sender's ``user_id`` is deliberately not part of the key: every chat belongs to the one owner
+    configured in ``[runtime].owner_id``.
+    """
+    return f"{channel}:{chat_id or 0}"

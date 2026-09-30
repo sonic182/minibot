@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from minibot.core.agent_runtime import ToolResult
-from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.core.tools import ToolContext
+from minibot.llm.tools.base import ToolBinding
 
 
 class AudioTranscriptionExecutor(Protocol):

@@ -28,12 +28,14 @@ from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentSpec
+from minibot.core.channels import session_identifier
 from minibot.core.tasks import TaskLimits, TaskStopReason
+from minibot.core.tools import ToolContext
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.services.runtime_compaction import build_compactor
 from minibot.llm.tools.apply_patch import ApplyPatchTool
 from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
-from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.bash import BashTool
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.code_read import CodeReadTool
@@ -46,7 +48,7 @@ from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.skill_loader import SkillLoaderTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.llm.tools.wait import WaitTool
-from minibot.shared.utils import session_identifier, validate_attachments
+from minibot.shared.utils import validate_attachments
 
 _LOGGER = logging.getLogger("minibot.task_worker")
 _WORKER_SPEC_PATH = Path("<task_worker>")

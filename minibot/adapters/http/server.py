@@ -192,7 +192,7 @@ def build_history_route(memory: Any) -> RouteSpec:
     """Build the ``/history`` route: sessions index, or one session's messages with ``?session=``.
 
     The session id goes in a query parameter rather than the path because ids embed a colon
-    (``telegram:12345``, see ``minibot.shared.utils.session_identifier``). Both views take ``q`` to
+    (``telegram:12345``, see ``minibot.core.channels.session_identifier``). Both views take ``q`` to
     search message content and page by cursor: ``cursor`` for sessions, ``before`` for messages.
     """
 

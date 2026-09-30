@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from minibot.app.handlers.services.tool_audio_executor import AudioTranscriptionExecutor
 from minibot.app.incoming_files_context import incoming_files_from_metadata
 from minibot.core.channels import ChannelMessage, IncomingFileRef
-from minibot.llm.tools.base import ToolContext
+from minibot.core.tools import ToolContext
 
 
 @dataclass(frozen=True)

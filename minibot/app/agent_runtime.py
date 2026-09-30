@@ -17,6 +17,7 @@ from minibot.core.agent_runtime import (
 )
 from minibot.core.events import ReasoningEvent
 from minibot.core.tasks import TaskStopReason
+from minibot.core.tools import ToolContext
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.reasoning_replay import reasoning_text_from_message
 from minibot.llm.services.runtime_compaction import RuntimeCompactor
@@ -28,7 +29,7 @@ from minibot.llm.services.tool_loop_guard import (
     tool_iteration_signature,
     tool_loop_fallback_payload,
 )
-from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.pre_response import pre_response_binding
 from minibot.shared.utils import humanize_token_count
 

@@ -7,7 +7,8 @@ from typing import Any, Protocol
 
 from minibot.app.tool_guardrail_validator import ToolGuardrailValidator, _FailResult, _RetryResult, _ValidResult
 from minibot.core.agent_runtime import AgentMessage, AgentState
-from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.core.tools import ToolContext
+from minibot.llm.tools.base import ToolBinding
 
 
 @dataclass(frozen=True)

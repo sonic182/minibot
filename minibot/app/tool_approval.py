@@ -12,8 +12,9 @@ from uuid import uuid4
 from minibot.app.event_bus import EventBus
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns
 from minibot.core.events import ToolApprovalRequestedEvent, ToolApprovalResolvedEvent
+from minibot.core.tools import ToolContext, ToolPayload
 from minibot.llm.services.tool_executor import canonical_tool_name, is_sensitive_argument_key
-from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
+from minibot.llm.tools.base import ToolBinding
 from minibot.shared.errors import ToolInputError
 
 Approver = Callable[[str, dict[str, Any], ToolContext], Awaitable[bool]]

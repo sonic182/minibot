@@ -11,8 +11,8 @@ from minibot.app.response_parser import extract_answer, plain_render, resolve_re
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole
 from minibot.core.channels import RenderableResponse
+from minibot.core.tools import ToolContext
 from minibot.llm.provider_factory import LLMClient
-from minibot.llm.tools.base import ToolContext
 
 
 def count_tool_messages(state: AgentState) -> int:

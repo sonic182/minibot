@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from minibot.core.channels import session_identifier
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.chat_memory import ChatMemoryTool
-from minibot.shared.utils import session_identifier
 from tests.fixtures.memory import InMemoryMemoryStore as StubMemory
 
 

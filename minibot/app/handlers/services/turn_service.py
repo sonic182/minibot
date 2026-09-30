@@ -19,15 +19,15 @@ from minibot.app.response_parser import extract_answer, plain_render, resolve_re
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
-from minibot.core.channels import ChannelMessage, ChannelResponse
+from minibot.core.channels import ChannelMessage, ChannelResponse, session_id_for, session_identifier
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.core.tasks import MAX_TASK_CONTINUATIONS
+from minibot.core.tools import ToolContext
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
-from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.shared.utils import session_id_for, session_identifier
+from minibot.llm.tools.base import ToolBinding
 
 if TYPE_CHECKING:  # pragma: no cover
     from minibot.app.event_bus import EventBus

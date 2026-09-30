@@ -17,12 +17,11 @@ from minibot.app.handlers.services import (
 )
 from minibot.app.tool_use_guardrail import NoopToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
-from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
+from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse, session_id_for
 from minibot.core.events import MessageEvent
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient, LLMGeneration
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.shared.utils import session_id_for
 from tests.fixtures.memory import InMemoryMemoryStore as StubMemory
 
 
