@@ -97,7 +97,7 @@ class MCPToolBridge:
                     "argument_keys": sorted(sanitized_payload.keys()),
                 },
             )
-            result = self._client.call_tool_blocking(tool.name, sanitized_payload)
+            result = await self._client.call_tool(tool.name, sanitized_payload)
             content = result.content
             if isinstance(content, list):
                 content = _stringify_content_parts(content)
@@ -110,7 +110,15 @@ class MCPToolBridge:
                     "result_preview": str(content)[:400],
                 },
             )
-            return ToolResult(content={"server": self._server_name, "tool": tool.name, "result": content})
+            return ToolResult(
+                content={
+                    "ok": not result.is_error,
+                    "server": self._server_name,
+                    "tool": tool.name,
+                    "is_error": result.is_error,
+                    "result": content,
+                }
+            )
 
         return ToolBinding(tool=llm_tool, handler=_handler)
 

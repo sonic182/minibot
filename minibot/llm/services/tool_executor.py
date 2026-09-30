@@ -74,8 +74,9 @@ def parse_tool_call(call: ToolCall) -> tuple[str, dict[str, Any]]:
                     preview = arguments_payload.replace("\n", " ")
                     if len(preview) > 220:
                         preview = f"{preview[:220]}..."
-                    raise ValueError(
-                        f"Tool call arguments must be a valid JSON object. Received arguments preview: {preview}"
+                    raise ToolInputError(
+                        f"Tool call arguments must be a valid JSON object. Received arguments preview: {preview}",
+                        error_code="invalid_tool_arguments",
                     ) from exc
         else:
             arguments_dict = dict(arguments or {})
@@ -87,7 +88,7 @@ def parse_tool_call(call: ToolCall) -> tuple[str, dict[str, Any]]:
     if not func_name:
         raise ValueError("Tool call missing name")
     if not isinstance(arguments_dict, dict):
-        raise ValueError("Tool call arguments must be an object")
+        raise ToolInputError("Tool call arguments must be an object", error_code="invalid_tool_arguments")
     return canonical_tool_name(func_name), arguments_dict
 
 
@@ -239,11 +240,7 @@ def _build_failure_result(
     arguments: Mapping[str, Any],
     exc: Exception,
 ) -> ToolResult:
-    error_code = getattr(exc, "error_code", "") or ""
-    if not error_code:
-        error_code = "tool_execution_failed"
-        if isinstance(exc, ValueError) and "arguments" in str(exc).lower():
-            error_code = "invalid_tool_arguments"
+    error_code = getattr(exc, "error_code", "") or "tool_execution_failed"
     signature = tool_failure_signature(
         tool_name=tool_name,
         arguments=arguments,

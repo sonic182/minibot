@@ -17,6 +17,7 @@ from minibot.llm.services.request_builder import (
 from minibot.llm.services.schema_policy import prepare_tool_specs
 from minibot.llm.services.tool_executor import execute_tool_calls, tool_name_from_call
 from minibot.llm.services.tool_loop_guard import (
+    MAX_PSEUDO_TOOL_NUDGES,
     MAX_REPEATED_TOOL_ITERATIONS,
     any_tool_call_truncated,
     assistant_message_for_followup,
@@ -87,6 +88,7 @@ async def generate_with_tools(
     )
     usage_accumulator = UsageAccumulator()
     truncated_count = 0
+    pseudo_nudge_count = 0
 
     while True:
         call_kwargs = build_generate_step_call_kwargs(
@@ -147,7 +149,12 @@ async def generate_with_tools(
                 conversation.append(assistant_message_for_followup(message, replay_text=replay_text))
                 conversation.append({"role": "user", "content": _TRUNCATED_PATCH})
                 continue
-            if not message_tool_calls and _has_pseudo_tool_call_tag(raw_content):
+            if (
+                not message_tool_calls
+                and pseudo_nudge_count < MAX_PSEUDO_TOOL_NUDGES
+                and _has_pseudo_tool_call_tag(raw_content)
+            ):
+                pseudo_nudge_count += 1
                 conversation.append(assistant_message_for_followup(message, replay_text=replay_text))
                 conversation.append({"role": "user", "content": _PSEUDO_TOOL_PATCH})
                 continue

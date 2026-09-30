@@ -22,6 +22,7 @@ from minibot.llm.services.reasoning_replay import reasoning_text_from_message
 from minibot.llm.services.runtime_compaction import RuntimeCompactor
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
 from minibot.llm.services.tool_loop_guard import (
+    MAX_PSEUDO_TOOL_NUDGES,
     MAX_REPEATED_TOOL_ITERATIONS,
     any_tool_call_truncated,
     tool_iteration_signature,
@@ -147,6 +148,7 @@ class AgentRuntime:
         repeated_iteration_count = 0
         last_iteration_signature: str | None = None
         truncated_tool_call_count = 0
+        pseudo_nudge_count = 0
 
         async with asyncio.timeout(self._limits.timeout_seconds):
             while True:
@@ -300,7 +302,12 @@ class AgentRuntime:
                             AgentMessage(role="user", content=[MessagePart(type="text", text=_TRUNCATED_PATCH)])
                         )
                         continue
-                    if not tool_calls and _has_pseudo_tool_call_tag(raw_message_content):
+                    if (
+                        not tool_calls
+                        and pseudo_nudge_count < MAX_PSEUDO_TOOL_NUDGES
+                        and _has_pseudo_tool_call_tag(raw_message_content)
+                    ):
+                        pseudo_nudge_count += 1
                         state.messages.append(
                             self._message_renderer.from_provider_assistant_message(completion.message)
                         )

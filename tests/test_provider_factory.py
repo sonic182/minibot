@@ -760,6 +760,36 @@ async def test_generate_recovers_pseudo_tool_call_from_text(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
+async def test_generate_delivers_pseudo_tool_call_text_after_repeated_nudges(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import provider_registry
+
+    pseudo = '<tool_call>{"name":"noop","arguments":{}}</tool_call>'
+
+    class _AlwaysPseudoToolProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            if len(self.calls) > 10:
+                raise AssertionError("pseudo tool call retries are unbounded")
+            return _FakeResponse(
+                main_response=_FakeMessage(content=pseudo), original={"id": f"resp-{len(self.calls)}"}
+            )
+
+    async def _noop_handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"ok": True}
+
+    tool = Tool(name="noop", description="noop", parameters={"type": "object", "properties": {}, "required": []})
+    binding = ToolBinding(tool=tool, handler=_noop_handler)
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openai", _AlwaysPseudoToolProvider)
+    client = LLMClient(LLMMConfig(provider="openai", api_key="secret", model="x"))
+
+    result = await client.generate([], "hello", tools=[binding])
+
+    assert result.payload == pseudo
+    assert len(client._provider.calls) == 3
+
+
+@pytest.mark.asyncio
 async def test_generate_uses_user_content_when_provided(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm.services import provider_registry
 

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCP tool calls no longer freeze the bot in `bridge` mode.** The bridge waited for each remote call on a
+  separate thread while holding the main event loop, so Telegram polling, the scheduler and every other turn
+  stalled until the call returned. It now awaits the call directly. Its result also carries `ok` and
+  `is_error`, as `lazy` mode already did, so a remote tool error no longer reads as a success.
+- **Stdio MCP servers that write a lot to stderr no longer wedge.** stderr was never read after startup, so
+  about 16 MB of accumulated output stalled the server and every call timed out. It is now drained
+  continuously and only a short tail is kept for error messages.
+- **A reply that keeps quoting `<tool_call>` no longer loops until the timeout.** After two nudges to use the
+  tool-calling interface, the text is delivered as the answer, in both the agent runtime and the plain
+  generation loop.
+- **Only malformed call arguments report `invalid_tool_arguments`.** The code was derived by searching the
+  error message for the word "arguments", so any unrelated tool error that mentioned it was mislabelled. It
+  now comes from a typed `ToolInputError`, and malformed arguments are logged as a warning without a
+  traceback.
+
 ## [0.24.0] - 2026-09-30
 
 ### Added
