@@ -10,7 +10,12 @@ from pydantic import ValidationError
 
 from minibot.adapters.config.schema import ToolApprovalConfig
 from minibot.app.event_bus import EventBus
-from minibot.app.tool_approval import apply_tool_approval, format_approval_detail, request_tool_approval
+from minibot.app.tool_approval import (
+    _cap_detail,
+    apply_tool_approval,
+    format_approval_detail,
+    request_tool_approval,
+)
 from minibot.core.events import ToolApprovalRequestedEvent, ToolApprovalResolvedEvent
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.errors import ToolInputError
@@ -214,6 +219,16 @@ async def test_detail_supplied_by_a_worker_is_capped() -> None:
 
     event = await asyncio.wait_for(anext(aiter(requested)), timeout=1)
     assert isinstance(event, ToolApprovalRequestedEvent)
-    assert event.detail.startswith("x" * 3000)
-    assert event.detail.endswith("…(truncated)")
-    assert len(event.detail) < 3100
+    assert event.detail == "x" * 3000 + "\n…(truncated)"
+
+
+@pytest.mark.parametrize("extra", [0, 50])
+def test_capping_an_already_truncated_detail_keeps_one_marker(extra: int) -> None:
+    detail = format_approval_detail({key: key * 900 for key in "abcd"})
+    worker_detail = detail[: -len("\n…(truncated)")] + "q" * extra + "\n…(truncated)"
+
+    capped = _cap_detail(worker_detail)
+
+    assert capped.count("…(truncated)") == 1
+    assert capped.endswith("\n…(truncated)")
+    assert len(capped) <= 3000 + len("\n…(truncated)")

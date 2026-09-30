@@ -474,7 +474,6 @@ class TaskManager:
                             timeout_seconds=min(self._approval_timeout_seconds, max(deadline - loop.time(), 0)),
                         )
                     except Exception:
-                        # A stopped bus must deny the call, not escape _reader and skip its cleanup.
                         self._logger.exception("tool approval request failed", extra={"task_id": payload["task_id"]})
                     reply = {"type": "approval_result", "approval_id": event.get("approval_id"), "approved": approved}
                     tx.write(json.dumps(reply).encode() + b"\n")

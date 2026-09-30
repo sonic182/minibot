@@ -16,15 +16,11 @@ from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundFileEvent, OutboundFormatRepairEvent
 
 telegram_markdownify: Any | None = None
-# The Bot API reports markup errors as a bare 400 with no subcode; its fixed description is the only
-# discriminator (see the Telegram exception in AGENTS.md).
 _TELEGRAM_PARSE_ENTITIES_ERROR = "can't parse entities"
 
 
 class TelegramOutboundSender:
     _MAX_MESSAGE_LENGTH = 4000
-    # Fixed headroom for MarkdownV2 escaping (~12% seen in practice); an escape-heavy chunk
-    # can still overflow 4096 and then falls back to plain text for the rest of the message.
     _MARKDOWN_SOURCE_CHUNK_LENGTH = 3500
 
     def __init__(
@@ -145,8 +141,6 @@ class TelegramOutboundSender:
         return True, None
 
     async def _send_parse_mode_chunks(self, chat_id: int, render: RenderableResponse) -> tuple[bool, str | None]:
-        # Split the source before converting it: slicing converted MarkdownV2 can cut through an
-        # entity and make a later chunk unparseable after earlier ones were already delivered.
         chunks: list[tuple[str, str, ParseMode | None]] = []
         if render.kind == "markdown":
             for source in chunk_text(render.text, self._MARKDOWN_SOURCE_CHUNK_LENGTH):
@@ -195,10 +189,6 @@ class TelegramOutboundSender:
                 )
                 if index == 1:
                     return False, str(exc)
-                # Earlier chunks are already on screen, so this must report success whatever happens
-                # next: a failure would make the caller repair or resend the whole response and
-                # duplicate them. A markup failure gets one plain-text try for the rest; anything
-                # else (flood limit, network) would most likely fail again, so the rest is dropped.
                 if parse_mode is not None and _TELEGRAM_PARSE_ENTITIES_ERROR in str(exc).lower():
                     remaining = "\n".join(source for source, _, _ in chunks[index - 1 :])
                     await self._send_parse_mode_chunks(

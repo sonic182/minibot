@@ -182,8 +182,6 @@ class TelegramService:
                 )
 
     async def _send_approval_request(self, event: ToolApprovalRequestedEvent) -> None:
-        # Plain text on purpose: the arguments carry third-party content (an email body, say) that must
-        # not be able to inject formatting or links into the approval prompt.
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [

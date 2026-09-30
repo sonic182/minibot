@@ -22,7 +22,6 @@ _DETAIL_MAX_CHARS = 3000
 _TRUNCATED_SUFFIX = "\n…(truncated)"
 _VALUE_MAX_CHARS = 1000
 NAME_MAX_CHARS = 200
-# Control, format (bidi overrides, zero-width), line- and paragraph-separator characters.
 _ESCAPED_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 _ESCAPED_CHARS = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
 _LAZY_MCP_CALL_SUFFIX = "__call_tool"
@@ -52,7 +51,6 @@ def apply_tool_approval(
 def effective_tool_name(tool_name: str, payload: ToolPayload) -> str:
     name = canonical_tool_name(tool_name)
     remote = payload.get("tool_name") if isinstance(payload, dict) else None
-    # Stripped exactly like MCPLazyToolBridge does before dispatching, or padding would dodge the patterns.
     if name.endswith(_LAZY_MCP_CALL_SUFFIX) and isinstance(remote, str) and remote.strip():
         return f"{name.removesuffix(_LAZY_MCP_CALL_SUFFIX)}__{remote.strip()}"
     return name
@@ -96,7 +94,6 @@ async def request_tool_approval(
         return False
     approval_id = uuid4().hex
     resolved = False
-    # Subscribe before publishing so a fast answer cannot slip past.
     subscription = event_bus.subscribe(types=(ToolApprovalResolvedEvent,))
     try:
         await event_bus.publish(
@@ -122,9 +119,6 @@ async def request_tool_approval(
     finally:
         await subscription.close()
         if not resolved:
-            # Also on cancellation (turn timeout, task cancel): without this the prompt keeps live
-            # buttons, and a late tap would show "approved" for a call that never runs. No user_id
-            # marks the expiry.
             with contextlib.suppress(Exception):
                 await event_bus.publish(ToolApprovalResolvedEvent(approval_id=approval_id, approved=False))
     return False
@@ -144,9 +138,9 @@ def format_approval_detail(arguments: dict[str, Any]) -> str:
 
 
 def _cap_detail(text: str) -> str:
-    if len(text) > _DETAIL_MAX_CHARS and not text.endswith(_TRUNCATED_SUFFIX):
-        return f"{text[:_DETAIL_MAX_CHARS]}{_TRUNCATED_SUFFIX}"
-    return text[: _DETAIL_MAX_CHARS + len(_TRUNCATED_SUFFIX)]
+    if len(text) <= _DETAIL_MAX_CHARS:
+        return text
+    return f"{text[:_DETAIL_MAX_CHARS]}{_TRUNCATED_SUFFIX}"
 
 
 def _render_value(value: Any) -> str:
