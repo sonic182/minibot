@@ -72,6 +72,9 @@ HTTP transport example:
 ``catalog_cache_ttl_seconds`` controls automatic catalog discovery before a direct ``call_tool``;
 set it to ``0`` to disable the cache. An explicit ``list_tools`` call always refreshes the catalog.
 
+See :doc:`mcp_servers` for recommended servers (email, long-term memory) and how to run local MCP
+binaries, including under Docker.
+
 .. note::
 
    Browser automation no longer goes through an MCP server. It now drives the

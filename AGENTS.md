@@ -11,7 +11,7 @@
 - **Tests**: run only the files your change touches — `poetry run pytest <file>` (single test via `poetry run pytest <file>::<TestClass>::<test_method>` or `poetry run pytest <file> -k <test_name>`). Leave the full `poetry run pytest` sweep to CI; do not run it locally.
 
 ## Documentation & Comments
-- **Comments/docstrings** — avoid incidental comments; public documentation docstrings are acceptable when they feed generated docs or clarify public config/tool surfaces.
+- **Comments/docstrings** — do not add code comments unless the user explicitly asks for them; public documentation docstrings are acceptable when they feed generated docs or clarify public config/tool surfaces.
 - **Linting is welcome** — run `ruff check` or `ruff format`; this repo does not configure `flake8` despite it being available.
 
 ## Output Classification Rule
@@ -20,6 +20,7 @@
 - Text matching is acceptable only for deterministic protocol/format parsing (for example markdown fences, SSE framing), not for semantic decision-making.
 - **Provider failures follow the same rule.** Classify HTTP/provider errors (quota, rate limit, context overflow) by the HTTP status plus the provider's structured `error.code`/`error.type`, never by message text. The same status or code can mean different things per provider, so interpret it knowing which provider returned it (reference: `ProviderHTTPError` in `llm/errors.py`).
 - If a provider exposes no structured code for a case, leave it unclassified (generic failure) and record the gap; do not fall back to matching its message.
+- **Exception — Telegram Bot API:** it returns only `error_code` 400 with a fixed, human-written `description` and no subcode. Matching a documented description (e.g. `can't parse entities`) is allowed there, kept to one named constant per case. Never extend this to LLM output or to providers that expose structured codes.
 
 ## Code Style
 - **Line length**: 119 characters.

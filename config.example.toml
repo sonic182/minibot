@@ -165,6 +165,8 @@ directory = "./agents"
 # - "exclusive_mcp": only specialist-claimed MCP tools are hidden from main; built-in tools stay shared.
 #   Recommended when browser MCP tools should be specialist-only but main should keep filesystem/memory/etc.
 tool_ownership_mode = "exclusive_mcp"
+# MCP servers kept visible to main even when a specialist claims them (exclusive modes only).
+shared_mcp_servers = []
 # Tool-use guardrail for the main agent.
 # - "disabled": no guardrail — the handler trusts the model's output directly (default, simpler).
 # - "llm_classifier": before returning, runs a secondary LLM call to decide whether the request
@@ -363,6 +365,13 @@ auto_transcribe_max_duration_seconds = 45
 # Browser runtime paths used by browser-specialist prompts and Playwright MCP output-dir.
 [tools.browser]
 output_dir = "./data/files/browser"
+
+# Ask for approval on Telegram (approve/deny buttons) before these tools run. fnmatch patterns over
+# exposed tool names; empty disables it. Denied on timeout or when the turn is not on Telegram.
+[tools.approval]
+require_approval = []
+# require_approval = ["mcp_mail__smtp_*"]
+timeout_seconds = 90
 
 # Optional sleep/wait tool.
 [tools.wait]

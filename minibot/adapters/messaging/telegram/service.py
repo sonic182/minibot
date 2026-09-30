@@ -7,11 +7,12 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ChatAction
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import Message as TelegramMessage
 
 from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
-from minibot.adapters.messaging.telegram.authorization import is_authorized
+from minibot.adapters.messaging.telegram.authorization import is_authorized, is_authorized_ids
 from minibot.adapters.messaging.telegram.incoming_media_collector import TelegramIncomingMediaCollector
 from minibot.adapters.messaging.telegram.outbound_sender import TelegramOutboundSender
 from minibot.app.event_bus import EventBus
@@ -20,12 +21,16 @@ from minibot.core.events import (
     MessageEvent,
     OutboundEvent,
     OutboundFileEvent,
+    ToolApprovalRequestedEvent,
+    ToolApprovalResolvedEvent,
     TurnCompletedEvent,
     TurnFailedEvent,
     TurnStartedEvent,
 )
 
 _TYPING_INTERVAL_SECONDS = 4
+_DENIAL_DRAIN_SECONDS = 1.0
+_APPROVAL_CALLBACK_PREFIX = "approval"
 
 
 class TelegramService:
@@ -65,10 +70,21 @@ class TelegramService:
         self._outgoing_task: asyncio.Task[None] | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._outgoing_subscription = event_bus.subscribe(
-            types=(OutboundEvent, OutboundFileEvent, TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent)
+            types=(
+                OutboundEvent,
+                OutboundFileEvent,
+                TurnStartedEvent,
+                TurnCompletedEvent,
+                TurnFailedEvent,
+                ToolApprovalRequestedEvent,
+                ToolApprovalResolvedEvent,
+            )
         )
+        self._pending_approvals: dict[str, tuple[int, int]] = {}
+        self._approval_denials: set[asyncio.Task[None]] = set()
 
         self._dp.message.register(self._handle_message)
+        self._dp.callback_query.register(self._handle_approval_callback)
 
     async def start(self) -> None:
         self._logger.info("starting telegram polling")
@@ -155,11 +171,86 @@ class TelegramService:
                     await self._outbound_sender.send_text_response(event.response)
                 if isinstance(event, OutboundFileEvent) and event.response.channel == "telegram":
                     await self._outbound_sender.send_file_response(event)
+                if isinstance(event, ToolApprovalRequestedEvent) and event.channel == "telegram":
+                    await self._send_approval_request(event)
+                if isinstance(event, ToolApprovalResolvedEvent) and event.user_id is None:
+                    await self._expire_approval(event.approval_id)
             except Exception:
                 self._logger.exception(
                     "telegram outbound event failed",
                     extra={"event_type": event.event_type},
                 )
+
+    async def _send_approval_request(self, event: ToolApprovalRequestedEvent) -> None:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✅ Approve", callback_data=f"{_APPROVAL_CALLBACK_PREFIX}:{event.approval_id}:y"
+                    ),
+                    InlineKeyboardButton(
+                        text="❌ Deny", callback_data=f"{_APPROVAL_CALLBACK_PREFIX}:{event.approval_id}:n"
+                    ),
+                ]
+            ]
+        )
+        try:
+            sent = await self._bot.send_message(
+                chat_id=event.chat_id,
+                text=f"Approval required: {event.tool_name}\n\n{event.detail}",
+                reply_markup=keyboard,
+            )
+        except Exception:
+            self._logger.exception("failed to send tool approval prompt", extra={"chat_id": event.chat_id})
+            denial = asyncio.create_task(
+                self._event_bus.publish(ToolApprovalResolvedEvent(approval_id=event.approval_id, approved=False))
+            )
+            self._approval_denials.add(denial)
+            denial.add_done_callback(self._denial_finished)
+            return
+        self._pending_approvals[event.approval_id] = (event.chat_id, sent.message_id)
+
+    async def _handle_approval_callback(self, callback: CallbackQuery) -> None:
+        prefix, _, rest = (callback.data or "").partition(":")
+        approval_id, _, answer = rest.partition(":")
+        message = callback.message
+        chat_id = message.chat.id if message is not None else None
+        if prefix != _APPROVAL_CALLBACK_PREFIX or answer not in {"y", "n"} or chat_id is None:
+            await callback.answer()
+            return
+        if not is_authorized_ids(self._config, chat_id, callback.from_user.id):
+            self._logger.warning(
+                "blocked unauthorized approval",
+                extra={"chat_id": chat_id, "user_id": callback.from_user.id},
+            )
+            await callback.answer("Access denied.")
+            return
+        pending = self._pending_approvals.pop(approval_id, None)
+        if pending is None:
+            await callback.answer("Expired")
+            return
+        approved = answer == "y"
+        await self._event_bus.publish(
+            ToolApprovalResolvedEvent(approval_id=approval_id, approved=approved, user_id=callback.from_user.id)
+        )
+        await callback.answer()
+        await self._close_approval_prompt(*pending, "✅ Approved" if approved else "❌ Denied")
+
+    async def _expire_approval(self, approval_id: str) -> None:
+        pending = self._pending_approvals.pop(approval_id, None)
+        if pending is not None:
+            await self._close_approval_prompt(*pending, "⌛ No answer: denied")
+
+    def _denial_finished(self, task: asyncio.Task[None]) -> None:
+        self._approval_denials.discard(task)
+        if not task.cancelled() and (exc := task.exception()) is not None:
+            self._logger.warning("approval denial could not be published", exc_info=exc)
+
+    async def _close_approval_prompt(self, chat_id: int, message_id: int, outcome: str) -> None:
+        with contextlib.suppress(Exception):
+            await self._bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id)
+        with contextlib.suppress(Exception):
+            await self._bot.send_message(chat_id=chat_id, text=outcome, reply_to_message_id=message_id)
 
     def _log_outgoing_task_end(self, task: asyncio.Task[None]) -> None:
         """A dead outgoing loop is invisible otherwise: the task is held on an attribute, so
@@ -205,6 +296,13 @@ class TelegramService:
             self._outgoing_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._outgoing_task
+
+        denials = list(self._approval_denials)
+        if denials:
+            _, stuck = await asyncio.wait(denials, timeout=_DENIAL_DRAIN_SECONDS)
+            for denial in stuck:
+                denial.cancel()
+            await asyncio.gather(*stuck, return_exceptions=True)
 
         typing_tasks = list(self._typing_tasks.values())
         self._typing_tasks.clear()

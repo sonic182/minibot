@@ -715,3 +715,121 @@ async def test_budget_is_resolved_before_the_execution_lease_is_claimed() -> Non
     await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert order == ["budget", "claim"]
+
+
+class _PipeScripted:
+    """Fake pipe: replays worker lines in order and records what the manager writes back."""
+
+    def __init__(self, *events: dict) -> None:
+        self._lines = [json.dumps(event).encode() + b"\n" for event in events]
+        self.written: list[dict] = []
+
+    @asynccontextmanager
+    async def open(self):
+        lines = self._lines
+        written = self.written
+
+        class _RX:
+            async def readline(self) -> bytes:
+                return lines.pop(0) if lines else b""
+
+        class _TX:
+            def write(self, data: bytes) -> None:
+                written.append(json.loads(data))
+
+        yield _RX(), _TX()
+
+
+@pytest.mark.asyncio
+async def test_worker_approval_request_is_answered_over_the_pipe() -> None:
+    manager = _make_manager(EventBus())
+    pipe = _PipeScripted(
+        {
+            "type": "approval_request",
+            "approval_id": "a1",
+            "tool_name": "mcp_mail__smtp_send_message",
+            "arguments": {"to": "a@b.c"},
+            "channel": "telegram",
+            "chat_id": 1,
+        },
+        {"type": "result", "task_id": "t1", "status": "done", "text": "ok"},
+    )
+    approve = AsyncMock(return_value=True)
+
+    with patch("minibot.adapters.tasks.manager.request_tool_approval", approve):
+        result = await manager._read_worker_result(pipe, {"task_id": "t1"}, 5.0, None, 5)
+
+    assert result["text"] == "ok"
+    assert approve.await_args.kwargs["tool_name"] == "mcp_mail__smtp_send_message"
+    assert approve.await_args.kwargs["chat_id"] == 1
+    assert pipe.written[-1] == {"type": "approval_result", "approval_id": "a1", "approved": True}
+
+
+@pytest.mark.asyncio
+async def test_worker_approval_request_prefers_the_precomputed_detail() -> None:
+    manager = _make_manager(EventBus())
+    pipe = _PipeScripted(
+        {
+            "type": "approval_request",
+            "approval_id": "a1",
+            "tool_name": "mcp_mail__smtp_send_message",
+            "detail": "to: a@b.c",
+            "channel": "telegram",
+            "chat_id": 1,
+        },
+        {"type": "result", "task_id": "t1", "status": "done", "text": "ok"},
+    )
+    approve = AsyncMock(return_value=True)
+
+    with patch("minibot.adapters.tasks.manager.request_tool_approval", approve):
+        await manager._read_worker_result(pipe, {"task_id": "t1"}, 5.0, None, 5)
+
+    assert approve.await_args.kwargs["detail"] == "to: a@b.c"
+
+
+class _BadLinePipe:
+    def __init__(self, line: bytes | None) -> None:
+        self._line = line
+
+    @asynccontextmanager
+    async def open(self):
+        line = self._line
+
+        class _RX:
+            async def readline(self) -> bytes:
+                if line is None:
+                    raise ValueError("Separator is not found, and chunk exceed the limit")
+                return line
+
+        class _TX:
+            def write(self, data: bytes) -> None:
+                pass
+
+        yield _RX(), _TX()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "error"),
+    [
+        (None, "worker sent an oversized message"),
+        (b"not json\n", "worker returned invalid JSON"),
+        (b'{"type": "surprise"}\n', "worker returned an invalid message"),
+    ],
+)
+async def test_protocol_failure_terminates_the_worker_and_fails_the_task(line: bytes | None, error: str) -> None:
+    bus = EventBus()
+    subscription = bus.subscribe(types=(OutboundEvent,))
+    manager = _make_manager(bus)
+
+    ack_cb, _, _, proc, reader_task = await _spawn(manager, _BadLinePipe(line), task_id="t1")
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    assert proc.terminate_calls == 1
+    assert proc.start_calls == 1
+    ack_cb.assert_awaited_once()
+    status = await asyncio.wait_for(anext(aiter(subscription)), timeout=1.0)
+    assert isinstance(status, OutboundEvent)
+    assert status.response.metadata["status"] == "failed"
+    result = await manager._read_worker_result(_BadLinePipe(line), {"task_id": "t2"}, 5.0, None, 5)
+    assert result["error"] == error

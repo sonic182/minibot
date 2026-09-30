@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import signal
@@ -8,6 +9,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.config.schema import Settings, task_limit
@@ -23,6 +25,7 @@ from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
+from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentSpec
 from minibot.core.tasks import TaskLimits, TaskStopReason
@@ -90,8 +93,41 @@ async def _worker_async(pipe: Any) -> None:
     async with pipe.open() as (rx, tx):
         raw = await rx.readline()
 
+        pending_approvals: dict[str, asyncio.Future[bool]] = {}
+
         async def emit_progress(progress: dict[str, Any]) -> None:
             tx.write(json.dumps({"type": "progress", "progress": progress}).encode() + b"\n")
+
+        async def request_approval(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
+            approval_id = uuid4().hex
+            future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+            pending_approvals[approval_id] = future
+            request = {
+                "type": "approval_request",
+                "approval_id": approval_id,
+                "tool_name": tool_name[:NAME_MAX_CHARS],
+                "detail": format_approval_detail(arguments),
+                "channel": context.channel,
+                "chat_id": context.chat_id,
+            }
+            tx.write(json.dumps(request, default=str).encode() + b"\n")
+            try:
+                return await future
+            finally:
+                pending_approvals.pop(approval_id, None)
+
+        async def read_approval_results() -> None:
+            while line := await rx.readline():
+                with contextlib.suppress(json.JSONDecodeError):
+                    event = json.loads(line)
+                    if not isinstance(event, dict):
+                        continue
+                    future = pending_approvals.get(str(event.get("approval_id")))
+                    if event.get("type") == "approval_result" and future is not None and not future.done():
+                        future.set_result(event.get("approved") is True)
+            for future in pending_approvals.values():
+                if not future.done():
+                    future.set_result(False)
 
         try:
             payload = json.loads(raw)
@@ -105,13 +141,22 @@ async def _worker_async(pipe: Any) -> None:
                 "metadata": {"error_type": "invalid_payload"},
             }
         else:
-            result = await run_agent_loop(payload, progress_callback=emit_progress)
+            reader = asyncio.create_task(read_approval_results())
+            try:
+                result = await run_agent_loop(
+                    payload,
+                    progress_callback=emit_progress,
+                    approval_callback=request_approval,
+                )
+            finally:
+                reader.cancel()
         tx.write(json.dumps(result).encode() + b"\n")
 
 
 async def run_agent_loop(
     task: dict[str, Any],
     progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    approval_callback: Approver | None = None,
 ) -> dict[str, Any]:
     task_id = str(task.get("task_id") or "")
     try:
@@ -133,7 +178,11 @@ async def run_agent_loop(
             extension_tool_names=[binding.tool.name for binding in extensions.tools],
         )
         llm_client = llm_factory.create_for_agent(spec)
-        tools = _build_worker_tools(settings=settings, spec=spec, extension_tools=extensions.tools)
+        tools = apply_tool_approval(
+            _build_worker_tools(settings=settings, spec=spec, extension_tools=extensions.tools),
+            patterns=settings.tools.approval.require_approval,
+            approve=approval_callback or _deny_approval,
+        )
         limits = _task_limits(task, settings)
         runtime = AgentRuntime(
             llm_client=llm_client,
@@ -228,6 +277,10 @@ async def run_agent_loop(
             "stop_reason": _stop_reason_for_error(exc).value,
             "metadata": _build_error_metadata(exc),
         }
+
+
+async def _deny_approval(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
+    return False
 
 
 def _build_worker_tools(

@@ -86,6 +86,17 @@ Main-agent tool policy is set under ``[orchestration.main_agent]``:
 - ``exclusive`` — specialist-owned tools are removed from the main agent.
 - ``exclusive_mcp`` — only specialist-owned MCP tools are removed from the main agent.
 
+``shared_mcp_servers`` lists MCP servers that stay visible to the main agent in both exclusive modes,
+even when a specialist also claims them — for example a read-only web search server that both the
+main agent and a research specialist use. The ``[orchestration.main_agent]`` ``tools_allow`` and
+``tools_deny`` policy still applies first, so ``tools_deny = ["mcp*"]`` hides a shared server too:
+
+.. code-block:: toml
+
+   [orchestration]
+   tool_ownership_mode = "exclusive_mcp"
+   shared_mcp_servers = ["exa"]
+
 Assigning an MCP server to an agent:
 
 .. code-block:: markdown

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -10,7 +12,12 @@ from minibot.adapters.config.schema import TelegramChannelConfig
 from minibot.adapters.messaging.telegram.service import TelegramService
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelResponse, IncomingFileRef
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.events import (
+    MessageEvent,
+    OutboundEvent,
+    ToolApprovalRequestedEvent,
+    ToolApprovalResolvedEvent,
+)
 
 
 @dataclass
@@ -160,3 +167,132 @@ async def test_outgoing_loop_survives_a_failing_send() -> None:
 
     assert sender.failed == ["boom"]
     assert sender.sent == ["delivered"]
+
+
+@dataclass
+class _Callback:
+    data: str
+    message: _Message
+    from_user: _User
+    answer: AsyncMock = field(default_factory=AsyncMock)
+
+
+def _approval_service(**config: Any) -> tuple[TelegramService, _EventBusStub, _Callback]:
+    service, _, event_bus, _ = _service(TelegramChannelConfig(bot_token="token", **config))
+    service._pending_approvals = {"a1": (1, 7)}
+    message = _Message(chat=_Chat(1), from_user=None, message_id=7)
+    callback = _Callback(data="approval:a1:y", message=message, from_user=_User(2))
+    return service, event_bus, callback
+
+
+@pytest.mark.asyncio
+async def test_approval_callback_publishes_the_answer() -> None:
+    service, event_bus, callback = _approval_service(allowed_user_ids=[2])
+
+    await service._handle_approval_callback(callback)  # type: ignore[arg-type]
+
+    [event] = event_bus.events
+    assert isinstance(event, ToolApprovalResolvedEvent)
+    assert (event.approval_id, event.approved, event.user_id) == ("a1", True, 2)
+    assert "a1" not in service._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_approval_callback_from_unauthorized_user_is_ignored() -> None:
+    service, event_bus, callback = _approval_service(allowed_user_ids=[99])
+
+    await service._handle_approval_callback(callback)  # type: ignore[arg-type]
+
+    assert not event_bus.events
+    assert "a1" in service._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_approval_callback_for_expired_request_is_not_published() -> None:
+    service, event_bus, callback = _approval_service(allowed_user_ids=[2])
+    service._pending_approvals.clear()
+
+    await service._handle_approval_callback(callback)  # type: ignore[arg-type]
+
+    assert not event_bus.events
+    callback.answer.assert_awaited_once_with("Expired")
+
+
+@pytest.mark.asyncio
+async def test_approval_prompt_that_fails_to_send_is_denied_at_once() -> None:
+    service, bot, event_bus, _ = _service(TelegramChannelConfig(bot_token="token"))
+
+    async def _fail(**_kwargs: Any) -> None:
+        raise RuntimeError("message is too long")
+
+    bot.send_message = _fail
+    service._pending_approvals = {}
+    service._approval_denials = set()
+
+    await service._send_approval_request(
+        ToolApprovalRequestedEvent(approval_id="a1", tool_name="t", channel="telegram", chat_id=1, detail="d")
+    )
+    await asyncio.gather(*service._approval_denials)
+
+    [event] = event_bus.events
+    assert isinstance(event, ToolApprovalResolvedEvent)
+    assert (event.approval_id, event.approved, event.user_id) == ("a1", False, None)
+    assert "a1" not in service._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_failed_denial_publish_is_logged_not_left_unretrieved(caplog: pytest.LogCaptureFixture) -> None:
+    service, bot, event_bus, _ = _service(TelegramChannelConfig(bot_token="token"))
+
+    async def _fail(**_kwargs: Any) -> None:
+        raise RuntimeError("message is too long")
+
+    async def _stopped_bus(_event: Any) -> None:
+        raise RuntimeError("event bus is stopped")
+
+    bot.send_message = _fail
+    event_bus.publish = _stopped_bus
+    service._pending_approvals = {}
+    service._approval_denials = set()
+
+    with caplog.at_level(logging.WARNING, logger="test.telegram.service"):
+        await service._send_approval_request(
+            ToolApprovalRequestedEvent(approval_id="a1", tool_name="t", channel="telegram", chat_id=1, detail="d")
+        )
+        await asyncio.gather(*service._approval_denials, return_exceptions=True)
+        await asyncio.sleep(0)
+
+    assert any("approval denial" in record.getMessage() for record in caplog.records)
+    assert not service._approval_denials
+
+
+@pytest.mark.asyncio
+async def test_outcome_is_still_sent_when_removing_the_buttons_fails() -> None:
+    service, bot, _, _ = _service(TelegramChannelConfig(bot_token="token"))
+
+    async def _fail(**_kwargs: Any) -> None:
+        raise RuntimeError("message is not modified")
+
+    bot.edit_message_reply_markup = _fail  # type: ignore[attr-defined]
+
+    await service._close_approval_prompt(1, 7, "✅ Approved")
+
+    assert [call["text"] for call in bot.calls] == ["✅ Approved"]
+
+
+@pytest.mark.asyncio
+async def test_stop_does_not_wait_forever_for_a_stuck_denial(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.adapters.messaging.telegram import service as service_module
+
+    monkeypatch.setattr(service_module, "_DENIAL_DRAIN_SECONDS", 0.05)
+    service, bot, _, _ = _service(TelegramChannelConfig(bot_token="token"))
+    service._poll_task = None
+    service._outgoing_task = None
+    service._typing_tasks = {}
+    bot.session = type("_Session", (), {"close": AsyncMock()})()
+    stuck = asyncio.create_task(asyncio.Event().wait())
+    service._approval_denials = {stuck}
+
+    await asyncio.wait_for(service.stop(), timeout=0.5)
+
+    assert stuck.cancelled()

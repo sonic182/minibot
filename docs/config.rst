@@ -255,6 +255,9 @@ Tool Configuration
    * - Section
      - Config model
      - Key options
+   * - ``[tools.approval]``
+     - ``ToolApprovalConfig``
+     - ``require_approval`` (fnmatch tool-name patterns, default empty), ``timeout_seconds``; Telegram approve/deny buttons before a matching call runs, denied on timeout or outside Telegram
    * - ``[tools.kv_memory]``
      - ``KeyValueMemoryConfig``
      - ``enabled``, ``sqlite_url``, ``default_limit``, ``max_limit``

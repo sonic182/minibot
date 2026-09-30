@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -379,3 +380,79 @@ def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
     assert generous.max_new_tokens == 4096
     assert tight.max_new_tokens == 2048
     assert general.max_new_tokens == 8192
+
+
+class _ApprovalPipe:
+    def __init__(self, *, answer: bool | None) -> None:
+        self.answer = answer
+        self.written: list[bytes] = []
+        self._requested = asyncio.Event()
+        self._reads = 0
+
+    @asynccontextmanager
+    async def open(self):
+        pipe = self
+
+        class _RX:
+            async def readline(self) -> bytes:
+                pipe._reads += 1
+                if pipe._reads == 1:
+                    return json.dumps({"task_id": "t1"}).encode() + b"\n"
+                await pipe._requested.wait()
+                if pipe.answer is None or pipe._reads > 2:
+                    return b""
+                request = json.loads(next(line for line in pipe.written if b"approval_request" in line))
+                reply = {"type": "approval_result", "approval_id": request["approval_id"], "approved": pipe.answer}
+                return json.dumps(reply).encode() + b"\n"
+
+        class _TX:
+            def write(self, data: bytes) -> None:
+                pipe.written.append(data)
+                if b"approval_request" in data:
+                    pipe._requested.set()
+
+        yield _RX(), _TX()
+
+
+async def _run_worker_asking_approval(pipe: _ApprovalPipe, tool_name: str = "mcp_mail__smtp_send_message") -> bool:
+    outcome: list[bool] = []
+
+    async def _fake_loop(_task, progress_callback=None, approval_callback=None):
+        outcome.append(
+            await approval_callback(
+                tool_name,
+                {"body": "x" * 200_000, "password": "hunter2"},
+                ToolContext(channel="telegram", chat_id=1),
+            )
+        )
+        return {"type": "result", "task_id": "t1", "status": "done", "text": "ok"}
+
+    with patch.object(worker, "run_agent_loop", _fake_loop):
+        await worker._worker_async(pipe)
+    return outcome[0]
+
+
+@pytest.mark.asyncio
+async def test_worker_sends_a_capped_redacted_detail_and_returns_the_answer() -> None:
+    pipe = _ApprovalPipe(answer=True)
+
+    assert await _run_worker_asking_approval(pipe) is True
+
+    request_line = next(line for line in pipe.written if b"approval_request" in line)
+    assert len(request_line) < 10_000
+    assert b"hunter2" not in request_line
+
+
+@pytest.mark.asyncio
+async def test_worker_denies_a_pending_approval_when_the_manager_hangs_up() -> None:
+    assert await _run_worker_asking_approval(_ApprovalPipe(answer=None)) is False
+
+
+@pytest.mark.asyncio
+async def test_worker_caps_the_tool_name_it_sends() -> None:
+    pipe = _ApprovalPipe(answer=True)
+
+    await _run_worker_asking_approval(pipe, tool_name="mcp_mail__" + "x" * 70_000)
+
+    request_line = next(line for line in pipe.written if b"approval_request" in line)
+    assert len(request_line) < 10_000

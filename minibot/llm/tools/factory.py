@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from minibot.adapters.config.schema import Settings
 from minibot.adapters.files.local_storage import LocalFileStorage
@@ -9,11 +9,12 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_registry import SkillRegistry
+from minibot.app.tool_approval import Approver, apply_tool_approval, request_tool_approval
 from minibot.core.memory import KeyValueMemory, MemoryBackend
 from minibot.core.tasks import TaskProducer
 from minibot.llm.services.tool_executor import canonical_tool_name
 from minibot.llm.tools.agent_info import AgentInfoTool
-from minibot.llm.tools.base import ToolBinding
+from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.output_spill import apply_tool_output_spill
@@ -67,13 +68,33 @@ def build_enabled_tools(
         tools.extend(AgentInfoTool(registry=agent_registry, llm_factory=llm_factory).bindings())
     _ensure_unique_tool_names(tools)
     return apply_tool_call_events(
-        apply_tool_output_spill(
-            tools,
-            storage=managed_storage,
-            config=settings.tools.tool_output_spill,
+        apply_tool_approval(
+            apply_tool_output_spill(
+                tools,
+                storage=managed_storage,
+                config=settings.tools.tool_output_spill,
+            ),
+            patterns=settings.tools.approval.require_approval,
+            approve=_event_bus_approver(event_bus, settings.tools.approval.timeout_seconds),
         ),
         event_bus=event_bus,
     )
+
+
+def _event_bus_approver(event_bus: EventBus | None, timeout_seconds: float) -> Approver:
+    async def approve(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
+        if event_bus is None:
+            return False
+        return await request_tool_approval(
+            event_bus,
+            tool_name=tool_name,
+            arguments=arguments,
+            channel=context.channel,
+            chat_id=context.chat_id,
+            timeout_seconds=timeout_seconds,
+        )
+
+    return approve
 
 
 def _build_managed_storage(settings: Settings) -> LocalFileStorage:
