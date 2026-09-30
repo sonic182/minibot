@@ -191,11 +191,12 @@ and the fix is small.
 
 ## [ ] Phase 3 — Native skills & runtime self-knowledge
 
-Detailed design, broken into seven PRs: [`native_skills.md`](native_skills.md).
-**In progress** — done: PR 1 (version single-sourcing, #82), PR 2 (native
-tier + `create-skill`, #83) and PR 6 (`install-skill` + `install_skill`, #84,
-released in 0.18.0). Next: `reload_agents` (PR 3), ahead of `get_settings`
-(PR 4), then the `minibot-docs` and `create-agent` skills (PRs 5 and 7).
+**In progress** — shipped: version single-sourcing (#82), the native tier +
+`create-skill` (#83) and `install-skill` + `install_skill` (#84, released in
+0.18.0). Remaining, in delivery order: `reload_agents`, `get_settings`, the
+`minibot-docs` skill, then the `create-agent` skill. Each is independently
+shippable, and tests and docs ride along with the change that introduces the
+behaviour.
 
 Different theme from the phases around it — capability, not containment —
 but it lands two new LLM-facing surfaces, so the Trust model above still
@@ -215,7 +216,8 @@ skills silently. Gated by the existing `[tools.skills] enabled`, plus a
 `native` master switch and a `native_disabled` opt-out list, so the default
 needs no config and turning one off is one line.
 
-v1 set, chosen for self-improvement and self-knowledge:
+v1 set, chosen for self-improvement and self-knowledge (`create-skill` and
+`install-skill` shipped; `minibot-docs` and `create-agent` remain):
 
 - `create-skill` — authoring, including the places MiniBot's parser is
   stricter than the agentskills.io spec (flat `key: value` frontmatter, not
@@ -225,31 +227,125 @@ v1 set, chosen for self-improvement and self-knowledge:
   bash). No node, no new Poetry dependency. Maintains a `skills-lock.json`
   in the shape the npm `skills` tool already writes. Off by default
   (`[tools.skills] install`).
-- `minibot-docs` — answers "how does MiniBot work" from the published
-  `llms.txt` (2.7 KB) and the Sphinx `_sources/*.rst.txt` RST, which beats
-  scraping rendered HTML. It must never answer a configuration-*state*
-  question from documentation; that is what `get_settings` is for.
-- `create-agent` — specialist authoring, where the tool-scoping rules are
-  counterintuitive enough to be worth writing down: with neither
-  `tools_allow` nor `tools_deny` set an agent gets **zero** non-MCP tools
-  (`app/agent_policies.py:48`), and `tools_allow` is never consulted for an
-  MCP name. Ships last: it needs `reload_agents` below to be useful.
+- `minibot-docs` — self-knowledge: the agent *is* MiniBot, and users ask it
+  how MiniBot works; without this it invents config keys that do not exist.
+  Pure markdown, so the risk is in the wording, not the code. Depends on
+  `get_settings`. Fetch targets, in order:
+  1. `https://sonic182.github.io/minibot/llms.txt` — 2.7 KB curated page
+     index, cheap enough to fetch on every lookup.
+  2. `https://sonic182.github.io/minibot/_sources/<page>.rst.txt` — Sphinx
+     publishes the RST sources (`html_copy_source` is on by default); clean
+     RST beats scraping rendered HTML with `http_request`.
+  3. `https://sonic182.github.io/minibot/llms-full.txt` — still only 6.7 KB,
+     an expanded index rather than full content, so a fallback.
+
+  Two different questions hide under "ask about minibot", and routing them
+  correctly is what makes the skill right rather than merely useful:
+
+  | question | answer from |
+  |---|---|
+  | "How do I enable the vault?" | docs |
+  | "Am I running the vault?" | `get_settings` — never the docs |
+
+  The published docs describe the latest release, not this process. The skill
+  must say so and refuse to answer a configuration-*state* question from
+  documentation. Done when a docs question is answered from
+  `_sources/*.rst.txt` and a "do I have X enabled" question routes to
+  `get_settings`.
+- `create-agent` — specialist authoring (`agents/<name>.md`). The tool-scoping
+  rules are counterintuitive and documented nowhere the agent can see, so an
+  agent writing a specialist without them produces one that looks correct and
+  is broken:
+  - with **neither** `tools_allow` nor `tools_deny` set, a specialist gets
+    **zero** non-MCP tools (`app/agent_policies.py:48`) — not "all tools"
+  - `tools_allow` is **never consulted** for an MCP tool name; MCP tools are
+    gated by `mcp_servers` membership plus deny patterns only
+  - `tools_allow` and `tools_deny` are mutually exclusive (enforced in
+    `tool_policy_utils.py` and by a pydantic validator in `schema.py`)
+  - always stripped from a delegated agent (`agent_policies.py:15`):
+    `fetch_agent_info`, `spawn_task`, `list_tasks`, `get_task`, `cancel_task`
+  - an empty Markdown body is **fatal**, not a warning (unlike skills, where
+    it is a silent drop)
+
+  Body flow: read `agents.directory` from `get_settings`, write
+  `<directory>/<name>.md`, call `reload_agents`; an `ok: false` result names
+  the file and the problem, so fix and reload until it comes back `ok: true`
+  with the new name in `added`. Ships last, narrowest audience: it needs
+  `reload_agents` (and `get_settings`) to be useful. Done when a specialist
+  written by following the skill is delegatable in the same session.
 
 Three supporting changes, each small, in delivery order:
 
-- **`reload_agents` tool** — lands first after the native tier. Skills
-  re-read on an mtime/size fingerprint (`app/skill_registry.py:55`); agents
-  do not re-read at all, so a freshly written specialist is invisible until
-  restart. An explicit tool rather than a fingerprint hot reload: it re-runs
-  `load_agent_specs` and swaps via `replace_all()` (which keeps the
-  registry's identity), and because the loader *raises* on a bad file, the
-  error comes back to the agent that just wrote it instead of being
-  swallowed — the old roster is kept on failure. Must also drop the
-  `is_empty()` gate on `fetch_agent_info` (`llm/tools/factory.py:67`), or a
-  first specialist reloaded into an empty roster has no way to be inspected.
-- **`get_settings`** — a read-only core tool answering "what am I actually
-  running?", sibling to `chat_history_info`. Emits only sections that are
-  enabled, so absence is itself the answer.
+- **`reload_agents` tool** — lands first. Skills re-read on an mtime/size
+  fingerprint (`app/skill_registry.py:55`); `AgentRegistry`
+  (`app/agent_registry.py:6`) has no equivalent. Specs are loaded once in
+  `AppContainer.configure()` (`adapters/container/app_container.py:53`) and
+  swapped once more by token auto-config (`app_container.py:224`, via
+  `replace_all()`); nothing re-reads `agents/*.md` afterwards, so a freshly
+  written specialist is invisible until restart. Useful on its own too: an
+  owner who hand-edits `agents/*.md` no longer has to restart the daemon.
+
+  Chosen shape: an explicit tool, not a fingerprint hot reload. It re-runs
+  `load_agent_specs(settings.orchestration.directory)`
+  (`app/agent_definitions_loader.py:18`) and swaps the result in with
+  `replace_all()`. Why a tool:
+  - **Errors reach the agent.** The loader *raises* on a bad file (invalid
+    frontmatter, empty body), and a silent background reload would have to
+    swallow that. A tool returns it, so the agent that just wrote the file
+    sees what is wrong and fixes it in the same turn.
+  - **The old roster survives a failure.** Swap only on success.
+  - **Deterministic.** The roster changes when asked, and nothing stats the
+    directory on every `get()`.
+
+  ```json
+  {"ok": true, "names": ["browser_agent", "researcher"], "added": ["researcher"], "removed": []}
+  {"ok": false, "error": "agents/researcher.md: agent body prompt cannot be empty"}
+  ```
+
+  `replace_all()` keeps the registry's identity, so `AgentDelegateTool` and
+  `PromptService` — both hold the registry, not a snapshot — pick the change up
+  with no further wiring. Three things to get right:
+  - **`fetch_agent_info` must exist even when the roster started empty.**
+    `build_enabled_tools` only builds it when `not agent_registry.is_empty()`
+    (`llm/tools/factory.py:67`), so a first specialist reloaded into an empty
+    roster could not be inspected. Drop the gate (the tool already handles an
+    unknown name) or build it whenever `reload_agents` is built. `spawn_task`
+    is unaffected: it comes from the tasks extension, gated on
+    `[tasks].enabled`.
+  - **Token auto-config.** Startup runs `apply_runtime_token_autoconfig_async`
+    (`app/token_limits_autoconfig.py:20`) over the specs before the swap, and
+    it fetches the models.dev catalog. Reloaded specs need the same treatment
+    or a reloaded agent runs with unadjusted limits — decide whether to re-run
+    it (a network call per reload) or cache the catalog.
+  - **Not for specialists.** Add `reload_agents` to
+    `RESERVED_DELEGATION_TOOL_NAMES` (`app/agent_policies.py:10`); a delegated
+    agent must not rewrite the roster it was picked from. Task workers build
+    their own registry per run (`adapters/tasks/worker.py`), so they see new
+    files anyway — no worker wiring.
+
+  Accepted consequence: the roster is part of the system prompt
+  (`PromptService._specialist_roster_fragment`), so a reload that changes it
+  changes the prompt fingerprint and drops the cached `previous_response_id`
+  (`session_state_service.py:54-66`) for that session. Rare and harmless.
+
+  Files: `minibot/llm/tools/agent_reload.py` (`.bindings()`),
+  `minibot/llm/tools/reload_agents.txt` (description sidecar — an empty or
+  missing file aborts startup), one branch in `factory.py`, the reserved-name
+  addition. Tests: write a new `agents/*.md` after startup, call
+  `reload_agents`, assert it is delegatable; a broken file returns
+  `ok: false` and leaves the previous roster in place. Docs:
+  `docs/agents.rst` (currently implies a restart) and `docs/tools.rst`. Done
+  when a specialist written at runtime is delegatable in the same session after
+  one `reload_agents` call, including from a zero-agent start, and its roster
+  line appears in the next system prompt.
+- **`get_settings`** — a read-only always-on core tool answering "what am I
+  actually running?", sibling to `chat_history_info`
+  (`llm/tools/chat_memory.py:26`, built unconditionally in
+  `build_enabled_tools`). Independent of any skill; it benefits every turn where
+  the agent would otherwise invent its own configuration, and it is the
+  prerequisite that makes `minibot-docs` honest. Emits only sections that are
+  enabled, so absence is itself the answer. Full allowlist and wiring in
+  "`get_settings` design" below.
 - ~~**Single-source the version**~~ — **done, merged in #82.** `__version__`
   was hardcoded at `0.1.0`, fifteen minor versions behind `pyproject.toml`,
   and referenced nowhere else, which is how the drift survived. It now reads
@@ -272,6 +368,109 @@ Trust model, for the two new surfaces:
   a prompt-injection surface by construction. Never auto-activate after
   import; show the parsed name, description and resolved source URL; require
   explicit owner confirmation for a source the owner did not name.
+
+### `get_settings` design
+
+Files: `minibot/llm/tools/settings_info.py` (`.bindings()`),
+`minibot/llm/tools/get_settings.txt` (description sidecar — an empty or missing
+file aborts startup), one branch in `factory.py`. The name is free of the alias
+table (`http_client`, `calculator`, `datetime_now`, `artifact_insert` —
+`llm/services/tool_executor.py:29`), which is what uniqueness is keyed on.
+
+Shape: enabled-only. A section appears *only* when that feature is on, so
+absence is itself the answer and the payload stays small — no
+`"enabled": false` noise.
+
+```json
+{
+  "ok": true,
+  "version": "0.24.0",
+  "config_path": "/abs/path/config.toml",
+  "cwd": "/abs/path",
+  "channels": ["telegram"],
+  "llm": {"provider": "openrouter", "model": "..."},
+  "memory": {"max_history_messages": 100, "max_history_tokens": null},
+  "tools": {
+    "file_storage": {"root_dir": "...", "mode": "confined", "max_write_bytes": 64000},
+    "skills": {"paths": ["..."], "write_dir": "...", "write_dir_access": "filesystem",
+               "native": true, "count": 4},
+    "bash": {"default_timeout_seconds": 15, "max_timeout_seconds": 120},
+    "mcp": {"servers": ["github"]}
+  },
+  "agents": {"directory": "./agents", "names": ["browser_agent", "..."]},
+  "tasks": {"backend": "sqlite"},
+  "scheduler": {},
+  "vault": {"unlocked": true}
+}
+```
+
+**Allowlist, never a denylist**, and it starts small: each section names the
+exact fields it emits, and anything not named is not emitted. `Settings` is full
+of secrets a denylist would leak the next time one is added to `schema.py`:
+`channels.telegram.bot_token`, `llm.api_key`, `providers.<name>.api_key` /
+`auth_path`, `tools.mcp.servers[].auth_secret`, `http.basic_auth_password` /
+`auth_token`, plus the RabbitMQ and Qdrant URLs, which carry credentials inline.
+`is_sensitive_argument_key` (`llm/services/tool_executor.py`) is a key-substring
+denylist built for *log* sanitizing — cite it, do not reuse it. `${ENV}` and
+`${secret:}` are resolved before validation, so by the time the tool sees
+`Settings` there is no reference left to show, which is one more reason to pick
+fields one by one.
+
+v1 allowlist (the whole of it):
+
+| emitted | source | why the agent needs it |
+|---|---|---|
+| `version`, `config_path`, `cwd` | `minibot.__version__`, `AppContainer.get_config_path()`, `Path.cwd()` | "what am I running / where from" — use the getter, do not call `resolve_config_path()` again |
+| `channels` | **names only** of enabled channels | which surface it is talking on |
+| `llm.provider`, `llm.model`, `llm.prompts_dir` | `LLMMConfig` | self-description, cost/capability questions, where prompt packs live |
+| `memory.backend`, `max_history_messages`, `max_history_tokens` | `MemoryConfig` | history/compaction questions |
+| `agents.directory`, `agents.names` | `OrchestrationConfig.directory`, `AgentRegistry.names()` | required by `create-agent` |
+| `tools.<name>` present-or-absent | `ToolsConfig` | which capabilities exist this turn |
+| `tools.file_storage.root_dir`, `.mode`, `.max_write_bytes` | `FileStorageToolConfig` | already in the prompt fragment; here in structured form |
+| `tools.skills.paths`, `.write_dir`, `.write_dir_access`, `.native`, `.count` | `SkillRegistry` | same source `list_skills` reads, so one value |
+| `tools.bash.default_timeout_seconds`, `.max_timeout_seconds`, `.env_allowlist` | `BashToolConfig` | timeouts it would otherwise guess; env var **names** (not values) |
+| `tools.mcp.servers` | **names only** | which remote toolsets exist |
+| `tasks.backend` | `TasksConfig.backend` | async delegation questions |
+| `scheduler` | presence only | whether scheduling is available |
+| `vault.unlocked` | bool | whether `${secret:}` resolution is live |
+
+Never emitted, in any form: `llm.api_key`, `llm.base_url`, `llm.extra_headers`,
+`llm.auth_path`, every `providers.<name>.*`, `channels.telegram.*` beyond the
+name, `tools.mcp.servers[].url` / `.auth_secret`, all of `[http]`, all of
+`[rabbitmq]`, `vault.path` / `vault.password_file` / entry names / entry values,
+`memory.sqlite_url` and every other `*_url`, and `runtime.owner_id`.
+`extra_headers` and `base_url` read as harmless and are not: the first is where
+people put `Authorization`, the second can be an internal endpoint.
+
+Rule for growing the list: an addition qualifies when it names **one** exact
+field, is non-secret *by construction* rather than by inspection of today's
+value, answers a question one of the shipped skills actually asks, and the
+sentinel leak test still passes.
+
+Division of labour with the system prompt: `build_environment_prompt_fragment`
+(`app/environment_context.py`) stays the place for the few facts worth paying
+for on every turn (cwd, managed root, confined/yolo mode, version, config path).
+The broad enabled-map costs nothing until asked, so it lives behind this tool.
+
+Wiring:
+- **Workers.** A tool wired only into `factory.py` does not exist for task
+  workers. Add it to `_build_worker_tools` and `_WORKER_TOOL_ALLOWLIST`
+  (`adapters/tasks/worker.py`). Probably yes — workers ask the same questions.
+- **Specialists.** A specialist with neither `tools_allow` nor `tools_deny` gets
+  zero non-MCP tools, so `get_settings` must be listed explicitly in any agent
+  that needs it.
+
+Tests — the one that matters: build a `Settings` with every secret-bearing field
+set to a unique sentinel, call the tool, and assert the sentinel appears nowhere
+in the serialized result. That is the test that keeps catching leaks as
+`schema.py` grows. Plus: a disabled section is absent from the payload entirely.
+Docs: `docs/tools.rst`. Done when `get_settings` on a minimal config returns only
+the sections that are on, and the sentinel test passes with every secret field
+populated.
+
+Open question: do bundled native skills need to be visible to task workers?
+Workers build their own `SkillRegistry` in `_build_worker_tools`; confirm the
+native tier is included there before relying on it in `create-agent`.
 
 ## [ ] Phase 4 — MCP OAuth (issue #65)
 

@@ -28,25 +28,27 @@ from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentSpec
+from minibot.core.channels import session_identifier
 from minibot.core.tasks import TaskLimits, TaskStopReason
+from minibot.core.tools import ToolContext
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.services.runtime_compaction import build_compactor
 from minibot.llm.tools.apply_patch import ApplyPatchTool
 from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
-from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.bash import BashTool
 from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.code_read import CodeReadTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
-from minibot.llm.tools.mcp_bridge import build_mcp_bindings
+from minibot.llm.tools.mcp_bridge import build_mcp_bindings_async
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.skill_loader import SkillLoaderTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.llm.tools.wait import WaitTool
-from minibot.shared.utils import session_identifier, validate_attachments
+from minibot.shared.utils import validate_attachments
 
 _LOGGER = logging.getLogger("minibot.task_worker")
 _WORKER_SPEC_PATH = Path("<task_worker>")
@@ -159,6 +161,7 @@ async def run_agent_loop(
     approval_callback: Approver | None = None,
 ) -> dict[str, Any]:
     task_id = str(task.get("task_id") or "")
+    mcp_clients: list[MCPClient] = []
     try:
         channel = _require_string(task.get("channel"), "channel")
         prompt = _require_string(task.get("prompt"), "prompt")
@@ -178,8 +181,11 @@ async def run_agent_loop(
             extension_tool_names=[binding.tool.name for binding in extensions.tools],
         )
         llm_client = llm_factory.create_for_agent(spec)
+        mcp_bindings = await _build_worker_mcp_bindings(settings=settings, spec=spec, clients=mcp_clients)
         tools = apply_tool_approval(
-            _build_worker_tools(settings=settings, spec=spec, extension_tools=extensions.tools),
+            _build_worker_tools(
+                settings=settings, spec=spec, extension_tools=extensions.tools, mcp_bindings=mcp_bindings
+            ),
             patterns=settings.tools.approval.require_approval,
             approve=approval_callback or _deny_approval,
         )
@@ -277,6 +283,8 @@ async def run_agent_loop(
             "stop_reason": _stop_reason_for_error(exc).value,
             "metadata": _build_error_metadata(exc),
         }
+    finally:
+        await _close_mcp_clients(mcp_clients)
 
 
 async def _deny_approval(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
@@ -284,7 +292,11 @@ async def _deny_approval(tool_name: str, arguments: dict[str, Any], context: Too
 
 
 def _build_worker_tools(
-    *, settings: Settings, spec: AgentSpec, extension_tools: Sequence[ToolBinding] = ()
+    *,
+    settings: Settings,
+    spec: AgentSpec,
+    extension_tools: Sequence[ToolBinding] = (),
+    mcp_bindings: Sequence[ToolBinding] = (),
 ) -> list[ToolBinding]:
     bindings: list[ToolBinding] = []
     managed_storage = _build_managed_storage(settings)
@@ -324,32 +336,7 @@ def _build_worker_tools(
     if settings.tools.skills.enabled:
         registry = SkillRegistry.from_config(settings.tools.skills)
         bindings.extend(SkillLoaderTool(registry, managed_storage, settings.tools.bash.enabled).bindings())
-    if settings.tools.mcp.enabled and spec.mcp_servers:
-        for server in settings.tools.mcp.servers:
-            if server.name not in spec.mcp_servers:
-                continue
-            client = MCPClient(
-                server_name=server.name,
-                transport=server.transport,
-                timeout_seconds=settings.tools.mcp.timeout_seconds,
-                command=server.command,
-                args=server.args,
-                env=server.env or None,
-                cwd=server.cwd,
-                url=server.url,
-                headers=server.headers,
-            )
-            bindings.extend(
-                build_mcp_bindings(
-                    mode=server.mode,
-                    server_name=server.name,
-                    client=client,
-                    name_prefix=settings.tools.mcp.name_prefix,
-                    enabled_tools=server.enabled_tools,
-                    disabled_tools=server.disabled_tools,
-                    catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
-                )
-            )
+    bindings.extend(mcp_bindings)
 
     bindings.extend(extension_tools)
     scoped = strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))
@@ -358,6 +345,49 @@ def _build_worker_tools(
         storage=managed_storage,
         config=settings.tools.tool_output_spill,
     )
+
+
+async def _build_worker_mcp_bindings(
+    *, settings: Settings, spec: AgentSpec, clients: list[MCPClient]
+) -> list[ToolBinding]:
+    bindings: list[ToolBinding] = []
+    if not settings.tools.mcp.enabled or not spec.mcp_servers:
+        return bindings
+    for server in settings.tools.mcp.servers:
+        if server.name not in spec.mcp_servers:
+            continue
+        client = MCPClient(
+            server_name=server.name,
+            transport=server.transport,
+            timeout_seconds=settings.tools.mcp.timeout_seconds,
+            command=server.command,
+            args=server.args,
+            env=server.env or None,
+            cwd=server.cwd,
+            url=server.url,
+            headers=server.headers,
+        )
+        clients.append(client)
+        bindings.extend(
+            await build_mcp_bindings_async(
+                mode=server.mode,
+                server_name=server.name,
+                client=client,
+                name_prefix=settings.tools.mcp.name_prefix,
+                enabled_tools=server.enabled_tools,
+                disabled_tools=server.disabled_tools,
+                catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
+            )
+        )
+    return bindings
+
+
+async def _close_mcp_clients(clients: Sequence[MCPClient]) -> None:
+    for client in clients:
+        try:
+            await client.aclose()
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("failed to close mcp client", exc_info=True)
 
 
 def _build_worker_spec(

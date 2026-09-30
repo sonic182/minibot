@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`spawn_task` takes `continue_turn`.** By default a delegated task is still fire and forget: the worker's
+  answer goes straight to the chat and the main agent never sees it. With `continue_turn: true` the result
+  (or the failure or timeout) comes back to the main agent as a new turn, saved to the conversation history,
+  so it can answer from it, compare results or chain the next task. The worker's text is marked as untrusted
+  data and truncated; files it produced are still sent to the chat, and their paths (up to 50) are listed in
+  the text the agent sees. One turn can start at most three continuing tasks and chains are limited to three
+  levels (`task:continuation_limit`). The task queue gains a nullable `continuation_depth` column, added to
+  existing SQLite files on startup, and RabbitMQ task messages carry the same field. `minibot console --once`
+  waits for the continuation reply instead of exiting on the hand-off.
+
+### Fixed
+
+- **MCP tool calls no longer freeze the bot in `bridge` mode.** The bridge waited for each remote call on a
+  separate thread while holding the main event loop, so Telegram polling, the scheduler and every other turn
+  stalled until the call returned. It now awaits the call directly. Its result also carries `ok` and
+  `is_error`, as `lazy` mode already did, so a remote tool error no longer reads as a success.
+- **Task workers no longer start each stdio MCP server twice.** Tool discovery ran on a helper thread's
+  loop, so the first call killed that process and spawned a new one; workers now discover on their own
+  loop and close their MCP servers when the task ends. At daemon boot the discovery process is closed cleanly instead of being killed from another thread.
+- **Stdio MCP servers that write a lot to stderr no longer wedge.** stderr was never read after startup, so
+  about 16 MB of accumulated output stalled the server and every call timed out. It is now drained
+  continuously and only a short tail is kept for error messages.
+- **A reply that keeps quoting `<tool_call>` no longer loops until the timeout.** After two nudges to use the
+  tool-calling interface, the text is delivered as the answer, in both the agent runtime and the plain
+  generation loop.
+- **Only malformed call arguments report `invalid_tool_arguments`.** The code was derived by searching the
+  error message for the word "arguments", so any unrelated tool error that mentioned it was mislabelled. It
+  now comes from a typed `ToolInputError`, and malformed arguments are logged as a warning without a
+  traceback.
+
 ## [0.24.0] - 2026-09-30
 
 ### Added

@@ -13,6 +13,7 @@ from minibot.core.agents import AgentSpec
 from minibot.core.tasks import TaskRequest
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.tasks import TaskTools
+from minibot.shared.errors import ToolInputError
 
 
 class _TaskManagerStub:
@@ -42,6 +43,11 @@ class _ProducerStub:
 
     async def enqueue(self, task: TaskRequest) -> None:
         self.enqueued.append(task)
+
+
+class _FailingProducer(_ProducerStub):
+    async def enqueue(self, task: TaskRequest) -> None:
+        raise RuntimeError("queue down")
 
 
 def _build_tools(
@@ -280,6 +286,81 @@ async def test_spawn_task_carries_model_overrides_to_the_queue() -> None:
     overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6", "reasoning_effort": "high"}
     assert result["model_overrides"] == overrides
     assert producer.enqueued[0].model_overrides == overrides
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_continue_turn_records_the_chain_depth() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub())
+
+    await bindings["spawn_task"].handler({"prompt": "fire and forget"}, ToolContext(channel="console"))
+    continued = await bindings["spawn_task"].handler(
+        {"prompt": "need the result", "continue_turn": True},
+        ToolContext(channel="console", task_chain_depth=1),
+    )
+
+    assert [task.continuation_depth for task in producer.enqueued] == [None, 2]
+    assert continued["continue_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_refuses_to_continue_past_the_chain_limit() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub())
+
+    with pytest.raises(ToolInputError) as excinfo:
+        await bindings["spawn_task"].handler(
+            {"prompt": "one more", "continue_turn": True},
+            ToolContext(channel="console", task_chain_depth=3),
+        )
+
+    assert excinfo.value.error_code == "task:continuation_limit"
+    assert producer.enqueued == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_refuses_continuing_tasks_past_the_per_turn_claim() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub())
+    claims = iter([True, True, True, False])
+    context = ToolContext(channel="console", claim_task_continuation=lambda: next(claims))
+
+    for _ in range(3):
+        await bindings["spawn_task"].handler({"prompt": "fan out", "continue_turn": True}, context)
+    with pytest.raises(ToolInputError) as excinfo:
+        await bindings["spawn_task"].handler({"prompt": "one too many", "continue_turn": True}, context)
+
+    assert excinfo.value.error_code == "task:continuation_limit"
+    assert len(producer.enqueued) == 3
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_releases_the_continuation_claim_when_enqueue_fails() -> None:
+    bindings = _build_tools(_FailingProducer(), _TaskManagerStub())
+    released: list[None] = []
+    context = ToolContext(
+        channel="console",
+        claim_task_continuation=lambda: True,
+        release_task_continuation=lambda: released.append(None),
+    )
+
+    with pytest.raises(RuntimeError, match="queue down"):
+        await bindings["spawn_task"].handler({"prompt": "x", "continue_turn": True}, context)
+
+    assert len(released) == 1
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_rejects_a_non_boolean_continue_turn() -> None:
+    bindings = _build_tools(_ProducerStub(), _TaskManagerStub())
+
+    with pytest.raises(ToolInputError, match="continue_turn") as excinfo:
+        await bindings["spawn_task"].handler(
+            {"prompt": "x", "continue_turn": "yes"},
+            ToolContext(channel="console"),
+        )
+
+    assert excinfo.value.error_code == "invalid_tool_arguments"
 
 
 @pytest.mark.asyncio

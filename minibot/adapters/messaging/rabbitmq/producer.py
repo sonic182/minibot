@@ -30,6 +30,7 @@ class RabbitMQTaskProducer:
                 "model_overrides": task.model_overrides,
                 "chat_id": task.chat_id,
                 "user_id": task.user_id,
+                "continuation_depth": task.continuation_depth,
             }
         try:
             connection = await aio_pika.connect_robust(self._config.broker_url)

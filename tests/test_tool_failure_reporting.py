@@ -52,6 +52,28 @@ async def test_tool_input_error_is_logged_as_warning_without_traceback(caplog: p
 
 
 @pytest.mark.asyncio
+async def test_only_malformed_call_arguments_are_labelled_invalid_tool_arguments() -> None:
+    async def handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        raise ValueError("could not build arguments for the upstream API")
+
+    records = await execute_tool_calls_for_runtime(
+        [
+            ToolCall(id="call_1", type="function", name="demo", function={"name": "demo", "arguments": "{}"}),
+            ToolCall(id="call_2", type="function", name="demo", function={"name": "demo", "arguments": "{invalid"}),
+        ],
+        [ToolBinding(tool=Tool(name="demo", description="d", parameters={"type": "object"}), handler=handler)],
+        ToolContext(owner_id="primary"),
+        responses_mode=False,
+        logger=logging.getLogger("test.tool_arguments"),
+    )
+
+    assert [record.result.content["error_code"] for record in records] == [
+        "tool_execution_failed",
+        "invalid_tool_arguments",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_tool_failure_reaches_the_model_with_the_typed_error_code(tmp_path: Any) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1024)
 

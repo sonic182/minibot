@@ -34,7 +34,12 @@ from minibot.adapters.mcp.client import MCPClient, MCPServerMetadata, MCPToolCal
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.base import ToolContext
-from minibot.llm.tools.mcp_bridge import MCPLazyToolBridge, MCPToolBridge
+from minibot.llm.tools.mcp_bridge import (
+    MCPLazyToolBridge,
+    MCPToolBridge,
+    build_mcp_bindings,
+    build_mcp_bindings_async,
+)
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "mcp"
 
@@ -84,6 +89,29 @@ class _LazyMCPClient:
     async def call_tool(self, tool_name: str, payload: dict[str, object]) -> MCPToolCallResult:
         self.tool_calls.append((tool_name, payload))
         return MCPToolCallResult(content=[{"type": "text", "text": "completed"}])
+
+
+class _EagerMCPClient:
+    def __init__(self, *, is_error: bool = False) -> None:
+        self.is_error = is_error
+
+    def list_tools_blocking(self) -> list[MCPToolDefinition]:
+        return [MCPToolDefinition(name="slow", description="slow tool", input_schema={})]
+
+    def call_tool_blocking(self, tool_name: str, payload: dict[str, object]) -> MCPToolCallResult:
+        time.sleep(0.2)
+        return self._result()
+
+    async def call_tool(self, tool_name: str, payload: dict[str, object]) -> MCPToolCallResult:
+        await asyncio.sleep(0.2)
+        return self._result()
+
+    def _result(self) -> MCPToolCallResult:
+        return MCPToolCallResult(content=[{"type": "text", "text": "completed"}], is_error=self.is_error)
+
+
+def _eager_binding(client: _EagerMCPClient):
+    return MCPToolBridge(server_name="eager", client=cast(MCPClient, client)).build_bindings()[0]
 
 
 @pytest.fixture
@@ -147,7 +175,10 @@ def test_mcp_bridge_stdio_discovery_and_call(stdio_server_args: list[str]) -> No
     assert parsed["value"] == 3
 
 
-def test_mcp_bridge_stdio_process_persists_across_blocking_calls(stdio_counter_server_args: list[str]) -> None:
+@pytest.mark.asyncio
+async def test_mcp_bridge_stdio_process_is_spawned_once_for_discovery_and_calls(
+    stdio_counter_server_args: list[str],
+) -> None:
     client = MCPClient(
         server_name="dice_cli",
         transport="stdio",
@@ -155,16 +186,105 @@ def test_mcp_bridge_stdio_process_persists_across_blocking_calls(stdio_counter_s
         command=stdio_counter_server_args[0],
         args=stdio_counter_server_args[1:],
     )
-    bridge = MCPToolBridge(server_name="dice_cli", client=client)
-    bindings = {binding.tool.name: binding for binding in bridge.build_bindings()}
+    bindings = await build_mcp_bindings_async(
+        mode="bridge",
+        server_name="dice_cli",
+        client=client,
+        name_prefix="mcp",
+        enabled_tools=[],
+        disabled_tools=[],
+        catalog_cache_ttl_seconds=60,
+    )
+    counter_binding = {binding.tool.name: binding for binding in bindings}["mcp_dice_cli__counter"]
+    discovery_pid = client._stdio_process.pid
 
-    counter_binding = bindings["mcp_dice_cli__counter"]
-
-    first = asyncio.run(counter_binding.handler({}, ToolContext(owner_id="tester")))
-    second = asyncio.run(counter_binding.handler({}, ToolContext(owner_id="tester")))
+    first = await counter_binding.handler({}, ToolContext(owner_id="tester"))
+    second = await counter_binding.handler({}, ToolContext(owner_id="tester"))
 
     assert json.loads(first.content["result"])["count"] == 1
     assert json.loads(second.content["result"])["count"] == 2
+    assert client._stdio_process.pid == discovery_pid
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_mcp_blocking_discovery_process_is_closed_before_the_first_call_on_the_main_loop(
+    stdio_counter_server_args: list[str],
+) -> None:
+    client = MCPClient(
+        server_name="dice_cli",
+        transport="stdio",
+        timeout_seconds=5,
+        command=stdio_counter_server_args[0],
+        args=stdio_counter_server_args[1:],
+    )
+    bindings = build_mcp_bindings(
+        mode="bridge",
+        server_name="dice_cli",
+        client=client,
+        name_prefix="mcp",
+        enabled_tools=[],
+        disabled_tools=[],
+        catalog_cache_ttl_seconds=60,
+    )
+    counter_binding = {binding.tool.name: binding for binding in bindings}["mcp_dice_cli__counter"]
+    discovery_pid = client._stdio_process.pid
+
+    client.close_blocking()
+
+    assert client._stdio_process is None
+    with pytest.raises(ProcessLookupError):
+        os.kill(discovery_pid, 0)
+
+    result = await counter_binding.handler({}, ToolContext(owner_id="tester"))
+
+    assert json.loads(result.content["result"])["count"] == 1
+    assert client._stdio_process.pid != discovery_pid
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_mcp_bridge_call_does_not_block_the_event_loop() -> None:
+    binding = _eager_binding(_EagerMCPClient())
+    stop = asyncio.Event()
+    ticks = 0
+
+    async def ticker() -> None:
+        nonlocal ticks
+        while not stop.is_set():
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    ticker_task = asyncio.create_task(ticker())
+    await binding.handler({}, ToolContext(owner_id="tester"))
+    stop.set()
+    await ticker_task
+
+    assert ticks >= 5
+
+
+@pytest.mark.asyncio
+async def test_mcp_bridge_reports_remote_tool_errors() -> None:
+    binding = _eager_binding(_EagerMCPClient(is_error=True))
+
+    result = await binding.handler({}, ToolContext(owner_id="tester"))
+
+    assert result.content.get("ok") is False
+    assert result.content.get("is_error") is True
+
+
+def test_mcp_client_survives_a_stdio_server_flooding_stderr() -> None:
+    client = MCPClient(
+        server_name="noisy",
+        transport="stdio",
+        timeout_seconds=2,
+        command=sys.executable,
+        args=[str(FIXTURES_DIR / "stdio_noisy_server.py")],
+    )
+
+    result = asyncio.run(client.call_tool("ping", {}))
+
+    assert result.content == [{"type": "text", "text": "pong"}]
 
 
 def test_mcp_bridge_http_discovery_and_call(http_server_url: str) -> None:

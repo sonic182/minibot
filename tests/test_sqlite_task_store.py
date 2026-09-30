@@ -260,3 +260,21 @@ async def test_model_overrides_round_trip_and_are_added_to_existing_tables(task_
     reloaded = await task_store.get("task-legacy", "primary")
     assert reloaded is not None
     assert reloaded.request.model_overrides == {}
+
+
+@pytest.mark.asyncio
+async def test_continuation_depth_round_trips_and_is_added_to_existing_tables(task_store: SQLiteTaskStore) -> None:
+    request = _request("task-continue")
+    request.continuation_depth = 2
+    await task_store.create(request)
+
+    leased = await task_store.lease_due_tasks(now=_utcnow(), limit=10, lease_timeout_seconds=30)
+    assert leased[0].request.continuation_depth == 2
+
+    async with task_store._engine.begin() as connection:
+        await connection.execute(text("ALTER TABLE tasks DROP COLUMN continuation_depth"))
+    await task_store.initialize()
+    await task_store.create(_request("task-legacy"))
+    reloaded = await task_store.get("task-legacy", "primary")
+    assert reloaded is not None
+    assert reloaded.request.continuation_depth is None

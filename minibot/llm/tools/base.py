@@ -1,27 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
 
 from llm_async.models import Tool
 
-from minibot.core.agent_runtime import ToolResult
+from minibot.core.tools import ToolContext, ToolHandler, ToolPayload
 
-ToolPayload = dict[str, Any]
-
-
-@dataclass(frozen=True)
-class ToolContext:
-    owner_id: str | None = None
-    channel: str | None = None
-    chat_id: int | None = None
-    user_id: int | None = None
-    turn_id: str | None = None
-    task_handoff_callback: Callable[[str], Awaitable[None]] | None = None
-
-
-ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[ToolResult | Any]]
+__all__ = ["ToolBinding", "ToolContext", "ToolHandler", "ToolPayload"]
 
 
 @dataclass(frozen=True)

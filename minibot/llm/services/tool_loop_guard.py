@@ -9,6 +9,7 @@ from minibot.llm.services.reasoning_replay import apply_reasoning_replay, extrac
 from minibot.llm.services.tool_executor import decode_tool_arguments, stringify_result, tool_name_from_call
 
 MAX_REPEATED_TOOL_ITERATIONS = 3
+MAX_PSEUDO_TOOL_NUDGES = 2
 
 
 def any_tool_call_truncated(tool_calls: Sequence[Any]) -> bool:

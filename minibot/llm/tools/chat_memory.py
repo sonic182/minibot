@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from llm_async.models import Tool
 
+from minibot.core.channels import session_identifier
 from minibot.core.memory import MemoryBackend
 from minibot.llm.tools.arg_utils import optional_int, require_channel
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import empty_object_schema, integer_field, strict_object
-from minibot.shared.utils import session_identifier
 
 
 class ChatMemoryTool:

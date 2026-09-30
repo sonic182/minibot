@@ -9,9 +9,10 @@ from pathlib import Path
 from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.console.service import ConsoleService
 from minibot.app.dispatcher import Dispatcher
+from minibot.core.channels import session_identifier
 from minibot.core.memory import MemoryEntry
 from minibot.shared.console_compat import CompatConsole, prompt_input
-from minibot.shared.utils import session_identifier, summarize_items
+from minibot.shared.utils import summarize_items
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -182,6 +183,8 @@ async def _wait_for_response_or_warn(
                 raise TimeoutError
             metadata = (await console_service.wait_for_response(remaining)).response.metadata
             if metadata.get("source") == "task_worker" and metadata.get("status") != "retrying":
+                return True
+            if metadata.get("task_continuation") and not metadata.get("task_handoff"):
                 return True
     except TimeoutError:
         logger.warning("timed out waiting for console response", extra={"timeout_seconds": timeout_seconds})

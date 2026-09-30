@@ -19,14 +19,15 @@ from minibot.app.response_parser import extract_answer, plain_render, resolve_re
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
-from minibot.core.channels import ChannelMessage, ChannelResponse
+from minibot.core.channels import ChannelMessage, ChannelResponse, session_id_for, session_identifier
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
+from minibot.core.tasks import MAX_TASK_CONTINUATIONS
+from minibot.core.tools import ToolContext
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services import LLMExecutionProfile
-from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.shared.utils import session_id_for, session_identifier
+from minibot.llm.tools.base import ToolBinding
 
 if TYPE_CHECKING:  # pragma: no cover
     from minibot.app.event_bus import EventBus
@@ -107,6 +108,19 @@ class LLMTurnService:
             if self._task_handoff_callback is not None:
                 await self._task_handoff_callback(turn_id)
 
+        continuations_claimed = 0
+
+        def _claim_task_continuation() -> bool:
+            nonlocal continuations_claimed
+            if continuations_claimed >= MAX_TASK_CONTINUATIONS:
+                return False
+            continuations_claimed += 1
+            return True
+
+        def _release_task_continuation() -> None:
+            nonlocal continuations_claimed
+            continuations_claimed = max(continuations_claimed - 1, 0)
+
         tool_context = ToolContext(
             owner_id=owner_id,
             channel=message.channel,
@@ -114,6 +128,9 @@ class LLMTurnService:
             user_id=message.user_id,
             turn_id=event.event_id,
             task_handoff_callback=_on_task_handoff,
+            task_chain_depth=_task_chain_depth(message),
+            claim_task_continuation=_claim_task_continuation,
+            release_task_continuation=_release_task_continuation,
         )
         input_message = message
         if self._audio_auto_transcription_service is not None:
@@ -287,6 +304,8 @@ class LLMTurnService:
         metadata["primary_agent"] = "minibot"
         if handed_off_to_task:
             metadata["task_handoff"] = True
+        if _is_task_result(message):
+            metadata["task_continuation"] = True
         if reasoning_text:
             metadata["reasoning"] = reasoning_text
         if compaction_result.updates:
@@ -420,6 +439,17 @@ class LLMTurnService:
                 detail = f"{detail[:200]}..."
             return f"LLM error ({error_name}): {detail}"
         return f"LLM error ({error_name})."
+
+
+def _is_task_result(message: ChannelMessage) -> bool:
+    return message.metadata.get("source") == "task_result"
+
+
+def _task_chain_depth(message: ChannelMessage) -> int:
+    depth = message.metadata.get("task_chain_depth")
+    if _is_task_result(message) and isinstance(depth, int) and not isinstance(depth, bool) and depth > 0:
+        return depth
+    return 0
 
 
 def _prompt_cache_key(message: ChannelMessage) -> str | None:

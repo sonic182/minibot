@@ -265,6 +265,23 @@ async def test_runtime_recovers_pseudo_tool_call_from_text() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_delivers_pseudo_tool_call_text_after_repeated_nudges() -> None:
+    pseudo = '<tool_call>{"name":"http_request","arguments":{}}</tool_call>'
+    steps = [
+        LLMCompletionStep(message=_FakeMessage(content=pseudo), response_id=f"resp-{index}", total_tokens=1)
+        for index in range(6)
+    ]
+    llm_client = _StubRuntimeLLMClient(steps=steps, executions=[])
+    runtime = _runtime(llm_client, tools=[cast(Any, object())])
+
+    result = await runtime.run(state=_ping_state(), tool_context=ToolContext(owner_id="1"))
+
+    assert result.payload == pseudo
+    assert llm_client.complete_once_calls == 3
+    assert llm_client.execute_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_runtime_nudges_and_continues_on_repeated_identical_tool_failures() -> None:
     # A call that cannot succeed (an unreachable host, say) is a finding to report, not a reason
     # to throw away everything the run already produced. The runtime tells the agent to stop

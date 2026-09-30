@@ -31,6 +31,9 @@ class TaskStopReason(StrEnum):
     WORKER_ERROR = "worker_error"
 
 
+MAX_TASK_CONTINUATIONS = 3
+
+
 @dataclass(frozen=True, slots=True)
 class TaskLimits:
     timeout_seconds: int
@@ -50,6 +53,7 @@ class TaskRequest:
     user_id: int | None = None
     owner_id: str = "primary"
     limits: TaskLimits = field(default_factory=lambda: TaskLimits(timeout_seconds=1800))
+    continuation_depth: int | None = None
 
 
 @dataclass(slots=True)

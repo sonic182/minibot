@@ -61,6 +61,11 @@ def register(mb: ExtensionContext) -> None:
                 message = message.replace(secret, "***")
             servers.append({**status, "tools": [], "error": message})
             continue
+        finally:
+            try:
+                client.close_blocking()
+            except Exception:  # noqa: BLE001
+                mb.logger.warning("failed to close mcp discovery client", exc_info=True, extra={"server": server.name})
         bindings.extend(server_bindings)
         tool_names = [binding.tool.name for binding in server_bindings]
         instructions = _server_instructions(client)

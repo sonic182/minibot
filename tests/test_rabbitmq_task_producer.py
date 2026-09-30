@@ -76,6 +76,7 @@ async def test_enqueue_publishes_persistent_json_to_fanout_exchange(monkeypatch:
             context={"trace_id": "abc"},
             chat_id=42,
             user_id=7,
+            continuation_depth=2,
         )
     )
 
@@ -97,4 +98,5 @@ async def test_enqueue_publishes_persistent_json_to_fanout_exchange(monkeypatch:
         "model_overrides": {},
         "chat_id": 42,
         "user_id": 7,
+        "continuation_depth": 2,
     }

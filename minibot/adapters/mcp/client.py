@@ -35,6 +35,8 @@ class MCPServerMetadata:
 
 class MCPClient:
     _STDIO_READ_CHUNK_SIZE = 64 * 1024
+    _STDERR_TAIL_BYTES = 4 * 1024
+    _STDERR_SETTLE_SECONDS = 1.0
 
     def __init__(
         self,
@@ -69,6 +71,8 @@ class MCPClient:
         self._stdio_lock: asyncio.Lock | None = None
         self._stdio_start_lock: asyncio.Lock | None = None
         self._stdio_read_buffer = bytearray()
+        self._stderr_tail = b""
+        self._stderr_task: asyncio.Task[None] | None = None
         self._blocking_runner = _BlockingLoopRunner()
 
     async def list_tools(self) -> list[MCPToolDefinition]:
@@ -176,6 +180,8 @@ class MCPClient:
             )
             self._stdio_process = process
             self._stdio_read_buffer.clear()
+            self._stderr_tail = b""
+            self._stderr_task = asyncio.create_task(self._drain_stdio_stderr(process))
             try:
                 response = await self._request_stdio_raw(
                     {
@@ -235,6 +241,7 @@ class MCPClient:
                 process.kill()
         self._stdio_process = None
         self._stdio_read_buffer.clear()
+        self._stderr_task = None
         self._stdio_loop = current_loop
         self._stdio_lock = asyncio.Lock()
         self._stdio_start_lock = asyncio.Lock()
@@ -249,7 +256,7 @@ class MCPClient:
         while True:
             line = await asyncio.wait_for(self._read_stdio_line(process), timeout=self._timeout_seconds)
             if not line:
-                raise RuntimeError(f"empty mcp stdio response: {await self._read_stdio_stderr(process)}")
+                raise RuntimeError(f"empty mcp stdio response: {await self._read_stdio_stderr()}")
 
             decoded_line = line.decode("utf-8", errors="replace").strip()
             if not decoded_line:
@@ -301,11 +308,18 @@ class MCPClient:
         del self._stdio_read_buffer[: newline_index + 1]
         return line
 
-    async def _read_stdio_stderr(self, process: asyncio.subprocess.Process) -> str:
+    async def _drain_stdio_stderr(self, process: asyncio.subprocess.Process) -> None:
         if process.stderr is None:
-            return ""
-        stderr_data = await process.stderr.read()
-        return stderr_data.decode("utf-8", errors="ignore")
+            return
+        while chunk := await process.stderr.read(self._STDIO_READ_CHUNK_SIZE):
+            self._stderr_tail = (self._stderr_tail + chunk)[-self._STDERR_TAIL_BYTES :]
+
+    async def _read_stdio_stderr(self) -> str:
+        drain_task = self._stderr_task
+        if drain_task is not None:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(drain_task), timeout=self._STDERR_SETTLE_SECONDS)
+        return self._stderr_tail.decode("utf-8", errors="ignore")
 
     async def _request_http(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._url:
@@ -345,6 +359,29 @@ class MCPClient:
 
     def call_tool_blocking(self, tool_name: str, payload: dict[str, Any]) -> MCPToolCallResult:
         return self._blocking_runner.run(lambda: self.call_tool(tool_name, payload))
+
+    async def aclose(self) -> None:
+        process = self._stdio_process
+        drain_task = self._stderr_task
+        self._stdio_process = None
+        self._stderr_task = None
+        self._stdio_read_buffer.clear()
+        if process is None:
+            return
+        if process.returncode is None:
+            with suppress(ProcessLookupError):
+                process.kill()
+        if self._stdio_loop is not asyncio.get_running_loop():
+            return
+        await process.wait()
+        if drain_task is not None:
+            with suppress(Exception):
+                await drain_task
+
+    def close_blocking(self) -> None:
+        if self._stdio_process is None:
+            return
+        self._blocking_runner.run(self.aclose)
 
     def _store_server_metadata(self, response: dict[str, Any]) -> None:
         result = response.get("result", {})

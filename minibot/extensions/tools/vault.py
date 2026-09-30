@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from minibot.app.extensions import ExtensionContext
-from minibot.llm.tools.base import ToolContext
+from minibot.core.tools import ToolContext
 
 
 class ListSecretsArgs(BaseModel):

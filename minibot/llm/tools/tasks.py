@@ -12,7 +12,15 @@ from minibot.adapters.tasks.manager import TaskManager
 from minibot.app.agent_policies import normalize_model_overrides
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.llm_client_factory import ProviderOption, find_provider
-from minibot.core.tasks import TaskLimits, TaskProducer, TaskRecord, TaskRepository, TaskRequest, TaskStatus
+from minibot.core.tasks import (
+    MAX_TASK_CONTINUATIONS,
+    TaskLimits,
+    TaskProducer,
+    TaskRecord,
+    TaskRepository,
+    TaskRequest,
+    TaskStatus,
+)
 from minibot.llm.tools.arg_utils import (
     optional_int,
     optional_str,
@@ -23,6 +31,7 @@ from minibot.llm.tools.arg_utils import (
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import strict_object
+from minibot.shared.errors import ToolInputError
 
 
 class TaskTools:
@@ -84,6 +93,13 @@ class TaskTools:
                     "reasoning_effort": {
                         "type": ["string", "null"],
                         "description": "Optional reasoning budget for this task (provider-specific).",
+                    },
+                    "continue_turn": {
+                        "type": ["boolean", "null"],
+                        "description": (
+                            "True to get the result back as a new turn so you can keep working on it; "
+                            "false or null to deliver the worker's answer straight to the user."
+                        ),
                     },
                 },
                 required=["prompt"],
@@ -149,20 +165,27 @@ class TaskTools:
             )
         task_context = _coerce_task_context(payload)
         limits = _resolve_limits(payload, self._config, spec_timeout_seconds=spec.timeout_seconds if spec else None)
-        await self._producer.enqueue(
-            TaskRequest(
-                task_id=task_id,
-                channel=channel,
-                prompt=prompt,
-                agent_name=agent_name,
-                context=task_context,
-                model_overrides=model_overrides,
-                chat_id=context.chat_id,
-                user_id=context.user_id,
-                owner_id=owner_id,
-                limits=limits,
+        continuation_depth = _resolve_continuation_depth(payload, context)
+        try:
+            await self._producer.enqueue(
+                TaskRequest(
+                    task_id=task_id,
+                    channel=channel,
+                    prompt=prompt,
+                    agent_name=agent_name,
+                    context=task_context,
+                    model_overrides=model_overrides,
+                    chat_id=context.chat_id,
+                    user_id=context.user_id,
+                    owner_id=owner_id,
+                    limits=limits,
+                    continuation_depth=continuation_depth,
+                )
             )
-        )
+        except Exception:
+            if continuation_depth is not None and context.release_task_continuation is not None:
+                context.release_task_continuation()
+            raise
         if (
             self._task_repository is not None
             and context.task_handoff_callback is not None
@@ -179,6 +202,7 @@ class TaskTools:
             "agent_name": agent_name,
             "model_overrides": model_overrides,
             "limits": _limits_payload(limits),
+            "continue_turn": continuation_depth is not None,
         }
 
     async def _cancel_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
@@ -257,6 +281,27 @@ def _resolve_limits(
         max_steps=task_limit(config.worker_max_steps),
         max_tool_calls=task_limit(config.worker_max_tool_calls),
     )
+
+
+def _resolve_continuation_depth(payload: dict[str, Any], context: ToolContext) -> int | None:
+    continue_turn = payload.get("continue_turn")
+    if continue_turn is not None and not isinstance(continue_turn, bool):
+        raise ToolInputError("continue_turn must be a boolean or null", error_code="invalid_tool_arguments")
+    if not continue_turn:
+        return None
+    if context.task_chain_depth >= MAX_TASK_CONTINUATIONS:
+        raise ToolInputError(
+            f"This turn already continues from {context.task_chain_depth} chained tasks, which is the limit. "
+            "Answer the user now, or spawn the task with continue_turn false.",
+            error_code="task:continuation_limit",
+        )
+    if context.claim_task_continuation is not None and not context.claim_task_continuation():
+        raise ToolInputError(
+            f"This turn already started {MAX_TASK_CONTINUATIONS} tasks with continue_turn, which is the limit. "
+            "Wait for their results, or spawn this task with continue_turn false.",
+            error_code="task:continuation_limit",
+        )
+    return context.task_chain_depth + 1
 
 
 def _status_filter(value: Any) -> list[TaskStatus] | None:
