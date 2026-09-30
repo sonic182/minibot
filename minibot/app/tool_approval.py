@@ -87,8 +87,13 @@ async def request_tool_approval(
     channel: str | None,
     chat_id: int | None,
     timeout_seconds: float,
+    detail: str | None = None,
 ) -> bool:
-    """Ask the user on Telegram and wait for the answer; anything but an explicit approval denies."""
+    """Ask the user on Telegram and wait for the answer; anything but an explicit approval denies.
+
+    ``detail`` is an already rendered ``format_approval_detail`` text (a worker sends it instead of the
+    raw arguments); without it the prompt is rendered from ``arguments``.
+    """
     if channel != "telegram" or chat_id is None:
         _logger.warning("tool approval unavailable on this channel", extra={"tool": tool_name, "channel": channel})
         return False
@@ -103,7 +108,7 @@ async def request_tool_approval(
                 tool_name=_escape(tool_name)[:_NAME_MAX_CHARS],
                 channel=channel,
                 chat_id=chat_id,
-                detail=format_approval_detail(arguments),
+                detail=detail if detail is not None else format_approval_detail(arguments),
             )
         )
         async with asyncio.timeout(timeout_seconds):

@@ -228,3 +228,32 @@ async def test_send_file_response_uses_send_document(tmp_path: Path) -> None:
     assert len(bot.send_document_calls) == 1
     assert bot.send_document_calls[0]["chat_id"] == 1
     assert bot.send_document_calls[0]["caption"] == "latest"
+
+
+@pytest.mark.asyncio
+async def test_later_chunk_failure_that_is_not_markup_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A flood-control or network error on chunk 2 says nothing about its markup; retrying it as plain text
+    # would resend a chunk that may already have been delivered.
+    sender, bot, event_bus = _sender()
+    monkeypatch.setattr(outbound_sender_module, "telegram_markdownify", lambda value: f"<{value}>")
+    attempts: list[str] = []
+
+    async def _send_message(**kwargs: Any) -> None:
+        attempts.append(kwargs["text"])
+        if len(attempts) == 2:
+            raise RuntimeError("Flood control exceeded")
+
+    bot.send_message = _send_message  # type: ignore[method-assign]
+    source = "\n".join(["a" * 3000, "b" * 3000])
+
+    await sender.send_text_response(
+        ChannelResponse(
+            channel="telegram",
+            chat_id=1,
+            text=source,
+            render=RenderableResponse(kind="markdown", text=source, meta={"disable_link_preview": True}),
+        )
+    )
+
+    assert len(attempts) == 2
+    assert not event_bus.events

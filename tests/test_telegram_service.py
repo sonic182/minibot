@@ -238,3 +238,43 @@ async def test_approval_prompt_that_fails_to_send_is_denied_at_once() -> None:
     assert isinstance(event, ToolApprovalResolvedEvent)
     assert (event.approval_id, event.approved, event.user_id) == ("a1", False, None)
     assert "a1" not in service._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_failed_denial_publish_is_logged_not_left_unretrieved(caplog: pytest.LogCaptureFixture) -> None:
+    service, bot, event_bus, _ = _service(TelegramChannelConfig(bot_token="token"))
+
+    async def _fail(**_kwargs: Any) -> None:
+        raise RuntimeError("message is too long")
+
+    async def _stopped_bus(_event: Any) -> None:
+        raise RuntimeError("event bus is stopped")
+
+    bot.send_message = _fail
+    event_bus.publish = _stopped_bus
+    service._pending_approvals = {}
+    service._approval_denials = set()
+
+    with caplog.at_level(logging.WARNING, logger="test.telegram.service"):
+        await service._send_approval_request(
+            ToolApprovalRequestedEvent(approval_id="a1", tool_name="t", channel="telegram", chat_id=1, detail="d")
+        )
+        await asyncio.gather(*service._approval_denials, return_exceptions=True)
+        await asyncio.sleep(0)
+
+    assert any("approval denial" in record.getMessage() for record in caplog.records)
+    assert not service._approval_denials
+
+
+@pytest.mark.asyncio
+async def test_outcome_is_still_sent_when_removing_the_buttons_fails() -> None:
+    service, bot, _, _ = _service(TelegramChannelConfig(bot_token="token"))
+
+    async def _fail(**_kwargs: Any) -> None:
+        raise RuntimeError("message is not modified")
+
+    bot.edit_message_reply_markup = _fail  # type: ignore[attr-defined]
+
+    await service._close_approval_prompt(1, 7, "✅ Approved")
+
+    assert [call["text"] for call in bot.calls] == ["✅ Approved"]

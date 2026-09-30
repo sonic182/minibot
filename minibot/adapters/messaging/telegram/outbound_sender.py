@@ -199,7 +199,7 @@ class TelegramOutboundSender:
                 # next: a failure would make the caller repair or resend the whole response and
                 # duplicate them. A markup failure gets one plain-text try for the rest; anything
                 # else (flood limit, network) would most likely fail again, so the rest is dropped.
-                if parse_mode is not None:
+                if parse_mode is not None and _TELEGRAM_PARSE_ENTITIES_ERROR in str(exc).lower():
                     remaining = "\n".join(source for source, _, _ in chunks[index - 1 :])
                     await self._send_parse_mode_chunks(
                         chat_id=chat_id,

@@ -437,7 +437,11 @@ class TaskManager:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
                     raise TimeoutError
-                raw = await asyncio.wait_for(rx.readline(), timeout=remaining)
+                try:
+                    raw = await asyncio.wait_for(rx.readline(), timeout=remaining)
+                except ValueError:
+                    # StreamReader raises it for a line over its 64 KiB limit.
+                    return {"status": TaskStatus.FAILED.value, "error": "worker sent an oversized message"}
                 if not raw:
                     return {"status": TaskStatus.FAILED.value, "error": "worker closed without a result"}
                 try:
@@ -465,6 +469,7 @@ class TaskManager:
                             arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else {},
                             channel=event.get("channel") if isinstance(event.get("channel"), str) else None,
                             chat_id=event.get("chat_id") if isinstance(event.get("chat_id"), int) else None,
+                            detail=event.get("detail") if isinstance(event.get("detail"), str) else None,
                             timeout_seconds=min(self._approval_timeout_seconds, max(deadline - loop.time(), 0)),
                         )
                     except Exception:

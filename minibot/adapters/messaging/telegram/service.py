@@ -210,7 +210,7 @@ class TelegramService:
                 self._event_bus.publish(ToolApprovalResolvedEvent(approval_id=event.approval_id, approved=False))
             )
             self._approval_denials.add(denial)
-            denial.add_done_callback(self._approval_denials.discard)
+            denial.add_done_callback(self._denial_finished)
             return
         self._pending_approvals[event.approval_id] = (event.chat_id, sent.message_id)
 
@@ -245,9 +245,16 @@ class TelegramService:
         if pending is not None:
             await self._close_approval_prompt(*pending, "⌛ No answer: denied")
 
+    def _denial_finished(self, task: asyncio.Task[None]) -> None:
+        self._approval_denials.discard(task)
+        if not task.cancelled() and (exc := task.exception()) is not None:
+            # Fail-closed either way: the requester times out. This only keeps the cause visible.
+            self._logger.warning("approval denial could not be published", exc_info=exc)
+
     async def _close_approval_prompt(self, chat_id: int, message_id: int, outcome: str) -> None:
         with contextlib.suppress(Exception):
             await self._bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id)
+        with contextlib.suppress(Exception):
             await self._bot.send_message(chat_id=chat_id, text=outcome, reply_to_message_id=message_id)
 
     def _log_outgoing_task_end(self, task: asyncio.Task[None]) -> None:
@@ -294,6 +301,10 @@ class TelegramService:
             self._outgoing_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._outgoing_task
+
+        denials = list(self._approval_denials)
+        if denials:
+            await asyncio.gather(*denials, return_exceptions=True)
 
         typing_tasks = list(self._typing_tasks.values())
         self._typing_tasks.clear()
