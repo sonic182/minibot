@@ -383,8 +383,6 @@ def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
 
 
 class _ApprovalPipe:
-    """Feeds the worker its payload, then answers (or hangs up on) the first approval request."""
-
     def __init__(self, *, answer: bool | None) -> None:
         self.answer = answer
         self.written: list[bytes] = []
@@ -441,7 +439,6 @@ async def test_worker_sends_a_capped_redacted_detail_and_returns_the_answer() ->
     assert await _run_worker_asking_approval(pipe) is True
 
     request_line = next(line for line in pipe.written if b"approval_request" in line)
-    # asyncio's pipe reader rejects lines over 64 KiB, so the request must stay far below that.
     assert len(request_line) < 10_000
     assert b"hunter2" not in request_line
 
@@ -453,7 +450,6 @@ async def test_worker_denies_a_pending_approval_when_the_manager_hangs_up() -> N
 
 @pytest.mark.asyncio
 async def test_worker_caps_the_tool_name_it_sends() -> None:
-    # A lazy MCP call_tool embeds a model-chosen remote name, so the name can overrun the pipe limit too.
     pipe = _ApprovalPipe(answer=True)
 
     await _run_worker_asking_approval(pipe, tool_name="mcp_mail__" + "x" * 70_000)

@@ -19,6 +19,7 @@ from minibot.shared.errors import ToolInputError
 Approver = Callable[[str, dict[str, Any], ToolContext], Awaitable[bool]]
 
 _DETAIL_MAX_CHARS = 3000
+_TRUNCATED_SUFFIX = "\n…(truncated)"
 _VALUE_MAX_CHARS = 1000
 NAME_MAX_CHARS = 200
 # Control, format (bidi overrides, zero-width), line- and paragraph-separator characters.
@@ -89,11 +90,7 @@ async def request_tool_approval(
     timeout_seconds: float,
     detail: str | None = None,
 ) -> bool:
-    """Ask the user on Telegram and wait for the answer; anything but an explicit approval denies.
-
-    ``detail`` is an already rendered ``format_approval_detail`` text (a worker sends it instead of the
-    raw arguments); without it the prompt is rendered from ``arguments``.
-    """
+    """Ask the user on Telegram and wait for the answer; anything but an explicit approval denies."""
     if channel != "telegram" or chat_id is None:
         _logger.warning("tool approval unavailable on this channel", extra={"tool": tool_name, "channel": channel})
         return False
@@ -108,7 +105,7 @@ async def request_tool_approval(
                 tool_name=_escape(tool_name)[:NAME_MAX_CHARS],
                 channel=channel,
                 chat_id=chat_id,
-                detail=detail[:_DETAIL_MAX_CHARS] if detail is not None else format_approval_detail(arguments),
+                detail=_cap_detail(detail) if detail is not None else format_approval_detail(arguments),
             )
         )
         async with asyncio.timeout(timeout_seconds):
@@ -143,10 +140,13 @@ def format_approval_detail(arguments: dict[str, Any]) -> str:
     lines = sorted(
         (f"{_escape(str(key))}: {_render_value(value)}" for key, value in _redact(arguments).items()), key=len
     )
-    text = "\n".join(lines)
-    if len(text) > _DETAIL_MAX_CHARS:
-        return f"{text[:_DETAIL_MAX_CHARS]}\n…(truncated)"
-    return text
+    return _cap_detail("\n".join(lines))
+
+
+def _cap_detail(text: str) -> str:
+    if len(text) > _DETAIL_MAX_CHARS and not text.endswith(_TRUNCATED_SUFFIX):
+        return f"{text[:_DETAIL_MAX_CHARS]}{_TRUNCATED_SUFFIX}"
+    return text[: _DETAIL_MAX_CHARS + len(_TRUNCATED_SUFFIX)]
 
 
 def _render_value(value: Any) -> str:

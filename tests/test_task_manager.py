@@ -766,28 +766,6 @@ async def test_worker_approval_request_is_answered_over_the_pipe() -> None:
 
 
 @pytest.mark.asyncio
-async def test_worker_line_over_the_pipe_limit_fails_the_task_instead_of_escaping() -> None:
-    class _OversizedPipe:
-        @asynccontextmanager
-        async def open(self):
-            class _RX:
-                async def readline(self) -> bytes:
-                    raise ValueError("Separator is not found, and chunk exceed the limit")
-
-            class _TX:
-                def write(self, data: bytes) -> None:
-                    pass
-
-            yield _RX(), _TX()
-
-    manager = _make_manager(EventBus())
-
-    result = await manager._read_worker_result(_OversizedPipe(), {"task_id": "t1"}, 5.0, None, 5)
-
-    assert result["status"] == "failed"
-
-
-@pytest.mark.asyncio
 async def test_worker_approval_request_prefers_the_precomputed_detail() -> None:
     manager = _make_manager(EventBus())
     pipe = _PipeScripted(
@@ -809,27 +787,49 @@ async def test_worker_approval_request_prefers_the_precomputed_detail() -> None:
     assert approve.await_args.kwargs["detail"] == "to: a@b.c"
 
 
-@pytest.mark.asyncio
-async def test_oversized_worker_line_terminates_the_worker_and_acks() -> None:
-    # The manager, not the worker, ended this run: without terminate() the reader joins a worker that
-    # keeps running, holding the semaphore slot and letting the lease lapse.
-    class _OversizedPipe:
-        @asynccontextmanager
-        async def open(self):
-            class _RX:
-                async def readline(self) -> bytes:
+class _BadLinePipe:
+    def __init__(self, line: bytes | None) -> None:
+        self._line = line
+
+    @asynccontextmanager
+    async def open(self):
+        line = self._line
+
+        class _RX:
+            async def readline(self) -> bytes:
+                if line is None:
                     raise ValueError("Separator is not found, and chunk exceed the limit")
+                return line
 
-            class _TX:
-                def write(self, data: bytes) -> None:
-                    pass
+        class _TX:
+            def write(self, data: bytes) -> None:
+                pass
 
-            yield _RX(), _TX()
+        yield _RX(), _TX()
 
-    manager = _make_manager(EventBus())
 
-    ack_cb, _, _, proc, reader_task = await _spawn(manager, _OversizedPipe(), task_id="t1")
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "error"),
+    [
+        (None, "worker sent an oversized message"),
+        (b"not json\n", "worker returned invalid JSON"),
+        (b'{"type": "surprise"}\n', "worker returned an invalid message"),
+    ],
+)
+async def test_protocol_failure_terminates_the_worker_and_fails_the_task(line: bytes | None, error: str) -> None:
+    bus = EventBus()
+    subscription = bus.subscribe(types=(OutboundEvent,))
+    manager = _make_manager(bus)
+
+    ack_cb, _, _, proc, reader_task = await _spawn(manager, _BadLinePipe(line), task_id="t1")
     await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert proc.terminate_calls == 1
+    assert proc.start_calls == 1
     ack_cb.assert_awaited_once()
+    status = await asyncio.wait_for(anext(aiter(subscription)), timeout=1.0)
+    assert isinstance(status, OutboundEvent)
+    assert status.response.metadata["status"] == "failed"
+    result = await manager._read_worker_result(_BadLinePipe(line), {"task_id": "t2"}, 5.0, None, 5)
+    assert result["error"] == error

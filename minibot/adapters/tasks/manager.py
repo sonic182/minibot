@@ -442,7 +442,6 @@ class TaskManager:
                 try:
                     raw = await asyncio.wait_for(rx.readline(), timeout=remaining)
                 except ValueError:
-                    # StreamReader raises it for a line over its 64 KiB limit.
                     return _protocol_failure("worker sent an oversized message")
                 if not raw:
                     return {"status": TaskStatus.FAILED.value, "error": "worker closed without a result"}
@@ -584,7 +583,6 @@ def _stop_reason_from_result(result: dict[str, Any]) -> TaskStopReason:
 
 
 def _protocol_failure(error: str) -> dict[str, Any]:
-    """The manager ended this run, so the worker may still be running: ``_reader`` must terminate it."""
     return {"status": TaskStatus.FAILED.value, "error": error, "terminate_worker": True}
 
 

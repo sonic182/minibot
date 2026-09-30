@@ -203,9 +203,6 @@ class TelegramService:
                 reply_markup=keyboard,
             )
         except Exception:
-            # Nobody can answer a prompt that never arrived: deny now instead of making the requester
-            # wait out the whole timeout. Published from a task: this runs inside the outgoing consumer
-            # loop, and a blocking publish onto its own full queue would stall that loop for good.
             self._logger.exception("failed to send tool approval prompt", extra={"chat_id": event.chat_id})
             denial = asyncio.create_task(
                 self._event_bus.publish(ToolApprovalResolvedEvent(approval_id=event.approval_id, approved=False))
@@ -249,7 +246,6 @@ class TelegramService:
     def _denial_finished(self, task: asyncio.Task[None]) -> None:
         self._approval_denials.discard(task)
         if not task.cancelled() and (exc := task.exception()) is not None:
-            # Fail-closed either way: the requester times out. This only keeps the cause visible.
             self._logger.warning("approval denial could not be published", exc_info=exc)
 
     async def _close_approval_prompt(self, chat_id: int, message_id: int, outcome: str) -> None:
@@ -305,8 +301,6 @@ class TelegramService:
 
         denials = list(self._approval_denials)
         if denials:
-            # A publish parked on a queue whose consumer is gone would never finish; the requester's
-            # timeout already denies the call, so an unfinished denial is cancelled, not awaited.
             _, stuck = await asyncio.wait(denials, timeout=_DENIAL_DRAIN_SECONDS)
             for denial in stuck:
                 denial.cancel()

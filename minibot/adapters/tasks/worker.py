@@ -106,8 +106,6 @@ async def _worker_async(pipe: Any) -> None:
                 "type": "approval_request",
                 "approval_id": approval_id,
                 "tool_name": tool_name[:NAME_MAX_CHARS],
-                # The prompt shows a capped, redacted rendering anyway; the raw arguments of a long body
-                # would overrun the 64 KiB line limit of the manager's pipe reader.
                 "detail": format_approval_detail(arguments),
                 "channel": context.channel,
                 "chat_id": context.chat_id,

@@ -214,4 +214,6 @@ async def test_detail_supplied_by_a_worker_is_capped() -> None:
 
     event = await asyncio.wait_for(anext(aiter(requested)), timeout=1)
     assert isinstance(event, ToolApprovalRequestedEvent)
-    assert len(event.detail) <= 3000
+    assert event.detail.startswith("x" * 3000)
+    assert event.detail.endswith("…(truncated)")
+    assert len(event.detail) < 3100

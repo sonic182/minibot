@@ -232,8 +232,6 @@ async def test_send_file_response_uses_send_document(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_later_chunk_failure_that_is_not_markup_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A flood-control or network error on chunk 2 says nothing about its markup; retrying it as plain text
-    # would resend a chunk that may already have been delivered.
     sender, bot, event_bus = _sender()
     monkeypatch.setattr(outbound_sender_module, "telegram_markdownify", lambda value: f"<{value}>")
     attempts: list[str] = []
