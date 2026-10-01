@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 
 from minibot.app.agent_registry import AgentRegistry
@@ -22,7 +23,7 @@ from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_factory import build_enabled_tools
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.config.schema import Settings
-from minibot.core.channels import ChannelResponse, RenderableResponse
+from minibot.core.channels import ChannelCapabilities, ChannelResponse, RenderableResponse
 from minibot.core.events import (
     BaseEvent,
     MessageEvent,
@@ -68,8 +69,10 @@ class Dispatcher:
         llm_client: LLMClient,
         extensions: ExtensionRegistry,
         managed_storage: FileStorage | None,
+        channel_capabilities: Mapping[str, ChannelCapabilities] | None = None,
     ) -> None:
         self._event_bus = event_bus
+        self._channel_capabilities = dict(channel_capabilities or {})
         self._subscription = event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
         self._pending_turns = pending_turns
         tools = build_enabled_tools(
@@ -201,7 +204,15 @@ class Dispatcher:
         with contextlib.suppress(Exception):
             await self._event_bus.publish(event)
 
+    def _with_channel_capabilities(self, event: MessageEvent) -> MessageEvent:
+        capabilities = self._channel_capabilities.get(event.message.channel)
+        if capabilities is None or "capabilities" in event.message.model_fields_set:
+            return event
+        message = event.message.model_copy(update={"capabilities": capabilities})
+        return event.model_copy(update={"message": message})
+
     async def _handle_message(self, event: MessageEvent) -> None:
+        event = self._with_channel_capabilities(event)
         await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
         try:
             message = event.message

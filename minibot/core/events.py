@@ -105,7 +105,7 @@ class ReasoningEvent(BaseEvent):
 class ToolCallEvent(BaseEvent):
     """Emitted around every tool handler invocation.
 
-    ``detail`` is already redacted and clipped by ``minibot/shared/tool_call_display.py`` before
+    ``detail`` is already redacted and clipped by ``minibot/llm/tools/tool_call_display.py`` before
     this event is published — the raw argument payload (which can hold credentials, e.g.
     ``http_request`` headers, ``bash`` env, ``python_execute`` code) never leaves the tool-execution
     layer. Safe to log, persist, or forward to any subscriber, including extensions.

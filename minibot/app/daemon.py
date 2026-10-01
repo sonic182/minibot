@@ -10,6 +10,7 @@ from typing import Any
 
 from minibot import __version__
 from minibot.adapters.container import AppContainer
+from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.adapters.messaging.web import WebChannelService
 from minibot.app.console import main as console_main
 from minibot.app.dispatcher import Dispatcher
@@ -38,6 +39,7 @@ async def run() -> None:
         llm_client=AppContainer.get_llm_client(),
         extensions=AppContainer.get_extensions(),
         managed_storage=AppContainer.get_file_storage(),
+        channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
     )
     strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     enabled_tools = dispatcher.main_agent_tool_names or ["none"]

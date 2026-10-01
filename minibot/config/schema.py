@@ -897,7 +897,7 @@ class SqliteTaskQueueConfig(BaseModel):
     - ``lease_timeout_seconds`` — lease duration before a stalled task is claimable again (default: ``2100``).
     - ``batch_size`` — max tasks leased per poll cycle (default: ``4``).
     - ``max_attempts`` — redeliveries before a task is marked failed (default: ``3``). This is queue-level
-      redelivery, distinct from the in-process provider rate-limit retry in ``adapters/tasks/manager.py``.
+      redelivery, distinct from the in-process provider rate-limit retry in ``app/tasks/manager.py``.
     - ``done_retention_seconds`` — how long terminal task rows and their compact event history are kept before
       purging (default: ``2592000``).
     """

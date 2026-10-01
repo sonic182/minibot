@@ -9,6 +9,7 @@ from pathlib import Path
 from minibot.adapters.container import AppContainer
 from minibot.adapters.messaging.console.compat import CompatConsole, prompt_input
 from minibot.adapters.messaging.console.service import ConsoleService
+from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.app.dispatcher import Dispatcher
 from minibot.core.channels import session_identifier
 from minibot.core.memory import MemoryEntry
@@ -63,6 +64,7 @@ async def run(
         llm_client=AppContainer.get_llm_client(),
         extensions=AppContainer.get_extensions(),
         managed_storage=AppContainer.get_file_storage(),
+        channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
     )
     strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     main_agent_tools_enabled = getattr(dispatcher, "main_agent_tool_names", None) or ["none"]

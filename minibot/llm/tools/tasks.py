@@ -266,7 +266,7 @@ def _resolve_limits(
 
     The agent's own ``timeout_seconds`` is the default when the call names none. It is resolved
     here and not in the worker because the daemon-side supervisor derives its deadline from the
-    same ``TaskLimits`` (``adapters/tasks/manager.py``); deciding it in the subprocess would let
+    same ``TaskLimits`` (``app/tasks/manager.py``); deciding it in the subprocess would let
     the two disagree.
     """
     timeout_seconds = optional_int(payload.get("timeout_seconds"), field="timeout_seconds", min_value=1)

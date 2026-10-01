@@ -12,7 +12,7 @@ MiniBot is an asyncio application with two runtime entrypoints: **daemon mode**
 (`minibot.app.console`) for local console conversations. Both publish inbound events
 to an internal event bus, route messages through the LLM pipeline, and emit outbound
 responses back to the active channel adapter. A third, deliberately narrower
-entrypoint is the forked task worker (`minibot.adapters.tasks.worker`).
+entrypoint is the forked task worker (`minibot.app.tasks.worker`).
 
 ## Guiding principles
 
@@ -21,20 +21,28 @@ entrypoint is the forked task worker (`minibot.adapters.tasks.worker`).
 - **Async-first** boundaries for I/O-heavy paths (Telegram, DB, provider calls).
 - **Replaceable infrastructure** behind protocols (memory repositories, scheduled
   prompt store, tools, vector stores).
-- **Explicit, testable flow** with dependency wiring centralized in the container.
+- **Explicit, testable flow** with dependency wiring centralized in the composition roots
+  (`minibot.app.daemon` and `minibot.app.console`), which hand concrete adapters to the
+  dispatcher instead of letting it resolve them through the container.
 
 ## Repository layout
 
 Directories only; module-level detail lives in the linked pages below. Dependencies
-point inward — `adapters` and `llm` may import `core`; `core` imports none of them.
+point inward — `adapters` may import `core` and `config`; `core` imports none of
+`app`, `adapters`, `llm` or `config`; `llm` never imports `app` or `adapters`; `app`
+imports `adapters` only in the composition roots (`daemon`, `console`) and the task
+worker.
 
 ```text
 minibot/
-  app/        orchestration: daemon, dispatcher, handler, agent runtime, extensions API
+  app/        orchestration: daemon, dispatcher, handler, agent runtime, tool factory,
+              extensions API
     handlers/services/   LLM turn collaborators
-  core/       domain models + protocols
-  adapters/   infrastructure: config, container, logging, http, memory, graph,
-              vectors, qdrant, messaging, scheduler, tasks, files, mcp, vault
+    tasks/               task manager and the forked worker entrypoint
+  config/     settings schema, `${ENV_VAR}` expansion, config path resolution
+  core/       domain models + protocols (channels, events, files, tasks, MCP, memory)
+  adapters/   infrastructure: config loading, container, logging, http, memory, graph,
+              vectors, qdrant, messaging, scheduler, tasks (stores), files, mcp, vault
   llm/        provider factory + tool schemas/handlers (providers/, services/, tools/)
   extensions/ bundled extensions: thin register(mb) composition
   rag/        ingestion, chunking, embeddings, retrieval
@@ -86,13 +94,17 @@ flowchart TD
 
 ## Layer map
 
-- `core` — domain contracts: `AgentSpec`, runtime state, channel DTOs, events,
-  memory/graph/task/vector protocols.
+- `config` — the `Settings` schema, environment expansion and config path resolution,
+  shared by every layer.
+- `core` — domain contracts: `AgentSpec`, runtime state, channel DTOs and
+  `ChannelCapabilities`, events, file/MCP/memory/graph/task/vector protocols.
 - `app` — event bus, dispatcher, `LLMMessageHandler` and its services, agent
-  runtime/registry/policies, extension API, guardrails, scheduler and task services.
-- `adapters` — config loading/validation, container, logging, the optional HTTP
-  server, SQLite/SQLAlchemy memory, Telegram/console/RabbitMQ messaging, scheduler
-  persistence, subprocess task workers, local files, MCP clients, credential vault.
+  runtime/registry/policies, tool factory, extension API, guardrails, scheduler and
+  task services (`app.tasks`: manager and worker).
+- `adapters` — config loading, container, logging, the optional HTTP server,
+  SQLite/SQLAlchemy memory, Telegram/console/RabbitMQ messaging (Telegram supplies its
+  own `ChannelCapabilities`), scheduler persistence, task stores, local files, MCP
+  clients, credential vault.
 - `llm` — provider factory and services (request building, schema policy, tool
   execution, usage parsing, compaction), plus the LLM-facing tool schemas/handlers.
 - `extensions` — bundled, opt-in `register(mb)` modules (tools, channels,
