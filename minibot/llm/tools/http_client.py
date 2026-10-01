@@ -13,8 +13,8 @@ import aiosonic
 from aiosonic.timeout import Timeouts
 from llm_async.models import Tool
 
-from minibot.adapters.config.schema import HTTPClientToolConfig
-from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.config.schema import HTTPClientToolConfig
+from minibot.core.files import FileStorage
 from minibot.llm.services.tool_executor import tool_failure_signature
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.schema_utils import nullable_string, strict_object
@@ -52,7 +52,7 @@ class HTTPClientTool:
     - ``spill_to_managed_file``, ``spill_after_chars``, ``spill_preview_chars``, ``max_spill_bytes``.
     """
 
-    def __init__(self, config: HTTPClientToolConfig, storage: LocalFileStorage | None = None) -> None:
+    def __init__(self, config: HTTPClientToolConfig, storage: FileStorage | None = None) -> None:
         self._config = config
         self._storage = storage
         self._logger = logging.getLogger("minibot.http_tool")

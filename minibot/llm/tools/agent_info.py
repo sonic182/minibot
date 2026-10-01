@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from llm_async.models import Tool
 
-from minibot.app.agent_registry import AgentRegistry
-from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.core.agents import AgentCatalog
+from minibot.llm.provider_options import ProviderOption
 from minibot.llm.tools.arg_utils import require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
@@ -11,9 +11,9 @@ from minibot.llm.tools.schema_utils import strict_object, string_field
 
 
 class AgentInfoTool:
-    def __init__(self, *, registry: AgentRegistry, llm_factory: LLMClientFactory) -> None:
+    def __init__(self, *, registry: AgentCatalog, providers: list[ProviderOption]) -> None:
         self._registry = registry
-        self._llm_factory = llm_factory
+        self._providers = providers
 
     def bindings(self) -> list[ToolBinding]:
         return [ToolBinding(tool=self._fetch_agent_info_schema(), handler=self._fetch_agent_info)]
@@ -52,7 +52,7 @@ class AgentInfoTool:
                 "reasoning_effort": spec.reasoning_effort,
                 "timeout_seconds": spec.timeout_seconds,
             },
-            "available_providers": [option.as_payload() for option in self._llm_factory.available_providers()],
+            "available_providers": [option.as_payload() for option in self._providers],
             "override_hint": (
                 "spawn_task accepts model_provider, model and reasoning_effort to run this specialist on one "
                 "of the providers listed above for a single task. A null default means the specialist "

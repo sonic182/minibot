@@ -49,7 +49,7 @@ class UserInputService:
         reply_to = message.metadata.get("reply_to")
         if not isinstance(reply_to, dict):
             return ""
-        lines = ["Telegram reply context:"]
+        lines = [f"{message.capabilities.reply_context_label}:"]
         username = reply_to.get("username")
         if isinstance(username, str) and username:
             lines.append(f"Author: @{username}")

@@ -1,6 +1,6 @@
 """SQLite-backed relation graph.
 
-SQLite is authoritative: task workers are forked processes (``adapters/tasks/manager.py``), so the
+SQLite is authoritative: task workers are forked processes (``app/tasks/manager.py``), so the
 store has to survive concurrent writers, which is what WAL mode is for. NetworkX is the algorithm
 engine only, materialized per query and never handed out past this module — a future Cypher backend
 implements the same six methods without the tool layer noticing.

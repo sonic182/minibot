@@ -9,8 +9,8 @@ from typing import Any
 
 from croniter import croniter
 
-from minibot.adapters.config.schema import ScheduledPromptsConfig
 from minibot.app.event_bus import EventBus
+from minibot.config.schema import ScheduledPromptsConfig
 from minibot.core.channels import ChannelMessage
 from minibot.core.events import MessageEvent
 from minibot.core.jobs import (

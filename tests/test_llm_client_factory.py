@@ -12,8 +12,9 @@ from minibot.adapters.config.schema import (
     ProviderConfig,
     Settings,
 )
-from minibot.app.llm_client_factory import LLMClientFactory, available_providers, find_provider
+from minibot.app.llm_client_factory import LLMClientFactory, available_providers
 from minibot.core.agents import AgentSpec
+from minibot.llm.provider_options import find_provider
 
 
 def _agent_spec(

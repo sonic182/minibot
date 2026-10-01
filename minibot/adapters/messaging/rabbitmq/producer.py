@@ -5,7 +5,7 @@ from dataclasses import asdict
 
 import aio_pika
 
-from minibot.adapters.config.schema import RabbitMQConsumerConfig
+from minibot.config.schema import RabbitMQConsumerConfig
 from minibot.core.tasks import TaskRepository, TaskRequest, TaskStopReason
 
 

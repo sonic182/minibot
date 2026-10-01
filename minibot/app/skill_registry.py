@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-from minibot.adapters.config.schema import SkillsToolConfig
 from minibot.app.skill_definitions_loader import (
     fingerprint_skill_paths,
     load_skill_specs,
     resolve_skill_discovery_paths,
     resolve_skill_write_dir,
 )
+from minibot.config.schema import SkillsToolConfig
 from minibot.core.skills import SkillSource, SkillSpec
 
 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from llm_async.models import Tool
 
-from minibot.adapters.config.schema import BashToolConfig
+from minibot.config.schema import BashToolConfig
 from minibot.llm.tools.arg_utils import int_with_default, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
@@ -17,7 +17,7 @@ from minibot.llm.tools.schema_utils import nullable_integer, nullable_string, st
 from minibot.shared.subprocess_utils import communicate_with_timeout
 
 if TYPE_CHECKING:
-    from minibot.adapters.files.local_storage import LocalFileStorage
+    from minibot.core.files import FileStorage
 
 
 class BashTool:
@@ -38,7 +38,7 @@ class BashTool:
     ``truncated``, and ``duration_ms``.
     """
 
-    def __init__(self, config: BashToolConfig, storage: LocalFileStorage | None = None) -> None:
+    def __init__(self, config: BashToolConfig, storage: FileStorage | None = None) -> None:
         self._config = config
         self._storage = storage
 

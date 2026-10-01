@@ -11,7 +11,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionRegistry
 from minibot.app.skill_registry import SkillRegistry
-from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
+from minibot.core.channels import ChannelCapabilities, ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import (
     MessageEvent,
     OutboundEvent,
@@ -26,28 +26,28 @@ def _empty_extension_registry() -> ExtensionRegistry:
     return ExtensionRegistry([], logging.getLogger("test.extensions"))
 
 
-def _patch_container(
+def _dispatcher_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     dispatcher_module,
     handler_cls: type,
     *,
     pending_store: object | None = None,
-) -> None:
-    """Stub every AppContainer getter Dispatcher.__init__ reaches for."""
+) -> dict[str, object]:
     store = pending_store if pending_store is not None else _FakePendingTurnStore()
     monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", handler_cls)
     monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
-    container = dispatcher_module.AppContainer
-    monkeypatch.setattr(container, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(container, "get_scheduled_prompt_service", lambda: None)
-    monkeypatch.setattr(container, "get_memory_backend", lambda: object())
-    monkeypatch.setattr(container, "get_kv_memory_backend", lambda: None)
-    monkeypatch.setattr(container, "get_llm_client", lambda: object())
-    monkeypatch.setattr(container, "get_agent_registry", lambda: AgentRegistry([]))
-    monkeypatch.setattr(container, "get_skill_registry", lambda: SkillRegistry([]))
-    monkeypatch.setattr(container, "get_llm_factory", lambda: object())
-    monkeypatch.setattr(container, "get_pending_turn_store", lambda: store)
-    monkeypatch.setattr(container, "get_extensions", _empty_extension_registry)
+    return {
+        "pending_turns": store,
+        "settings": _FakeSettings(),
+        "memory_backend": object(),
+        "agent_registry": AgentRegistry([]),
+        "llm_factory": object(),
+        "skill_registry": SkillRegistry([]),
+        "config_path": None,
+        "llm_client": object(),
+        "extensions": _empty_extension_registry(),
+        "managed_storage": None,
+    }
 
 
 class _FakePendingTurnStore:
@@ -126,13 +126,15 @@ async def _running_dispatcher(
     *,
     pending_store: object | None = None,
     event_types: tuple[type, ...] | None = None,
+    channel_capabilities: dict[str, ChannelCapabilities] | None = None,
 ):
     from minibot.app import dispatcher as dispatcher_module
 
-    _patch_container(monkeypatch, dispatcher_module, handler_cls, pending_store=pending_store)
+    dependencies = _dispatcher_dependencies(monkeypatch, dispatcher_module, handler_cls, pending_store=pending_store)
+    dependencies["channel_capabilities"] = channel_capabilities
     bus = EventBus()
     subscription = bus.subscribe(types=event_types)
-    dispatcher = dispatcher_module.Dispatcher(bus)
+    dispatcher = dispatcher_module.Dispatcher(bus, **dependencies)
     await dispatcher.start()
     try:
         yield bus, subscription
@@ -188,6 +190,36 @@ async def test_dispatcher_publishes_outbound_reply(monkeypatch: pytest.MonkeyPat
 
     assert outbound is not None
     assert outbound.response.text == "ok:hello"
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_applies_channel_capabilities_to_messages_without_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[ChannelCapabilities] = []
+
+    class _StubHandler(_StubHandlerBase):
+        async def handle(self, event: MessageEvent) -> ChannelResponse:
+            seen.append(event.message.capabilities)
+            return ChannelResponse(channel="telegram", chat_id=1, text="ok", metadata={"should_reply": True})
+
+    telegram = ChannelCapabilities(supports_tool_approval=True)
+    explicit = ChannelCapabilities(supports_reply_targets=True)
+    explicit_event = MessageEvent(
+        message=ChannelMessage(
+            channel="telegram", user_id=1, chat_id=1, message_id=1, text="hi", capabilities=explicit
+        ),
+    )
+    async with _running_dispatcher(monkeypatch, _StubHandler, channel_capabilities={"telegram": telegram}) as (
+        bus,
+        subscription,
+    ):
+        await bus.publish(_message_event("scheduled"))
+        await _wait_outbound(subscription)
+        await bus.publish(explicit_event)
+        await _wait_outbound(subscription)
+
+    assert seen == [telegram, explicit]
 
 
 @pytest.mark.asyncio

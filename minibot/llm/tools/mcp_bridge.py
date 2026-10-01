@@ -9,8 +9,8 @@ from typing import Any
 
 from llm_async.models import Tool
 
-from minibot.adapters.mcp.client import MCPClient, MCPServerMetadata, MCPToolDefinition
 from minibot.core.agent_runtime import ToolResult
+from minibot.core.mcp import MCPClient, MCPServerMetadata, MCPToolDefinition
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.schema_utils import empty_object_schema, strict_object
 

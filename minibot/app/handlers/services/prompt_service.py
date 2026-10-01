@@ -6,6 +6,7 @@ from typing import Any
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.skill_registry import SkillRegistry
+from minibot.core.channels import ChannelCapabilities
 from minibot.llm.services import LLMExecutionProfile
 from minibot.llm.tools.base import ToolBinding
 from minibot.shared.prompt_loader import load_channel_prompt, load_compact_prompt, load_policy_prompts
@@ -220,18 +221,16 @@ class PromptService:
         original_kind: str,
         parse_error: str,
         original_content: str,
+        capabilities: ChannelCapabilities | None = None,
     ) -> str:
-        if channel == "telegram":
+        instructions = capabilities.format_repair_instructions if capabilities else None
+        if instructions:
             return (
-                "We tried to send a formatted response to Telegram but got a formatting parse error. "
-                "Rewrite the same answer with valid Telegram-compatible formatting.\n\n"
+                "We tried to send a formatted response to the target channel and got a formatting parse error.\n\n"
+                f"{instructions}\n"
                 f"Original kind: {original_kind}\n"
-                f"Telegram error: {parse_error}\n\n"
-                "Requirements:\n"
-                "- Return the same meaning and content, only fix formatting.\n"
-                "- Keep kind as markdown or html only if valid for Telegram, otherwise use text.\n"
-                "- For markdown, write normal Markdown (do not pre-escape Telegram MarkdownV2).\n"
-                "- Do not use placeholder statements.\n\n"
+                f"Parse error: {parse_error}\n\n"
+                "Return the same meaning and content, only fix formatting. Do not use placeholder statements.\n\n"
                 f"Original content:\n{original_content}"
             )
         return (

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram.types import Message as TelegramMessage
 
-from minibot.adapters.config.schema import TelegramChannelConfig
+from minibot.config.schema import TelegramChannelConfig
 
 
 def is_authorized(config: TelegramChannelConfig, message: TelegramMessage) -> bool:

@@ -45,12 +45,44 @@ def _install_console_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
             return object()
 
         @classmethod
+        def get_pending_turn_store(cls):
+            return object()
+
+        @classmethod
+        def get_memory_backend(cls):
+            return object()
+
+        @classmethod
+        def get_agent_registry(cls):
+            return object()
+
+        @classmethod
+        def get_llm_factory(cls):
+            return object()
+
+        @classmethod
+        def get_skill_registry(cls):
+            return object()
+
+        @classmethod
+        def get_config_path(cls):
+            return None
+
+        @classmethod
+        def get_llm_client(cls):
+            return object()
+
+        @classmethod
+        def get_file_storage(cls):
+            return None
+
+        @classmethod
         async def initialize_storage(cls) -> None:
             calls["initialized"] = True
 
     class _FakeDispatcher:
-        def __init__(self, event_bus) -> None:
-            del event_bus
+        def __init__(self, event_bus, **_dependencies) -> None:
+            del event_bus, _dependencies
 
         async def start(self) -> None:
             calls["dispatcher_started"] = True

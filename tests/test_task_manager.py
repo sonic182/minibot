@@ -10,11 +10,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from minibot.adapters.config.schema import Settings
-from minibot.adapters.tasks.manager import DelegationBudget, TaskManager, resolve_delegation_budget
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.tasks.manager import DelegationBudget, TaskManager, resolve_delegation_budget
 from minibot.app.token_limits_autoconfig import prime_model_limits
 from minibot.core.agents import AgentSpec
+from minibot.core.channels import ChannelCapabilities
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
 
 # ---------------------------------------------------------------------------
@@ -118,8 +119,17 @@ class _FakeProc:
 # ---------------------------------------------------------------------------
 
 
-def _make_manager(bus: EventBus, timeout: float = 5.0) -> TaskManager:
-    return TaskManager(event_bus=bus, worker_timeout_seconds=timeout)
+def _make_manager(
+    bus: EventBus,
+    timeout: float = 5.0,
+    *,
+    channel_capabilities: dict[str, ChannelCapabilities] | None = None,
+) -> TaskManager:
+    return TaskManager(
+        event_bus=bus,
+        worker_timeout_seconds=timeout,
+        channel_capabilities=channel_capabilities,
+    )
 
 
 async def _spawn(
@@ -141,8 +151,8 @@ async def _spawn(
     fake_proc = _FakeProc()
 
     with (
-        patch("minibot.adapters.tasks.manager.aioduplex", return_value=(pipe, MagicMock())),
-        patch("minibot.adapters.tasks.manager.Process", return_value=fake_proc),
+        patch("minibot.app.tasks.manager.aioduplex", return_value=(pipe, MagicMock())),
+        patch("minibot.app.tasks.manager.Process", return_value=fake_proc),
     ):
         await manager.spawn(
             task_id=task_id,
@@ -243,7 +253,10 @@ async def test_reader_success_without_render_kind_falls_back_to_plain_text() -> 
 async def test_reader_success_publishes_telegram_attachments_before_result() -> None:
     bus = EventBus()
     sub = bus.subscribe()
-    manager = _make_manager(bus)
+    manager = _make_manager(
+        bus,
+        channel_capabilities={"telegram": ChannelCapabilities(supports_file_attachment_delivery=True)},
+    )
     pipe = _PipeSuccess(
         {
             "task_id": "t1",
@@ -291,7 +304,10 @@ async def test_reader_success_appends_attachment_paths_for_console() -> None:
 async def test_reader_success_with_continuation_hands_the_result_back_to_the_orchestrator() -> None:
     bus = EventBus()
     sub = bus.subscribe()
-    manager = _make_manager(bus)
+    manager = _make_manager(
+        bus,
+        channel_capabilities={"telegram": ChannelCapabilities(supports_file_attachment_delivery=True)},
+    )
     pipe = _PipeSuccess(
         {
             "task_id": "t1",
@@ -553,11 +569,11 @@ async def test_reader_retryable_worker_error_retries_then_succeeds(monkeypatch: 
     async def _fake_sleep(_delay: float) -> None:
         return None
 
-    monkeypatch.setattr("minibot.adapters.tasks.manager.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("minibot.app.tasks.manager.asyncio.sleep", _fake_sleep)
 
     with (
-        patch("minibot.adapters.tasks.manager.aioduplex", side_effect=[(pipe_1, MagicMock()), (pipe_2, MagicMock())]),
-        patch("minibot.adapters.tasks.manager.Process", side_effect=[fake_proc_1, fake_proc_2]),
+        patch("minibot.app.tasks.manager.aioduplex", side_effect=[(pipe_1, MagicMock()), (pipe_2, MagicMock())]),
+        patch("minibot.app.tasks.manager.Process", side_effect=[fake_proc_1, fake_proc_2]),
     ):
         await manager.spawn(
             task_id="t-retry",
@@ -836,7 +852,7 @@ async def test_worker_approval_request_is_answered_over_the_pipe() -> None:
     )
     approve = AsyncMock(return_value=True)
 
-    with patch("minibot.adapters.tasks.manager.request_tool_approval", approve):
+    with patch("minibot.app.tasks.manager.request_tool_approval", approve):
         result = await manager._read_worker_result(pipe, {"task_id": "t1"}, 5.0, None, 5)
 
     assert result["text"] == "ok"
@@ -861,7 +877,7 @@ async def test_worker_approval_request_prefers_the_precomputed_detail() -> None:
     )
     approve = AsyncMock(return_value=True)
 
-    with patch("minibot.adapters.tasks.manager.request_tool_approval", approve):
+    with patch("minibot.app.tasks.manager.request_tool_approval", approve):
         await manager._read_worker_result(pipe, {"task_id": "t1"}, 5.0, None, 5)
 
     assert approve.await_args.kwargs["detail"] == "to: a@b.c"

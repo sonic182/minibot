@@ -6,9 +6,8 @@ from typing import Any
 
 from llm_async.models import Tool
 
-from minibot.adapters.files.local_storage import LocalFileStorage
-from minibot.app.skill_registry import SkillRegistry
-from minibot.core.skills import SkillSpec
+from minibot.core.files import FileStorage
+from minibot.core.skills import SkillCatalog, SkillSpec
 from minibot.llm.tools.arg_utils import optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
@@ -43,8 +42,8 @@ class SkillLoaderTool:
 
     def __init__(
         self,
-        registry: SkillRegistry,
-        managed_storage: LocalFileStorage | None = None,
+        registry: SkillCatalog,
+        managed_storage: FileStorage | None = None,
         bash_enabled: bool = False,
     ) -> None:
         self._registry = registry

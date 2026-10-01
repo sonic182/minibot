@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from minibot.core.agent_runtime import ToolResult
+from minibot.core.channels import ChannelCapabilities
 
 ToolPayload = dict[str, Any]
 
@@ -13,6 +14,7 @@ ToolPayload = dict[str, Any]
 class ToolContext:
     owner_id: str | None = None
     channel: str | None = None
+    channel_capabilities: ChannelCapabilities = field(default_factory=ChannelCapabilities)
     chat_id: int | None = None
     user_id: int | None = None
     turn_id: str | None = None

@@ -7,6 +7,7 @@ from typing import Any
 from minibot.core.agent_runtime import ToolResult
 from minibot.core.agents import AgentSpec
 from minibot.llm.provider_factory import LLMCompletionStep, LLMGeneration, ToolExecutionRecord
+from minibot.llm.provider_options import ProviderOption
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from tests.fixtures.llm.fakes import FakeMessage as _MockMessage
 from tests.fixtures.llm.fakes import FakeToolCall as _MockToolCall
@@ -240,3 +241,6 @@ class ScriptedLLMFactory:
 
     def create_for_agent(self, spec: AgentSpec) -> ScriptedLLMClient:
         return self._agent_clients.get(spec.name, self._default_client)
+
+    def available_providers(self) -> list[ProviderOption]:
+        return []

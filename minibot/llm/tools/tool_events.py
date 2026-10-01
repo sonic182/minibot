@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 from uuid import uuid4
 
-from minibot.core.events import ToolCallEvent
+from minibot.core.events import EventPublisher, ToolCallEvent
 from minibot.llm.services.tool_executor import canonical_tool_name
 from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
-from minibot.shared.tool_call_display import ToolCallDisplay, summarize_tool_call
-
-if TYPE_CHECKING:  # pragma: no cover
-    from minibot.app.event_bus import EventBus
+from minibot.llm.tools.tool_call_display import ToolCallDisplay, summarize_tool_call
 
 _logger = logging.getLogger("minibot.tool_events")
 
@@ -19,7 +16,7 @@ _logger = logging.getLogger("minibot.tool_events")
 def apply_tool_call_events(
     bindings: Sequence[ToolBinding],
     *,
-    event_bus: EventBus | None,
+    event_bus: EventPublisher | None,
 ) -> list[ToolBinding]:
     """Wrap tool handlers so every invocation emits a ``ToolCallEvent``.
 
@@ -32,7 +29,7 @@ def apply_tool_call_events(
     return [_wrap(binding, event_bus=event_bus) for binding in bindings]
 
 
-def _wrap(binding: ToolBinding, *, event_bus: EventBus) -> ToolBinding:
+def _wrap(binding: ToolBinding, *, event_bus: EventPublisher) -> ToolBinding:
     tool_name = canonical_tool_name(binding.tool.name)
 
     async def handler(payload: ToolPayload, context: ToolContext) -> Any:
@@ -52,7 +49,7 @@ def _wrap(binding: ToolBinding, *, event_bus: EventBus) -> ToolBinding:
 
 
 async def _publish(
-    event_bus: EventBus,
+    event_bus: EventPublisher,
     tool_name: str,
     phase: Literal["started", "completed", "failed"],
     call_id: str,

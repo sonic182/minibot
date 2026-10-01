@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Hex architecture refactor.** Move configuration contracts into `minibot.config`, add core ports for infrastructure boundaries, move task orchestration into `minibot.app`, and wire dispatcher dependencies through the composition roots.
+- **Module paths moved.** `minibot.llm.tools.factory` is now `minibot.app.tool_factory`,
+  `minibot.adapters.tasks.manager` and `minibot.adapters.tasks.worker` are now `minibot.app.tasks.manager` and
+  `minibot.app.tasks.worker`, `minibot.shared.tool_call_display` is now `minibot.llm.tools.tool_call_display`,
+  `minibot.shared.console_compat` is now `minibot.adapters.messaging.console.compat`, and `minibot.app.codex_login`
+  is now `minibot.adapters.codex_login`. `minibot.adapters.config.schema` and `.environment` remain as
+  compatibility aliases for `minibot.config`. Out-of-tree extensions that import the old paths need updating.
+- **Channel behavior comes from `ChannelCapabilities`.** Tool approval, reply targets, attachment delivery and
+  format-repair prompts no longer test for the `telegram` channel name. Telegram supplies its own capabilities;
+  the dispatcher applies them to any Telegram message that does not carry them, so scheduled prompts and task
+  continuations can still ask for tool approval in a Telegram chat.
+
 ### Added
 
 - **`spawn_task` takes `continue_turn`.** By default a delegated task is still fire and forget: the worker's

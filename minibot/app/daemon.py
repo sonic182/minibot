@@ -10,6 +10,7 @@ from typing import Any
 
 from minibot import __version__
 from minibot.adapters.container import AppContainer
+from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.adapters.messaging.web import WebChannelService
 from minibot.app.console import main as console_main
 from minibot.app.dispatcher import Dispatcher
@@ -26,7 +27,20 @@ async def run() -> None:
     logger = AppContainer.get_logger()
     settings = AppContainer.get_settings()
     event_bus = AppContainer.get_event_bus()
-    dispatcher = Dispatcher(event_bus)
+    dispatcher = Dispatcher(
+        event_bus,
+        pending_turns=AppContainer.get_pending_turn_store(),
+        settings=settings,
+        memory_backend=AppContainer.get_memory_backend(),
+        agent_registry=AppContainer.get_agent_registry(),
+        llm_factory=AppContainer.get_llm_factory(),
+        skill_registry=AppContainer.get_skill_registry(),
+        config_path=AppContainer.get_config_path(),
+        llm_client=AppContainer.get_llm_client(),
+        extensions=AppContainer.get_extensions(),
+        managed_storage=AppContainer.get_file_storage(),
+        channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
+    )
     strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     enabled_tools = dispatcher.main_agent_tool_names or ["none"]
     tool_summary = summarize_items(enabled_tools)
@@ -243,7 +257,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args[:1] == ["codex"]:
         if args[1:2] == ["login"]:
-            from minibot.app.codex_login import main as codex_login_main
+            from minibot.adapters.codex_login import main as codex_login_main
 
             codex_login_main(args[2:])
             return

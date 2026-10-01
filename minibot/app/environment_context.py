@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from minibot import __version__
-from minibot.adapters.config.loader import resolve_config_path
-from minibot.adapters.config.schema import Settings
+from minibot.config.paths import resolve_config_path
+from minibot.config.schema import Settings
 
 
 def build_environment_prompt_fragment(settings: Settings, config_path: Path | None = None) -> str:

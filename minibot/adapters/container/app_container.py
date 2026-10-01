@@ -4,9 +4,8 @@ import inspect
 import logging
 from pathlib import Path
 
-from minibot.adapters.config.environment import has_secret_references, has_secret_syntax
 from minibot.adapters.config.loader import load_settings, resolve_config_path
-from minibot.adapters.config.schema import Settings
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.pending_turns import PendingTurnStore
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
@@ -18,6 +17,9 @@ from minibot.app.extensions import ExtensionRegistry, load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_async
+from minibot.config.environment import has_secret_references, has_secret_syntax
+from minibot.config.schema import Settings
+from minibot.core.files import FileStorage
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
 
@@ -29,6 +31,7 @@ class AppContainer:
     _event_bus: EventBus | None = None
     _memory_backend: MemoryBackend | None = None
     _pending_turn_store: PendingTurnStore | None = None
+    _file_storage: FileStorage | None = None
     _llm_client: LLMClient | None = None
     _llm_factory: LLMClientFactory | None = None
     _agent_registry: AgentRegistry | None = None
@@ -54,6 +57,15 @@ class AppContainer:
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
         cls._pending_turn_store = PendingTurnStore(cls._settings.memory)
+        cls._file_storage = (
+            LocalFileStorage(
+                root_dir=cls._settings.tools.file_storage.root_dir,
+                max_write_bytes=cls._settings.tools.file_storage.max_write_bytes,
+                allow_outside_root=cls._settings.tools.file_storage.allow_outside_root,
+            )
+            if cls._settings.tools.file_storage.enabled
+            else None
+        )
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
         cls._agent_registry = AgentRegistry(agent_specs)
@@ -117,6 +129,10 @@ class AppContainer:
         if cls._pending_turn_store is None:
             raise RuntimeError("pending turn store not configured")
         return cls._pending_turn_store
+
+    @classmethod
+    def get_file_storage(cls) -> FileStorage | None:
+        return cls._file_storage
 
     @classmethod
     def get_llm_client(cls) -> LLMClient:

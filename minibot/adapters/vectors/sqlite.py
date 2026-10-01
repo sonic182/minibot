@@ -9,8 +9,8 @@ from sqlalchemy import JSON, Index, Integer, LargeBinary, String, delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
-from minibot.adapters.config.schema import RagToolConfig
 from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.config.schema import RagToolConfig
 
 # Each store module owns its declarative base so create_all only touches its own tables.
 RagBase = declarative_base()

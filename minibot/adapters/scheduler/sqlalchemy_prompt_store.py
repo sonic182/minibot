@@ -10,8 +10,8 @@ from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
-from minibot.adapters.config.schema import ScheduledPromptsConfig
 from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, lease_rows, like_pattern, resolve_sqlite_storage_path
+from minibot.config.schema import ScheduledPromptsConfig
 from minibot.core.jobs import (
     PromptRecurrence,
     PromptRole,

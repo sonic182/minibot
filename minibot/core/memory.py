@@ -59,6 +59,14 @@ class MemoryBackend(Protocol):
     ) -> SessionPage: ...
 
 
+class PendingTurnRepository(Protocol):
+    async def mark_pending(self, event_id: str, payload: str) -> None: ...
+
+    async def clear_pending(self, event_id: str) -> None: ...
+
+    async def mark_task_handoff(self, event_id: str) -> None: ...
+
+
 @dataclass(frozen=True)
 class KeyValueEntry:
     id: str

@@ -6,7 +6,7 @@ from typing import Any
 
 from llm_async.models.tool_call import ToolCall
 
-from minibot.adapters.config.schema import LLMMConfig
+from minibot.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
 from minibot.llm.errors import wrap_provider_exception
 from minibot.llm.services.client_bootstrap import (

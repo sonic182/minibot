@@ -1,30 +1,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from dataclasses import dataclass
 
-from minibot.adapters.config.schema import LLMMConfig, OpenRouterProviderRoutingConfig, Settings
+from minibot.config.schema import LLMMConfig, OpenRouterProviderRoutingConfig, Settings
 from minibot.core.agents import AgentSpec
 from minibot.llm.provider_factory import LLMClient
-
-
-@dataclass(frozen=True, slots=True)
-class ProviderOption:
-    """A provider an agent or a runtime delegation override may target."""
-
-    name: str
-    api_format: str
-    base_url: str | None
-    models: tuple[str, ...]
-
-    def as_payload(self) -> dict[str, object]:
-        return {
-            "name": self.name,
-            "api_format": self.api_format,
-            "base_url": self.base_url,
-            "models": list(self.models),
-        }
+from minibot.llm.provider_options import ProviderOption
 
 
 def available_providers(settings: Settings) -> list[ProviderOption]:
@@ -76,14 +57,6 @@ def _has_credentials(*, api_format: str, api_key: str | None, auth_path: str | N
         return load_credentials(resolve_auth_path(auth_path)) is not None
     except (CodexSetupError, OSError):
         return False
-
-
-def find_provider(name: str, options: Sequence[ProviderOption]) -> ProviderOption | None:
-    normalized = name.strip().lower()
-    for option in options:
-        if option.name == normalized:
-            return option
-    return None
 
 
 class LLMClientFactory:

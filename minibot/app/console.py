@@ -7,11 +7,12 @@ import sys
 from pathlib import Path
 
 from minibot.adapters.container import AppContainer
+from minibot.adapters.messaging.console.compat import CompatConsole, prompt_input
 from minibot.adapters.messaging.console.service import ConsoleService
+from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.app.dispatcher import Dispatcher
 from minibot.core.channels import session_identifier
 from minibot.core.memory import MemoryEntry
-from minibot.shared.console_compat import CompatConsole, prompt_input
 from minibot.shared.utils import summarize_items
 
 
@@ -51,7 +52,20 @@ async def run(
     settings = AppContainer.get_settings()
     _configure_console_file_only_logging(logger, verbose=verbose)
     event_bus = AppContainer.get_event_bus()
-    dispatcher = Dispatcher(event_bus)
+    dispatcher = Dispatcher(
+        event_bus,
+        pending_turns=AppContainer.get_pending_turn_store(),
+        settings=settings,
+        memory_backend=AppContainer.get_memory_backend(),
+        agent_registry=AppContainer.get_agent_registry(),
+        llm_factory=AppContainer.get_llm_factory(),
+        skill_registry=AppContainer.get_skill_registry(),
+        config_path=AppContainer.get_config_path(),
+        llm_client=AppContainer.get_llm_client(),
+        extensions=AppContainer.get_extensions(),
+        managed_storage=AppContainer.get_file_storage(),
+        channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
+    )
     strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     main_agent_tools_enabled = getattr(dispatcher, "main_agent_tool_names", None) or ["none"]
     tool_summary = summarize_items(main_agent_tools_enabled)

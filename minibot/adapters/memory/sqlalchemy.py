@@ -9,13 +9,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
-from minibot.adapters.config.schema import MemoryConfig
 from minibot.adapters.sqlalchemy_utils import (
     ensure_parent_dir,
     fts_match_query,
     like_pattern,
     resolve_sqlite_storage_path,
 )
+from minibot.config.schema import MemoryConfig
 from minibot.core.memory import HistoryPage, MemoryBackend, MemoryEntry, SessionPage, SessionSummary
 from minibot.shared.datetime_utils import utcnow
 

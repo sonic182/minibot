@@ -19,7 +19,13 @@ from minibot.app.response_parser import extract_answer, plain_render, resolve_re
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
-from minibot.core.channels import ChannelMessage, ChannelResponse, session_id_for, session_identifier
+from minibot.core.channels import (
+    ChannelCapabilities,
+    ChannelMessage,
+    ChannelResponse,
+    session_id_for,
+    session_identifier,
+)
 from minibot.core.events import MessageEvent
 from minibot.core.memory import MemoryBackend
 from minibot.core.tasks import MAX_TASK_CONTINUATIONS
@@ -124,6 +130,7 @@ class LLMTurnService:
         tool_context = ToolContext(
             owner_id=owner_id,
             channel=message.channel,
+            channel_capabilities=message.capabilities,
             chat_id=message.chat_id,
             user_id=message.user_id,
             turn_id=event.event_id,
@@ -168,7 +175,11 @@ class LLMTurnService:
             await self._enforce_history_limit(session_id)
             chat_id = message.chat_id or message.user_id or 0
             metadata = self._metadata_service.response_metadata(True)
-            _set_reply_target(metadata, channel=message.channel, message_id=message.message_id)
+            _set_reply_target(
+                metadata,
+                supports_reply_targets=message.capabilities.supports_reply_targets,
+                message_id=message.message_id,
+            )
             metadata["token_trace"] = SessionStateService.build_token_trace(
                 turn_total_tokens=0,
                 session_total_tokens_before_compaction=None,
@@ -300,7 +311,11 @@ class LLMTurnService:
 
         chat_id = message.chat_id or message.user_id or 0
         metadata = self._metadata_service.response_metadata(should_reply)
-        _set_reply_target(metadata, channel=message.channel, message_id=message.message_id)
+        _set_reply_target(
+            metadata,
+            supports_reply_targets=message.capabilities.supports_reply_targets,
+            message_id=message.message_id,
+        )
         metadata["primary_agent"] = "minibot"
         if handed_off_to_task:
             metadata["task_handoff"] = True
@@ -339,6 +354,7 @@ class LLMTurnService:
         chat_id: int,
         user_id: int | None,
         attempt: int,
+        capabilities: ChannelCapabilities | None = None,
     ) -> ChannelResponse:
         session_id = session_identifier(channel, chat_id)
         turn_total_tokens = 0
@@ -357,6 +373,7 @@ class LLMTurnService:
             original_kind=original_kind,
             parse_error=parse_error,
             original_content=original_content,
+            capabilities=capabilities,
         )
         generation = await self._llm_client.generate(
             history,
@@ -390,7 +407,7 @@ class LLMTurnService:
         metadata = self._metadata_service.response_metadata(True)
         _set_reply_target(
             metadata,
-            channel=channel,
+            supports_reply_targets=bool(capabilities and capabilities.supports_reply_targets),
             message_id=response.metadata.get("reply_to_message_id"),
         )
         metadata["format_repair_attempt"] = attempt
@@ -462,8 +479,8 @@ def _prompt_cache_key(message: ChannelMessage) -> str | None:
     return session_key
 
 
-def _set_reply_target(metadata: dict[str, Any], *, channel: str, message_id: object) -> None:
-    if channel == "telegram" and isinstance(message_id, int) and not isinstance(message_id, bool) and message_id > 0:
+def _set_reply_target(metadata: dict[str, Any], *, supports_reply_targets: bool, message_id: object) -> None:
+    if supports_reply_targets and isinstance(message_id, int) and not isinstance(message_id, bool) and message_id > 0:
         metadata["reply_to_message_id"] = message_id
 
 

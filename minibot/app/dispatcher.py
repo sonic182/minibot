@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Mapping
+from pathlib import Path
 
-from minibot.adapters.container import AppContainer
+from minibot.app.agent_registry import AgentRegistry
 from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
+from minibot.app.extensions import ExtensionRegistry
 from minibot.app.handlers import LLMMessageHandler
 from minibot.app.handlers.services import (
     AudioAutoTranscribePolicy,
@@ -14,9 +17,13 @@ from minibot.app.handlers.services import (
     ToolBindingAudioTranscriptionExecutor,
     build_llm_turn_service,
 )
+from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_capabilities import main_agent_tool_view
+from minibot.app.tool_factory import build_enabled_tools
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
-from minibot.core.channels import ChannelResponse, RenderableResponse
+from minibot.config.schema import Settings
+from minibot.core.channels import ChannelCapabilities, ChannelResponse, RenderableResponse
 from minibot.core.events import (
     BaseEvent,
     MessageEvent,
@@ -26,7 +33,9 @@ from minibot.core.events import (
     TurnFailedEvent,
     TurnStartedEvent,
 )
-from minibot.llm.tools.factory import build_enabled_tools
+from minibot.core.files import FileStorage
+from minibot.core.memory import MemoryBackend, PendingTurnRepository
+from minibot.llm.provider_factory import LLMClient
 from minibot.shared.utils import humanize_token_count, summarize_items
 
 
@@ -46,16 +55,26 @@ def _token_trace_log_fields(token_trace: object) -> dict[str, object]:
 
 
 class Dispatcher:
-    def __init__(self, event_bus: EventBus) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus,
+        *,
+        pending_turns: PendingTurnRepository,
+        settings: Settings,
+        memory_backend: MemoryBackend,
+        agent_registry: AgentRegistry,
+        llm_factory: LLMClientFactory,
+        skill_registry: SkillRegistry,
+        config_path: Path | None,
+        llm_client: LLMClient,
+        extensions: ExtensionRegistry,
+        managed_storage: FileStorage | None,
+        channel_capabilities: Mapping[str, ChannelCapabilities] | None = None,
+    ) -> None:
         self._event_bus = event_bus
+        self._channel_capabilities = dict(channel_capabilities or {})
         self._subscription = event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
-        self._pending_turns = AppContainer.get_pending_turn_store()
-        settings = AppContainer.get_settings()
-        memory_backend = AppContainer.get_memory_backend()
-        agent_registry = AppContainer.get_agent_registry()
-        llm_factory = AppContainer.get_llm_factory()
-        skill_registry = AppContainer.get_skill_registry()
-        config_path = AppContainer.get_config_path()
+        self._pending_turns = pending_turns
         tools = build_enabled_tools(
             settings,
             memory_backend,
@@ -63,14 +82,14 @@ class Dispatcher:
             agent_registry=agent_registry,
             llm_factory=llm_factory,
             skill_registry=skill_registry,
-            extension_tools=AppContainer.get_extensions().tools,
+            extension_tools=extensions.tools,
+            managed_storage=managed_storage,
         )
         main_agent_tools_view = main_agent_tool_view(
             tools=tools,
             orchestration_config=settings.orchestration,
             agent_specs=agent_registry.all(),
         )
-        llm_client = AppContainer.get_llm_client()
         guardrail_mode = settings.orchestration.main_tool_use_guardrail
         if guardrail_mode == "llm_classifier":
             tool_use_guardrail: NoopToolUseGuardrail | LLMClassifierToolUseGuardrail = LLMClassifierToolUseGuardrail(
@@ -110,7 +129,7 @@ class Dispatcher:
             preload_skill_catalog=settings.tools.skills.preload_catalog,
             event_bus=event_bus,
             task_handoff_callback=task_handoff_callback,
-            extension_prompt_fragments=AppContainer.get_extensions().prompt_fragments_for(main_agent_tools_view.tools),
+            extension_prompt_fragments=extensions.prompt_fragments_for(main_agent_tools_view.tools),
         )
         self._handler = LLMMessageHandler(turn_service)
         self._logger = logging.getLogger("minibot.dispatcher")
@@ -185,7 +204,15 @@ class Dispatcher:
         with contextlib.suppress(Exception):
             await self._event_bus.publish(event)
 
+    def _with_channel_capabilities(self, event: MessageEvent) -> MessageEvent:
+        capabilities = self._channel_capabilities.get(event.message.channel)
+        if capabilities is None or "capabilities" in event.message.model_fields_set:
+            return event
+        message = event.message.model_copy(update={"capabilities": capabilities})
+        return event.model_copy(update={"message": message})
+
     async def _handle_message(self, event: MessageEvent) -> None:
+        event = self._with_channel_capabilities(event)
         await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
         try:
             message = event.message
@@ -300,6 +327,7 @@ class Dispatcher:
                 chat_id=event.chat_id,
                 user_id=event.user_id,
                 attempt=event.attempt,
+                capabilities=event.capabilities,
             )
             should_reply = repaired.metadata.get("should_reply", True)
             token_trace = repaired.metadata.get("token_trace")

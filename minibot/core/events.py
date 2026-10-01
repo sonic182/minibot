@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from minibot.core.channels import ChannelFileResponse, ChannelMessage, ChannelResponse
+from minibot.core.channels import ChannelCapabilities, ChannelFileResponse, ChannelMessage, ChannelResponse
+
+
+class EventPublisher(Protocol):
+    async def publish(self, event: BaseEvent) -> None: ...
 
 
 class BaseEvent(BaseModel):
@@ -36,6 +40,7 @@ class OutboundFormatRepairEvent(BaseEvent):
     chat_id: int
     channel: str
     user_id: int | None = None
+    capabilities: ChannelCapabilities = Field(default_factory=ChannelCapabilities)
 
 
 class SystemEvent(BaseEvent):
@@ -100,7 +105,7 @@ class ReasoningEvent(BaseEvent):
 class ToolCallEvent(BaseEvent):
     """Emitted around every tool handler invocation.
 
-    ``detail`` is already redacted and clipped by ``minibot/shared/tool_call_display.py`` before
+    ``detail`` is already redacted and clipped by ``minibot/llm/tools/tool_call_display.py`` before
     this event is published — the raw argument payload (which can hold credentials, e.g.
     ``http_request`` headers, ``bash`` env, ``python_execute`` code) never leaves the tool-execution
     layer. Safe to log, persist, or forward to any subscriber, including extensions.

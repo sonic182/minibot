@@ -10,12 +10,13 @@ from aiogram.enums import ChatAction
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import Message as TelegramMessage
 
-from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.messaging.telegram.authorization import is_authorized, is_authorized_ids
+from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.adapters.messaging.telegram.incoming_media_collector import TelegramIncomingMediaCollector
 from minibot.adapters.messaging.telegram.outbound_sender import TelegramOutboundSender
 from minibot.app.event_bus import EventBus
+from minibot.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.core.channels import ChannelMessage
 from minibot.core.events import (
     MessageEvent,
@@ -141,6 +142,7 @@ class TelegramService:
             metadata["reply_to"] = reply_metadata
         channel_message = ChannelMessage(
             channel="telegram",
+            capabilities=TELEGRAM_CHANNEL_CAPABILITIES,
             user_id=message.from_user.id if message.from_user else None,
             chat_id=message.chat.id,
             message_id=message.message_id,

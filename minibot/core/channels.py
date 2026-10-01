@@ -5,6 +5,15 @@ from typing import Any, Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
+class ChannelCapabilities(BaseModel):
+    supports_tool_approval: bool = False
+    supports_reply_targets: bool = False
+    supports_formatted_parse_error_retry: bool = False
+    supports_file_attachment_delivery: bool = False
+    reply_context_label: str = "Reply context"
+    format_repair_instructions: str | None = None
+
+
 class ChannelMessage(BaseModel):
     """One inbound message from a channel adapter.
 
@@ -24,6 +33,7 @@ class ChannelMessage(BaseModel):
     chat_id: int | None
     message_id: int | None
     text: str
+    capabilities: ChannelCapabilities = Field(default_factory=ChannelCapabilities)
     attachments: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

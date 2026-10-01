@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 import threading
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,9 +21,7 @@ import aiosonic
 from aiosonic.timeout import Timeouts
 from llm_async.models import Tool
 
-from minibot.app.skill_definitions_loader import NATIVE_SKILLS_DIR, parse_skill_file
-from minibot.app.skill_registry import SkillRegistry
-from minibot.core.skills import SkillSource, SkillSpec
+from minibot.core.skills import SkillCatalog, SkillSource, SkillSpec
 from minibot.llm.tools.arg_utils import optional_bool, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
@@ -64,8 +63,16 @@ class SkillInstallerTool:
     tool's format. Nothing is activated after installing.
     """
 
-    def __init__(self, registry: SkillRegistry) -> None:
+    def __init__(
+        self,
+        registry: SkillCatalog,
+        *,
+        parse_skill: Callable[[Path, Path, SkillSource], SkillSpec],
+        native_skills_dir: Path,
+    ) -> None:
         self._registry = registry
+        self._parse_skill = parse_skill
+        self._native_skills_dir = native_skills_dir
 
     def bindings(self) -> list[ToolBinding]:
         return [ToolBinding(tool=self._schema(), handler=self._handle)]
@@ -117,7 +124,16 @@ class SkillInstallerTool:
         existing = {spec.name: spec for spec in self._registry.all()}
         archive = await download(resolved.url)
         result = await asyncio.to_thread(
-            _process, resolved, archive, skill, install, force, dest, expected_hash, existing
+            _process,
+            resolved,
+            archive,
+            skill,
+            install,
+            force,
+            dest,
+            expected_hash,
+            existing,
+            self._parse_skill,
         )
         if install and result.get("ok"):
             self._registry.refresh_if_stale()
@@ -127,7 +143,7 @@ class SkillInstallerTool:
         if dest is None:
             return self._registry.write_dir()
         path = Path(dest).expanduser().resolve()
-        allowed = [p for p in self._registry.discovery_paths() if p != NATIVE_SKILLS_DIR]
+        allowed = [p for p in self._registry.discovery_paths() if p != self._native_skills_dir]
         if path not in allowed:
             raise ValueError(f"dest must be one of: {', '.join(p.as_posix() for p in allowed)}")
         return path
@@ -200,13 +216,14 @@ def _process(
     dest: Path,
     expected_hash: str | None,
     existing: dict[str, SkillSpec],
+    parse_skill: Callable[[Path, Path, SkillSource], SkillSpec],
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="minibot-skill-") as tmp:
         root = _extract(archive, Path(tmp))
         search_root = (root / resolved.subpath).resolve()
         if not search_root.is_relative_to(root) or not search_root.is_dir():
             return _error("path_not_found", f"'{resolved.subpath}' does not exist in {resolved.source}")
-        specs, invalid = _discover(search_root)
+        specs, invalid = _discover(search_root, parse_skill)
         if skill is not None:
             wanted = skill.casefold()
             specs = [spec for spec in specs if wanted in (spec.name.casefold(), spec.skill_dir.name.casefold())]
@@ -265,7 +282,10 @@ def _check_limits(files: int, size: int) -> None:
         raise ValueError(f"archive expands beyond {MAX_EXTRACT_BYTES} bytes")
 
 
-def _discover(root: Path) -> tuple[list[SkillSpec], list[tuple[Path, str]]]:
+def _discover(
+    root: Path,
+    parse_skill: Callable[[Path, Path, SkillSource], SkillSpec],
+) -> tuple[list[SkillSpec], list[tuple[Path, str]]]:
     found: list[Path] = []
 
     def walk(directory: Path, depth: int) -> None:
@@ -283,7 +303,7 @@ def _discover(root: Path) -> tuple[list[SkillSpec], list[tuple[Path, str]]]:
     invalid: list[tuple[Path, str]] = []
     for skill_dir in sorted(found, key=lambda path: len(path.parts)):
         try:
-            spec = parse_skill_file(skill_dir / "SKILL.md", skill_dir, SkillSource.PROJECT)
+            spec = parse_skill(skill_dir / "SKILL.md", skill_dir, SkillSource.PROJECT)
         except ValueError as exc:
             invalid.append((skill_dir, str(exc)))
             continue

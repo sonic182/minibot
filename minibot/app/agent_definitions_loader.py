@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from minibot.adapters.config.schema import AgentDefinitionConfig
+from minibot.config.schema import AgentDefinitionConfig
 from minibot.core.agents import AgentSpec
 from minibot.shared.frontmatter import parse_frontmatter, split_frontmatter
 

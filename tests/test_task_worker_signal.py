@@ -6,7 +6,7 @@ import signal
 import time
 from contextlib import asynccontextmanager
 
-from minibot.adapters.tasks.worker import worker_entry
+from minibot.app.tasks.worker import worker_entry
 
 
 def _sighandler_noop(*_args: object) -> None:

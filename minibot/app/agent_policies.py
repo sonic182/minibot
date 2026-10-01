@@ -4,10 +4,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
-from minibot.adapters.config.schema import Settings
 from minibot.app.mcp_tool_name import extract_mcp_server, is_mcp_tool_name
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns, validate_allow_deny
-from minibot.core.agents import AgentSpec
+from minibot.config.schema import Settings
+from minibot.core.agents import AgentSpec, normalize_model_overrides
 from minibot.llm.tools.base import ToolBinding
 
 MODEL_OVERRIDE_KEYS = ("model_provider", "model", "reasoning_effort")
@@ -56,18 +56,6 @@ def filter_tools_for_agent(tools: Sequence[ToolBinding], spec: AgentSpec) -> lis
 
 def strip_reserved_delegation_tools(tools: Sequence[ToolBinding]) -> list[ToolBinding]:
     return [binding for binding in tools if binding.tool.name not in RESERVED_DELEGATION_TOOL_NAMES]
-
-
-def normalize_model_overrides(payload: Mapping[str, Any] | None) -> dict[str, str]:
-    """Keep only the known override keys carrying a non-empty string."""
-    if not payload:
-        return {}
-    overrides: dict[str, str] = {}
-    for key in MODEL_OVERRIDE_KEYS:
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            overrides[key] = value.strip()
-    return overrides
 
 
 def resolve_delegation_target(

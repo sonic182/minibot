@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from minibot.adapters.config.schema import MainAgentConfig, OrchestrationConfig
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.mcp_tool_name import extract_mcp_server, is_mcp_tool_name
 from minibot.app.tool_policy_utils import apply_allow_deny, normalize_patterns
+from minibot.config.schema import MainAgentConfig, OrchestrationConfig
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding
 

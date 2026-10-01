@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from minibot.adapters.config.schema import RagToolConfig
 from minibot.app.extensions import ExtensionContext
+from minibot.config.schema import RagToolConfig
 from minibot.core.vectors import VectorStore
 
 from ..tools._storage import managed_storage

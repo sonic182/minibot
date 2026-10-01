@@ -4,10 +4,7 @@ import asyncio
 import contextlib
 import logging
 
-from minibot.adapters.config.schema import SqliteTaskQueueConfig
-from minibot.adapters.tasks.manager import TaskManager
-from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
-from minibot.core.tasks import TaskRecord
+from minibot.core.tasks import TaskConsumerSettings, TaskManager, TaskRecord, TaskRepository
 from minibot.shared.datetime_utils import utcnow
 
 
@@ -20,9 +17,9 @@ class SQLiteTaskConsumerService:
 
     def __init__(
         self,
-        store: SQLiteTaskStore,
+        store: TaskRepository,
         task_manager: TaskManager,
-        config: SqliteTaskQueueConfig,
+        config: TaskConsumerSettings,
         max_concurrent_workers: int,
     ) -> None:
         self._store = store

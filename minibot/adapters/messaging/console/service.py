@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from html import unescape
 from typing import Any, Protocol
 
+from minibot.adapters.messaging.console.compat import CompatConsole, format_assistant_output
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
 from minibot.core.events import MessageEvent, OutboundEvent, ReasoningEvent, ToolCallEvent
-from minibot.shared.console_compat import CompatConsole, format_assistant_output
 
 _TAG_RE = re.compile(r"<[^>]+>")
 

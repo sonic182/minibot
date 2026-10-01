@@ -118,7 +118,7 @@ Payload:
 - ``tool_name`` — the tool name.
 - ``turn_id``, ``owner_id``, ``channel``, ``chat_id``.
 - ``detail`` — a redacted, size-clipped human-readable summary of the call, produced by
-  ``minibot/shared/tool_call_display.py`` before the event is published. Raw argument values
+  ``minibot/llm/tools/tool_call_display.py`` before the event is published. Raw argument values
   never leave the tool-execution layer because they can be large and can hold credentials.
 - ``error`` — set when ``phase`` is ``failed``.
 

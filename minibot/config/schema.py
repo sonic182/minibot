@@ -1,0 +1,1101 @@
+from __future__ import annotations
+
+import os
+import tomllib
+import types
+from collections.abc import Mapping
+from datetime import datetime
+from pathlib import Path
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from urllib.parse import urlsplit
+
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ByteSize,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
+
+from minibot.config.environment import expand_environment, expand_secrets, has_secret_references
+
+_BYTE_SIZE_ADAPTER = TypeAdapter(ByteSize)
+
+# Mirrors the keys of minibot.llm.services.provider_registry.LLM_PROVIDERS plus chatgpt_codex,
+# spelled out here so config validation stays free of llm_async imports.
+ProviderApiFormat = Literal["openai", "openai_responses", "openrouter", "claude", "google", "chatgpt_codex"]
+PROVIDER_API_FORMATS: tuple[str, ...] = get_args(ProviderApiFormat)
+
+
+def _coerce_byte_size(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("byte size must be a positive integer or size string")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value.is_integer():
+            # pi-lens-ignore: unchecked-throwing-call-python
+            return int(value)
+        raise ValueError("byte size numeric values must be whole numbers")
+    try:
+        return int(_BYTE_SIZE_ADAPTER.validate_python(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid byte size value") from exc
+
+
+def _expand_secret_references(data: object, secrets: Mapping[str, str] | None) -> object:
+    if secrets is None:
+        return data
+    if isinstance(data, dict) and has_secret_references(data.get("vault", {})):
+        # The vault cannot resolve its own location, so a reference here could never be satisfied.
+        raise ValueError("[vault] settings cannot use ${secret:} references")
+    return expand_secrets(data, secrets)
+
+
+def _load_file_data(path: Path) -> dict[str, Any]:
+    suffix = path.suffix.lower()
+    if suffix == ".toml":
+        with path.open("rb") as config_file:
+            data = tomllib.load(config_file)
+        return data
+    raise ValueError(f"unsupported config file type: {path.suffix or '<none>'}")
+
+
+def _normalize_for_annotation(value: Any, annotation: Any) -> Any:
+    if annotation is Any:
+        return value
+
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _normalize_for_annotation(value, get_args(annotation)[0])
+
+    if origin in (Union, types.UnionType):
+        non_none_args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if value is None or not non_none_args:
+            return value
+        return _normalize_for_annotation(value, non_none_args[0])
+
+    if origin in (list, list):
+        item_annotation = get_args(annotation)[0] if get_args(annotation) else Any
+        if value == {}:
+            return []
+        if isinstance(value, list):
+            return [_normalize_for_annotation(item, item_annotation) for item in value]
+        return value
+
+    if origin in (dict, dict):
+        args = get_args(annotation)
+        value_annotation = args[1] if len(args) == 2 else Any
+        if isinstance(value, dict):
+            return {key: _normalize_for_annotation(item, value_annotation) for key, item in value.items()}
+        return value
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel) and isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            field = annotation.model_fields.get(key)
+            normalized[key] = _normalize_for_annotation(item, field.annotation) if field is not None else item
+        return normalized
+
+    return value
+
+
+def _check_http_url(value: str) -> str:
+    # ${secret:NAME} stays literal until the vault pass, so only check resolved values.
+    if has_secret_references(value):
+        return value
+    parts = urlsplit(value)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise ValueError(f"must be an http(s) URL, got {value!r}")
+    return value
+
+
+ByteSizeValue = Annotated[int, BeforeValidator(_coerce_byte_size), Field(gt=0)]
+HttpUrlValue = Annotated[str, AfterValidator(_check_http_url)]
+TaskLimitValue = PositiveInt | Literal["unlimited"]
+
+
+def task_limit(value: TaskLimitValue) -> int | None:
+    """``None`` for ``"unlimited"``, the number otherwise."""
+    return None if value == "unlimited" else int(value)
+
+
+ENVIRONMENT_CHOICES: tuple[str, ...] = ("development", "debug", "production")
+# Environments where the HTTP server serves /static with Cache-Control: no-store so a normal
+# reload picks up dashboard edits. Kept here so the configurator and the server share one set.
+STATIC_CACHE_DISABLED_ENVIRONMENTS: frozenset[str] = frozenset({"development", "debug"})
+
+
+class RuntimeConfig(BaseModel):
+    """Top-level runtime settings. TOML section: ``[runtime]``
+
+    - ``log_level`` — root log level (default: ``"INFO"``).
+    - ``environment`` — label used in log context (default: ``"development"``). It also drives
+      the built-in HTTP UI: ``"development"`` and ``"debug"`` make the server send
+      ``Cache-Control: no-store`` for dashboard static assets, so a normal reload picks up edits;
+      any other value (for example ``"production"``) leaves normal caching on.
+    - ``agent_timeout_seconds`` — hard wall-clock timeout for any agent turn (min/default: ``120``).
+    - ``owner_id`` — the person this MiniBot assists (default: ``"primary"``).
+
+    MiniBot is a personal assistant for exactly one owner. ``owner_id`` is a constant of the
+    deployment: it is never derived from a message, a task payload or any caller-supplied field,
+    and it becomes ``ToolContext.owner_id`` for every tool call on every entrypoint. It therefore
+    owns long-term memory, the relation graph, scheduled jobs and the RAG corpus.
+
+    Conversations are scoped separately, per channel and chat. One owner, many chat sessions: a
+    private Telegram chat, a group and the console keep independent history while sharing that
+    one owner's long-term data.
+    """
+
+    log_level: str = "INFO"
+    environment: str = "development"
+    agent_timeout_seconds: int = Field(default=120, ge=120)
+    owner_id: str = Field(default="primary", min_length=1)
+
+
+class TelegramChannelConfig(BaseModel):
+    """Telegram channel settings. TOML section: ``[channels.telegram]``
+
+    - ``bot_token`` — BotFather token (required).
+    - ``allowed_chat_ids`` / ``allowed_user_ids`` — access control lists.
+    - ``mode`` — ``"long_polling"`` (default) or ``"webhook"``.
+    - ``webhook_url`` — required when ``mode = "webhook"``.
+    - ``require_authorized`` — reject messages from unlisted IDs (default: ``true``).
+    - ``media_enabled`` — accept photo/document attachments (default: ``true``).
+    - ``max_photo_bytes`` / ``max_document_bytes`` / ``max_total_media_bytes`` — per-message size caps.
+    - ``max_attachments_per_message`` — attachment count cap (default: ``3``).
+    - ``allowed_document_mime_types`` — MIME whitelist; empty means all types are allowed.
+    - ``format_repair_enabled`` — auto-repair malformed Markdown before sending (default: ``true``).
+    """
+
+    enabled: bool = True
+    bot_token: str = ""
+    allowed_chat_ids: list[int] = Field(default_factory=list)
+    allowed_user_ids: list[int] = Field(default_factory=list)
+    mode: str = Field(default="long_polling")
+    webhook_url: str | None = None
+    require_authorized: bool = True
+    media_enabled: bool = True
+    max_photo_bytes: ByteSizeValue = 5242880
+    max_document_bytes: ByteSizeValue = 10485760
+    max_total_media_bytes: ByteSizeValue = 12582912
+    max_attachments_per_message: PositiveInt = 3
+    allowed_document_mime_types: list[str] = Field(default_factory=list)
+    format_repair_enabled: bool = True
+    format_repair_max_attempts: PositiveInt = 1
+
+
+class ChannelsConfig(BaseModel):
+    """Per-channel settings. TOML section: ``[channels.*]``
+
+    ``telegram`` is validated here. Any other ``[channels.<name>]`` section is kept as a
+    raw dict for the channel extension that owns it — reach it with ``section(name)``.
+    """
+
+    telegram: TelegramChannelConfig = Field(default_factory=lambda: TelegramChannelConfig(bot_token=""))
+
+    model_config = ConfigDict(extra="allow")
+
+    def section(self, name: str) -> dict[str, Any]:
+        return dict((self.model_extra or {}).get(name) or {})
+
+
+class OpenRouterProviderRoutingConfig(BaseModel):
+    order: list[str] | None = None
+    allow_fallbacks: bool | None = None
+    require_parameters: bool | None = None
+    data_collection: Literal["allow", "deny"] | None = None
+    zdr: bool | None = None
+    enforce_distillable_text: bool | None = None
+    only: list[str] | None = None
+    ignore: list[str] | None = None
+    quantizations: list[str] | None = None
+    sort: str | dict[str, Any] | None = None
+    preferred_min_throughput: float | dict[str, float] | None = None
+    preferred_max_latency: float | dict[str, float] | None = None
+    max_price: dict[str, Any] | None = None
+    provider_extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class OpenRouterLLMConfig(BaseModel):
+    attribution_enabled: bool = True
+    models: list[str] = Field(default_factory=list)
+    provider: OpenRouterProviderRoutingConfig | None = None
+    reasoning_enabled: bool | None = None
+    plugins: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def _parse_iso8601_datetime(value: str) -> datetime:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("datetime value must not be empty")
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError("datetime value must be a valid ISO8601 string") from exc
+
+
+class XAIWebSearchConfig(BaseModel):
+    allowed_domains: list[str] = Field(default_factory=list)
+    excluded_domains: list[str] = Field(default_factory=list)
+    enable_image_understanding: bool = False
+
+    @model_validator(mode="after")
+    def _validate_limits(self) -> XAIWebSearchConfig:
+        if len(self.allowed_domains) > 5:
+            raise ValueError("allowed_domains supports at most 5 entries")
+        if len(self.excluded_domains) > 5:
+            raise ValueError("excluded_domains supports at most 5 entries")
+        return self
+
+
+class XAIXSearchConfig(BaseModel):
+    allowed_x_handles: list[str] = Field(default_factory=list)
+    excluded_x_handles: list[str] = Field(default_factory=list)
+    from_date: str | None = None
+    to_date: str | None = None
+    enable_image_understanding: bool = False
+    enable_video_understanding: bool = False
+
+    @model_validator(mode="after")
+    def _validate_limits(self) -> XAIXSearchConfig:
+        if len(self.allowed_x_handles) > 10:
+            raise ValueError("allowed_x_handles supports at most 10 entries")
+        if len(self.excluded_x_handles) > 10:
+            raise ValueError("excluded_x_handles supports at most 10 entries")
+        from_dt = _parse_iso8601_datetime(self.from_date) if self.from_date else None
+        to_dt = _parse_iso8601_datetime(self.to_date) if self.to_date else None
+        if from_dt and to_dt:
+            if (from_dt.tzinfo is None) != (to_dt.tzinfo is None):
+                raise ValueError("from_date and to_date must both be timezone-aware or both timezone-naive")
+            if from_dt > to_dt:
+                raise ValueError("from_date must be less than or equal to to_date")
+        return self
+
+
+class XAILLMConfig(BaseModel):
+    web_search_enabled: bool = False
+    x_search_enabled: bool = False
+    web_search: XAIWebSearchConfig = XAIWebSearchConfig()
+    x_search: XAIXSearchConfig = XAIXSearchConfig()
+
+
+class LLMMConfig(BaseModel):
+    """Main LLM settings. TOML section: ``[llm]``
+
+    - ``provider`` — provider name: ``"openai"``, ``"anthropic"``, ``"openrouter"``, ``"xai"``, etc.
+    - ``api_key`` — provider API key.
+    - ``base_url`` — optional base URL (for proxies or OpenAI-compatible local servers).
+    - ``model`` — model identifier (default: ``"gpt-4o-mini"``).
+    - ``temperature`` — sampling temperature (``null`` uses provider default).
+    - ``max_new_tokens`` — max tokens to generate per turn.
+    - ``max_tool_iterations`` — maximum tool-call rounds before forcing a final answer (default: ``15``).
+    - ``request_timeout_seconds`` — HTTP timeout per LLM request (min: ``45``).
+    - ``system_prompt`` — inline system prompt (overridden by ``system_prompt_file``).
+    - ``system_prompt_file`` — path to the main system prompt markdown file.
+    - ``prompts_dir`` — directory for runtime prompt fragments.
+    - ``reasoning_effort`` — reasoning budget hint for supported models (e.g. ``"high"``).
+    - ``reasoning_summary`` — request a plaintext reasoning summary from Responses models
+      (``"auto"``/``"concise"``/``"detailed"``).
+    - ``main_responses_state_mode`` — how conversation state is passed for the main agent
+      (``"full_messages"`` or ``"previous_response_id"``).
+    - ``prompt_cache_enabled`` — enable provider-side prompt caching (default: ``true``).
+    - ``strip_logs`` — shorten selected fields in the provider raw-response debug log (default: ``false``).
+    - ``extra_headers`` — extra HTTP headers sent on every provider request (usually inherited from
+      ``[providers.<name>.headers]``).
+    - ``auth_path`` — path to an OAuth credentials file, used by the ``chatgpt_codex`` provider
+      (usually inherited from ``[providers.chatgpt_codex.auth_path]``; defaults to
+      ``~/.minibot/auth_codex.json``).
+    - ``openrouter`` — OpenRouter-specific routing overrides (``[llm.openrouter]``).
+    - ``xai`` — xAI web/X search integration (``[llm.xai]``).
+    """
+
+    provider: str = "openai"
+    api_key: str = ""
+    base_url: str | None = None
+    model: str = "gpt-4o-mini"
+    http2: bool = False
+    temperature: float | None = None
+    max_new_tokens: PositiveInt | None = None
+    max_tool_iterations: PositiveInt = 15
+    request_timeout_seconds: int = Field(default=45, ge=45)
+    sock_connect_timeout_seconds: PositiveInt = 10
+    sock_read_timeout_seconds: PositiveInt = 45
+    retry_attempts: PositiveInt = 3
+    retry_delay_seconds: float = Field(default=2.0, gt=0)
+    system_prompt: str = "You are Minibot, a helpful assistant."
+    system_prompt_file: str | None = "./prompts/main_agent_system.md"
+    prompts_dir: str = "./prompts"
+    reasoning_effort: str | None = None
+    reasoning_summary: str | None = None
+    main_responses_state_mode: Literal["full_messages", "previous_response_id"] = "full_messages"
+    agent_responses_state_mode: Literal["full_messages", "previous_response_id"] = "previous_response_id"
+    responses_state_mode: Literal["full_messages", "previous_response_id"] = "full_messages"
+    prompt_cache_enabled: bool = True
+    prompt_cache_retention: Literal["in-memory", "24h"] | None = None
+    strip_logs: bool = False
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    auth_path: str | None = None
+    openrouter: OpenRouterLLMConfig = OpenRouterLLMConfig()
+    xai: XAILLMConfig = XAILLMConfig()
+
+
+class ProviderConfig(BaseModel):
+    """Named LLM provider credentials. TOML section: ``[providers.<name>]``
+
+    Used to supply API keys and base URLs for secondary providers referenced
+    by agent definitions (``model_provider``).
+
+    - ``api_key`` — provider API key.
+    - ``base_url`` — optional base URL override (e.g. for proxies or local endpoints).
+    - ``headers`` — extra HTTP headers sent on every request to this provider. OpenCode Go
+      requires ``x-opencode-session`` and rejects requests without it (``MissingSessionID``).
+    - ``auth_path`` — used only by ``[providers.chatgpt_codex]``: path to the ChatGPT Codex OAuth
+      credentials file written by ``minibot codex login``. Defaults to
+      ``~/.minibot/auth_codex.json`` when unset.
+    - ``api_format`` — which API dialect this endpoint speaks, and therefore which client is built:
+      ``"openai"``, ``"openai_responses"``, ``"openrouter"``, ``"claude"``, ``"google"`` or
+      ``"chatgpt_codex"``. Required unless the section name is itself one of those values, which lets
+      several endpoints of the same format coexist: ``[providers.opencode_go]`` with
+      ``api_format = "openai_responses"`` alongside ``[providers.zai]`` with ``api_format = "openai"``.
+    - ``models`` — advisory list of model ids this endpoint serves. Not validated against the
+      endpoint; it is what agents and runtime delegation overrides are offered to choose from.
+
+    OpenAI-compatible third-party endpoints (set under ``[providers.openai]`` with
+    ``[llm].provider = "openai"``, or ``[providers.openai_responses]`` with
+    ``provider = "openai_responses"``):
+
+    - OpenCode Zen (pay-as-you-go): ``base_url = "https://opencode.ai/zen/v1"``,
+      e.g. ``model = "kimi-k2.7-code"``.
+    - OpenCode Go (subscription): ``base_url = "https://opencode.ai/zen/go/v1"``,
+      e.g. ``model = "mimo-v2.5"``. Some models (``gpt-5.6-luna``, ``grok-4.6``) are
+      only exposed via the Responses variant of that base URL.
+    - z.ai GLM Coding Plan: ``base_url = "https://api.z.ai/api/coding/paas/v4"`` (Chat
+      Completions, recommended — documented function calling/streaming support) with
+      ``model = "glm-5.3"`` or the cheaper ``"glm-5.3-flash"``. A Responses-style
+      endpoint also exists at ``https://api.z.ai/api/v1`` but z.ai's docs don't confirm
+      parity with OpenAI Responses semantics (``previous_response_id``, ``reasoning``),
+      so prefer Chat Completions unless you've verified it works for your use case.
+    """
+
+    api_key: str = ""
+    base_url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    auth_path: str | None = None
+    api_format: ProviderApiFormat | None = None
+    models: list[str] = Field(default_factory=list)
+
+
+class AgentDefinitionConfig(BaseModel):
+    name: str
+    description: str = ""
+    mode: Literal["agent"] = "agent"
+    enabled: bool = True
+    model_provider: str | None = None
+    model: str | None = None
+    temperature: float | None = None
+    omit_temperature: bool = False
+    max_new_tokens: PositiveInt | None = None
+    reasoning_effort: str | None = None
+    max_tool_iterations: PositiveInt | None = None
+    timeout_seconds: PositiveInt | None = None
+    tools_allow: list[str] = Field(default_factory=list)
+    tools_deny: list[str] = Field(default_factory=list)
+    mcp_servers: list[str] = Field(default_factory=list)
+    openrouter_provider_overrides: dict[str, Any] = Field(default_factory=dict)
+    openrouter_reasoning_enabled: bool | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def _validate_tool_policy(self) -> AgentDefinitionConfig:
+        if self.tools_allow and self.tools_deny:
+            raise ValueError("only one of tools_allow or tools_deny can be set")
+        extras = dict(self.model_extra or {})
+        invalid_extra_keys: list[str] = []
+        overrides: dict[str, Any] = {}
+        valid_provider_keys = set(OpenRouterProviderRoutingConfig.model_fields)
+        prefix = "openrouter_provider_"
+        for key, value in extras.items():
+            if not key.startswith(prefix):
+                invalid_extra_keys.append(key)
+                continue
+            provider_key = key[len(prefix) :]
+            if provider_key not in valid_provider_keys:
+                invalid_extra_keys.append(key)
+                continue
+            overrides[provider_key] = value
+        if invalid_extra_keys:
+            invalid_keys = ", ".join(sorted(invalid_extra_keys))
+            raise ValueError(f"unknown frontmatter keys: {invalid_keys}")
+        try:
+            provider_cfg = OpenRouterProviderRoutingConfig.model_validate(overrides)
+        except ValidationError as exc:
+            raise ValueError(f"invalid openrouter provider overrides: {exc}") from exc
+        self.openrouter_provider_overrides = provider_cfg.model_dump(
+            mode="python",
+            exclude_none=True,
+            exclude_defaults=True,
+        )
+        return self
+
+
+class MainAgentConfig(BaseModel):
+    name: str = "minibot"
+    tools_allow: list[str] = Field(default_factory=list)
+    tools_deny: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_tool_policy(self) -> MainAgentConfig:
+        if self.tools_allow and self.tools_deny:
+            raise ValueError("only one of tools_allow or tools_deny can be set")
+        return self
+
+
+class OrchestrationConfig(BaseModel):
+    """Multi-agent orchestration settings. TOML section: ``[orchestration]``
+
+    - ``directory`` — path to agent definition files (default: ``"./agents"``).
+    - ``tool_ownership_mode`` — how tools are shared between agents:
+      ``"shared"`` (default), ``"exclusive"``, or ``"exclusive_mcp"``.
+    - ``shared_mcp_servers`` — MCP server names whose tools stay visible to the main agent even when a
+      specialist claims them under an exclusive ownership mode (default: empty).
+    - ``main_tool_use_guardrail`` — optional guardrail before tool execution:
+      ``"disabled"`` (default) or ``"llm_classifier"``.
+    - ``main_agent`` — tool allow/deny policy for the main agent (``[orchestration.main_agent]``).
+    """
+
+    directory: str = "./agents"
+    tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
+    shared_mcp_servers: list[str] = Field(default_factory=list)
+    main_tool_use_guardrail: Literal["disabled", "llm_classifier"] = "disabled"
+    main_agent: MainAgentConfig = MainAgentConfig()
+
+
+class MemoryConfig(BaseModel):
+    """Conversation history memory settings. TOML section: ``[memory]``
+
+    - ``backend`` — storage backend (currently only ``"sqlite"``).
+    - ``sqlite_url`` — SQLite database URL (default: ``"sqlite+aiosqlite:///./data/minibot.db"``).
+    - ``max_history_messages`` — hard cap on stored messages per conversation (``null`` = unlimited).
+    - ``max_history_tokens`` — token budget for history sent to the LLM (``null`` = unlimited).
+    - ``context_ratio_before_compact`` — fraction of context window used before triggering
+      automatic compaction (default: ``0.95``).
+    - ``notify_compaction_updates`` — what the chat receives when history is compacted:
+      ``"off"`` nothing (default), ``"brief"`` only the short "running" and "done" notices,
+      ``"full"`` those notices plus the compaction summary.
+    """
+
+    backend: str = "sqlite"
+    sqlite_url: str = "sqlite+aiosqlite:///./data/minibot.db"
+    max_history_messages: int | None = Field(default=None, ge=1)
+    max_history_tokens: int | None = Field(default=None, ge=1)
+    context_ratio_before_compact: float = Field(default=0.95, gt=0, le=1)
+    notify_compaction_updates: Literal["off", "brief", "full"] = "off"
+
+
+class KeyValueMemoryConfig(BaseModel):
+    """Key/value memory tool settings. TOML section: ``[tools.kv_memory]``
+
+    - ``enabled`` — expose the ``memory`` tool (default: ``false``).
+    - ``sqlite_url`` — SQLite database URL for stored entries.
+    - ``pool_size`` / ``echo`` — SQLAlchemy engine settings.
+    - ``default_limit`` / ``max_limit`` — page size and hard cap for memory searches.
+
+    Entries are owned by ``[runtime].owner_id``, which is shared with every other owner-scoped
+    tool rather than configured here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    sqlite_url: str = "sqlite+aiosqlite:///./data/kv_memory.db"
+    pool_size: PositiveInt = 5
+    echo: bool = False
+    default_limit: PositiveInt = 20
+    max_limit: PositiveInt = 100
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_moved_owner_id(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "default_owner_id" in data:
+            raise ValueError(
+                "[tools.kv_memory].default_owner_id has moved to [runtime].owner_id, because it "
+                "owns the relation graph, scheduled jobs and the RAG corpus too, not just this "
+                "tool. Move the value there and delete this key."
+            )
+        return data
+
+
+class HTTPClientToolConfig(BaseModel):
+    enabled: bool = False
+    timeout_seconds: PositiveInt = 10
+    max_bytes: ByteSizeValue = 16384
+    max_parse_bytes: ByteSizeValue = 2000000
+    response_processing_mode: Literal["none", "auto", "text", "compact"] = "auto"
+    max_chars: PositiveInt | None = None
+    normalize_whitespace: bool = True
+    spill_to_managed_file: bool = False
+    spill_after_chars: PositiveInt = 16000
+    spill_preview_chars: PositiveInt = 2000
+    max_spill_bytes: ByteSizeValue = 5000000
+    spill_subdir: str = "http_responses/tmp"
+
+
+class TimeToolConfig(BaseModel):
+    enabled: bool = True
+    default_format: str = "%Y-%m-%dT%H:%M:%SZ"
+
+
+class WaitToolConfig(BaseModel):
+    enabled: bool = False
+    max_milliseconds: PositiveInt = 30000
+
+
+class CalculatorToolConfig(BaseModel):
+    enabled: bool = True
+    default_scale: PositiveInt = 28
+    max_expression_length: PositiveInt = 200
+    max_exponent_abs: PositiveInt = 1000
+
+
+class PythonExecRLimitConfig(BaseModel):
+    enabled: bool = False
+    cpu_seconds: PositiveInt | None = 2
+    memory_mb: PositiveInt | None = 256
+    fsize_mb: PositiveInt | None = 16
+    nproc: PositiveInt | None = 64
+    nofile: PositiveInt | None = 256
+
+
+class PythonExecCgroupConfig(BaseModel):
+    enabled: bool = False
+    driver: Literal["systemd"] = "systemd"
+    cpu_quota_percent: PositiveInt | None = 100
+    memory_max_mb: PositiveInt | None = 256
+
+
+class PythonExecJailConfig(BaseModel):
+    enabled: bool = False
+    command_prefix: list[str] = Field(default_factory=list)
+
+
+class PythonExecToolConfig(BaseModel):
+    enabled: bool = True
+    backend: Literal["host"] = "host"
+    python_path: str | None = None
+    venv_path: str | None = None
+    sandbox_mode: Literal["none", "basic", "rlimit", "cgroup", "jail"] = "basic"
+    default_timeout_seconds: PositiveInt = 8
+    max_timeout_seconds: PositiveInt = 20
+    max_output_bytes: ByteSizeValue = 64000
+    max_code_bytes: ByteSizeValue = 32000
+    artifacts_enabled: bool = True
+    artifacts_default_subdir: str = "generated"
+    artifacts_allowed_extensions: list[str] = Field(
+        default_factory=lambda: [".png", ".jpg", ".jpeg", ".pdf", ".csv", ".txt", ".json", ".svg"]
+    )
+    artifacts_max_files: PositiveInt = 5
+    artifacts_max_file_bytes: ByteSizeValue = 5000000
+    artifacts_max_total_bytes: ByteSizeValue = 20000000
+    artifacts_allow_in_jail: bool = False
+    artifacts_jail_shared_dir: str | None = None
+    pass_parent_env: bool = False
+    env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "LANG", "LC_ALL", "PYTHONUTF8"])
+    rlimit: PythonExecRLimitConfig = PythonExecRLimitConfig()
+    cgroup: PythonExecCgroupConfig = PythonExecCgroupConfig()
+    jail: PythonExecJailConfig = PythonExecJailConfig()
+
+
+class BashToolConfig(BaseModel):
+    enabled: bool = False
+    default_timeout_seconds: PositiveInt = 15
+    max_timeout_seconds: PositiveInt = 120
+    max_output_bytes: ByteSizeValue = 128000
+    pass_parent_env: bool = False
+    env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL"])
+    spill_to_managed_file: bool = False
+    spill_after_chars: PositiveInt = 2000
+    spill_preview_chars: PositiveInt = 500
+    spill_subdir: str = "bash_output/tmp"
+
+
+class ToolOutputSpillConfig(BaseModel):
+    """Generic offload of oversized tool results to a managed temp file.
+
+    Applies to every tool except those listed in ``exclude_tools``, and only when
+    file storage is enabled and the agent also has a read-back tool available
+    (``grep``, ``code_read``, ``read_file`` or ``bash``). ``activate_skill`` spills only
+    past 64,000 characters (or ``spill_after_chars``, if larger), so skill instructions
+    normally arrive inline.
+    """
+
+    enabled: bool = True
+    spill_after_chars: PositiveInt = 8000
+    preview_chars: PositiveInt = 800
+    subdir: str = "tool_output/tmp"
+    # ``http_request`` runs its own spill and ``pre_response`` is signalling, so both stay out.
+    # ``bash`` does not: excluding it let an oversized result (a browser snapshot, say) ride inline
+    # into every later step of a tool loop.
+    exclude_tools: list[str] = Field(default_factory=lambda: ["http_request", "pre_response"])
+
+
+class ApplyPatchToolConfig(BaseModel):
+    enabled: bool = False
+    restrict_to_workspace: bool = True
+    workspace_root: str = "."
+    allow_outside_workspace: bool = False
+    preserve_trailing_newline: bool = True
+    max_patch_bytes: ByteSizeValue = 262144
+
+
+class MCPServerConfig(BaseModel):
+    name: str
+    mode: Literal["bridge", "lazy"] = "bridge"
+    transport: Literal["stdio", "http"] = "stdio"
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    cwd: str | None = None
+    url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    # Name of a `[vault]` entry whose value is sent as `Authorization: Bearer <value>`. The server
+    # and the secret name both come from config, never from LLM input.
+    auth_secret: str | None = None
+    enabled_tools: list[str] = Field(default_factory=list)
+    disabled_tools: list[str] = Field(default_factory=list)
+    catalog_cache_ttl_seconds: Annotated[int, Field(ge=0)] = 60
+
+
+class MCPToolConfig(BaseModel):
+    enabled: bool = False
+    name_prefix: str = "mcp"
+    timeout_seconds: PositiveInt = 10
+    servers: list[MCPServerConfig] = Field(default_factory=list)
+
+
+class FileStorageToolConfig(BaseModel):
+    enabled: bool = False
+    root_dir: str = "./data/files"
+    max_write_bytes: ByteSizeValue = 64000
+    allow_outside_root: bool = False
+    save_incoming_uploads: bool = False
+    uploads_subdir: str = "uploads"
+    incoming_temp_subdir: str = "uploads/temp"
+
+
+class GrepToolConfig(BaseModel):
+    enabled: bool = False
+    max_matches: PositiveInt = 200
+    max_file_size_bytes: ByteSizeValue = 1000000
+
+
+class BrowserToolConfig(BaseModel):
+    output_dir: str = "./data/files/browser"
+
+
+class AudioTranscriptionToolConfig(BaseModel):
+    enabled: bool = False
+    model: str = "small"
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+    compute_type: str = "int8"
+    beam_size: PositiveInt = 5
+    vad_filter: bool = True
+    auto_transcribe_short_incoming: bool = True
+    auto_transcribe_max_duration_seconds: PositiveInt = 45
+    # whisper.cpp server inference URL (e.g. http://10.0.1.22:8080/inference). When set, audio is
+    # sent there instead of loading faster-whisper locally; model/device/compute_type are ignored.
+    server_url: HttpUrlValue | None = None
+
+
+class SkillsToolConfig(BaseModel):
+    """Skill discovery for the main agent.
+
+    ``preload_catalog`` embeds skill names and descriptions in the system prompt. Without it the
+    prompt only tells the model to call ``list_skills``, so it cannot tell whether a relevant skill
+    exists — while the specialist roster *is* in the prompt, which makes delegating look like the
+    obvious route even for work a skill covers.
+
+    Skills are discovered from three sources, in precedence order: project (``./.minibot/skills``
+    and ``./.agents/skills``, or ``paths`` when set), user (the same directory names under
+    ``$HOME``), and native — the skills bundled inside the MiniBot package. Setting
+    ``paths`` replaces the project and user lists; ``native`` is independent of it, so configuring
+    ``paths`` never silently drops the bundled skills.
+
+    ``native_disabled`` opts out of individual bundled skills by name, and is the only way to
+    switch one off: bundled skills carry no ``enabled`` frontmatter, because nobody edits files
+    inside an installed package. A project- or user-level skill of the same name always wins over
+    a bundled one, which is the supported way to override one rather than disable it.
+
+    ``write_path`` is where the agent creates or installs skills, and is added as the
+    highest-priority discovery path so a skill written at runtime is found without a restart. It
+    defaults to ``~/.minibot/skills``, so it outranks the project-level ``./.minibot/skills``.
+
+    ``install`` attaches the ``install_skill`` tool, which downloads skills from GitHub or an
+    archive URL into ``write_path``. It is off by default because an installed skill is
+    third-party instructions the agent will later follow; while it is off, the bundled
+    ``install-skill`` skill is hidden as well.
+    """
+
+    enabled: bool = True
+    paths: list[str] = Field(default_factory=list)
+    preload_catalog: bool = True
+    native: bool = True
+    native_disabled: list[str] = Field(default_factory=list)
+    write_path: str = "~/.minibot/skills"
+    install: bool = False
+
+    @property
+    def disabled_native_skills(self) -> list[str]:
+        return [*self.native_disabled, *([] if self.install else ["install-skill"])]
+
+
+class RagEmbeddingConfig(BaseModel):
+    model: str = "sentence-transformers/all-MiniLM-L12-v2"
+    dim: int = 384
+    truncate_dim: int | None = None
+    max_sequence_tokens: PositiveInt = 128
+
+
+class RagRerankConfig(BaseModel):
+    enabled: bool = False
+    model: str = "cross-encoder/ms-marco-MiniLM-L2-v2"
+    candidate_limit: PositiveInt = 50
+    max_results: PositiveInt = 7
+
+
+class RagToolConfig(BaseModel):
+    """Retrieval-augmented generation settings. TOML section: ``[tools.rag]``
+
+    - ``backend`` — vector store: ``"sqlite"`` (default; no service required) or ``"qdrant"``.
+    - ``sqlite_url`` — SQLite database URL used when ``backend = "sqlite"``.
+    - ``qdrant_url`` — Qdrant HTTP endpoint used when ``backend = "qdrant"``.
+
+    The SQLite backend scores with an exact scan over the rows left after the scope filters, so it
+    trades throughput at very large corpora for exact recall under filtering; Qdrant keeps an
+    approximate index and is the option to reach for when the corpus outgrows that.
+    """
+
+    enabled: bool = False
+    backend: Literal["sqlite", "qdrant"] = "sqlite"
+    sqlite_url: str = "sqlite+aiosqlite:///./data/rag.db"
+    echo: bool = False
+    qdrant_url: str = "http://localhost:6333"
+    collection_name: str = "minibot_chunks"
+    embedding: RagEmbeddingConfig = RagEmbeddingConfig()
+    rerank: RagRerankConfig = RagRerankConfig()
+    chunk_size_tokens: PositiveInt = 96
+    chunk_overlap_tokens: int = Field(default=20, ge=0)
+    search_limit: int = 5
+    truncate_result_tokens: bool = False
+    max_result_tokens: PositiveInt = 1500
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ToolApprovalConfig(BaseModel):
+    """Human approval before dangerous tool calls. TOML section: ``[tools.approval]``
+
+    - ``require_approval`` — fnmatch patterns of tool names that need a Telegram approval before
+      running (default: empty, feature off). MCP tools match their exposed name, e.g.
+      ``mcp_mail__smtp_send_message``, also when the server runs in ``lazy`` mode.
+    - ``timeout_seconds`` — how long to wait for an answer before denying (default: ``90``). The
+      wait counts against the surrounding deadline, ``runtime.agent_timeout_seconds`` for the main
+      agent and the task timeout for a delegated one, so keep this below both. While the main agent
+      waits, other chats' turns queue behind it.
+
+    Calls are denied when nobody answers, when the turn has no Telegram chat, or when the user taps
+    Deny; the model then receives a ``tool_approval:denied`` error. Patterns match the canonical tool
+    name (``http_request``, not an alias), and unknown keys inside ``[tools.approval]`` are rejected so a
+    misspelled option cannot silently turn the gate off. The section name itself must be spelled exactly
+    ``[tools.approval]``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_approval: list[str] = Field(default_factory=list)
+    timeout_seconds: PositiveInt = 90
+
+
+class ToolsConfig(BaseModel):
+    approval: ToolApprovalConfig = ToolApprovalConfig()
+    kv_memory: KeyValueMemoryConfig = KeyValueMemoryConfig()
+    http_client: HTTPClientToolConfig = HTTPClientToolConfig()
+    time: TimeToolConfig = TimeToolConfig()
+    wait: WaitToolConfig = WaitToolConfig()
+    calculator: CalculatorToolConfig = CalculatorToolConfig()
+    python_exec: PythonExecToolConfig = PythonExecToolConfig()
+    bash: BashToolConfig = BashToolConfig()
+    tool_output_spill: ToolOutputSpillConfig = ToolOutputSpillConfig()
+    apply_patch: ApplyPatchToolConfig = ApplyPatchToolConfig()
+    file_storage: FileStorageToolConfig = FileStorageToolConfig()
+    grep: GrepToolConfig = GrepToolConfig()
+    browser: BrowserToolConfig = BrowserToolConfig()
+    audio_transcription: AudioTranscriptionToolConfig = AudioTranscriptionToolConfig()
+    mcp: MCPToolConfig = MCPToolConfig()
+    skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
+    rag: RagToolConfig = RagToolConfig()
+
+
+class RabbitMQConsumerConfig(BaseModel):
+    """Broker connection settings for ``tasks.backend = "rabbitmq"``. TOML section: ``[rabbitmq]``
+
+    Requires the ``rabbitmq`` extra: ``poetry install --extras rabbitmq``.
+    Enabling the task system itself lives in ``[tasks]``.
+
+    - ``broker_url`` — AMQP connection URL (default: ``"amqp://guest:guest@localhost:5672/"``).
+    - ``queue_name`` — queue to consume from (default: ``"minibot"``).
+    - ``exchange_name`` — fanout exchange name (default: ``"minibot.tasks"``).
+    - ``prefetch_count`` — max unacknowledged messages per worker (default: ``1``).
+    """
+
+    broker_url: str = "amqp://guest:guest@localhost:5672/"
+    queue_name: str = "minibot"
+    exchange_name: str = "minibot.tasks"
+    prefetch_count: PositiveInt = 1
+
+
+class ScheduledPromptsConfig(BaseModel):
+    """Scheduler persistence and polling settings. TOML section: ``[scheduler.prompts]``
+
+    - ``enabled`` — enable the scheduler (default: ``true``).
+    - ``sqlite_url`` — SQLite database URL for job storage.
+    - ``poll_interval_seconds`` — how often due jobs are checked (default: ``60``).
+    - ``lease_timeout_seconds`` — lease duration before a stalled job is retried (default: ``120``).
+    - ``batch_size`` — max jobs processed per poll cycle (default: ``10``).
+    - ``max_attempts`` — retries before a job is marked failed (default: ``3``).
+    - ``min_recurrence_interval_seconds`` — floor for recurring job intervals (default: ``60``).
+    """
+
+    enabled: bool = True
+    sqlite_url: str = "sqlite+aiosqlite:///./data/scheduled_prompts.db"
+    poll_interval_seconds: PositiveInt = 60
+    lease_timeout_seconds: PositiveInt = 120
+    batch_size: PositiveInt = 10
+    max_attempts: PositiveInt = 3
+    min_recurrence_interval_seconds: PositiveInt = 60
+    pool_size: PositiveInt = 5
+    echo: bool = False
+
+
+class SchedulerConfig(BaseModel):
+    prompts: ScheduledPromptsConfig = ScheduledPromptsConfig()
+
+
+class SqliteTaskQueueConfig(BaseModel):
+    """Queue storage settings for ``tasks.backend = "sqlite"``. TOML section: ``[tasks.sqlite]``
+
+    - ``sqlite_url`` — SQLite database URL for the task queue.
+    - ``poll_interval_seconds`` — how often the consumer checks for queued tasks (default: ``5``).
+    - ``lease_timeout_seconds`` — lease duration before a stalled task is claimable again (default: ``2100``).
+    - ``batch_size`` — max tasks leased per poll cycle (default: ``4``).
+    - ``max_attempts`` — redeliveries before a task is marked failed (default: ``3``). This is queue-level
+      redelivery, distinct from the in-process provider rate-limit retry in ``app/tasks/manager.py``.
+    - ``done_retention_seconds`` — how long terminal task rows and their compact event history are kept before
+      purging (default: ``2592000``).
+    """
+
+    sqlite_url: str = "sqlite+aiosqlite:///./data/tasks.db"
+    poll_interval_seconds: PositiveInt = 5
+    lease_timeout_seconds: PositiveInt = 2100
+    batch_size: PositiveInt = 4
+    max_attempts: PositiveInt = 3
+    done_retention_seconds: PositiveInt = 2592000
+    pool_size: PositiveInt = 5
+    echo: bool = False
+
+
+class TasksConfig(BaseModel):
+    """Async task system settings. TOML section: ``[tasks]``
+
+    Gates both the task consumer service and the ``spawn_task``/``cancel_task``/``list_tasks``/``get_task`` tools.
+    ``spawn_task`` is also the only way to delegate to a specialist agent, so disabling this
+    section turns multi-agent orchestration off entirely.
+
+    - ``enabled`` — enable the async task system (default: ``true``; the ``sqlite`` backend
+      needs no broker and no extra).
+    - ``backend`` — queue backend: ``"sqlite"`` (default; no broker required) or
+      ``"rabbitmq"`` (see ``[rabbitmq]``).
+    - ``worker_timeout_seconds`` — hard per-task processing timeout (default: ``1800``).
+    - ``worker_max_steps`` — optional execution-step ceiling; ``"unlimited"`` disables it (default).
+    - ``worker_max_tool_calls`` — optional tool-call ceiling; ``"unlimited"`` disables it (default).
+    - ``max_concurrent_workers`` — maximum parallel task handlers (default: ``4``).
+    - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
+    """
+
+    enabled: bool = True
+    backend: Literal["rabbitmq", "sqlite"] = "sqlite"
+    worker_timeout_seconds: PositiveInt = 1800
+    worker_max_steps: TaskLimitValue = "unlimited"
+    worker_max_tool_calls: TaskLimitValue = "unlimited"
+    max_concurrent_workers: PositiveInt = 4
+    sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
+
+    @model_validator(mode="after")
+    def _validate_lease_outlives_worker(self) -> TasksConfig:
+        # A lease shorter than the worst-case task duration expires while the worker is still
+        # running, so the next poll hands the same row to a second worker and the task runs twice.
+        if self.backend == "sqlite" and self.sqlite.lease_timeout_seconds <= self.worker_timeout_seconds:
+            raise ValueError(
+                "tasks.sqlite.lease_timeout_seconds must be greater than tasks.worker_timeout_seconds "
+                "or a running task can be leased twice"
+            )
+        return self
+
+
+class LoggingConfig(BaseModel):
+    """Structured logging settings. TOML section: ``[logging]``
+
+    - ``structured`` — enable structured (JSON-like) log output (default: ``true``).
+    - ``logfmt_enabled`` — use logfmt key=value format instead of JSON (default: ``true``).
+    - ``log_level`` — log level for the logging subsystem (default: ``"INFO"``).
+    - ``kv_separator`` — separator between key and value in logfmt (default: ``"="``).
+    - ``record_separator`` — separator between fields in logfmt (default: ``" "``).
+    """
+
+    structured: bool = True
+    logfmt_enabled: bool = True
+    log_level: str = "INFO"
+    kv_separator: str = "="
+    record_separator: str = " "
+
+
+class ExtensionsConfig(BaseModel):
+    """Python extensions loaded at startup. TOML section: ``[extensions]``
+
+    - ``modules`` — importable module names, each exposing a ``register(mb)`` function.
+      Resolved via normal Python import, so both pip-installed packages and local
+      modules on ``PYTHONPATH`` work.
+    - ``config`` — per-extension settings, keyed by extension name. The extension
+      receives its own slice as ``mb.config``; keys inside are arbitrary.
+
+    A module that cannot be imported, has no ``register``, or whose ``register``
+    raises fails startup: a silently missing tool is worse than a crash on boot.
+    """
+
+    modules: list[str] = Field(default_factory=list)
+    config: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class VaultConfig(BaseModel):
+    """Encrypted credential vault. TOML section: ``[vault]``
+
+    - ``enabled`` — unlock the vault at startup (default: ``false``).
+    - ``path`` — the encrypted vault file (default: ``"secrets.vault.yml"``). Write it with
+      ``minibot vault edit``; keep it out of git.
+    - ``password_file`` — read the unlock password from this file instead of prompting. Supported,
+      but not on equal footing with the interactive prompt: any tool that can read the filesystem
+      can read this file. Same for the ``MINIBOT_VAULT_PASSWORD`` environment variable.
+
+    Secrets are destination-bound: an admin binds a secret to a consumer in config (for example
+    ``[[tools.mcp.servers]] auth_secret``), and the value is resolved there. The LLM can list
+    secret names and nothing else.
+    """
+
+    enabled: bool = False
+    path: str = "secrets.vault.yml"
+    password_file: str = ""
+
+
+class HTTPServerConfig(BaseModel):
+    """Built-in HTTP server. TOML section: ``[http]``
+
+    - ``enabled`` — serve HTTP alongside the daemon (default: ``false``). Needs the ``http`` extra.
+    - ``host`` / ``port`` — where to bind (default: ``127.0.0.1:8080``); port ``0`` picks a free one.
+      Only literal ``127.0.0.1`` and ``::1`` can run without credentials.
+    - ``auth_token`` — bearer token required on every route except ``/health``. Accepts ``${secret:NAME}``.
+    - ``basic_auth_user`` / ``basic_auth_password`` — HTTP Basic credentials, used instead of the bearer
+      token when set (browsers prompt for these natively). Accepts ``${secret:NAME}``.
+    - ``chat_upload_*`` — browser-chat media limits and temporary upload retention. Uploads require
+      ``[tools.file_storage] enabled``; audio also requires automatic transcription.
+
+    Routes come from core features and from extensions calling ``mb.add_route`` or ``mb.add_page``.
+    There is no TLS here: put a reverse proxy in front when this is reachable from outside the host.
+
+    Static dashboard assets under ``/static`` are served with ``Cache-Control: no-store`` when
+    ``[runtime].environment`` is ``"development"`` or ``"debug"``, and with normal caching
+    otherwise. They are gzip-compressed when the browser accepts it; pages are not.
+    """
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = Field(default=8080, ge=0, le=65535)
+    auth_token: str = ""
+    basic_auth_user: str = ""
+    basic_auth_password: str = ""
+    chat_upload_max_attachments: PositiveInt = 3
+    chat_upload_max_image_bytes: ByteSizeValue = 5_000_000
+    chat_upload_max_audio_bytes: ByteSizeValue = 10_000_000
+    chat_upload_max_total_bytes: ByteSizeValue = 12_000_000
+    chat_upload_retention_hours: Annotated[int, Field(ge=0)] = 24
+
+    @model_validator(mode="after")
+    def _require_auth_off_loopback(self) -> HTTPServerConfig:
+        has_auth = self.auth_token or (self.basic_auth_user and self.basic_auth_password)
+        if self.enabled and not has_auth and self.host not in {"127.0.0.1", "::1"}:
+            raise ValueError(
+                f"[http] auth_token or basic_auth_user/basic_auth_password is required when host is "
+                f"{self.host!r} rather than a literal loopback address"
+            )
+        return self
+
+
+class Settings(BaseModel):
+    runtime: RuntimeConfig = RuntimeConfig()
+    channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    llm: LLMMConfig = LLMMConfig()
+    orchestration: OrchestrationConfig = OrchestrationConfig()
+    memory: MemoryConfig = MemoryConfig()
+    tools: ToolsConfig = ToolsConfig()
+    scheduler: SchedulerConfig = SchedulerConfig()
+    logging: LoggingConfig = LoggingConfig()
+    tasks: TasksConfig = TasksConfig()
+    rabbitmq: RabbitMQConsumerConfig = RabbitMQConsumerConfig()
+    vault: VaultConfig = VaultConfig()
+    http: HTTPServerConfig = HTTPServerConfig()
+    extensions: ExtensionsConfig = ExtensionsConfig()
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_provider_api_formats(self) -> Settings:
+        """A provider section must name a real API format, by its own name or by ``api_format``.
+
+        Without this, an unrecognized section name falls through to the OpenAI Chat Completions
+        client, and the delegation roster then offers the model a provider whose advertised format
+        does not exist. A load failure naming the valid values is the lesser evil.
+        """
+        for name, provider_cfg in self.providers.items():
+            if provider_cfg.api_format is not None or name.strip().lower() in PROVIDER_API_FORMATS:
+                continue
+            valid = ", ".join(PROVIDER_API_FORMATS)
+            raise ValueError(
+                f"[providers.{name}] must set api_format (one of {valid}) because its name is not an API format"
+            )
+        return self
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], secrets: Mapping[str, str] | None = None) -> Settings:
+        """Expand ``${ENV_VAR}``, then ``${secret:NAME}`` when ``secrets`` is supplied.
+
+        ``secrets=None`` leaves ``${secret:NAME}`` references literal, which is what the
+        configuration wizard wants: it round-trips the document back to disk and must preserve
+        references rather than resolve them.
+        """
+        expanded = expand_environment(data, os.environ)
+        expanded = _expand_secret_references(expanded, secrets)
+        return cls.model_validate(_normalize_for_annotation(expanded, cls))
+
+    @classmethod
+    def from_file(cls, path: Path | None = None, secrets: Mapping[str, str] | None = None) -> Settings:
+        if path is None:
+            raise ValueError("config file path is required")
+        return cls.from_dict(_load_file_data(path), secrets)

@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from minibot.adapters.messaging.console.service import ConsoleService
-from minibot.adapters.tasks.manager import TaskManager
 from minibot.app.event_bus import EventBus
+from minibot.app.tasks.manager import TaskManager
 
 
 class _PipeSuccess:
@@ -54,8 +54,8 @@ async def test_task_result_preserves_console_channel_for_outbound_routing() -> N
     ack_cb = AsyncMock()
     nack_cb = AsyncMock()
     with (
-        patch("minibot.adapters.tasks.manager.aioduplex", return_value=(_PipeSuccess({"text": "done"}), MagicMock())),
-        patch("minibot.adapters.tasks.manager.Process", return_value=_FakeProc()),
+        patch("minibot.app.tasks.manager.aioduplex", return_value=(_PipeSuccess({"text": "done"}), MagicMock())),
+        patch("minibot.app.tasks.manager.Process", return_value=_FakeProc()),
     ):
         await manager.spawn(
             task_id="t1",
