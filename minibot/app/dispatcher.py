@@ -187,9 +187,9 @@ class Dispatcher:
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run())
-        self._history_task = asyncio.create_task(self._record_delivered_history())
+        self._history_task = asyncio.create_task(self._record_outbound_history())
 
-    async def _record_delivered_history(self) -> None:
+    async def _record_outbound_history(self) -> None:
         async for event in self._history_subscription:
             if not isinstance(event, OutboundEvent):
                 continue
@@ -371,6 +371,7 @@ class Dispatcher:
             self._logger.exception("failed to handle format repair", exc_info=exc)
             fallback_text = event.response.render.text if event.response.render is not None else event.response.text
             fallback_metadata = dict(event.response.metadata)
+            fallback_metadata.pop("history_text", None)
             fallback_metadata["format_repair_failed"] = True
             fallback_metadata["format_repair_error"] = str(exc)
             fallback_response = ChannelResponse(

@@ -96,6 +96,8 @@ Worker limits live on ``[tasks]``:
 - ``worker_timeout_seconds`` — hard per-task processing timeout (default ``1800``).
 - ``worker_max_steps`` / ``worker_max_tool_calls`` — optional ceilings, or ``"unlimited"`` (the default).
 - ``max_concurrent_workers`` — maximum parallel handlers (default ``4``).
+- ``continue_turn_default`` — what ``spawn_task`` does when ``continue_turn`` is unset (default ``false``);
+  see :doc:`agents`.
 
 .. warning::
 

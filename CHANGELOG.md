@@ -42,8 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The main agent can read fire-and-forget task results.** A task result delivered straight to the chat,
   and the failure or timeout notice, is now also recorded in the conversation history (truncated, with the
   full task id and marked as untrusted worker output), so asking about it on the next message works.
-  `get_task` also accepts a unique id prefix of at least 8 characters, so a shortened id no longer reads as
-  a missing task.
+  `get_task` and `cancel_task` also accept a unique id prefix of at least 8 characters, so a shortened id no
+  longer reads as a missing task; both act on the full id the prefix resolves to, so `cancel_task` really
+  stops the worker and `get_task` returns the task's events. A rich-text format-repair fallback no longer
+  records the same result in the history a second time.
 
 - **MCP tool calls no longer freeze the bot in `bridge` mode.** The bridge waited for each remote call on a
   separate thread while holding the main event loop, so Telegram polling, the scheduler and every other turn

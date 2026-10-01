@@ -320,6 +320,38 @@ async def test_spawn_task_continue_turn_default_applies_when_unset_and_falls_bac
 
 
 @pytest.mark.asyncio
+async def test_cancel_and_get_task_use_the_full_id_resolved_from_a_prefix() -> None:
+    full_id = "a0dbc23f-1111-4000-8000-000000000001"
+    record = TaskRecord(request=TaskRequest(task_id=full_id, channel="console", prompt="p"), status=TaskStatus.RUNNING)
+
+    class _Repository:
+        def __init__(self) -> None:
+            self.events_calls: list[str] = []
+
+        async def get(self, task_id: str, owner_id: str | None = None) -> TaskRecord | None:
+            return record if full_id.startswith(task_id) else None
+
+        async def events(self, task_id: str, **_kwargs: Any) -> list[dict[str, Any]]:
+            self.events_calls.append(task_id)
+            return []
+
+        async def mark_cancelled(self, task_id: str) -> bool:
+            return True
+
+    manager = _TaskManagerStub()
+    repository = _Repository()
+    tools = TaskTools(cast(Any, _ProducerStub()), cast(Any, manager), task_repository=cast(Any, repository))
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+    context = ToolContext(channel="console", owner_id="primary")
+
+    await bindings["cancel_task"].handler({"task_id": "a0dbc23f"}, context)
+    await bindings["get_task"].handler({"task_id": "a0dbc23f"}, context)
+
+    assert manager.cancel_calls == [full_id]
+    assert repository.events_calls == [full_id]
+
+
+@pytest.mark.asyncio
 async def test_list_tasks_includes_a_result_preview() -> None:
     record = TaskRecord(
         request=TaskRequest(task_id="t1", channel="console", prompt="p"),

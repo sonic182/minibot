@@ -213,6 +213,7 @@ class TaskTools:
             task = await self._task_repository.get(task_id, self._owner_id(context))
             if task is None:
                 return {"task_id": task_id, "cancelled": False, "reason": "not found"}
+            task_id = task.request.task_id
         cancelled = await self._task_manager.cancel(task_id)
         if not cancelled and self._task_repository is not None:
             cancelled = await self._task_repository.mark_cancelled(task_id)
@@ -248,7 +249,7 @@ class TaskTools:
         include_events = payload.get("include_events") is not False
         response = {"task": _record_detail(record), "found": True}
         if include_events:
-            response["events"] = await self._task_repository.events(task_id)
+            response["events"] = await self._task_repository.events(record.request.task_id)
         return response
 
     def _owner_id(self, context: ToolContext) -> str:
