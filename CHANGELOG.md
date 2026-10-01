@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Hex architecture refactor.** Move configuration contracts into `minibot.config`, add core ports for infrastructure boundaries, move task orchestration into `minibot.app`, and wire dispatcher dependencies through the composition roots.
+
 ### Added
 
 - **`spawn_task` takes `continue_turn`.** By default a delegated task is still fire and forget: the worker's
