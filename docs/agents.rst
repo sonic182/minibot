@@ -20,9 +20,10 @@ Delegation Tools
 
 Delegation is **asynchronous**: ``spawn_task`` returns a ``task_id`` and the main agent does not
 wait inside the turn. By default the worker's answer, including any files it produced, is sent
-straight to the conversation as a later message (fire and forget). The delivered result, or the
-failure or timeout notice, is also recorded in the conversation history, marked as untrusted worker
-output, so the main agent can read it on the user's next message without a new turn. Pass
+straight to the conversation as a later message (fire and forget). A short notice with the agent,
+the task id and the outcome is also recorded in the conversation history as a user message, so the
+main agent knows the task finished and can call ``get_task`` for its result on the user's next
+message. The worker's output itself is never written to the history. Pass
 ``continue_turn: true`` when the main agent needs the result to keep working, such as a second
 step that depends on it or a comparison: the result then comes back as a new turn, saved to the
 conversation history, and the main agent answers from it instead of the raw worker text. Failures

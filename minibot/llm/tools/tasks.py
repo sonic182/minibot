@@ -11,6 +11,7 @@ from minibot.config.schema import TasksConfig, task_limit
 from minibot.core.agents import AgentCatalog, normalize_model_overrides
 from minibot.core.tasks import (
     MAX_TASK_CONTINUATIONS,
+    AmbiguousTaskIdError,
     TaskLimits,
     TaskManager,
     TaskProducer,
@@ -33,6 +34,7 @@ from minibot.llm.tools.schema_utils import strict_object
 from minibot.shared.errors import ToolInputError
 
 _RESULT_PREVIEW_CHARS = 300
+_AMBIGUOUS_PREFIX_REASON = "ambiguous task id prefix: more than one task matches, use more characters of the id"
 
 
 class TaskTools:
@@ -210,7 +212,10 @@ class TaskTools:
     async def _cancel_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         task_id = require_non_empty_str(payload, "task_id")
         if self._task_repository is not None:
-            task = await self._task_repository.get(task_id, self._owner_id(context))
+            try:
+                task = await self._task_repository.get(task_id, self._owner_id(context))
+            except AmbiguousTaskIdError:
+                return {"task_id": task_id, "cancelled": False, "reason": _AMBIGUOUS_PREFIX_REASON}
             if task is None:
                 return {"task_id": task_id, "cancelled": False, "reason": "not found"}
             task_id = task.request.task_id
@@ -243,7 +248,10 @@ class TaskTools:
         task_id = require_non_empty_str(payload, "task_id")
         if self._task_repository is None:
             return {"task_id": task_id, "found": False}
-        record = await self._task_repository.get(task_id, self._owner_id(context))
+        try:
+            record = await self._task_repository.get(task_id, self._owner_id(context))
+        except AmbiguousTaskIdError:
+            return {"task_id": task_id, "found": False, "reason": _AMBIGUOUS_PREFIX_REASON}
         if record is None:
             return {"task_id": task_id, "found": False}
         include_events = payload.get("include_events") is not False

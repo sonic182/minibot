@@ -198,9 +198,7 @@ class Dispatcher:
             if not isinstance(text, str) or not text:
                 continue
             try:
-                await self._memory.append_history(
-                    session_identifier(response.channel, response.chat_id), "assistant", text
-                )
+                await self._memory.append_history(session_identifier(response.channel, response.chat_id), "user", text)
             except Exception:
                 self._logger.exception(
                     "failed to record delivered message in history",

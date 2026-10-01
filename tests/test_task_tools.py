@@ -10,7 +10,7 @@ from minibot.adapters.config.schema import TasksConfig
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.llm_client_factory import ProviderOption
 from minibot.core.agents import AgentSpec
-from minibot.core.tasks import TaskRecord, TaskRequest, TaskResult, TaskStatus
+from minibot.core.tasks import AmbiguousTaskIdError, TaskRecord, TaskRequest, TaskResult, TaskStatus
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.tasks import TaskTools
 from minibot.shared.errors import ToolInputError
@@ -349,6 +349,26 @@ async def test_cancel_and_get_task_use_the_full_id_resolved_from_a_prefix() -> N
 
     assert manager.cancel_calls == [full_id]
     assert repository.events_calls == [full_id]
+
+
+@pytest.mark.asyncio
+async def test_cancel_and_get_task_report_an_ambiguous_prefix() -> None:
+    class _Repository:
+        async def get(self, task_id: str, owner_id: str | None = None) -> TaskRecord | None:
+            raise AmbiguousTaskIdError(task_id)
+
+    manager = _TaskManagerStub()
+    tools = TaskTools(cast(Any, _ProducerStub()), cast(Any, manager), task_repository=cast(Any, _Repository()))
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+    context = ToolContext(channel="console", owner_id="primary")
+
+    cancelled = await bindings["cancel_task"].handler({"task_id": "b1c2d3e4"}, context)
+    fetched = await bindings["get_task"].handler({"task_id": "b1c2d3e4"}, context)
+
+    assert cancelled["cancelled"] is False
+    assert fetched["found"] is False
+    assert "ambiguous" in cancelled["reason"] and "ambiguous" in fetched["reason"]
+    assert manager.cancel_calls == []
 
 
 @pytest.mark.asyncio

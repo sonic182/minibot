@@ -200,9 +200,9 @@ async def test_reader_success_publishes_direct_outbound_event() -> None:
     assert event.response.metadata["task_id"] == "t1"
     assert event.response.metadata["source"] == "task_worker"
     assert event.response.chat_id == 1
-    history_text = event.response.metadata["history_text"]
-    assert "Background task t1 finished" in history_text
-    assert "<task_output>\nthe answer\n</task_output>" in history_text
+    assert event.response.metadata["history_text"] == (
+        "[Background task t1 finished. Call get_task if you need its result.]"
+    )
     await sub.close()
 
 
@@ -397,7 +397,7 @@ async def test_reader_failure_without_continuation_records_the_failure_for_the_h
     assert isinstance(event, OutboundEvent)
     history_text = event.response.metadata["history_text"]
     assert "ended with status failed" in history_text
-    assert "boom" in history_text
+    assert "boom" not in history_text
     await sub.close()
 
 

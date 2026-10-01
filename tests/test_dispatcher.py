@@ -249,7 +249,7 @@ async def test_dispatcher_records_delivered_task_results_in_history(monkeypatch:
         )
         await asyncio.wait_for(done.wait(), timeout=1.0)
 
-    assert recorded == [("telegram:7", "assistant", "Background task t1 finished.")]
+    assert recorded == [("telegram:7", "user", "Background task t1 finished.")]
 
 
 @pytest.mark.asyncio
