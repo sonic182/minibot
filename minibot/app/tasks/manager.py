@@ -458,17 +458,17 @@ class TaskManager:
         loop = asyncio.get_running_loop()
         grace_seconds = _SUPERVISOR_GRACE_SECONDS if timeout_seconds >= 1 else 0
         deadline = loop.time() + timeout_seconds + grace_seconds
-        async with mainpipe.open() as (rx, tx):
+        async with mainpipe.open() as (reader_pipe, writer_pipe):
             # Added here rather than to `payload` so secrets never enter the dict that status and
             # result publishing carry around.
             wire_payload = {**payload, "secrets": self._secrets} if self._secrets else payload
-            tx.write(json.dumps(wire_payload).encode() + b"\n")
+            writer_pipe.write(json.dumps(wire_payload).encode() + b"\n")
             while True:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
                     raise TimeoutError
                 try:
-                    raw = await asyncio.wait_for(rx.readline(), timeout=remaining)
+                    raw = await asyncio.wait_for(reader_pipe.readline(), timeout=remaining)
                 except ValueError:
                     return _protocol_failure("worker sent an oversized message")
                 if not raw:
@@ -505,7 +505,7 @@ class TaskManager:
                     except Exception:
                         self._logger.exception("tool approval request failed", extra={"task_id": payload["task_id"]})
                     reply = {"type": "approval_result", "approval_id": event.get("approval_id"), "approved": approved}
-                    tx.write(json.dumps(reply).encode() + b"\n")
+                    writer_pipe.write(json.dumps(reply).encode() + b"\n")
                     continue
                 if event.get("type") == "result":
                     return event

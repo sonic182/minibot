@@ -60,8 +60,8 @@ def _expand_secret_references(data: object, secrets: Mapping[str, str] | None) -
 def _load_file_data(path: Path) -> dict[str, Any]:
     suffix = path.suffix.lower()
     if suffix == ".toml":
-        with path.open("rb") as fp:
-            data = tomllib.load(fp)
+        with path.open("rb") as config_file:
+            data = tomllib.load(config_file)
         return data
     raise ValueError(f"unsupported config file type: {path.suffix or '<none>'}")
 

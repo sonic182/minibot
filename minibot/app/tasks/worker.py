@@ -92,13 +92,13 @@ def worker_entry(pipe: Any) -> None:
 
 
 async def _worker_async(pipe: Any) -> None:
-    async with pipe.open() as (rx, tx):
-        raw = await rx.readline()
+    async with pipe.open() as (reader_pipe, writer_pipe):
+        raw = await reader_pipe.readline()
 
         pending_approvals: dict[str, asyncio.Future[bool]] = {}
 
         async def emit_progress(progress: dict[str, Any]) -> None:
-            tx.write(json.dumps({"type": "progress", "progress": progress}).encode() + b"\n")
+            writer_pipe.write(json.dumps({"type": "progress", "progress": progress}).encode() + b"\n")
 
         async def request_approval(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
             approval_id = uuid4().hex
@@ -112,14 +112,14 @@ async def _worker_async(pipe: Any) -> None:
                 "channel": context.channel,
                 "chat_id": context.chat_id,
             }
-            tx.write(json.dumps(request, default=str).encode() + b"\n")
+            writer_pipe.write(json.dumps(request, default=str).encode() + b"\n")
             try:
                 return await future
             finally:
                 pending_approvals.pop(approval_id, None)
 
         async def read_approval_results() -> None:
-            while line := await rx.readline():
+            while line := await reader_pipe.readline():
                 with contextlib.suppress(json.JSONDecodeError):
                     event = json.loads(line)
                     if not isinstance(event, dict):
@@ -152,7 +152,7 @@ async def _worker_async(pipe: Any) -> None:
                 )
             finally:
                 reader.cancel()
-        tx.write(json.dumps(result).encode() + b"\n")
+        writer_pipe.write(json.dumps(result).encode() + b"\n")
 
 
 async def run_agent_loop(

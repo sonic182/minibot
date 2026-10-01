@@ -34,7 +34,10 @@ def expand_secrets(value: object, secrets: Mapping[str, str], *, path: str = "")
 
 def has_secret_references(value: object) -> bool:
     """Whether any string in ``value`` carries an unescaped ``${secret:NAME}`` reference."""
-    return _any_string(value, lambda text: any(not m.group("escape") for m in _SECRET_REFERENCE.finditer(text)))
+    return _any_string(
+        value,
+        lambda text: any(not match.group("escape") for match in _SECRET_REFERENCE.finditer(text)),
+    )
 
 
 def has_secret_syntax(value: object) -> bool:
