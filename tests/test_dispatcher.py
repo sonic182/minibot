@@ -127,11 +127,14 @@ async def _running_dispatcher(
     pending_store: object | None = None,
     event_types: tuple[type, ...] | None = None,
     channel_capabilities: dict[str, ChannelCapabilities] | None = None,
+    memory_backend: object | None = None,
 ):
     from minibot.app import dispatcher as dispatcher_module
 
     dependencies = _dispatcher_dependencies(monkeypatch, dispatcher_module, handler_cls, pending_store=pending_store)
     dependencies["channel_capabilities"] = channel_capabilities
+    if memory_backend is not None:
+        dependencies["memory_backend"] = memory_backend
     bus = EventBus()
     subscription = bus.subscribe(types=event_types)
     dispatcher = dispatcher_module.Dispatcher(bus, **dependencies)
@@ -220,6 +223,33 @@ async def test_dispatcher_applies_channel_capabilities_to_messages_without_them(
         await _wait_outbound(subscription)
 
     assert seen == [telegram, explicit]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_records_delivered_task_results_in_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list[tuple[str, str, str]] = []
+    done = asyncio.Event()
+
+    class _Memory:
+        async def append_history(self, session_id: str, role: str, content: str, **_kwargs: object) -> None:
+            recorded.append((session_id, role, content))
+            done.set()
+
+    async with _running_dispatcher(monkeypatch, _StubHandlerBase, memory_backend=_Memory()) as (bus, _):
+        await bus.publish(OutboundEvent(response=ChannelResponse(channel="telegram", chat_id=7, text="plain reply")))
+        await bus.publish(
+            OutboundEvent(
+                response=ChannelResponse(
+                    channel="telegram",
+                    chat_id=7,
+                    text="task answer",
+                    metadata={"source": "task_worker", "history_text": "Background task t1 finished."},
+                )
+            )
+        )
+        await asyncio.wait_for(done.wait(), timeout=1.0)
+
+    assert recorded == [("telegram:7", "assistant", "Background task t1 finished.")]
 
 
 @pytest.mark.asyncio

@@ -396,6 +396,11 @@ class TaskManager:
                             "source": "task_worker",
                             "status": status.value,
                             "attempts": attempt,
+                            "history_text": _history_text(
+                                payload,
+                                status=status,
+                                body=f"The task failed: {error} (stop reason: {stop_reason.value})",
+                            ),
                         },
                     )
                 self._logger.warning(
@@ -428,7 +433,16 @@ class TaskManager:
                 await self._publish_status(
                     payload=payload,
                     text="La tarea asíncrona excedió el tiempo límite y fue cancelada.",
-                    metadata={"task_id": task_id, "source": "task_worker", "status": TaskStatus.TIMED_OUT.value},
+                    metadata={
+                        "task_id": task_id,
+                        "source": "task_worker",
+                        "status": TaskStatus.TIMED_OUT.value,
+                        "history_text": _history_text(
+                            payload,
+                            status=TaskStatus.TIMED_OUT,
+                            body="The task timed out and was cancelled before producing a result.",
+                        ),
+                    },
                 )
         except _LeaseLostError:
             self._logger.warning("task execution lease lost", extra={"task_id": task_id})
@@ -568,13 +582,7 @@ class TaskManager:
                     user_id=user_id if isinstance(user_id, int) else None,
                     chat_id=chat_id,
                     message_id=None,
-                    text=_continuation_text(
-                        task_id=task_id,
-                        agent_name=payload.get("agent_name"),
-                        status=status,
-                        body=body,
-                        attachments=attachments or [],
-                    ),
+                    text=_history_text(payload, status=status, body=body, attachments=attachments),
                     metadata={
                         "source": "task_result",
                         "task_id": task_id,
@@ -610,7 +618,14 @@ class TaskManager:
         await self._publish_status(
             payload=payload,
             text=text,
-            metadata={"task_id": payload.get("task_id"), "source": "task_worker", **result.metadata},
+            metadata={
+                "task_id": payload.get("task_id"),
+                "source": "task_worker",
+                **result.metadata,
+                "history_text": _history_text(
+                    payload, status=TaskStatus.DONE, body=result.text, attachments=result.attachments
+                ),
+            },
             render=render,
         )
 
@@ -725,6 +740,22 @@ def _with_attachment_list(text: str, attachments: list[dict[str, Any]]) -> str:
 
 def _continues_turn(payload: dict[str, Any]) -> bool:
     return payload.get("continuation_depth") is not None
+
+
+def _history_text(
+    payload: dict[str, Any],
+    *,
+    status: TaskStatus,
+    body: str,
+    attachments: list[dict[str, Any]] | None = None,
+) -> str:
+    return _continuation_text(
+        task_id=str(payload.get("task_id")),
+        agent_name=payload.get("agent_name"),
+        status=status,
+        body=body,
+        attachments=attachments or [],
+    )
 
 
 def _continuation_text(

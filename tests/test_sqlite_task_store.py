@@ -65,6 +65,21 @@ async def test_create_lease_and_mark_done(task_store: SQLiteTaskStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_resolves_a_unique_id_prefix(task_store: SQLiteTaskStore) -> None:
+    await task_store.create(_request("a0dbc23f-1111-4000-8000-000000000001"))
+    await task_store.create(_request("b1c2d3e4-1111-4000-8000-000000000001"))
+    await task_store.create(_request("b1c2d3e4-2222-4000-8000-000000000002"))
+
+    found = await task_store.get("a0dbc23f")
+
+    assert found is not None
+    assert found.request.task_id == "a0dbc23f-1111-4000-8000-000000000001"
+    assert await task_store.get("b1c2d3e4") is None
+    assert await task_store.get("a0dbc23") is None
+    assert await task_store.get("a0dbc23f", owner_id="someone-else") is None
+
+
+@pytest.mark.asyncio
 async def test_leased_task_is_not_handed_out_twice(task_store: SQLiteTaskStore) -> None:
     await task_store.create(_request("task-1"))
     now = _utcnow()

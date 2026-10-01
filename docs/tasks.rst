@@ -52,14 +52,16 @@ Tool Surface
        pass structured ``context_json``, and cap ``timeout_seconds`` (no greater than the configured
        worker timeout). Without it, a named specialist's own ``timeout_seconds`` applies. Steps and
        tool calls are bounded only by ``worker_max_steps`` / ``worker_max_tool_calls``.
-       ``continue_turn`` (default off) returns the result to the main agent as a new turn instead of
-       sending the worker's answer straight to the user; see :doc:`agents`.
+       ``continue_turn`` returns the result to the main agent as a new turn instead of sending the
+       worker's answer straight to the user; when unset, ``[tasks] continue_turn_default`` decides
+       (default ``false``). See :doc:`agents`.
    * - ``cancel_task``
      - Cancel an active task by ``task_id``.
    * - ``list_tasks``
      - List the owner's tasks, optionally filtered by ``status`` (up to 100).
    * - ``get_task``
-     - Retrieve one task's result, structured progress, and compact event history
+     - Retrieve one task's result, structured progress, and compact event history (by full id or a
+       unique prefix of at least 8 characters)
        (``include_events`` defaults to ``true``).
 
 Statuses

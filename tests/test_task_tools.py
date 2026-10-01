@@ -10,7 +10,7 @@ from minibot.adapters.config.schema import TasksConfig
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.llm_client_factory import ProviderOption
 from minibot.core.agents import AgentSpec
-from minibot.core.tasks import TaskRequest
+from minibot.core.tasks import TaskRecord, TaskRequest, TaskResult, TaskStatus
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.tasks import TaskTools
 from minibot.shared.errors import ToolInputError
@@ -301,6 +301,44 @@ async def test_spawn_task_continue_turn_records_the_chain_depth() -> None:
 
     assert [task.continuation_depth for task in producer.enqueued] == [None, 2]
     assert continued["continue_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_continue_turn_default_applies_when_unset_and_falls_back_at_the_limit() -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(
+        cast(Any, producer), cast(Any, _TaskManagerStub()), config=TasksConfig(continue_turn_default=True)
+    )
+    spawn = {binding.tool.name: binding for binding in tools.bindings()}["spawn_task"]
+
+    defaulted = await spawn.handler({"prompt": "default"}, ToolContext(channel="console"))
+    at_limit = await spawn.handler({"prompt": "too deep"}, ToolContext(channel="console", task_chain_depth=3))
+    opted_out = await spawn.handler({"prompt": "direct", "continue_turn": False}, ToolContext(channel="console"))
+
+    assert [task.continuation_depth for task in producer.enqueued] == [1, None, None]
+    assert [defaulted["continue_turn"], at_limit["continue_turn"], opted_out["continue_turn"]] == [True, False, False]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_includes_a_result_preview() -> None:
+    record = TaskRecord(
+        request=TaskRequest(task_id="t1", channel="console", prompt="p"),
+        status=TaskStatus.DONE,
+        result=TaskResult(text="x" * 400),
+    )
+
+    class _Repository:
+        async def list(self, **_kwargs: Any) -> list[TaskRecord]:
+            return [record]
+
+    tools = TaskTools(
+        cast(Any, _ProducerStub()), cast(Any, _TaskManagerStub()), task_repository=cast(Any, _Repository())
+    )
+    list_tasks = {binding.tool.name: binding for binding in tools.bindings()}["list_tasks"]
+
+    result = await list_tasks.handler({}, ToolContext(channel="console", owner_id="primary"))
+
+    assert result["tasks"][0]["result_preview"] == "x" * 300
 
 
 @pytest.mark.asyncio

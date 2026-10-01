@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
@@ -17,6 +18,7 @@ from minibot.shared.datetime_utils import ensure_utc, utcnow
 
 TaskBase = declarative_base()
 _MAX_EVENTS_PER_TASK = 100
+_TASK_ID_PREFIX = re.compile(r"[0-9a-f-]{8,35}")
 
 
 class TaskModel(TaskBase):
@@ -353,6 +355,12 @@ class SQLiteTaskStore:
             if owner_id is not None:
                 statement = statement.where(TaskModel.owner_id == owner_id)
             record = (await session.execute(statement)).scalars().first()
+            if record is None and _TASK_ID_PREFIX.fullmatch(task_id):
+                statement = select(TaskModel).where(TaskModel.id.startswith(task_id, autoescape=True)).limit(2)
+                if owner_id is not None:
+                    statement = statement.where(TaskModel.owner_id == owner_id)
+                matches = (await session.execute(statement)).scalars().all()
+                record = matches[0] if len(matches) == 1 else None
             return _to_domain(record) if record else None
 
     async def list(self, *, owner_id: str, statuses: list[TaskStatus] | None, limit: int) -> list[TaskRecord]:

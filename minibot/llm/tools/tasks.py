@@ -32,6 +32,8 @@ from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import strict_object
 from minibot.shared.errors import ToolInputError
 
+_RESULT_PREVIEW_CHARS = 300
+
 
 class TaskTools:
     def __init__(
@@ -97,7 +99,8 @@ class TaskTools:
                         "type": ["boolean", "null"],
                         "description": (
                             "True to get the result back as a new turn so you can keep working on it; "
-                            "false or null to deliver the worker's answer straight to the user."
+                            "false to deliver the worker's answer straight to the user; null uses the "
+                            "configured default."
                         ),
                     },
                 },
@@ -164,7 +167,7 @@ class TaskTools:
             )
         task_context = _coerce_task_context(payload)
         limits = _resolve_limits(payload, self._config, spec_timeout_seconds=spec.timeout_seconds if spec else None)
-        continuation_depth = _resolve_continuation_depth(payload, context)
+        continuation_depth = _resolve_continuation_depth(payload, context, default=self._config.continue_turn_default)
         try:
             await self._producer.enqueue(
                 TaskRequest(
@@ -226,7 +229,14 @@ class TaskTools:
                 statuses=status,
                 limit=min(limit, 100),
             )
-        return {"tasks": [_record_summary(record) for record in records], "count": len(records)}
+        tasks = [
+            {
+                **_record_summary(record),
+                "result_preview": record.result.text[:_RESULT_PREVIEW_CHARS] if record.result else None,
+            }
+            for record in records
+        ]
+        return {"tasks": tasks, "count": len(records)}
 
     async def _get_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         task_id = require_non_empty_str(payload, "task_id")
@@ -282,10 +292,18 @@ def _resolve_limits(
     )
 
 
-def _resolve_continuation_depth(payload: dict[str, Any], context: ToolContext) -> int | None:
+def _resolve_continuation_depth(payload: dict[str, Any], context: ToolContext, *, default: bool) -> int | None:
     continue_turn = payload.get("continue_turn")
     if continue_turn is not None and not isinstance(continue_turn, bool):
         raise ToolInputError("continue_turn must be a boolean or null", error_code="invalid_tool_arguments")
+    if continue_turn is None:
+        if not default:
+            return None
+        if context.task_chain_depth >= MAX_TASK_CONTINUATIONS:
+            return None
+        if context.claim_task_continuation is not None and not context.claim_task_continuation():
+            return None
+        return context.task_chain_depth + 1
     if not continue_turn:
         return None
     if context.task_chain_depth >= MAX_TASK_CONTINUATIONS:
