@@ -200,6 +200,9 @@ async def test_reader_success_publishes_direct_outbound_event() -> None:
     assert event.response.metadata["task_id"] == "t1"
     assert event.response.metadata["source"] == "task_worker"
     assert event.response.chat_id == 1
+    assert event.response.metadata["history_text"] == (
+        "[Background task t1 finished. Call get_task if you need its result.]"
+    )
     await sub.close()
 
 
@@ -378,6 +381,23 @@ async def test_reader_failure_with_continuation_reports_the_failure_to_the_orche
     assert event.message.metadata["status"] == "failed"
     assert event.message.metadata["task_chain_depth"] == 2
     assert sub._queue.empty()
+    await sub.close()
+
+
+@pytest.mark.asyncio
+async def test_reader_failure_without_continuation_records_the_failure_for_the_history() -> None:
+    bus = EventBus()
+    sub = bus.subscribe()
+    manager = _make_manager(bus)
+
+    _, _, _, _, reader_task = await _spawn(manager, _PipeWorkerError("boom"))
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
+    assert isinstance(event, OutboundEvent)
+    history_text = event.response.metadata["history_text"]
+    assert "ended with status failed" in history_text
+    assert "boom" not in history_text
     await sub.close()
 
 

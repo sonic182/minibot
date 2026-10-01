@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from minibot.adapters.config.schema import SqliteTaskQueueConfig
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
-from minibot.core.tasks import TaskRequest, TaskStatus
+from minibot.core.tasks import AmbiguousTaskIdError, TaskRequest, TaskStatus
 
 
 def _utcnow() -> datetime:
@@ -62,6 +62,23 @@ async def test_create_lease_and_mark_done(task_store: SQLiteTaskStore) -> None:
     assert stored is not None
     assert stored.status == TaskStatus.DONE
     assert stored.lease_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_get_resolves_a_unique_id_prefix(task_store: SQLiteTaskStore) -> None:
+    await task_store.create(_request("a0dbc23f-1111-4000-8000-000000000001"))
+    await task_store.create(_request("b1c2d3e4-1111-4000-8000-000000000001"))
+    await task_store.create(_request("b1c2d3e4-2222-4000-8000-000000000002"))
+
+    found = await task_store.get("a0dbc23f", owner_id="primary")
+
+    assert found is not None
+    assert found.request.task_id == "a0dbc23f-1111-4000-8000-000000000001"
+    assert await task_store.get("a0dbc23", owner_id="primary") is None
+    assert await task_store.get("a0dbc23f") is None
+    assert await task_store.get("a0dbc23f", owner_id="someone-else") is None
+    with pytest.raises(AmbiguousTaskIdError):
+        await task_store.get("b1c2d3e4", owner_id="primary")
 
 
 @pytest.mark.asyncio

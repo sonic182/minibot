@@ -10,7 +10,7 @@ from minibot.adapters.config.schema import TasksConfig
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.llm_client_factory import ProviderOption
 from minibot.core.agents import AgentSpec
-from minibot.core.tasks import TaskRequest
+from minibot.core.tasks import AmbiguousTaskIdError, TaskRecord, TaskRequest, TaskResult, TaskStatus
 from minibot.llm.tools.base import ToolContext
 from minibot.llm.tools.tasks import TaskTools
 from minibot.shared.errors import ToolInputError
@@ -301,6 +301,96 @@ async def test_spawn_task_continue_turn_records_the_chain_depth() -> None:
 
     assert [task.continuation_depth for task in producer.enqueued] == [None, 2]
     assert continued["continue_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_continue_turn_default_applies_when_unset_and_falls_back_at_the_limit() -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(
+        cast(Any, producer), cast(Any, _TaskManagerStub()), config=TasksConfig(continue_turn_default=True)
+    )
+    spawn = {binding.tool.name: binding for binding in tools.bindings()}["spawn_task"]
+
+    defaulted = await spawn.handler({"prompt": "default"}, ToolContext(channel="console"))
+    at_limit = await spawn.handler({"prompt": "too deep"}, ToolContext(channel="console", task_chain_depth=3))
+    opted_out = await spawn.handler({"prompt": "direct", "continue_turn": False}, ToolContext(channel="console"))
+
+    assert [task.continuation_depth for task in producer.enqueued] == [1, None, None]
+    assert [defaulted["continue_turn"], at_limit["continue_turn"], opted_out["continue_turn"]] == [True, False, False]
+
+
+@pytest.mark.asyncio
+async def test_cancel_and_get_task_use_the_full_id_resolved_from_a_prefix() -> None:
+    full_id = "a0dbc23f-1111-4000-8000-000000000001"
+    record = TaskRecord(request=TaskRequest(task_id=full_id, channel="console", prompt="p"), status=TaskStatus.RUNNING)
+
+    class _Repository:
+        def __init__(self) -> None:
+            self.events_calls: list[str] = []
+
+        async def get(self, task_id: str, owner_id: str | None = None) -> TaskRecord | None:
+            return record if full_id.startswith(task_id) else None
+
+        async def events(self, task_id: str, **_kwargs: Any) -> list[dict[str, Any]]:
+            self.events_calls.append(task_id)
+            return []
+
+        async def mark_cancelled(self, task_id: str) -> bool:
+            return True
+
+    manager = _TaskManagerStub()
+    repository = _Repository()
+    tools = TaskTools(cast(Any, _ProducerStub()), cast(Any, manager), task_repository=cast(Any, repository))
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+    context = ToolContext(channel="console", owner_id="primary")
+
+    await bindings["cancel_task"].handler({"task_id": "a0dbc23f"}, context)
+    await bindings["get_task"].handler({"task_id": "a0dbc23f"}, context)
+
+    assert manager.cancel_calls == [full_id]
+    assert repository.events_calls == [full_id]
+
+
+@pytest.mark.asyncio
+async def test_cancel_and_get_task_report_an_ambiguous_prefix() -> None:
+    class _Repository:
+        async def get(self, task_id: str, owner_id: str | None = None) -> TaskRecord | None:
+            raise AmbiguousTaskIdError(task_id)
+
+    manager = _TaskManagerStub()
+    tools = TaskTools(cast(Any, _ProducerStub()), cast(Any, manager), task_repository=cast(Any, _Repository()))
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+    context = ToolContext(channel="console", owner_id="primary")
+
+    cancelled = await bindings["cancel_task"].handler({"task_id": "b1c2d3e4"}, context)
+    fetched = await bindings["get_task"].handler({"task_id": "b1c2d3e4"}, context)
+
+    assert cancelled["cancelled"] is False
+    assert fetched["found"] is False
+    assert "ambiguous" in cancelled["reason"] and "ambiguous" in fetched["reason"]
+    assert manager.cancel_calls == []
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_includes_a_result_preview() -> None:
+    record = TaskRecord(
+        request=TaskRequest(task_id="t1", channel="console", prompt="p"),
+        status=TaskStatus.DONE,
+        result=TaskResult(text="x" * 400),
+    )
+
+    class _Repository:
+        async def list(self, **_kwargs: Any) -> list[TaskRecord]:
+            return [record]
+
+    tools = TaskTools(
+        cast(Any, _ProducerStub()), cast(Any, _TaskManagerStub()), task_repository=cast(Any, _Repository())
+    )
+    list_tasks = {binding.tool.name: binding for binding in tools.bindings()}["list_tasks"]
+
+    result = await list_tasks.handler({}, ToolContext(channel="console", owner_id="primary"))
+
+    assert result["tasks"][0]["result_preview"] == "x" * 300
 
 
 @pytest.mark.asyncio

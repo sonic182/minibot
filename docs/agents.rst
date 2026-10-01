@@ -20,13 +20,18 @@ Delegation Tools
 
 Delegation is **asynchronous**: ``spawn_task`` returns a ``task_id`` and the main agent does not
 wait inside the turn. By default the worker's answer, including any files it produced, is sent
-straight to the conversation as a later message and the main agent never sees it (fire and forget).
-Pass ``continue_turn: true`` when the main agent needs the result to keep working, such as a second
+straight to the conversation as a later message (fire and forget). A short notice with the agent,
+the task id and the outcome is also recorded in the conversation history as a user message, so the
+main agent knows the task finished and can call ``get_task`` for its result on the user's next
+message. The worker's output itself is never written to the history. Pass
+``continue_turn: true`` when the main agent needs the result to keep working, such as a second
 step that depends on it or a comparison: the result then comes back as a new turn, saved to the
 conversation history, and the main agent answers from it instead of the raw worker text. Failures
 and timeouts come back the same way, so the agent can explain or retry. Worker output reaches the
 model marked as untrusted data. One turn can start at most three continuing tasks, and a chain of
-continuing tasks is limited to three levels. A rate-limit retry notice still goes straight to the
+continuing tasks is limited to three levels. ``[tasks] continue_turn_default = true`` makes
+continuing the default when the model leaves ``continue_turn`` unset; past the limits such a task
+falls back to fire and forget instead of failing. A rate-limit retry notice still goes straight to the
 user, and a continuing task that is cancelled does not report back. Use ``get_task`` to retrieve a
 result, ``list_tasks`` to see what is running, and ``cancel_task`` to stop one.
 

@@ -34,6 +34,10 @@ class TaskStopReason(StrEnum):
 MAX_TASK_CONTINUATIONS = 3
 
 
+class AmbiguousTaskIdError(ValueError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class TaskLimits:
     timeout_seconds: int

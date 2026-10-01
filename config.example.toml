@@ -587,6 +587,9 @@ worker_max_steps = "unlimited"
 worker_max_tool_calls = "unlimited"
 # Max subprocesses running simultaneously; excess tasks wait in the queue.
 max_concurrent_workers = 4
+# What spawn_task does when the model leaves continue_turn unset: false delivers the worker's answer straight to
+# the chat (it is also recorded in the history); true returns it to the main agent as a new turn.
+continue_turn_default = true
 
 # Queue storage used when tasks.backend = "sqlite". No external broker required.
 [tasks.sqlite]

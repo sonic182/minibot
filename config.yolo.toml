@@ -319,6 +319,7 @@ worker_timeout_seconds = 1800
 worker_max_steps = "unlimited"
 worker_max_tool_calls = "unlimited"
 max_concurrent_workers = 4
+continue_turn_default = true
 
 [tasks.sqlite]
 sqlite_url = "sqlite+aiosqlite:///./data/tasks.db"

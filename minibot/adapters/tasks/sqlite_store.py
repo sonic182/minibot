@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
@@ -12,11 +13,20 @@ from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
 from minibot.config.schema import SqliteTaskQueueConfig
-from minibot.core.tasks import TaskLimits, TaskRecord, TaskRequest, TaskResult, TaskStatus, TaskStopReason
+from minibot.core.tasks import (
+    AmbiguousTaskIdError,
+    TaskLimits,
+    TaskRecord,
+    TaskRequest,
+    TaskResult,
+    TaskStatus,
+    TaskStopReason,
+)
 from minibot.shared.datetime_utils import ensure_utc, utcnow
 
 TaskBase = declarative_base()
 _MAX_EVENTS_PER_TASK = 100
+_TASK_ID_PREFIX = re.compile(r"[0-9a-f-]{8,35}")
 
 
 class TaskModel(TaskBase):
@@ -353,6 +363,17 @@ class SQLiteTaskStore:
             if owner_id is not None:
                 statement = statement.where(TaskModel.owner_id == owner_id)
             record = (await session.execute(statement)).scalars().first()
+            if record is None and owner_id is not None and _TASK_ID_PREFIX.fullmatch(task_id):
+                statement = (
+                    select(TaskModel)
+                    .where(TaskModel.id.startswith(task_id, autoescape=True))
+                    .where(TaskModel.owner_id == owner_id)
+                    .limit(2)
+                )
+                matches = (await session.execute(statement)).scalars().all()
+                if len(matches) > 1:
+                    raise AmbiguousTaskIdError(task_id)
+                record = matches[0] if matches else None
             return _to_domain(record) if record else None
 
     async def list(self, *, owner_id: str, statuses: list[TaskStatus] | None, limit: int) -> list[TaskRecord]:

@@ -927,6 +927,9 @@ class TasksConfig(BaseModel):
     - ``worker_max_steps`` — optional execution-step ceiling; ``"unlimited"`` disables it (default).
     - ``worker_max_tool_calls`` — optional tool-call ceiling; ``"unlimited"`` disables it (default).
     - ``max_concurrent_workers`` — maximum parallel task handlers (default: ``4``).
+    - ``continue_turn_default`` — what ``spawn_task`` does when the model leaves ``continue_turn`` unset
+      (default: ``false``). ``true`` returns every result to the main agent as a new turn; once a turn reaches
+      the continuation limit, further tasks fall back to delivering straight to the chat instead of failing.
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
@@ -936,6 +939,7 @@ class TasksConfig(BaseModel):
     worker_max_steps: TaskLimitValue = "unlimited"
     worker_max_tool_calls: TaskLimitValue = "unlimited"
     max_concurrent_workers: PositiveInt = 4
+    continue_turn_default: bool = False
     sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
 
     @model_validator(mode="after")

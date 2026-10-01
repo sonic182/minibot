@@ -643,6 +643,18 @@ deliverable — see Trust model):
 (The env-inheritance half of this is already fixed in Phase 0 — what's left
 here is the harder, undecided part: filesystem/process isolation.)
 
+## [ ] Phase 8 — Share tool construction with task workers
+
+Left over from the hex architecture refactor. `_build_worker_tools`
+(`minibot/app/tasks/worker.py:294`) deliberately keeps a narrower tool set than
+the main agent and does not load extensions, so it builds its own
+constructors. `build_enabled_tools` (`minibot/app/tool_factory.py:28`) builds
+`CalculatorTool` and `SkillLoaderTool` the same way.
+
+Factor the reusable constructors out of `app/tool_factory.py` where that keeps
+the worker's current visibility. Do not enable main-agent-only tools for
+workers.
+
 ## Explicitly deferred
 
 - MCP OAuth HTTP callback endpoint (issue #65 alternative 2).

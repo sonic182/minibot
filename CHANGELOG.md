@@ -32,8 +32,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   levels (`task:continuation_limit`). The task queue gains a nullable `continuation_depth` column, added to
   existing SQLite files on startup, and RabbitMQ task messages carry the same field. `minibot console --once`
   waits for the continuation reply instead of exiting on the hand-off.
+- **`[tasks] continue_turn_default`.** Set it to `true` to make `continue_turn` the default when the model
+  leaves it unset. Past the continuation limits such a task falls back to fire and forget instead of failing;
+  an explicit `continue_turn: true` still fails with `task:continuation_limit`.
+- **`list_tasks` shows a `result_preview`** of up to 300 characters for finished tasks.
 
 ### Fixed
+
+- **The main agent can read fire-and-forget task results.** A task result delivered straight to the chat,
+  and the failure or timeout notice, is now also recorded in the conversation history as a short user
+  message with the agent, the full task id and the outcome (the worker's output is not copied there), so
+  the agent can call `get_task` when asked about it on the next message.
+  `get_task` and `cancel_task` also accept a unique id prefix of at least 8 characters, so a shortened id no
+  longer reads as a missing task. The prefix is resolved within the caller's own tasks only, and an
+  ambiguous one is reported as such instead of as "not found". Both tools act on the full id the prefix
+  resolves to, so `cancel_task` really stops the worker and `get_task` returns the task's events. A custom
+  `TaskRepository` may raise the new `minibot.core.tasks.AmbiguousTaskIdError` from `get()` when a prefix
+  matches more than one task. A rich-text format-repair fallback no longer records the same result in the
+  history a second time.
 
 - **MCP tool calls no longer freeze the bot in `bridge` mode.** The bridge waited for each remote call on a
   separate thread while holding the main event loop, so Telegram polling, the scheduler and every other turn

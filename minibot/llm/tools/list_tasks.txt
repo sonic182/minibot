@@ -1,3 +1,3 @@
 List currently active background worker tasks.
 
-Use this to inspect outstanding task_ids and elapsed time before deciding whether to wait, synthesize partial results, or cancel remaining work.
+Use this to inspect outstanding task_ids and elapsed time before deciding whether to wait, synthesize partial results, or cancel remaining work. Finished tasks include a short `result_preview`; call get_task for the full result.

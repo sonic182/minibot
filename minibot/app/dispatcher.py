@@ -23,7 +23,7 @@ from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_factory import build_enabled_tools
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.config.schema import Settings
-from minibot.core.channels import ChannelCapabilities, ChannelResponse, RenderableResponse
+from minibot.core.channels import ChannelCapabilities, ChannelResponse, RenderableResponse, session_identifier
 from minibot.core.events import (
     BaseEvent,
     MessageEvent,
@@ -74,6 +74,8 @@ class Dispatcher:
         self._event_bus = event_bus
         self._channel_capabilities = dict(channel_capabilities or {})
         self._subscription = event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
+        self._history_subscription = event_bus.subscribe(types=(OutboundEvent,))
+        self._memory = memory_backend
         self._pending_turns = pending_turns
         tools = build_enabled_tools(
             settings,
@@ -177,6 +179,7 @@ class Dispatcher:
                 extra={"hidden_tools": main_agent_tools_view.hidden_tool_names},
             )
         self._task: asyncio.Task[None] | None = None
+        self._history_task: asyncio.Task[None] | None = None
 
     @property
     def main_agent_tool_names(self) -> list[str]:
@@ -184,6 +187,23 @@ class Dispatcher:
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run())
+        self._history_task = asyncio.create_task(self._record_outbound_history())
+
+    async def _record_outbound_history(self) -> None:
+        async for event in self._history_subscription:
+            if not isinstance(event, OutboundEvent):
+                continue
+            response = event.response
+            text = response.metadata.get("history_text")
+            if not isinstance(text, str) or not text:
+                continue
+            try:
+                await self._memory.append_history(session_identifier(response.channel, response.chat_id), "user", text)
+            except Exception:
+                self._logger.exception(
+                    "failed to record delivered message in history",
+                    extra={"channel": response.channel, "chat_id": response.chat_id},
+                )
 
     async def _run(self) -> None:
         async for event in self._subscription:
@@ -349,6 +369,7 @@ class Dispatcher:
             self._logger.exception("failed to handle format repair", exc_info=exc)
             fallback_text = event.response.render.text if event.response.render is not None else event.response.text
             fallback_metadata = dict(event.response.metadata)
+            fallback_metadata.pop("history_text", None)
             fallback_metadata["format_repair_failed"] = True
             fallback_metadata["format_repair_error"] = str(exc)
             fallback_response = ChannelResponse(
@@ -365,10 +386,12 @@ class Dispatcher:
 
     async def stop(self) -> None:
         await self._subscription.close()
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+        await self._history_subscription.close()
+        for task in (self._task, self._history_task):
+            if task:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
 
 def _build_audio_auto_transcription_service(
