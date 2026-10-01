@@ -25,6 +25,7 @@ from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
+from minibot.app.tool_constructors import build_calculator_tool, build_skill_loader_bindings
 from minibot.config.schema import Settings, task_limit
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentSpec
@@ -37,7 +38,6 @@ from minibot.llm.tools.apply_patch import ApplyPatchTool
 from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
 from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.bash import BashTool
-from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.code_read import CodeReadTool
 from minibot.llm.tools.file_storage import FileStorageTool
 from minibot.llm.tools.grep import GrepTool
@@ -45,7 +45,6 @@ from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.mcp_bridge import build_mcp_bindings_async
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
-from minibot.llm.tools.skill_loader import SkillLoaderTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.llm.tools.wait import WaitTool
 from minibot.shared.utils import validate_attachments
@@ -305,7 +304,7 @@ def _build_worker_tools(
         bindings.extend(CurrentTimeTool(settings.tools.time.default_format).bindings())
     if settings.tools.calculator.enabled:
         bindings.extend(
-            CalculatorTool(
+            build_calculator_tool(
                 default_scale=settings.tools.calculator.default_scale,
                 max_expression_length=settings.tools.calculator.max_expression_length,
                 max_exponent_abs=settings.tools.calculator.max_exponent_abs,
@@ -335,7 +334,7 @@ def _build_worker_tools(
             )
     if settings.tools.skills.enabled:
         registry = SkillRegistry.from_config(settings.tools.skills)
-        bindings.extend(SkillLoaderTool(registry, managed_storage, settings.tools.bash.enabled).bindings())
+        bindings.extend(build_skill_loader_bindings(registry, managed_storage, settings.tools.bash.enabled))
     bindings.extend(mcp_bindings)
 
     bindings.extend(extension_tools)
