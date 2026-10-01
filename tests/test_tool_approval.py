@@ -16,11 +16,16 @@ from minibot.app.tool_approval import (
     format_approval_detail,
     request_tool_approval,
 )
+from minibot.core.channels import ChannelCapabilities
 from minibot.core.events import ToolApprovalRequestedEvent, ToolApprovalResolvedEvent
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.errors import ToolInputError
 
-_CONTEXT = ToolContext(channel="telegram", chat_id=1)
+_CONTEXT = ToolContext(
+    channel="telegram",
+    chat_id=1,
+    channel_capabilities=ChannelCapabilities(supports_tool_approval=True),
+)
 
 
 def _binding(name: str, handler: AsyncMock) -> ToolBinding:
@@ -119,6 +124,7 @@ async def test_tool_name_in_the_request_is_escaped_and_capped() -> None:
         channel="telegram",
         chat_id=1,
         timeout_seconds=0.01,
+        supports_tool_approval=True,
     )
 
     event = await asyncio.wait_for(anext(aiter(requested)), timeout=1)
@@ -158,7 +164,13 @@ async def _answer_first_request(bus: EventBus, *, approved: bool) -> None:
     await subscription.close()
 
 
-async def _request(bus: EventBus, *, channel: str = "telegram", timeout: float = 1) -> bool:
+async def _request(
+    bus: EventBus,
+    *,
+    channel: str = "telegram",
+    timeout: float = 1,
+    supports_tool_approval: bool = True,
+) -> bool:
     return await request_tool_approval(
         bus,
         tool_name="mcp_mail__smtp_send_message",
@@ -166,6 +178,7 @@ async def _request(bus: EventBus, *, channel: str = "telegram", timeout: float =
         channel=channel,
         chat_id=1,
         timeout_seconds=timeout,
+        supports_tool_approval=supports_tool_approval,
     )
 
 
@@ -198,7 +211,7 @@ async def test_request_outside_telegram_is_denied_without_asking() -> None:
     bus = EventBus()
     requested = bus.subscribe(types=(ToolApprovalRequestedEvent,))
 
-    assert await _request(bus, channel="console") is False
+    assert await _request(bus, channel="console", supports_tool_approval=False) is False
     assert requested._queue.empty()
 
 
@@ -214,6 +227,7 @@ async def test_detail_supplied_by_a_worker_is_capped() -> None:
         channel="telegram",
         chat_id=1,
         timeout_seconds=0.01,
+        supports_tool_approval=True,
         detail="x" * 10_000,
     )
 

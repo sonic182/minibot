@@ -15,6 +15,7 @@ from minibot.app.event_bus import EventBus
 from minibot.app.tasks.manager import DelegationBudget, TaskManager, resolve_delegation_budget
 from minibot.app.token_limits_autoconfig import prime_model_limits
 from minibot.core.agents import AgentSpec
+from minibot.core.channels import ChannelCapabilities
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
 
 # ---------------------------------------------------------------------------
@@ -118,8 +119,17 @@ class _FakeProc:
 # ---------------------------------------------------------------------------
 
 
-def _make_manager(bus: EventBus, timeout: float = 5.0) -> TaskManager:
-    return TaskManager(event_bus=bus, worker_timeout_seconds=timeout)
+def _make_manager(
+    bus: EventBus,
+    timeout: float = 5.0,
+    *,
+    channel_capabilities: dict[str, ChannelCapabilities] | None = None,
+) -> TaskManager:
+    return TaskManager(
+        event_bus=bus,
+        worker_timeout_seconds=timeout,
+        channel_capabilities=channel_capabilities,
+    )
 
 
 async def _spawn(
@@ -243,7 +253,10 @@ async def test_reader_success_without_render_kind_falls_back_to_plain_text() -> 
 async def test_reader_success_publishes_telegram_attachments_before_result() -> None:
     bus = EventBus()
     sub = bus.subscribe()
-    manager = _make_manager(bus)
+    manager = _make_manager(
+        bus,
+        channel_capabilities={"telegram": ChannelCapabilities(supports_file_attachment_delivery=True)},
+    )
     pipe = _PipeSuccess(
         {
             "task_id": "t1",
@@ -291,7 +304,10 @@ async def test_reader_success_appends_attachment_paths_for_console() -> None:
 async def test_reader_success_with_continuation_hands_the_result_back_to_the_orchestrator() -> None:
     bus = EventBus()
     sub = bus.subscribe()
-    manager = _make_manager(bus)
+    manager = _make_manager(
+        bus,
+        channel_capabilities={"telegram": ChannelCapabilities(supports_file_attachment_delivery=True)},
+    )
     pipe = _PipeSuccess(
         {
             "task_id": "t1",

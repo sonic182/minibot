@@ -4,6 +4,7 @@ import asyncio
 import os
 import threading
 from collections.abc import Callable
+from io import IOBase
 from typing import Any
 
 import aiosonic
@@ -14,6 +15,25 @@ from minibot.config.schema import AudioTranscriptionToolConfig
 from minibot.core.files import FileStorage
 
 _REMOTE_TIMEOUT_SECONDS = 600
+
+
+class _MultipartFileWithCRLF(IOBase):
+    def __init__(self, file: IOBase) -> None:
+        self._file = file
+        self._terminator_sent = False
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._file.read(size)
+        if chunk:
+            return chunk
+        if not self._terminator_sent:
+            self._terminator_sent = True
+            return b"\r\n"
+        return b""
+
+    def close(self) -> None:
+        self._file.close()
+        super().close()
 
 
 class AudioTranscriptionFacade:
@@ -103,7 +123,7 @@ class AudioTranscriptionFacade:
             form.add_field("translate", "true")
         try:
             with open(resolved_path, "rb") as audio_file:
-                form.add_field("file", audio_file, os.path.basename(resolved_path))
+                form.add_field("file", _MultipartFileWithCRLF(audio_file), os.path.basename(resolved_path))
                 async with aiosonic.HTTPClient() as client:
                     # whisper.cpp sends nothing until inference finishes, so sock_read must cover the whole run.
                     timeouts = Timeouts(sock_read=_REMOTE_TIMEOUT_SECONDS, request_timeout=_REMOTE_TIMEOUT_SECONDS)

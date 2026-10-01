@@ -70,6 +70,34 @@ def _make_container(extensions: object) -> type:
         def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
             return _EmptyPendingTurnStore()
 
+        @classmethod
+        def get_memory_backend(cls) -> object:
+            return object()
+
+        @classmethod
+        def get_agent_registry(cls) -> object:
+            return object()
+
+        @classmethod
+        def get_llm_factory(cls) -> object:
+            return object()
+
+        @classmethod
+        def get_skill_registry(cls) -> object:
+            return object()
+
+        @classmethod
+        def get_config_path(cls) -> None:
+            return None
+
+        @classmethod
+        def get_llm_client(cls) -> object:
+            return object()
+
+        @classmethod
+        def get_file_storage(cls) -> None:
+            return None
+
     return _FakeContainer
 
 
@@ -77,8 +105,8 @@ def _make_dispatcher(*, on_start=None, on_stop=None) -> type:
     class _FakeDispatcher:
         main_agent_tool_names: list[str] = []
 
-        def __init__(self, _event_bus: object) -> None:
-            pass
+        def __init__(self, _event_bus: object, **_dependencies: object) -> None:
+            return None
 
         async def start(self) -> None:
             if on_start is not None:

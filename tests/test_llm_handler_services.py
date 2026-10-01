@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 from llm_async.models import Tool
 
+from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime, RuntimeResult
 from minibot.app.handlers.services import (
@@ -197,6 +198,7 @@ def test_prompt_service_builds_format_repair_prompt() -> None:
         original_kind="markdown",
         parse_error="can't parse entities",
         original_content="*Hello",
+        capabilities=TELEGRAM_CHANNEL_CAPABILITIES,
     )
 
     assert "Telegram" in prompt
