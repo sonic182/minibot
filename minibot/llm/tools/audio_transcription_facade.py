@@ -10,8 +10,8 @@ import aiosonic
 from aiosonic.multipart import MultipartForm
 from aiosonic.timeout import Timeouts
 
-from minibot.adapters.config.schema import AudioTranscriptionToolConfig
-from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.config.schema import AudioTranscriptionToolConfig
+from minibot.core.files import FileStorage
 
 _REMOTE_TIMEOUT_SECONDS = 600
 
@@ -21,7 +21,7 @@ class AudioTranscriptionFacade:
         self,
         *,
         config: AudioTranscriptionToolConfig,
-        storage: LocalFileStorage,
+        storage: FileStorage,
         whisper_model_class_loader: Callable[[], Any],
     ) -> None:
         self._config = config

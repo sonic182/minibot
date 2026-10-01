@@ -126,3 +126,35 @@ class TaskRepository(Protocol):
     async def mark_cancelled(self, task_id: str) -> bool: ...
 
     async def events(self, task_id: str, *, limit: int = 100) -> list[dict[str, Any]]: ...
+
+    async def lease_due_tasks(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+        lease_timeout_seconds: int,
+    ) -> list[TaskRecord]: ...
+
+    async def retry_task(self, task_id: str, error: str) -> TaskStatus | None: ...
+
+
+class ActiveTask(Protocol):
+    task_id: str
+    channel: str
+    started_at: datetime
+
+
+class TaskManager(Protocol):
+    async def spawn(self, **kwargs: Any) -> None: ...
+
+    async def cancel(self, task_id: str) -> bool: ...
+
+    def active(self) -> list[ActiveTask]: ...
+
+    async def stop(self) -> None: ...
+
+
+class TaskConsumerSettings(Protocol):
+    batch_size: int
+    lease_timeout_seconds: int
+    poll_interval_seconds: float

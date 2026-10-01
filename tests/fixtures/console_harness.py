@@ -137,7 +137,19 @@ async def run_console_turn(
         patch.object(AppContainer, "get_llm_factory", return_value=llm_factory),
         patch.object(AppContainer, "get_llm_client", return_value=llm_factory.create_default()),
     ):
-        dispatcher = Dispatcher(bus)
+        dispatcher = Dispatcher(
+            bus,
+            pending_turns=AppContainer.get_pending_turn_store(),
+            settings=AppContainer.get_settings(),
+            memory_backend=AppContainer.get_memory_backend(),
+            agent_registry=AppContainer.get_agent_registry(),
+            llm_factory=AppContainer.get_llm_factory(),
+            skill_registry=AppContainer.get_skill_registry(),
+            config_path=AppContainer.get_config_path(),
+            llm_client=AppContainer.get_llm_client(),
+            extensions=AppContainer.get_extensions(),
+            managed_storage=AppContainer.get_file_storage(),
+        )
         console_service = ConsoleService(bus, chat_id=chat_id, user_id=user_id)
         await dispatcher.start()
         # The task queue's schema is created by the extension's own service, exactly as the daemon

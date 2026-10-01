@@ -5,7 +5,7 @@ from typing import Any
 
 from llm_async.models import Tool
 
-from minibot.adapters.config.schema import ApplyPatchToolConfig
+from minibot.config.schema import ApplyPatchToolConfig
 from minibot.llm.tools.arg_utils import require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description

@@ -36,6 +36,14 @@ def _write_skill(
     )
 
 
+def _skill_installer(registry: SkillRegistry) -> SkillInstallerTool:
+    return SkillInstallerTool(
+        registry,
+        parse_skill=skill_definitions_loader.parse_skill_file,
+        native_skills_dir=skill_definitions_loader.NATIVE_SKILLS_DIR,
+    )
+
+
 def _bindings_by_name(tool: SkillLoaderTool) -> dict[str, object]:
     return {binding.tool.name: binding for binding in tool.bindings()}
 
@@ -318,7 +326,7 @@ async def test_install_skill_previews_installs_and_is_discovered_without_restart
     )
     write_dir = tmp_path / "skills"
     registry = SkillRegistry(paths=[str(tmp_path / "configured")], write_path=str(write_dir))
-    handler = SkillInstallerTool(registry).bindings()[0].handler
+    handler = _skill_installer(registry).bindings()[0].handler
 
     preview = await handler({"source": "vercel-labs/skills"}, ToolContext())
 
@@ -372,7 +380,7 @@ async def test_install_skill_rejects_archive_members_escaping_the_extract_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _serve(monkeypatch, _tarball({"../evil/SKILL.md": "---\nname: evil\n---\n\nPwned.\n"}))
-    handler = SkillInstallerTool(SkillRegistry(write_path=str(tmp_path / "skills"))).bindings()[0].handler
+    handler = _skill_installer(SkillRegistry(write_path=str(tmp_path / "skills"))).bindings()[0].handler
 
     with pytest.raises(ValueError, match="unsafe archive"):
         await handler({"source": "https://example.com/skill.tar.gz", "install": True}, ToolContext())
@@ -392,7 +400,7 @@ async def test_install_skill_reports_and_gates_a_skill_it_would_shadow(
     _write_skill(project_dir, "find-skills", name="find-skills", description="Mine.")
     write_dir = tmp_path / "written"
     registry = SkillRegistry(paths=[str(project_dir)], write_path=str(write_dir))
-    handler = SkillInstallerTool(registry).bindings()[0].handler
+    handler = _skill_installer(registry).bindings()[0].handler
 
     preview = await handler({"source": "acme/skills"}, ToolContext())
 

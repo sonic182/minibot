@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from minibot.adapters.tasks.manager import TaskManager, resolve_delegation_budget
+from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.adapters.tasks.retention import TaskRetentionService
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskProducer, SQLiteTaskStore
 from minibot.app.agent_definitions_loader import load_agent_specs
@@ -8,6 +8,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.extensions import ExtensionContext
 from minibot.app.llm_client_factory import available_providers
 from minibot.app.task_consumer_service import SQLiteTaskConsumerService
+from minibot.app.tasks.manager import TaskManager, resolve_delegation_budget
 from minibot.llm.tools.tasks import TaskTools
 
 
@@ -38,6 +39,7 @@ def register(mb: ExtensionContext) -> None:
         secrets=mb.vault.as_mapping() if mb.vault else None,
         budget_for=lambda name, ov: resolve_delegation_budget(agent_registry, settings, name, ov),
         approval_timeout_seconds=settings.tools.approval.timeout_seconds,
+        channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
     )
     producer = SQLiteTaskProducer(store)
     consumer = SQLiteTaskConsumerService(

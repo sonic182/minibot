@@ -7,20 +7,19 @@ from uuid import uuid4
 
 from llm_async.models import Tool
 
-from minibot.adapters.config.schema import TasksConfig, task_limit
-from minibot.adapters.tasks.manager import TaskManager
-from minibot.app.agent_policies import normalize_model_overrides
-from minibot.app.agent_registry import AgentRegistry
-from minibot.app.llm_client_factory import ProviderOption, find_provider
+from minibot.config.schema import TasksConfig, task_limit
+from minibot.core.agents import AgentCatalog, normalize_model_overrides
 from minibot.core.tasks import (
     MAX_TASK_CONTINUATIONS,
     TaskLimits,
+    TaskManager,
     TaskProducer,
     TaskRecord,
     TaskRepository,
     TaskRequest,
     TaskStatus,
 )
+from minibot.llm.provider_options import ProviderOption, find_provider
 from minibot.llm.tools.arg_utils import (
     optional_int,
     optional_str,
@@ -39,12 +38,12 @@ class TaskTools:
         self,
         producer: TaskProducer,
         task_manager: TaskManager,
-        task_repository: TaskRepository | AgentRegistry | None = None,
+        task_repository: TaskRepository | AgentCatalog | None = None,
         config: TasksConfig | None = None,
-        agent_registry: AgentRegistry | None = None,
+        agent_registry: AgentCatalog | None = None,
         providers: Sequence[ProviderOption] = (),
     ) -> None:
-        if isinstance(task_repository, AgentRegistry) and agent_registry is None:
+        if isinstance(task_repository, AgentCatalog) and agent_registry is None:
             agent_registry = task_repository
             task_repository = None
         self._producer = producer

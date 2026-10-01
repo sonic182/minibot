@@ -12,7 +12,6 @@ from typing import Any
 from uuid import uuid4
 
 from minibot.adapters.config.loader import load_settings
-from minibot.adapters.config.schema import Settings, task_limit
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
 from minibot.app.agent_definitions_loader import load_agent_specs
@@ -26,6 +25,7 @@ from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
+from minibot.config.schema import Settings, task_limit
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentSpec
 from minibot.core.channels import session_identifier

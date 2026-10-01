@@ -3,15 +3,16 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from minibot.adapters.config.schema import Settings
-from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.skill_definitions_loader import NATIVE_SKILLS_DIR, parse_skill_file
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import Approver, apply_tool_approval, request_tool_approval
+from minibot.config.schema import Settings
+from minibot.core.files import FileStorage
 from minibot.core.memory import KeyValueMemory, MemoryBackend
-from minibot.core.tasks import TaskProducer
+from minibot.core.tasks import TaskManager, TaskProducer
 from minibot.llm.services.tool_executor import canonical_tool_name
 from minibot.llm.tools.agent_info import AgentInfoTool
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -21,7 +22,6 @@ from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.tool_events import apply_tool_call_events
 
 if TYPE_CHECKING:  # pragma: no cover
-    from minibot.adapters.tasks.manager import TaskManager
     from minibot.app.scheduler_service import ScheduledPromptService
 
 
@@ -37,13 +37,13 @@ def build_enabled_tools(
     task_manager: TaskManager | None = None,
     task_producer: TaskProducer | None = None,
     extension_tools: Sequence[ToolBinding] | None = None,
+    managed_storage: FileStorage | None = None,
 ) -> list[ToolBinding]:
     """Build core tools, then merge contributions from loaded extensions.
 
     ``kv_memory``, ``prompt_scheduler``, ``task_manager``, and ``task_producer`` remain
     accepted temporarily for callers outside the daemon; their tools are bundled extensions now.
     """
-    managed_storage = _build_managed_storage(settings) if settings.tools.file_storage.enabled else None
     tools = ChatMemoryTool(memory, max_history_messages=settings.memory.max_history_messages).bindings()
     if settings.tools.calculator.enabled:
         calculator = settings.tools.calculator
@@ -61,11 +61,19 @@ def build_enabled_tools(
         if settings.tools.skills.install:
             from minibot.llm.tools.skill_installer import SkillInstallerTool
 
-            tools.extend(SkillInstallerTool(skill_registry).bindings())
+            tools.extend(
+                SkillInstallerTool(
+                    skill_registry,
+                    parse_skill=parse_skill_file,
+                    native_skills_dir=NATIVE_SKILLS_DIR,
+                ).bindings()
+            )
     if extension_tools:
         tools.extend(extension_tools)
     if agent_registry is not None and llm_factory is not None and not agent_registry.is_empty():
-        tools.extend(AgentInfoTool(registry=agent_registry, llm_factory=llm_factory).bindings())
+        tools.extend(
+            AgentInfoTool(registry=agent_registry, providers=llm_factory.available_providers()).bindings()
+        )
     _ensure_unique_tool_names(tools)
     return apply_tool_call_events(
         apply_tool_approval(
@@ -92,17 +100,10 @@ def _event_bus_approver(event_bus: EventBus | None, timeout_seconds: float) -> A
             channel=context.channel,
             chat_id=context.chat_id,
             timeout_seconds=timeout_seconds,
+            supports_tool_approval=context.channel_capabilities.supports_tool_approval,
         )
 
     return approve
-
-
-def _build_managed_storage(settings: Settings) -> LocalFileStorage:
-    return LocalFileStorage(
-        root_dir=settings.tools.file_storage.root_dir,
-        max_write_bytes=settings.tools.file_storage.max_write_bytes,
-        allow_outside_root=settings.tools.file_storage.allow_outside_root,
-    )
 
 
 def _ensure_unique_tool_names(tools: list[ToolBinding]) -> None:

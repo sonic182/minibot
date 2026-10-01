@@ -7,11 +7,10 @@ from typing import Any, Literal, cast
 
 from llm_async.models import Tool
 
-from minibot.adapters.files.local_storage import LocalFileStorage
-from minibot.app.event_bus import EventBus
 from minibot.core.agent_runtime import AgentMessage, AppendMessageDirective, MessagePart, MessageRole, ToolResult
 from minibot.core.channels import ChannelFileResponse
-from minibot.core.events import OutboundFileEvent
+from minibot.core.events import EventPublisher, OutboundFileEvent
+from minibot.core.files import FileStorage
 from minibot.llm.tools.action_dispatcher import dispatch_action
 from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -49,8 +48,8 @@ class FileStorageTool:
 
     def __init__(
         self,
-        storage: LocalFileStorage,
-        event_bus: EventBus | None = None,
+        storage: FileStorage,
+        event_bus: EventPublisher | None = None,
     ) -> None:
         self._storage = storage
         self._event_bus = event_bus

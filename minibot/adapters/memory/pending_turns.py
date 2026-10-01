@@ -5,8 +5,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
-from minibot.adapters.config.schema import MemoryConfig
 from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.config.schema import MemoryConfig
 from minibot.shared.datetime_utils import utcnow
 
 Base = declarative_base()

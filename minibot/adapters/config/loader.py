@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from minibot.adapters.config.schema import Settings
-
-DEFAULT_CONFIG_PATHS = (Path("config.toml"),)
-
-
-def resolve_config_path(path: Path | None = None) -> Path:
-    env_path = os.environ.get("MINIBOT_CONFIG")
-    return path or (Path(env_path) if env_path else DEFAULT_CONFIG_PATHS[0])
+from minibot.config.paths import resolve_config_path
+from minibot.config.schema import Settings
 
 
 def load_settings(path: Path | None = None, secrets: Mapping[str, str] | None = None) -> Settings:

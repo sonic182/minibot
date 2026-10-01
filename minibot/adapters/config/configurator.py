@@ -23,16 +23,16 @@ from prompt_toolkit.layout.containers import HSplit
 from prompt_toolkit.widgets import CheckboxList, Label
 from pydantic import ValidationError
 
-from minibot.adapters.config.environment import expand_environment
 from minibot.adapters.config.loader import resolve_config_path
-from minibot.adapters.config.schema import (
+from minibot.app.llm_client_factory import available_providers
+from minibot.config.environment import expand_environment
+from minibot.config.schema import (
     ENVIRONMENT_CHOICES,
     LLMMConfig,
     ProviderConfig,
     Settings,
     TelegramChannelConfig,
 )
-from minibot.app.llm_client_factory import available_providers
 from minibot.llm.services.client_bootstrap import create_provider
 
 _logger = logging.getLogger(__name__)

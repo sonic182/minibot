@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import aiosonic
 from llm_async.utils.retry import RetryConfig
 
-from minibot.adapters.config.schema import LLMMConfig
+from minibot.config.schema import LLMMConfig
 from minibot.llm.services.codex_setup import CodexCredentialsError, load_credentials, resolve_auth_path
 from minibot.llm.services.provider_registry import resolve_provider_class
 

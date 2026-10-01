@@ -10,8 +10,8 @@ from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
-from minibot.adapters.config.schema import SqliteTaskQueueConfig
 from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.config.schema import SqliteTaskQueueConfig
 from minibot.core.tasks import TaskLimits, TaskRecord, TaskRequest, TaskResult, TaskStatus, TaskStopReason
 from minibot.shared.datetime_utils import ensure_utc, utcnow
 

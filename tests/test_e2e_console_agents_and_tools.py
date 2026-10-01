@@ -379,7 +379,19 @@ async def _run_console_turn(
     AppContainer.configure(config_path)
     await AppContainer.initialize_storage()
     bus = AppContainer.get_event_bus()
-    dispatcher = Dispatcher(bus)
+    dispatcher = Dispatcher(
+        bus,
+        pending_turns=AppContainer.get_pending_turn_store(),
+        settings=AppContainer.get_settings(),
+        memory_backend=AppContainer.get_memory_backend(),
+        agent_registry=AppContainer.get_agent_registry(),
+        llm_factory=AppContainer.get_llm_factory(),
+        skill_registry=AppContainer.get_skill_registry(),
+        config_path=AppContainer.get_config_path(),
+        llm_client=AppContainer.get_llm_client(),
+        extensions=AppContainer.get_extensions(),
+        managed_storage=AppContainer.get_file_storage(),
+    )
     console_service = ConsoleService(bus, chat_id=4321, user_id=8765)
     await dispatcher.start()
     extensions = AppContainer.get_extensions()

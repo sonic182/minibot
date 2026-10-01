@@ -25,7 +25,7 @@ from starlette.templating import Jinja2Templates
 from starlette.types import Scope
 from starlette.websockets import WebSocket
 
-from minibot.adapters.config.schema import STATIC_CACHE_DISABLED_ENVIRONMENTS, HTTPServerConfig
+from minibot.config.schema import STATIC_CACHE_DISABLED_ENVIRONMENTS, HTTPServerConfig
 
 type RouteSpec = tuple[str, Callable[[Request], Awaitable[Any]], tuple[str, ...]]
 type WebSocketSpec = tuple[str, Callable[[WebSocket], Awaitable[None]]]

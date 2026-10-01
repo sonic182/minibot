@@ -14,14 +14,20 @@ from typing import Any
 
 from aiopipe import aioduplex
 
-from minibot.adapters.config.schema import Settings
-from minibot.adapters.tasks.worker import worker_entry
 from minibot.app.agent_policies import is_retargeted, resolve_delegation_target
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.tasks.worker import worker_entry
 from minibot.app.token_limits_autoconfig import ensure_model_limits
 from minibot.app.tool_approval import request_tool_approval
-from minibot.core.channels import ChannelFileResponse, ChannelMessage, ChannelResponse, RenderableResponse
+from minibot.config.schema import Settings
+from minibot.core.channels import (
+    ChannelCapabilities,
+    ChannelFileResponse,
+    ChannelMessage,
+    ChannelResponse,
+    RenderableResponse,
+)
 from minibot.core.events import MessageEvent, OutboundEvent, OutboundFileEvent
 from minibot.core.tasks import TaskLimits, TaskRepository, TaskResult, TaskStatus, TaskStopReason
 from minibot.llm.services.runtime_compaction import threshold_from_context_limit
@@ -129,9 +135,11 @@ class TaskManager:
         secrets: Mapping[str, str] | None = None,
         budget_for: Callable[[str | None, Mapping[str, Any]], Awaitable[DelegationBudget]] | None = None,
         approval_timeout_seconds: float = 90,
+        channel_capabilities: Mapping[str, ChannelCapabilities] | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._approval_timeout_seconds = approval_timeout_seconds
+        self._channel_capabilities = dict(channel_capabilities or {})
         self._worker_timeout_seconds = worker_timeout_seconds
         self._lease_timeout_seconds = lease_timeout_seconds or max(1, int(worker_timeout_seconds))
         self._task_repository = task_repository
@@ -492,6 +500,7 @@ class TaskManager:
                             chat_id=event.get("chat_id") if isinstance(event.get("chat_id"), int) else None,
                             detail=event.get("detail") if isinstance(event.get("detail"), str) else None,
                             timeout_seconds=min(self._approval_timeout_seconds, max(deadline - loop.time(), 0)),
+                            supports_tool_approval=self._capabilities_for(event.get("channel")).supports_tool_approval,
                         )
                     except Exception:
                         self._logger.exception("tool approval request failed", extra={"task_id": payload["task_id"]})
@@ -587,7 +596,7 @@ class TaskManager:
             return
         text = _append_attachment_paths(
             text=result.text,
-            channel=str(payload.get("channel") or "rabbitmq"),
+            supports_file_delivery=self._capabilities_for(payload.get("channel")).supports_file_attachment_delivery,
             attachments=result.attachments,
         )
         # worker.py stashes what extract_answer() already resolved (markdown vs plain text) in
@@ -611,7 +620,13 @@ class TaskManager:
         attachments: list[dict[str, Any]],
         managed_files_root: Any,
     ) -> None:
-        if not attachments or payload.get("channel") != "telegram" or not isinstance(payload.get("chat_id"), int):
+        channel = str(payload.get("channel") or "")
+        capabilities = self._capabilities_for(channel)
+        if (
+            not attachments
+            or not capabilities.supports_file_attachment_delivery
+            or not isinstance(payload.get("chat_id"), int)
+        ):
             return
         base_dir = Path(managed_files_root if isinstance(managed_files_root, str) else "data/files").resolve()
         for attachment in attachments:
@@ -621,7 +636,7 @@ class TaskManager:
             await self._event_bus.publish(
                 OutboundFileEvent(
                     response=ChannelFileResponse(
-                        channel="telegram",
+                        channel=channel,
                         chat_id=payload["chat_id"],
                         file_path=str(file_path),
                         caption=attachment.get("caption"),
@@ -629,6 +644,11 @@ class TaskManager:
                     )
                 )
             )
+
+    def _capabilities_for(self, channel: Any) -> ChannelCapabilities:
+        if not isinstance(channel, str):
+            return ChannelCapabilities()
+        return self._channel_capabilities.get(channel, ChannelCapabilities())
 
 
 def _coerce_retry_after_seconds(value: Any) -> int:
@@ -688,8 +708,8 @@ def _resolve_managed_attachment_path(base_dir: Path, relative_path: str, logger:
     return resolved
 
 
-def _append_attachment_paths(*, text: str, channel: str, attachments: list[dict[str, Any]]) -> str:
-    if channel == "telegram":
+def _append_attachment_paths(*, text: str, supports_file_delivery: bool, attachments: list[dict[str, Any]]) -> str:
+    if supports_file_delivery:
         return text
     return _with_attachment_list(text, attachments)
 

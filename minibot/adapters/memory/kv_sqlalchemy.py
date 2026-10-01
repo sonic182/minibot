@@ -12,8 +12,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
-from minibot.adapters.config.schema import KeyValueMemoryConfig
 from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, fts_match_query, resolve_sqlite_storage_path
+from minibot.config.schema import KeyValueMemoryConfig
 from minibot.core.memory import (
     KeyValueCreateResult,
     KeyValueEntry,

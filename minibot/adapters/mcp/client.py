@@ -6,31 +6,12 @@ import logging
 from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
 from contextlib import suppress
-from dataclasses import dataclass
 from threading import Event, Lock, Thread
 from typing import Any, Literal
 
 import aiosonic
 
-
-@dataclass(frozen=True)
-class MCPToolDefinition:
-    name: str
-    description: str
-    input_schema: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class MCPToolCallResult:
-    content: Any
-    is_error: bool = False
-
-
-@dataclass(frozen=True)
-class MCPServerMetadata:
-    name: str
-    version: str | None = None
-    instructions: str | None = None
+from minibot.core.mcp import MCPServerMetadata, MCPToolCallResult, MCPToolDefinition
 
 
 class MCPClient:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from minibot.shared.tool_call_display import ToolCallDisplay, _is_secret, summarize_tool_call
+from minibot.llm.tools.tool_call_display import ToolCallDisplay, _is_secret, summarize_tool_call
 
 
 def test_exact_secret_keys_are_masked() -> None:

@@ -4,7 +4,7 @@ from typing import Any
 
 from llm_async.models import Tool
 
-from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.core.files import FileStorage
 from minibot.llm.tools.arg_utils import int_with_default, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
@@ -15,7 +15,7 @@ class CodeReadTool:
     _DEFAULT_LIMIT = 200
     _MAX_LIMIT = 400
 
-    def __init__(self, storage: LocalFileStorage) -> None:
+    def __init__(self, storage: FileStorage) -> None:
         self._storage = storage
 
     def bindings(self) -> list[ToolBinding]:

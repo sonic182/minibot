@@ -94,10 +94,10 @@ async def test_run_agent_loop_returns_structured_success() -> None:
     settings = Settings()
 
     with (
-        patch("minibot.adapters.tasks.worker.load_settings", return_value=settings),
-        patch("minibot.adapters.tasks.worker.LLMClientFactory", _FakeFactory),
-        patch("minibot.adapters.tasks.worker._build_worker_tools", return_value=[]),
-        patch("minibot.adapters.tasks.worker.AgentRuntime", _FakeRuntime),
+        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
+        patch("minibot.app.tasks.worker.AgentRuntime", _FakeRuntime),
     ):
         result = await worker.run_agent_loop(
             {"task_id": "t1", "channel": "console", "prompt": "Summarize this", "chat_id": 1, "user_id": 2}
@@ -138,9 +138,9 @@ def register(mb):
     settings = Settings.from_dict({"extensions": {"modules": [extension_name]}})
 
     with (
-        patch("minibot.adapters.tasks.worker.load_settings", return_value=settings),
-        patch("minibot.adapters.tasks.worker.LLMClientFactory", _FakeFactory),
-        patch("minibot.adapters.tasks.worker.AgentRuntime", _ToolCapturingRuntime),
+        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.app.tasks.worker.AgentRuntime", _ToolCapturingRuntime),
     ):
         await worker.run_agent_loop(
             {"task_id": "t1", "channel": "console", "prompt": "Greet Ana", "chat_id": 1, "user_id": 2}
@@ -167,10 +167,10 @@ async def test_run_agent_loop_falls_back_to_placeholder_text_on_empty_completion
     settings = Settings()
 
     with (
-        patch("minibot.adapters.tasks.worker.load_settings", return_value=settings),
-        patch("minibot.adapters.tasks.worker.LLMClientFactory", _FakeFactory),
-        patch("minibot.adapters.tasks.worker._build_worker_tools", return_value=[]),
-        patch("minibot.adapters.tasks.worker.AgentRuntime", _EmptyCompletionRuntime),
+        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
+        patch("minibot.app.tasks.worker.AgentRuntime", _EmptyCompletionRuntime),
     ):
         result = await worker.run_agent_loop(
             {"task_id": "t1", "channel": "console", "prompt": "Summarize this", "chat_id": 1, "user_id": 2}
@@ -193,11 +193,11 @@ async def test_run_agent_loop_resolves_specialist_agent() -> None:
     )
 
     with (
-        patch("minibot.adapters.tasks.worker.load_settings", return_value=settings),
-        patch("minibot.adapters.tasks.worker.LLMClientFactory", _FakeFactory),
-        patch("minibot.adapters.tasks.worker.load_agent_specs", return_value=[specialist]),
-        patch("minibot.adapters.tasks.worker._build_worker_tools", return_value=[]),
-        patch("minibot.adapters.tasks.worker.AgentRuntime", _FakeRuntime),
+        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.app.tasks.worker.load_agent_specs", return_value=[specialist]),
+        patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
+        patch("minibot.app.tasks.worker.AgentRuntime", _FakeRuntime),
     ):
         result = await worker.run_agent_loop(
             {
@@ -234,13 +234,13 @@ async def test_run_agent_loop_closes_the_mcp_clients_it_started() -> None:
         return client
 
     with (
-        patch("minibot.adapters.tasks.worker.load_settings", return_value=settings),
-        patch("minibot.adapters.tasks.worker.LLMClientFactory", _FakeFactory),
-        patch("minibot.adapters.tasks.worker.load_agent_specs", return_value=[specialist]),
-        patch("minibot.adapters.tasks.worker.MCPClient", _fake_client),
-        patch("minibot.adapters.tasks.worker.build_mcp_bindings_async", AsyncMock(return_value=[])),
-        patch("minibot.adapters.tasks.worker._build_worker_tools", return_value=[]),
-        patch("minibot.adapters.tasks.worker.AgentRuntime", _FakeRuntime),
+        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.app.tasks.worker.load_agent_specs", return_value=[specialist]),
+        patch("minibot.app.tasks.worker.MCPClient", _fake_client),
+        patch("minibot.app.tasks.worker.build_mcp_bindings_async", AsyncMock(return_value=[])),
+        patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
+        patch("minibot.app.tasks.worker.AgentRuntime", _FakeRuntime),
     ):
         result = await worker.run_agent_loop(
             {
@@ -357,7 +357,7 @@ def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:
     overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6", "reasoning_effort": "high"}
     factory = _FakeFactory(settings)
 
-    with patch("minibot.adapters.tasks.worker.load_agent_specs", return_value=[specialist]):
+    with patch("minibot.app.tasks.worker.load_agent_specs", return_value=[specialist]):
         specialist_spec = worker._resolve_task_spec(
             settings=settings,
             llm_factory=factory,
@@ -399,7 +399,7 @@ def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
     overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6"}
     factory = _FakeFactory(settings)
 
-    with patch("minibot.adapters.tasks.worker.load_agent_specs", return_value=[specialist]):
+    with patch("minibot.app.tasks.worker.load_agent_specs", return_value=[specialist]):
         # Target allows more than the agent asked for: the agent's own cap wins.
         generous = worker._resolve_task_spec(
             settings=settings,

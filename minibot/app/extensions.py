@@ -9,16 +9,16 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, get_type_hints
 
-from llm_async.models import Tool
 from pydantic import BaseModel, ValidationError
 
-from minibot.adapters.config.schema import Settings
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus, EventSubscription
+from minibot.config.schema import Settings
 from minibot.core.events import BaseEvent
 from minibot.core.secrets import SecretVault
 from minibot.core.tools import ToolContext, ToolPayload
 from minibot.llm.tools.base import ToolBinding
+from minibot.llm.tools.extension import build_extension_tool_binding
 from minibot.shared.errors import ToolInputError
 
 EventHandler = Callable[[Any], Awaitable[None]]
@@ -46,7 +46,7 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
         return ("minibot.extensions.channels.telegram", *common)
     if entrypoint == "console":
         return common
-    # Workers retain their deliberately narrower assembly in adapters.tasks.worker.
+    # Workers retain their deliberately narrower tool assembly.
     # Only user-configured extensions are loaded there.
     return ()
 
@@ -141,8 +141,10 @@ class ExtensionContext:
             return await func(args, context)
 
         self.add_tool(
-            ToolBinding(
-                tool=Tool(name=func.__name__, description=description, parameters=model.model_json_schema()),
+            build_extension_tool_binding(
+                name=func.__name__,
+                description=description,
+                parameters=model.model_json_schema(),
                 handler=handler,
             )
         )

@@ -12,9 +12,9 @@ from aiogram.exceptions import TelegramNetworkError
 from aiogram.types import Message as TelegramMessage
 from aiohttp import ClientError
 
-from minibot.adapters.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.messaging.telegram.incoming_media_mapper import TelegramIncomingMediaMapper
+from minibot.config.schema import FileStorageToolConfig, TelegramChannelConfig
 from minibot.core.channels import IncomingFileRef
 from minibot.shared.path_utils import to_posix_relative
 from minibot.shared.retries import AsyncRetriesService, RetryPolicy

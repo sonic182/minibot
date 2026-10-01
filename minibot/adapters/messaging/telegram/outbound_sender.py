@@ -10,8 +10,9 @@ from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile, InputRichMessage, ReplyParameters
 
-from minibot.adapters.config.schema import TelegramChannelConfig
+from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.app.event_bus import EventBus
+from minibot.config.schema import TelegramChannelConfig
 from minibot.core.channels import ChannelResponse, RenderableResponse
 from minibot.core.events import OutboundFileEvent, OutboundFormatRepairEvent
 
@@ -68,6 +69,7 @@ class TelegramOutboundSender:
                     chat_id=response.chat_id,
                     channel=response.channel,
                     user_id=self._extract_user_id(response),
+                    capabilities=TELEGRAM_CHANNEL_CAPABILITIES,
                 )
             )
             return

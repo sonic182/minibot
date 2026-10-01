@@ -4,9 +4,9 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
-from minibot.adapters.config.schema import ToolOutputSpillConfig
-from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.config.schema import ToolOutputSpillConfig
 from minibot.core.agent_runtime import ToolResult
+from minibot.core.files import FileStorage
 from minibot.llm.services.tool_executor import canonical_tool_name, normalize_tool_result, stringify_result
 from minibot.llm.tools.base import ToolBinding, ToolContext, ToolPayload
 
@@ -21,7 +21,7 @@ _logger = logging.getLogger("minibot.tool_output_spill")
 def apply_tool_output_spill(
     bindings: Sequence[ToolBinding],
     *,
-    storage: LocalFileStorage | None,
+    storage: FileStorage | None,
     config: ToolOutputSpillConfig,
 ) -> list[ToolBinding]:
     """Wrap tool handlers so oversized results are written to a managed file.
@@ -58,7 +58,7 @@ def apply_tool_output_spill(
 def _wrap(
     binding: ToolBinding,
     *,
-    storage: LocalFileStorage,
+    storage: FileStorage,
     config: ToolOutputSpillConfig,
     readback: list[str],
 ) -> ToolBinding:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from minibot.adapters.config.schema import LLMMConfig
+from minibot.config.schema import LLMMConfig
 from minibot.llm.services.provider_target import resolve_target_provider
 
 

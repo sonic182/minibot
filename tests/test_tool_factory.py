@@ -12,9 +12,9 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.tool_factory import build_enabled_tools
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.llm.tools.factory import build_enabled_tools
 
 
 class _MemoryStub:

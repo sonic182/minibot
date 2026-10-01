@@ -26,28 +26,28 @@ def _empty_extension_registry() -> ExtensionRegistry:
     return ExtensionRegistry([], logging.getLogger("test.extensions"))
 
 
-def _patch_container(
+def _dispatcher_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     dispatcher_module,
     handler_cls: type,
     *,
     pending_store: object | None = None,
-) -> None:
-    """Stub every AppContainer getter Dispatcher.__init__ reaches for."""
+) -> dict[str, object]:
     store = pending_store if pending_store is not None else _FakePendingTurnStore()
     monkeypatch.setattr(dispatcher_module, "LLMMessageHandler", handler_cls)
     monkeypatch.setattr(dispatcher_module, "build_enabled_tools", lambda *args, **kwargs: [])
-    container = dispatcher_module.AppContainer
-    monkeypatch.setattr(container, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(container, "get_scheduled_prompt_service", lambda: None)
-    monkeypatch.setattr(container, "get_memory_backend", lambda: object())
-    monkeypatch.setattr(container, "get_kv_memory_backend", lambda: None)
-    monkeypatch.setattr(container, "get_llm_client", lambda: object())
-    monkeypatch.setattr(container, "get_agent_registry", lambda: AgentRegistry([]))
-    monkeypatch.setattr(container, "get_skill_registry", lambda: SkillRegistry([]))
-    monkeypatch.setattr(container, "get_llm_factory", lambda: object())
-    monkeypatch.setattr(container, "get_pending_turn_store", lambda: store)
-    monkeypatch.setattr(container, "get_extensions", _empty_extension_registry)
+    return {
+        "pending_turns": store,
+        "settings": _FakeSettings(),
+        "memory_backend": object(),
+        "agent_registry": AgentRegistry([]),
+        "llm_factory": object(),
+        "skill_registry": SkillRegistry([]),
+        "config_path": None,
+        "llm_client": object(),
+        "extensions": _empty_extension_registry(),
+        "managed_storage": None,
+    }
 
 
 class _FakePendingTurnStore:
@@ -129,10 +129,10 @@ async def _running_dispatcher(
 ):
     from minibot.app import dispatcher as dispatcher_module
 
-    _patch_container(monkeypatch, dispatcher_module, handler_cls, pending_store=pending_store)
+    dependencies = _dispatcher_dependencies(monkeypatch, dispatcher_module, handler_cls, pending_store=pending_store)
     bus = EventBus()
     subscription = bus.subscribe(types=event_types)
-    dispatcher = dispatcher_module.Dispatcher(bus)
+    dispatcher = dispatcher_module.Dispatcher(bus, **dependencies)
     await dispatcher.start()
     try:
         yield bus, subscription

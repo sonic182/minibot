@@ -4,18 +4,15 @@ import asyncio
 import contextlib
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import aio_pika
 import aio_pika.abc
 
-from minibot.adapters.config.schema import RabbitMQConsumerConfig
 from minibot.app.agent_policies import normalize_model_overrides
 from minibot.app.event_bus import EventBus
-from minibot.core.tasks import TaskLimits, TaskRepository, TaskRequest, TaskStatus
-
-if TYPE_CHECKING:
-    from minibot.adapters.tasks.manager import TaskManager
+from minibot.config.schema import RabbitMQConsumerConfig
+from minibot.core.tasks import TaskLimits, TaskManager, TaskRepository, TaskRequest, TaskStatus
 
 
 class RabbitMQConsumerService:

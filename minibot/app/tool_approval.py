@@ -87,10 +87,11 @@ async def request_tool_approval(
     channel: str | None,
     chat_id: int | None,
     timeout_seconds: float,
+    supports_tool_approval: bool = False,
     detail: str | None = None,
 ) -> bool:
     """Ask the user on Telegram and wait for the answer; anything but an explicit approval denies."""
-    if channel != "telegram" or chat_id is None:
+    if not supports_tool_approval or chat_id is None:
         _logger.warning("tool approval unavailable on this channel", extra={"tool": tool_name, "channel": channel})
         return False
     approval_id = uuid4().hex

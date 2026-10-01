@@ -9,8 +9,8 @@ from getpass import getpass
 from pathlib import Path
 from types import MappingProxyType
 
-from minibot.adapters.config.schema import VaultConfig
 from minibot.adapters.vault import crypt, secrets_yaml
+from minibot.config.schema import VaultConfig
 
 PASSWORD_ENV_VAR = "MINIBOT_VAULT_PASSWORD"
 

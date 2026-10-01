@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from minibot.adapters.config.schema import Settings
 from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.config.schema import Settings
 
 
 def managed_storage(settings: Settings, *, error_message: str | None = None) -> LocalFileStorage | None:

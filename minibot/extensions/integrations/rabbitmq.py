@@ -13,7 +13,8 @@ def register(mb: ExtensionContext) -> None:
         return
     from minibot.adapters.messaging.rabbitmq.producer import RabbitMQTaskProducer
     from minibot.adapters.messaging.rabbitmq.service import RabbitMQConsumerService
-    from minibot.adapters.tasks.manager import TaskManager, resolve_delegation_budget
+    from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
+    from minibot.app.tasks.manager import TaskManager, resolve_delegation_budget
     from minibot.llm.tools.tasks import TaskTools
 
     settings = mb.settings
@@ -26,6 +27,7 @@ def register(mb: ExtensionContext) -> None:
         settings.tasks.sqlite.lease_timeout_seconds,
         secrets=mb.vault.as_mapping() if mb.vault else None,
         budget_for=lambda name, ov: resolve_delegation_budget(agent_registry, settings, name, ov),
+        channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
         approval_timeout_seconds=settings.tools.approval.timeout_seconds,
     )
     producer = RabbitMQTaskProducer(settings.rabbitmq, store)

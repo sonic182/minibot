@@ -7,8 +7,8 @@ from typing import Any
 
 from llm_async.models import Tool
 
-from minibot.adapters.config.schema import GrepToolConfig
-from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.config.schema import GrepToolConfig
+from minibot.core.files import FileStorage
 from minibot.llm.tools.arg_utils import optional_bool, optional_int, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
@@ -33,7 +33,7 @@ class GrepTool:
     - ``max_file_size_bytes`` — skip files larger than this.
     """
 
-    def __init__(self, storage: LocalFileStorage, config: GrepToolConfig) -> None:
+    def __init__(self, storage: FileStorage, config: GrepToolConfig) -> None:
         self._storage = storage
         self._config = config
 

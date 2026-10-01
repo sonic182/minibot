@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from minibot.adapters.config.schema import AudioTranscriptionToolConfig, FileStorageToolConfig, HTTPServerConfig
 from minibot.adapters.files.local_storage import LocalFileStorage
+from minibot.config.schema import AudioTranscriptionToolConfig, FileStorageToolConfig, HTTPServerConfig
 from minibot.core.channels import IncomingFileRef
 
 _UPLOAD_SUBDIR = "uploads/temp/web"
