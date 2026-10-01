@@ -14,7 +14,7 @@ from minibot.llm.tools.arg_utils import int_with_default, optional_str, require_
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_integer, nullable_string, strict_object
-from minibot.shared.subprocess_utils import communicate_with_timeout
+from minibot.shared.subprocess_utils import communicate_with_timeout, truncate_subprocess_output
 
 if TYPE_CHECKING:
     from minibot.core.files import FileStorage
@@ -104,7 +104,11 @@ class BashTool:
         if self._should_spill(stdout_data, stderr_data):
             spill_info = self._save_spilled_output(command, stdout_data, stderr_data)
             if spill_info is not None:
-                stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
+                stdout_text, stderr_text, truncated = truncate_subprocess_output(
+                    stdout_data,
+                    stderr_data,
+                    self._config.max_output_bytes,
+                )
                 preview_len = self._config.spill_preview_chars
                 return {
                     "ok": ok,
@@ -125,7 +129,11 @@ class BashTool:
                     "command": command,
                 }
 
-        stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
+        stdout_text, stderr_text, truncated = truncate_subprocess_output(
+            stdout_data,
+            stderr_data,
+            self._config.max_output_bytes,
+        )
 
         return {
             "ok": ok,
@@ -211,22 +219,3 @@ class BashTool:
                 raise ValueError("env values must be strings")
             parsed[key] = item
         return parsed
-
-    def _truncate_output(self, stdout_data: bytes, stderr_data: bytes) -> tuple[str, str, bool]:
-        cap = self._config.max_output_bytes
-        truncated = len(stdout_data) + len(stderr_data) > cap
-        if not truncated:
-            return (
-                stdout_data.decode("utf-8", errors="replace"),
-                stderr_data.decode("utf-8", errors="replace"),
-                False,
-            )
-
-        stdout_slice = stdout_data[:cap]
-        remaining = max(cap - len(stdout_slice), 0)
-        stderr_slice = stderr_data[:remaining]
-        return (
-            stdout_slice.decode("utf-8", errors="replace"),
-            stderr_slice.decode("utf-8", errors="replace"),
-            True,
-        )

@@ -8,6 +8,30 @@ import signal
 _DRAIN_TIMEOUT_SECONDS = 2.0
 
 
+def truncate_subprocess_output(
+    stdout_data: bytes,
+    stderr_data: bytes,
+    max_output_bytes: int,
+) -> tuple[str, str, bool]:
+    """Decode subprocess output under a combined stdout and stderr byte cap."""
+    truncated = len(stdout_data) + len(stderr_data) > max_output_bytes
+    if not truncated:
+        return (
+            stdout_data.decode("utf-8", errors="replace"),
+            stderr_data.decode("utf-8", errors="replace"),
+            False,
+        )
+
+    stdout_slice = stdout_data[:max_output_bytes]
+    remaining = max(max_output_bytes - len(stdout_slice), 0)
+    stderr_slice = stderr_data[:remaining]
+    return (
+        stdout_slice.decode("utf-8", errors="replace"),
+        stderr_slice.decode("utf-8", errors="replace"),
+        True,
+    )
+
+
 async def kill_process_group(process: asyncio.subprocess.Process) -> None:
     """SIGKILL the whole process group, even when the direct child already exited.
 
