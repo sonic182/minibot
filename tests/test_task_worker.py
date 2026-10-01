@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from minibot.adapters.config.schema import MCPServerConfig, Settings
-from minibot.adapters.tasks import worker
 from minibot.app.response_parser import EMPTY_REPLY_FALLBACK_TEXT
+from minibot.app.tasks import worker
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolContext
 
