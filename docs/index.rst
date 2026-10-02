@@ -1,3 +1,7 @@
+.. image:: _static/minibot-banner.png
+   :alt: MiniBot — Self-hosted, auditable, extensible
+   :width: 100%
+
 Minibot — Self-Hosted AI Assistant for Telegram
 ================================================
 

@@ -1,5 +1,4 @@
-MiniBot 🤖
-=======
+![MiniBot — Self-hosted, auditable, extensible](docs/_static/minibot-banner.png)
 
 [![PyPI version](https://img.shields.io/pypi/v/minibot)](https://pypi.org/project/minibot/)
 
