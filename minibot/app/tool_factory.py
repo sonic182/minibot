@@ -9,6 +9,7 @@ from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_definitions_loader import NATIVE_SKILLS_DIR, parse_skill_file
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import Approver, apply_tool_approval, request_tool_approval
+from minibot.app.tool_constructors import build_calculator_tool, build_skill_loader_bindings
 from minibot.config.schema import Settings
 from minibot.core.files import FileStorage
 from minibot.core.memory import KeyValueMemory, MemoryBackend
@@ -16,7 +17,6 @@ from minibot.core.tasks import TaskManager, TaskProducer
 from minibot.llm.services.tool_executor import canonical_tool_name
 from minibot.llm.tools.agent_info import AgentInfoTool
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.llm.tools.calculator import CalculatorTool
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.tool_events import apply_tool_call_events
@@ -48,16 +48,14 @@ def build_enabled_tools(
     if settings.tools.calculator.enabled:
         calculator = settings.tools.calculator
         tools.extend(
-            CalculatorTool(
+            build_calculator_tool(
                 default_scale=calculator.default_scale,
                 max_expression_length=calculator.max_expression_length,
                 max_exponent_abs=calculator.max_exponent_abs,
             ).bindings()
         )
     if settings.tools.skills.enabled and skill_registry is not None:
-        from minibot.llm.tools.skill_loader import SkillLoaderTool
-
-        tools.extend(SkillLoaderTool(skill_registry, managed_storage, settings.tools.bash.enabled).bindings())
+        tools.extend(build_skill_loader_bindings(skill_registry, managed_storage, settings.tools.bash.enabled))
         if settings.tools.skills.install:
             from minibot.llm.tools.skill_installer import SkillInstallerTool
 
@@ -71,9 +69,7 @@ def build_enabled_tools(
     if extension_tools:
         tools.extend(extension_tools)
     if agent_registry is not None and llm_factory is not None and not agent_registry.is_empty():
-        tools.extend(
-            AgentInfoTool(registry=agent_registry, providers=llm_factory.available_providers()).bindings()
-        )
+        tools.extend(AgentInfoTool(registry=agent_registry, providers=llm_factory.available_providers()).bindings())
     _ensure_unique_tool_names(tools)
     return apply_tool_call_events(
         apply_tool_approval(

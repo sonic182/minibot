@@ -26,7 +26,7 @@ from minibot.llm.tools.schema_utils import (
     string_field,
 )
 from minibot.shared.path_utils import normalize_path_separators, to_posix_relative
-from minibot.shared.subprocess_utils import communicate_with_timeout
+from minibot.shared.subprocess_utils import communicate_with_timeout, truncate_subprocess_output
 
 
 class HostPythonExecTool:
@@ -546,7 +546,11 @@ class HostPythonExecTool:
                     },
                 )
 
-            stdout_text, stderr_text, truncated = self._truncate_output(stdout_data, stderr_data)
+            stdout_text, stderr_text, truncated = truncate_subprocess_output(
+                stdout_data,
+                stderr_data,
+                self._config.max_output_bytes,
+            )
             artifacts_saved: list[dict[str, Any]] = []
             artifacts_skipped: list[dict[str, Any]] = []
             if artifact_options["enabled"]:
@@ -780,22 +784,3 @@ class HostPythonExecTool:
             )
         env["PYTHONUNBUFFERED"] = "1"
         return env
-
-    def _truncate_output(self, stdout_data: bytes, stderr_data: bytes) -> tuple[str, str, bool]:
-        cap = self._config.max_output_bytes
-        truncated = len(stdout_data) + len(stderr_data) > cap
-        if not truncated:
-            return (
-                stdout_data.decode("utf-8", errors="replace"),
-                stderr_data.decode("utf-8", errors="replace"),
-                False,
-            )
-
-        stdout_slice = stdout_data[:cap]
-        remaining = max(cap - len(stdout_slice), 0)
-        stderr_slice = stderr_data[:remaining]
-        return (
-            stdout_slice.decode("utf-8", errors="replace"),
-            stderr_slice.decode("utf-8", errors="replace"),
-            True,
-        )
