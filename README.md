@@ -97,6 +97,47 @@ docker compose up -d
 commented out — `[tools.rag].backend` and `[tasks].backend` both default to `"sqlite"` — and are
 only needed if you switch either to `"qdrant"` or `"rabbitmq"`.
 
+Configure it with your AI agent
+-------------------------------
+
+**Configure MiniBot with your AI agent** (Claude Code, Codex, OpenCode, pi, ...): paste this prompt.
+
+```text
+Configure MiniBot for me:
+1. Read the machine-readable docs at
+   https://sonic182.github.io/minibot/llms.txt and follow the Getting Started,
+   Configuration, Credential vault and Security links it lists.
+2. Ask me as little as possible — one short batch of questions, then decide the rest
+   yourself with secure defaults:
+   - the Telegram allowlist chat/user ids (the bot token goes in the vault);
+   - which LLM provider to use. Recommend the ChatGPT Codex subscription
+     (`chatgpt_codex`) or OpenCode Go, both with model `gpt-6-luna` and
+     `reasoning_effort = "high"`;
+   - whether to run in Docker. It is optional: only worth it for isolation if I enable
+     the dangerous tools below.
+3. Copy `config.example.toml` to `config.toml` and edit it yourself — do not run
+   `minibot configure`, that wizard is interactive and meant for humans. The templates
+   ship with the repo and with the installed package.
+4. Default to a secure install: leave the dangerous tools off — `python_exec`, `bash`,
+   `apply_patch`, and `file_storage` with `allow_outside_root = false`. Enable one only
+   if I explicitly ask, and say which tools are dangerous when you do.
+5. Use the credential vault: enable `[vault]`, keep every credential out of config.toml,
+   and write a `${secret:NAME}` placeholder for each (or `auth_secret` for an HTTP MCP
+   server). Ask me for the secret *names*, never a secret value, and never write one
+   down. Install the `vault` extra (and `codex` for the Codex provider).
+6. Walk me through the vault: `minibot vault init`, then `minibot vault edit` to add the
+   values, and `minibot vault list` to confirm. For Codex, also run `minibot codex login`.
+7. Start MiniBot and confirm the logs are clean.
+
+Stop after that and tell me what you configured and what still needs my input.
+
+For the full reference, run
+`curl --silent https://sonic182.github.io/minibot/llms-full.txt`
+```
+
+Both machine-readable files are published alongside the site: `llms.txt` is the concise,
+curated index, and `llms-full.txt` is a single-file dump of the complete documentation.
+
 Demo
 ----
 
