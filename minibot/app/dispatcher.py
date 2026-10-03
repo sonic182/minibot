@@ -86,6 +86,7 @@ class Dispatcher:
             skill_registry=skill_registry,
             extension_tools=extensions.tools,
             managed_storage=managed_storage,
+            config_path=config_path,
         )
         main_agent_tools_view = main_agent_tool_view(
             tools=tools,

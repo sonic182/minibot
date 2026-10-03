@@ -342,6 +342,14 @@ def test_default_worker_gets_skill_tools_only_when_skills_enabled(enabled: bool)
     assert "install_skill" not in tool_names
 
 
+def test_default_worker_gets_get_settings() -> None:
+    spec = worker._build_worker_spec(system_prompt="You are Minibot.", environment_prompt_fragment="")
+
+    tool_names = {binding.tool.name for binding in worker._build_worker_tools(settings=Settings(), spec=spec)}
+
+    assert "get_settings" in tool_names
+
+
 def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:
     settings = Settings()
     specialist = AgentSpec(

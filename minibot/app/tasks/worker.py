@@ -45,6 +45,7 @@ from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.mcp_bridge import build_mcp_bindings_async
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
+from minibot.llm.tools.settings_info import SettingsInfoTool
 from minibot.llm.tools.time import CurrentTimeTool
 from minibot.llm.tools.wait import WaitTool
 from minibot.shared.utils import validate_attachments
@@ -68,6 +69,7 @@ _WORKER_TOOL_ALLOWLIST = [
     "transcribe_audio",
     "list_skills",
     "activate_skill",
+    "get_settings",
 ]
 _WORKER_SYSTEM_PROMPT_SUFFIX = (
     "You are an isolated task worker.\n"
@@ -332,9 +334,13 @@ def _build_worker_tools(
                     storage=managed_storage,
                 ).bindings()
             )
+    registry: SkillRegistry | None = None
     if settings.tools.skills.enabled:
         registry = SkillRegistry.from_config(settings.tools.skills)
         bindings.extend(build_skill_loader_bindings(registry, managed_storage, settings.tools.bash.enabled))
+    bindings.extend(
+        SettingsInfoTool(settings, skill_names=registry.names if registry is not None else None).bindings()
+    )
     bindings.extend(mcp_bindings)
 
     bindings.extend(extension_tools)

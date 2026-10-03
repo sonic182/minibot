@@ -39,8 +39,17 @@ def test_build_enabled_tools_keeps_only_core_tools_without_extensions() -> None:
 
     names = {binding.tool.name for binding in build_enabled_tools(settings, memory=_MemoryStub())}
 
-    assert {"chat_history_info", "chat_history_trim", "calculate_expression"}.issubset(names)
+    assert {"chat_history_info", "chat_history_trim", "calculate_expression", "get_settings"}.issubset(names)
     assert "current_datetime" not in names
+    assert "read_docs" in names
+
+
+def test_read_docs_follows_the_minibot_docs_skill() -> None:
+    settings = Settings.from_dict({"tools": {"skills": {"enabled": True, "native_disabled": ["minibot-docs"]}}})
+
+    names = {binding.tool.name for binding in build_enabled_tools(settings, memory=_MemoryStub())}
+
+    assert "read_docs" not in names
 
 
 def test_build_enabled_tools_merges_bundled_extension_tools() -> None:
