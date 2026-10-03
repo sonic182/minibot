@@ -45,7 +45,7 @@ def _reload_binding(service: AgentManagementService, *, package: str) -> ToolBin
         parameters=empty_object_schema(),
     )
 
-    async def handler(_: dict[str, object], __: ToolContext) -> dict[str, object]:
+    async def handler(_: dict[str, object], _context: ToolContext) -> dict[str, object]:
         return (await service.reload()).as_payload()
 
     return ToolBinding(tool=schema, handler=handler)
@@ -70,7 +70,7 @@ def _write_binding(service: AgentManagementService, *, package: str, action: str
         ),
     )
 
-    async def handler(payload: dict[str, object], __: ToolContext) -> dict[str, object]:
+    async def handler(payload: dict[str, object], _context: ToolContext) -> dict[str, object]:
         name = require_non_empty_str(payload, "name")
         definition = require_non_empty_str(payload, "definition")
         outcome: AgentManagementOutcome = (
@@ -93,7 +93,7 @@ def _delete_binding(service: AgentManagementService, *, package: str) -> ToolBin
         ),
     )
 
-    async def handler(payload: dict[str, object], __: ToolContext) -> dict[str, object]:
+    async def handler(payload: dict[str, object], _context: ToolContext) -> dict[str, object]:
         name = require_non_empty_str(payload, "name")
         return (await service.delete(name=name)).as_payload()
 
