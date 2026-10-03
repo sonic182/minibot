@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import asyncio
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -76,10 +78,21 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             bind=self._engine,
             expire_on_commit=False,
         )
+        self._initialized = False
+        self._init_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
-        async with self._engine.begin() as connection:
-            await connection.run_sync(self._initialize_schema)
+        async with self._init_lock:
+            async with self._engine.begin() as connection:
+                await connection.run_sync(self._initialize_schema)
+            self._initialized = True
+
+    @asynccontextmanager
+    async def _session(self) -> AsyncIterator[AsyncSession]:
+        if not self._initialized:
+            await self.initialize()
+        async with self._session_factory() as scoped:
+            yield scoped
 
     @staticmethod
     def _initialize_schema(connection: Connection) -> None:
@@ -106,7 +119,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
 
     async def create(self, prompt: ScheduledPromptCreate) -> ScheduledPrompt:
         metadata = dict(prompt.metadata or {})
-        async with self._session_factory() as session:
+        async with self._session() as session:
             model = ScheduledPromptModel(
                 id=uuid4().hex,
                 owner_id=prompt.owner_id,
@@ -137,7 +150,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
         limit: int,
         lease_timeout_seconds: int,
     ) -> Sequence[ScheduledPrompt]:
-        async with self._session_factory() as session:
+        async with self._session() as session:
             records = await lease_rows(
                 session,
                 ScheduledPromptModel,
@@ -163,7 +176,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
 
     async def retry_job(self, job_id: str, next_run_at: datetime, error: str | None = None) -> None:
         now = utcnow()
-        async with self._session_factory() as session:
+        async with self._session() as session:
             await session.execute(
                 update(ScheduledPromptModel)
                 .where(ScheduledPromptModel.id == job_id)
@@ -180,7 +193,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
 
     async def reschedule_recurring(self, job_id: str, next_run_at: datetime) -> None:
         now = utcnow()
-        async with self._session_factory() as session:
+        async with self._session() as session:
             await session.execute(
                 update(ScheduledPromptModel)
                 .where(ScheduledPromptModel.id == job_id)
@@ -216,13 +229,13 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
         )
 
     async def delete_job(self, job_id: str) -> bool:
-        async with self._session_factory() as session:
+        async with self._session() as session:
             result = await session.execute(delete(ScheduledPromptModel).where(ScheduledPromptModel.id == job_id))
             await session.commit()
             return bool(getattr(result, "rowcount", 0))
 
     async def get(self, job_id: str) -> ScheduledPrompt | None:
-        async with self._session_factory() as session:
+        async with self._session() as session:
             stmt = select(ScheduledPromptModel).where(ScheduledPromptModel.id == job_id).limit(1)
             result = await session.execute(stmt)
             model = result.scalars().first()
@@ -256,7 +269,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             # SQLite's LIKE ignores ASCII case by itself; lower() would break non-ASCII exact matches.
             filters.append(ScheduledPromptModel.content.like(like_pattern(query.strip()), escape="\\"))
 
-        async with self._session_factory() as session:
+        async with self._session() as session:
             stmt = (
                 select(ScheduledPromptModel)
                 .where(*filters)
@@ -268,7 +281,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             return [self._to_domain(model) for model in result.scalars().all()]
 
     async def get_nearest_pending_run_at(self) -> datetime | None:
-        async with self._session_factory() as session:
+        async with self._session() as session:
             result = await session.execute(
                 select(func.min(ScheduledPromptModel.run_at)).where(
                     ScheduledPromptModel.status == ScheduledPromptStatus.PENDING.value
@@ -280,7 +293,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
         now = utcnow()
         payload = dict(values)
         payload.setdefault("updated_at", now)
-        async with self._session_factory() as session:
+        async with self._session() as session:
             await session.execute(
                 update(ScheduledPromptModel).where(ScheduledPromptModel.id == job_id).values(**payload)
             )

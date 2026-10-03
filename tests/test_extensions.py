@@ -111,6 +111,27 @@ def test_load_extensions_for_worker_exposes_scheduler_tools_without_pages(tmp_pa
     assert registry.routes == []
 
 
+@pytest.mark.asyncio
+async def test_worker_scheduler_tool_initializes_schema_and_keeps_chat_context(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {
+            "runtime": {"owner_id": "owner-1"},
+            "scheduler": {
+                "prompts": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'fresh.db'}"},
+            },
+        }
+    )
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+    handlers = {binding.tool.name: binding.handler for binding in registry.tools}
+    context = ToolContext(owner_id="owner-1", channel="telegram", chat_id=42, user_id=7)
+
+    created = await handlers["schedule_prompt"]({"content": "stretch", "delay_seconds": 600}, context)
+    listed = await handlers["list_scheduled_prompts"]({}, context)
+
+    assert created["scheduled"] is True
+    assert [job["job_id"] for job in listed["jobs"]] == [created["job_id"]]
+
+
 def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bus = EventBus()
 
