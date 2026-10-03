@@ -11,6 +11,7 @@ from llm_async.models import ToolCall
 from pydantic import ValidationError
 
 from minibot.adapters.config.schema import Settings
+from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext, load_extensions
 from minibot.core.channels import ChannelResponse
@@ -130,6 +131,26 @@ async def test_worker_scheduler_tool_initializes_schema_and_keeps_chat_context(t
 
     assert created["scheduled"] is True
     assert [job["job_id"] for job in listed["jobs"]] == [created["job_id"]]
+
+    store = SQLAlchemyScheduledPromptStore(settings.scheduler.prompts)
+    try:
+        persisted = await store.get(created["job_id"])
+        assert persisted is not None
+        assert (persisted.owner_id, persisted.channel, persisted.chat_id, persisted.user_id) == (
+            "owner-1",
+            "telegram",
+            42,
+            7,
+        )
+    finally:
+        await store._engine.dispose()
+
+    for other_context in (
+        ToolContext(owner_id="owner-1", channel="telegram", chat_id=43, user_id=7),
+        ToolContext(owner_id="owner-1", channel="telegram", chat_id=42, user_id=8),
+    ):
+        other_jobs = await handlers["list_scheduled_prompts"]({}, other_context)
+        assert other_jobs["jobs"] == []
 
 
 def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -83,7 +83,11 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
 
     async def initialize(self) -> None:
         async with self._init_lock:
+            if self._initialized:
+                return
             async with self._engine.begin() as connection:
+                if connection.dialect.name == "sqlite":
+                    await connection.exec_driver_sql("BEGIN IMMEDIATE")
                 await connection.run_sync(self._initialize_schema)
             self._initialized = True
 
