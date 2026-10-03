@@ -459,6 +459,53 @@ class MainAgentConfig(BaseModel):
         return self
 
 
+class SpecialistsConfig(BaseModel):
+    """Specialist agent settings. TOML section: ``[orchestration.specialists]``
+
+    - ``enabled`` — use owner-defined specialist agents (default: ``true``). Off drops the roster,
+      ``fetch_agent_info`` and named delegation, while the generic task worker stays available
+      whenever ``[tasks]`` is enabled. Specialists run on the task backend, so enabling this with
+      ``[tasks].enabled = false`` fails config loading rather than exposing a roster nothing can use.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+
+
+class AgentManagementConfig(BaseModel):
+    """Runtime agent management. TOML section: ``[orchestration.agent_management]``
+
+    - ``reload`` — expose ``reload_agents`` so an owner can hand-edit definition files and re-read
+      them (default: ``false``).
+    - ``write`` — expose controlled create/update/delete tools for model-authored definitions
+      (default: ``false``). A successful write refreshes the registry itself, so this does not
+      require ``reload``.
+    - ``directory`` — where model-authored definitions live (default: ``"./data/agents"``). Must not
+      overlap ``[orchestration].directory``, so owner- and model-authored files stay distinguishable.
+    - ``tools_allow`` — fnmatch patterns naming the native tools a managed agent may grant itself
+      (default: empty, which grants none). A managed definition's own ``tools_allow`` must list exact
+      names, and it may not use ``tools_deny``.
+    - ``mcp_servers`` — MCP server names a managed agent may claim (default: empty). MCP access is
+      claimed here, never through a tool name.
+    - ``providers`` — providers a managed agent may target, including a ``spawn_task`` override
+      (default: empty, meaning the main ``[llm]`` provider only, which is always allowed).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reload: bool = False
+    write: bool = False
+    directory: str = "./data/agents"
+    tools_allow: list[str] = Field(default_factory=list)
+    mcp_servers: list[str] = Field(default_factory=list)
+    providers: list[str] = Field(default_factory=list)
+
+    @property
+    def active(self) -> bool:
+        return self.reload or self.write
+
+
 class OrchestrationConfig(BaseModel):
     """Multi-agent orchestration settings. TOML section: ``[orchestration]``
 
@@ -470,6 +517,10 @@ class OrchestrationConfig(BaseModel):
     - ``main_tool_use_guardrail`` — optional guardrail before tool execution:
       ``"disabled"`` (default) or ``"llm_classifier"``.
     - ``main_agent`` — tool allow/deny policy for the main agent (``[orchestration.main_agent]``).
+    - ``specialists`` — whether owner-defined specialists are used at all
+      (``[orchestration.specialists]``).
+    - ``agent_management`` — optional runtime reload and model-authored definitions
+      (``[orchestration.agent_management]``).
     """
 
     directory: str = "./agents"
@@ -477,6 +528,21 @@ class OrchestrationConfig(BaseModel):
     shared_mcp_servers: list[str] = Field(default_factory=list)
     main_tool_use_guardrail: Literal["disabled", "llm_classifier"] = "disabled"
     main_agent: MainAgentConfig = MainAgentConfig()
+    specialists: SpecialistsConfig = Field(default_factory=SpecialistsConfig)
+    agent_management: AgentManagementConfig = Field(default_factory=AgentManagementConfig)
+
+    @model_validator(mode="after")
+    def _validate_management_directory(self) -> OrchestrationConfig:
+        if not self.agent_management.active:
+            return self
+        owner = Path(self.directory).resolve()
+        managed = Path(self.agent_management.directory).resolve()
+        if owner == managed or owner in managed.parents or managed in owner.parents:
+            raise ValueError(
+                "[orchestration.agent_management].directory must not overlap [orchestration].directory; "
+                "model-authored definitions need a separate location from owner-authored ones"
+            )
+        return self
 
 
 class MemoryConfig(BaseModel):
@@ -1097,6 +1163,22 @@ class Settings(BaseModel):
             raise ValueError(
                 f"[providers.{name}] must set api_format (one of {valid}) because its name is not an API format"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_specialist_activation(self) -> Settings:
+        """Specialists and agent management need their prerequisites enabled.
+
+        A roster that cannot be delegated to, or a management switch with no roster to manage, is a
+        misconfiguration rather than a silently inert feature.
+        """
+        if self.orchestration.specialists.enabled and not self.tasks.enabled:
+            raise ValueError(
+                "[orchestration.specialists].enabled requires [tasks].enabled = true; specialists run on the "
+                "task backend. Set [orchestration.specialists].enabled = false to keep tasks without specialists"
+            )
+        if self.orchestration.agent_management.active and not self.orchestration.specialists.enabled:
+            raise ValueError("[orchestration.agent_management] requires [orchestration.specialists].enabled = true")
         return self
 
     @classmethod

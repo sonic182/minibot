@@ -35,10 +35,15 @@ class ToolUseGuardrail(Protocol):
         prompt_cache_key: str | None,
     ) -> GuardrailDecision: ...
 
+    def replace_tools(self, tools: Sequence[ToolBinding]) -> None: ...
+
 
 class NoopToolUseGuardrail:
     async def apply(self, **_: Any) -> GuardrailDecision:
         return GuardrailDecision(requires_retry=False)
+
+    def replace_tools(self, tools: Sequence[ToolBinding]) -> None:
+        del tools
 
 
 class LLMClassifierToolUseGuardrail:
@@ -55,6 +60,9 @@ class LLMClassifierToolUseGuardrail:
         self._validation_max_attempts = max(1, validation_max_attempts)
         self._fail_open = fail_open
         self._logger = logging.getLogger("minibot.tool_use_guardrail")
+
+    def replace_tools(self, tools: Sequence[ToolBinding]) -> None:
+        self._tools = list(tools)
 
     async def apply(
         self,

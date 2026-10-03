@@ -151,7 +151,35 @@ the old boolean values now fail validation at startup.
 Orchestration
 -------------
 
+``[orchestration.specialists].enabled`` (default ``true``) is the switch for using owner-defined
+specialist agents. With it off, the roster, ``fetch_agent_info`` and named delegation all
+disappear, while the generic task worker stays available as long as ``[tasks]`` is enabled.
+Specialists run on the task backend, so enabling this with ``[tasks].enabled = false`` fails config
+loading instead of exposing a roster nothing can use.
+
+``[orchestration.agent_management]`` is opt-in and off by default: ``reload`` exposes
+``reload_agents`` for hand-edited files, and ``write`` exposes controlled create/update/delete
+tools for model-authored definitions stored in its own ``directory``, which must not overlap
+``[orchestration].directory``.
+
+Model-authored agents are bounded by an owner-configured ceiling, empty by default so a managed
+agent is granted nothing until the owner lists it. The ceiling itself may use fnmatch patterns
+(``file*``), but a managed definition may not: every entry in its ``tools_allow`` has to be an exact
+tool name, because only an exact name can be checked against a pattern without enumerating the tool
+list. A managed definition may not use ``tools_deny`` at all — it grants every tool except the
+listed ones, so no ceiling can bound it — and it claims MCP servers through ``mcp_servers`` rather
+than through tool names. ``providers`` restricts which model provider a managed agent may target,
+including a ``spawn_task`` model override; the provider the daemon already runs on is always
+allowed, since reusing it is not an escalation. Owner-authored agents are not subject to the
+ceiling, so their permissions stay exactly as the owner wrote them.
+
 .. autoclass:: minibot.adapters.config.schema.OrchestrationConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.SpecialistsConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.AgentManagementConfig
    :no-members:
 
 Scheduler

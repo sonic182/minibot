@@ -187,6 +187,30 @@ name = "minibot"
 # Note: with tool_ownership_mode="exclusive_mcp", only claimed MCP tools are hidden from main.
 tools_deny = ["mcp*"]
 
+# Use owner-defined specialist agents from `directory`.
+# false removes the specialist roster, `fetch_agent_info` and named delegation, while the generic
+# task worker stays available as long as [tasks] is enabled. Specialists run on the task backend,
+# so `enabled = true` with `[tasks].enabled = false` is a config error.
+[orchestration.specialists]
+enabled = true
+
+# Optional runtime agent management. Both switches default to false, so nothing here is exposed
+# unless the owner asks for it.
+[orchestration.agent_management]
+# Expose `reload_agents`: re-read definition files after hand-editing them, no restart needed.
+reload = false
+# Expose controlled create/update/delete tools for model-authored definitions. A successful write
+# refreshes the registry itself, so this does not require `reload`.
+write = false
+# Where model-authored definitions live. Must not overlap [orchestration].directory.
+directory = "./data/agents"
+# Capability ceiling for managed agents. Empty lists grant nothing: a managed agent created with
+# `tools_allow: [bash]` is rejected unless "bash" is listed here, and the same applies to MCP
+# servers and model providers. Owner-authored agents are unaffected by this ceiling.
+tools_allow = []
+mcp_servers = []
+providers = []
+
 # Optional OpenRouter-specific routing configuration.
 # Applied only when `llm.provider = "openrouter"`.
 [llm.openrouter]
@@ -375,6 +399,10 @@ output_dir = "./data/files/browser"
 [tools.approval]
 require_approval = []
 # require_approval = ["mcp_mail__smtp_*"]
+# Recommended when [orchestration.agent_management] write = true: confirm every change to the agent
+# roster in the chat before it happens. The gate fails closed, so a turn with no way to ask (a
+# scheduled prompt, a delegated task) is denied rather than approved.
+# require_approval = ["create_agent", "update_agent", "delete_agent"]
 timeout_seconds = 1800
 
 # Optional sleep/wait tool.

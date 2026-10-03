@@ -12,7 +12,10 @@ model never sees them.
 .. note::
 
    ``spawn_task`` is also the only way to delegate to a specialist agent (see :doc:`agents`), so
-   disabling this section disables multi-agent orchestration too.
+   disabling this section disables multi-agent orchestration too. The reverse does not hold:
+   ``[orchestration.specialists].enabled = false`` keeps the task system and its generic worker
+   while removing the specialist roster and named delegation. Setting ``specialists.enabled = true``
+   with ``[tasks].enabled = false`` is a config error.
 
 .. note::
 

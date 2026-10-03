@@ -83,7 +83,12 @@ def build_enabled_tools(
             )
     if extension_tools:
         tools.extend(extension_tools)
-    if agent_registry is not None and llm_factory is not None and not agent_registry.is_empty():
+    if (
+        settings.orchestration.specialists.enabled
+        and agent_registry is not None
+        and llm_factory is not None
+        and not agent_registry.is_empty()
+    ):
         tools.extend(AgentInfoTool(registry=agent_registry, providers=llm_factory.available_providers()).bindings())
     _ensure_unique_tool_names(tools)
     return apply_tool_call_events(

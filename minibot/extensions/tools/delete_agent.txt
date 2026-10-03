@@ -1,0 +1,8 @@
+Delete a managed specialist agent.
+
+Removes the definition file from the managed directory and refreshes the roster, so the agent is no
+longer available for delegation. Only agents that were created through these tools can be deleted;
+an owner-authored agent in [orchestration].directory is never touched, and the result reports
+`ok: false` with an error when the name is not a managed agent.
+
+Deleting an agent does not cancel tasks that are already running on it.

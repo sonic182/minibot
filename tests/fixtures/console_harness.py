@@ -45,6 +45,10 @@ def write_config(
             f'directory = "{orchestration_dir.as_posix()}"\n'
             f'tool_ownership_mode = "{tool_ownership_mode}"\n'
         ) + "\n".join(main_agent_lines)
+    if not tasks_enabled:
+        # Specialists run on the task backend, so a config that turns tasks off has to turn them off
+        # too or it fails validation.
+        orchestration_block += "\n[orchestration.specialists]\nenabled = false\n"
     # An hour-long poll interval keeps the consumer from leasing what a test enqueues: the loop
     # polls once at start, before the turn runs, and a real worker subprocess would call a real
     # provider. Tests assert on the queued row instead.
