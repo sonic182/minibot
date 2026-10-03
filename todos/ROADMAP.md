@@ -15,6 +15,7 @@ Possible roadmap to follow now...
 | 5 | guardrail enhancements | pending |
 | 6 | bash tool hardening | pending, priority depends on the Trust model |
 | 7 | share tool construction with task workers | done |
+| 8 | generic opt-in extensions for task workers | pending, wait for a second extension that needs it |
 
 Dropped: a native SMTP tool. Mail is covered by an MCP server (`docs/mcp_servers.rst`) behind the
 `[tools.approval]` gate, so there is nothing left for MiniBot to own.
@@ -205,7 +206,7 @@ way the main agent is"), and why adding `list_skills` / `activate_skill` to an a
 Ahead of everything below because it is a regression in shipped behaviour, not new capability,
 and the fix is small.
 
-## [ ] Phase 3 — Native skills & runtime self-knowledge
+## [x] Phase 3 — Native skills & runtime self-knowledge
 
 **Done** — version single-sourcing (#82), the native tier + `create-skill` (#83),
 `install-skill` + `install_skill` (#84, released in 0.18.0), `get_settings`, the
@@ -236,6 +237,11 @@ only unless `write = true`, and the ceiling defaults to granting nothing.
 
 Still out of scope for Phase 3: the `create-agent` skill is bundled but hidden until `write = true`,
 and the agent-management tools stay unavailable to workers and specialists.
+
+Known limit: the ceiling only bounds what a managed agent may *ask for*. A specialist runs in a task
+worker, which builds a narrower tool set, so listing a tool the worker never registers (for example
+`rag_*`, which only the daemon registers) passes the ceiling and then yields an agent with no tools.
+Tracked in Phase 8.
 
 Different theme from the phases around it — capability, not containment —
 but it lands two new LLM-facing surfaces, so the Trust model above still
@@ -721,9 +727,37 @@ here is the harder, undecided part: filesystem/process isolation.)
 ## [x] Phase 7 — Share tool construction with task workers
 
 `_build_worker_tools` (`minibot/app/tasks/worker.py`) keeps a narrower tool set
-than the main agent and does not load extensions. Shared calculator and skill
-loader constructors live in `minibot/app/tool_constructors.py`; each caller
-retains its own enablement and visibility rules.
+than the main agent and loads only the scheduler bundled extension (#110) plus user-configured
+extensions. Shared calculator and skill loader constructors live in
+`minibot/app/tool_constructors.py`; each caller retains its own enablement and visibility rules.
+Opting more bundled extensions in is Phase 8.
+
+## [ ] Phase 8 — Generic opt-in extensions for task workers
+
+Workers load no bundled extension except the scheduler (`_bundled_modules` in
+`minibot/app/extensions.py`), so a specialist agent that lists `rag_*` (or kv memory, MCP tools) in
+`tools_allow` gets nothing: those extensions return early for `entrypoint == "worker"`
+(`minibot/extensions/integrations/rag.py:34`, `tools/memory.py:23`, `integrations/mcp.py:12`). Found
+when a model-authored `rag_manager` agent answered that it had no RAG tools.
+
+The scheduler precedent (#110) shows that registering the tools is the small part. The daemon-side
+`start()` work does not run in a worker, so each extension needs lazy initialization and a lock
+against concurrent workers (`SQLAlchemyScheduledPromptStore._session`), plus isolation tests.
+
+Idea: one config mechanism instead of a per-extension flag, e.g. `[tasks.worker] extensions = [...]`
+naming the bundled extensions a worker loads on top of the scheduler. Default empty, so nothing changes
+for existing deployments.
+
+- Each extension that can be listed must be safe to register without its service: lazy init, no
+  schema race (SQLite) and no per-worker heavy state at import time. RAG models already load lazily and die
+  with the worker subprocess, but every task that uses RAG pays the load.
+- Document the option in `docs/config.rst`, and update `docs/extensions.rst` and `docs/tasks.rst`, which
+  say workers only get configured extension tools.
+- Decide against it for RAG if it ships as an MCP server: a long-lived MCP process shares the embedding
+  model across tasks, which this mechanism cannot.
+
+Deliberately not done yet (YAGNI): only RAG has asked for it so far, and the RAG-as-MCP plan may remove
+the need.
 
 ## Explicitly deferred
 
