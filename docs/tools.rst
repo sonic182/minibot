@@ -35,6 +35,12 @@ Tool Surface
        model, enabled tools with their non-secret settings, agents, and whether tasks, the scheduler and the
        vault are on. A feature that is off is absent. Never returns tokens, API keys or credential URLs. A
        specialist that sets ``tools_allow`` must list it explicitly.
+   * - Runtime
+     - ``read_docs``
+     - ``minibot-docs`` skill enabled
+     - Read-only access to the documentation bundled with the installed version: list pages, search by words, or
+       read one page (config sections are expanded to their field reference). Turn it off with
+       ``[tools.skills] native_disabled = ["minibot-docs"]``.
    * - Memory
      - ``memory``
      - ``[tools.kv_memory]``

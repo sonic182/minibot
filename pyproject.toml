@@ -26,8 +26,10 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 packages = [
-  { include = "minibot" }
+  { include = "minibot" },
+  { include = "*", from = "docs", to = "minibot/_docs", format = ["wheel"] },
 ]
+exclude = ["docs/_static", "docs/_build", "docs/_templates"]
 include = [
   # Tool descriptions live next to the module that builds the tool, wherever that module is.
   { path = "minibot/**/*.txt", format = ["sdist", "wheel"] },

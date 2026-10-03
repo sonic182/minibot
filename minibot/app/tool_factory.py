@@ -19,6 +19,7 @@ from minibot.llm.services.tool_executor import canonical_tool_name
 from minibot.llm.tools.agent_info import AgentInfoTool
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.chat_memory import ChatMemoryTool
+from minibot.llm.tools.docs_reader import DocsReaderTool
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.settings_info import SettingsInfoTool
 from minibot.llm.tools.tool_events import apply_tool_call_events
@@ -56,6 +57,9 @@ def build_enabled_tools(
             skill_names=skill_registry.names if skill_registry is not None else None,
         ).bindings()
     )
+    skills_config = settings.tools.skills
+    if skills_config.enabled and skills_config.native and "minibot-docs" not in skills_config.disabled_native_skills:
+        tools.extend(DocsReaderTool().bindings())
     if settings.tools.calculator.enabled:
         calculator = settings.tools.calculator
         tools.extend(

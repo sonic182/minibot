@@ -188,7 +188,7 @@ def test_bundled_minibot_docs_skill_is_loadable(tmp_path: Path) -> None:
     assert spec.source is SkillSource.NATIVE
     assert spec.description
     assert "get_settings" in spec.body
-    assert "_sources" in spec.body
+    assert "read_docs" in spec.body
 
 
 def test_native_skills_load_only_when_enabled(tmp_path: Path, native_skills_dir: Path) -> None:

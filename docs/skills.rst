@@ -145,9 +145,10 @@ Currently bundled:
   is stricter than the spec.
 - ``install-skill`` — the preview, confirm, install, verify procedure for ``install_skill``.
   Hidden unless ``install = true`` (see below).
-- ``minibot-docs`` — answers questions about how MiniBot works from the published documentation
-  (``llms.txt`` and the ``_sources`` pages), and routes questions about the running instance to the
-  ``get_settings`` tool instead of answering them from the docs. Needs ``http_request``.
+- ``minibot-docs`` — answers questions about how MiniBot works from the documentation bundled in the package
+  (the ``read_docs`` tool, which it enables), and routes questions about the running instance to the
+  ``get_settings`` tool instead of answering them from the docs. It falls back to the published site through
+  ``http_request`` only when the bundled docs are missing.
 
 Where the agent writes new skills
 ---------------------------------

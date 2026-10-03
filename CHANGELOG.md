@@ -14,9 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names and whether tasks, the scheduler and the vault are on. A disabled feature is absent. Every field is
   allowlisted one by one, so tokens, API keys, credential URLs, headers and MCP secrets are never returned.
   Task workers get it too; a specialist that sets `tools_allow` must list it.
-- **`minibot-docs` bundled skill.** Answers "how does MiniBot work" questions from the published documentation
-  (`llms.txt` and the `_sources/*.rst.txt` pages) instead of from memory, and sends "what do I have enabled"
-  questions to `get_settings`. Needs `http_request`; turn it off with `[tools.skills] native_disabled`.
+- **`minibot-docs` bundled skill.** Answers "how does MiniBot work" questions from the documentation instead of
+  from memory, and sends "what do I have enabled" questions to `get_settings`. Turn it off with
+  `[tools.skills] native_disabled`.
+- **`read_docs` tool and bundled documentation.** The wheel now carries the `docs/` sources (about 180 KB, no
+  extra needed). `read_docs` lists pages, searches them or reads one, and expands the `autoclass` config
+  sections to their field reference. It exists whenever the `minibot-docs` skill is enabled, so the skill no
+  longer needs network access; the published site is only a fallback.
 
 ## [0.25.2] - 2026-10-03
 
