@@ -45,6 +45,7 @@ class TaskTools:
         task_repository: TaskRepository | AgentCatalog | None = None,
         config: TasksConfig | None = None,
         agent_registry: AgentCatalog | None = None,
+        specialists_enabled: bool = True,
         providers: Sequence[ProviderOption] = (),
     ) -> None:
         if isinstance(task_repository, AgentCatalog) and agent_registry is None:
@@ -55,6 +56,7 @@ class TaskTools:
         self._task_repository = task_repository
         self._config = config or TasksConfig()
         self._agent_registry = agent_registry
+        self._specialists_enabled = specialists_enabled
         self._providers = list(providers)
 
     def bindings(self) -> list[ToolBinding]:
@@ -155,6 +157,11 @@ class TaskTools:
         owner_id = self._owner_id(context)
         prompt = require_non_empty_str(payload, "prompt")
         agent_name = optional_str(payload.get("agent_name"), error_message="agent_name must be a string or null")
+        if agent_name is not None and not self._specialists_enabled:
+            raise ValueError(
+                "agent_name is unavailable: specialist agents are disabled by "
+                "[orchestration.specialists].enabled = false; omit agent_name to run a generic task"
+            )
         registry = self._agent_registry
         spec = None if agent_name is None or registry is None else registry.get(agent_name)
         if agent_name is not None and registry is not None and spec is None:

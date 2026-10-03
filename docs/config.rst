@@ -151,7 +151,26 @@ the old boolean values now fail validation at startup.
 Orchestration
 -------------
 
+``[orchestration.specialists].enabled`` (default ``true``) is the switch for using owner-defined
+specialist agents. With it off, the roster, ``fetch_agent_info`` and named delegation all
+disappear, while the generic task worker stays available as long as ``[tasks]`` is enabled.
+Specialists run on the task backend, so enabling this with ``[tasks].enabled = false`` fails config
+loading instead of exposing a roster nothing can use.
+
+``[orchestration.agent_management]`` is opt-in and off by default: ``reload`` exposes
+``reload_agents`` for hand-edited files, and ``write`` exposes controlled create/update/delete
+tools for model-authored definitions stored in its own ``directory``, which must not overlap
+``[orchestration].directory``. Model-authored agents are bounded by an owner-configured ceiling
+(``tools_allow``, ``mcp_servers``, ``providers``), empty by default so a managed agent is granted
+nothing until the owner lists it.
+
 .. autoclass:: minibot.adapters.config.schema.OrchestrationConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.SpecialistsConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.AgentManagementConfig
    :no-members:
 
 Scheduler

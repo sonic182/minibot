@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from minibot.config.schema import AgentDefinitionConfig
+from minibot.config.schema import AgentDefinitionConfig, Settings
 from minibot.core.agents import AgentSpec
 from minibot.shared.frontmatter import parse_frontmatter, split_frontmatter
 
@@ -16,10 +16,17 @@ _DESCRIPTION_MAX_CHARS = 1000
 
 
 def load_agent_specs(directory: str) -> list[AgentSpec]:
+    """Load every enabled definition in one directory, rejecting duplicate names.
+
+    Two files claiming the same agent name used to last-win silently, which made the roster depend
+    on glob order. A collision is now an error, because a managed definition must never quietly
+    replace an owner-authored one.
+    """
     root = Path(directory)
     if not root.exists() or not root.is_dir():
         return []
     specs: list[AgentSpec] = []
+    seen: dict[str, Path] = {}
     for path in sorted(root.glob("*.md")):
         text = path.read_text(encoding="utf-8")
         frontmatter, body = split_frontmatter(text)
@@ -52,6 +59,10 @@ def load_agent_specs(directory: str) -> list[AgentSpec]:
                     "source": str(path),
                 },
             )
+        previous = seen.get(cfg.name)
+        if previous is not None:
+            raise ValueError(f"duplicate agent name '{cfg.name}': {path} and {previous} both define it")
+        seen[cfg.name] = path
         specs.append(
             AgentSpec(
                 name=cfg.name,
@@ -73,4 +84,31 @@ def load_agent_specs(directory: str) -> list[AgentSpec]:
                 openrouter_reasoning_enabled=cfg.openrouter_reasoning_enabled,
             )
         )
+    return specs
+
+
+def load_active_agent_specs(settings: Settings) -> list[AgentSpec]:
+    """Load every definition directory the current switches activate.
+
+    Owner definitions come from ``[orchestration].directory`` and model-authored ones from
+    ``[orchestration.agent_management].directory``. With ``[orchestration.specialists].enabled``
+    off this returns nothing, so a broken file in either directory cannot fail a startup that has
+    no use for a roster. A managed name that collides with an owner name is rejected rather than
+    replacing it.
+    """
+    if not settings.orchestration.specialists.enabled:
+        return []
+    specs = load_agent_specs(settings.orchestration.directory)
+    management = settings.orchestration.agent_management
+    if not management.active:
+        return specs
+    owner_names = {spec.name for spec in specs}
+    for spec in load_agent_specs(management.directory):
+        if spec.name in owner_names:
+            raise ValueError(
+                f"managed agent '{spec.name}' in {spec.source_path} collides with an owner-authored agent; "
+                "rename one of them"
+            )
+        owner_names.add(spec.name)
+        specs.append(spec)
     return specs

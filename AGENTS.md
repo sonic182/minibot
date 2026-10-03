@@ -10,7 +10,11 @@
 - **Format**: `poetry run ruff format .`
 - **Tests**: run only the files your change touches — `poetry run pytest <file>` (single test via `poetry run pytest <file>::<TestClass>::<test_method>` or `poetry run pytest <file> -k <test_name>`). Leave the full `poetry run pytest` sweep to CI; do not run it locally.
 
+## Iterative Development
+- **Build only what is needed now (YAGNI)** — develop in small, focused increments that satisfy current requirements. Avoid speculative features, premature abstractions, and infrastructure for hypothetical future needs.
+
 ## Documentation & Comments
+- **Project documentation** — document every new or changed configuration option in the relevant files under `./docs/` (for example, `docs/config.rst`), including its purpose, default, and usage example where applicable. Project documentation is distinct from inline code documentation; comments alone are not a substitute. Docstrings that feed generated project documentation also belong to this documentation surface and should stay in sync.
 - **Comments/docstrings** — do not add code comments unless the user explicitly asks for them; public documentation docstrings are acceptable when they feed generated docs or clarify public config/tool surfaces.
 - **Linting is welcome** — run `ruff check` or `ruff format`; this repo does not configure `flake8` despite it being available.
 

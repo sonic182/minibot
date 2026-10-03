@@ -3,7 +3,7 @@ from __future__ import annotations
 from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.adapters.tasks.retention import TaskRetentionService
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskProducer, SQLiteTaskStore
-from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_definitions_loader import load_active_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.extensions import ExtensionContext
 from minibot.app.llm_client_factory import available_providers
@@ -30,7 +30,7 @@ def register(mb: ExtensionContext) -> None:
         return
     settings = mb.settings
     store = SQLiteTaskStore(settings.tasks.sqlite)
-    agent_registry = mb.agent_registry or AgentRegistry(load_agent_specs(settings.orchestration.directory))
+    agent_registry = mb.agent_registry or AgentRegistry(load_active_agent_specs(settings))
     manager = TaskManager(
         mb.event_bus,
         settings.tasks.worker_timeout_seconds,
@@ -56,6 +56,7 @@ def register(mb: ExtensionContext) -> None:
             task_repository=store,
             config=settings.tasks,
             agent_registry=agent_registry,
+            specialists_enabled=settings.orchestration.specialists.enabled,
             providers=available_providers(settings),
         ).bindings()
     )

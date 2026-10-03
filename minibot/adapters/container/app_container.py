@@ -10,7 +10,7 @@ from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.pending_turns import PendingTurnStore
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 from minibot.adapters.vault import Vault, read_vault_password
-from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_definitions_loader import load_active_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionRegistry, load_extensions
@@ -53,7 +53,7 @@ class AppContainer:
         # every secret-bearing field in the schema currently is.
         if has_secret_syntax(cls._settings.model_dump(mode="python")):
             cls._settings = load_settings(config_path, cls._vault.as_mapping() if cls._vault else {})
-        agent_specs = load_agent_specs(cls._settings.orchestration.directory)
+        agent_specs = load_active_agent_specs(cls._settings)
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
         cls._pending_turn_store = PendingTurnStore(cls._settings.memory)

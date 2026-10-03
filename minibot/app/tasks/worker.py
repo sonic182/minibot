@@ -14,7 +14,7 @@ from uuid import uuid4
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
-from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_definitions_loader import load_active_agent_specs
 from minibot.app.agent_policies import apply_agent_overrides, filter_tools_for_agent, strip_reserved_delegation_tools
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
@@ -425,7 +425,12 @@ def _resolve_task_spec(
     target_ceiling = _coerce_int(task.get("max_new_tokens"))
     agent_name = task.get("agent_name")
     if isinstance(agent_name, str) and agent_name.strip():
-        registry = AgentRegistry(load_agent_specs(settings.orchestration.directory))
+        if not settings.orchestration.specialists.enabled:
+            raise ValueError(
+                f"agent '{agent_name.strip()}' is not available: specialist agents are disabled by "
+                "[orchestration.specialists].enabled = false"
+            )
+        registry = AgentRegistry(load_active_agent_specs(settings))
         spec = registry.get(agent_name.strip())
         if spec is None:
             raise ValueError(f"agent '{agent_name.strip()}' is not available for async task execution")

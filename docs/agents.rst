@@ -35,8 +35,19 @@ falls back to fire and forget instead of failing. A rate-limit retry notice stil
 user, and a continuing task that is cancelled does not report back. Use ``get_task`` to retrieve a
 result, ``list_tasks`` to see what is running, and ``cancel_task`` to stop one.
 
-Turning ``[tasks]`` off therefore turns multi-agent orchestration off: the specialist roster is
-dropped from the system prompt along with the tool that could act on it.
+Two switches decide whether any of this exists. ``[orchestration.specialists].enabled`` (default
+``true``) is the one for specialists themselves: with it off, the roster, ``fetch_agent_info`` and
+named delegation all disappear, and ``spawn_task`` still runs a generic worker. ``[tasks].enabled``
+(default ``true``) is the execution backend, so ``[orchestration.specialists].enabled = true`` with
+``[tasks].enabled = false`` is a config error rather than a roster nothing can act on. Turning
+``[tasks]`` off turns multi-agent orchestration off as well: the specialist roster is dropped from
+the system prompt along with the tool that could act on it.
+
+Runtime management is separate and off by default. ``[orchestration.agent_management]``
+``reload = true`` exposes ``reload_agents`` so an owner can hand-edit ``agents/*.md`` and re-read
+them without a restart; ``write = true`` additionally exposes controlled create/update/delete tools
+for model-authored definitions, kept in their own directory and bounded by the owner-configured
+ceiling described in :doc:`config`. Neither switch changes how existing owner-authored agents run.
 
 Agent Definitions
 -----------------
