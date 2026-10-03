@@ -155,6 +155,9 @@ spill_preview_chars = 2000
 max_spill_bytes = "5MB"
 spill_subdir = "http_responses/tmp"
 
+[tools.approval]
+timeout_seconds = 1800
+
 [tools.file_storage]
 enabled = true
 root_dir = "./data/files"

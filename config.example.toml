@@ -371,7 +371,7 @@ output_dir = "./data/files/browser"
 [tools.approval]
 require_approval = []
 # require_approval = ["mcp_mail__smtp_*"]
-timeout_seconds = 90
+timeout_seconds = 1800
 
 # Optional sleep/wait tool.
 [tools.wait]

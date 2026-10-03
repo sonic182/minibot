@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Friendlier tool approval prompt.** Arguments that are empty (`null`, blank strings, empty lists and
+  objects) are no longer listed, and nested values (such as mail attachments) are shown as an indented
+  list instead of one-line JSON. On Telegram the prompt is now plain formatted text, not a code block: a
+  bulleted list with bold argument names. Values are still escaped and sensitive keys still redacted.
+- **`config.example.toml` and `config.yolo.toml` set `[tools.approval] timeout_seconds = 1800`.** The
+  built-in default stays `90`; the wait is still capped by the surrounding agent or task deadline.
+
 ## [0.25.0] - 2026-10-02
 
 ### Changed

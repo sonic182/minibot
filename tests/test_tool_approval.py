@@ -96,9 +96,23 @@ def test_detail_keeps_every_argument_visible_and_escapes_format_characters() -> 
     detail = format_approval_detail({"body": "x" * 5000, "to": "attacker‮@evil.com", "api_key": "k"})
 
     lines = detail.splitlines()
-    assert lines[0] == "api_key: ***"
-    assert lines[1] == "to: attacker\\u202e@evil.com"
+    assert lines[0] == "- api_key: ***"
+    assert lines[1] == "- to: attacker\\u202e@evil.com"
     assert lines[2].endswith("…(+4000 chars)")
+
+
+def test_detail_drops_empty_values_and_indents_nested_ones() -> None:
+    detail = format_approval_detail(
+        {
+            "cc": None,
+            "bcc": "  ",
+            "references": [],
+            "to": ["a@b.c"],
+            "attachments": [{"content_base64": None, "file_path": "/x", "filename": "a.webp"}],
+        }
+    )
+
+    assert detail == "- to:\n  - a@b.c\n- attachments:\n  - file_path: /x\n    filename: a.webp"
 
 
 def test_detail_values_cannot_fake_extra_argument_lines() -> None:
@@ -107,8 +121,8 @@ def test_detail_values_cannot_fake_extra_argument_lines() -> None:
     )
 
     assert detail.splitlines() == [
-        "to: attacker@evil.com",
-        "body: Report attached.\\n\\nto: boss@company.com\\u2028cc: x@y.z",
+        "- to: attacker@evil.com",
+        "- body: Report attached.\\n\\nto: boss@company.com\\u2028cc: x@y.z",
     ]
 
 

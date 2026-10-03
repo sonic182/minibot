@@ -22,6 +22,7 @@ Approver = Callable[[str, dict[str, Any], ToolContext], Awaitable[bool]]
 _DETAIL_MAX_CHARS = 3000
 _TRUNCATED_SUFFIX = "\n…(truncated)"
 _VALUE_MAX_CHARS = 1000
+_NO_ARGUMENTS = "(no arguments)"
 NAME_MAX_CHARS = 200
 _ESCAPED_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 _ESCAPED_CHARS = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
@@ -127,16 +128,49 @@ async def request_tool_approval(
 
 
 def format_approval_detail(arguments: dict[str, Any]) -> str:
-    """One line per argument, shortest first, each value capped on its own.
+    """One block per argument, shortest first, each value capped on its own.
 
-    The model controls argument order and size, so a long body must never push a recipient out of
-    view. Unicode format characters (bidi overrides, zero-width) are escaped so text cannot be shown
-    reordered or hidden.
+    Empty values (``None``, blank strings, empty containers) are dropped. The model controls argument
+    order and size, so a long body must never push a recipient out of view. Unicode format characters
+    (bidi overrides, zero-width) are escaped so text cannot be shown reordered or hidden.
     """
-    lines = sorted(
-        (f"{_escape(str(key))}: {_render_value(value)}" for key, value in _redact(arguments).items()), key=len
+    pruned = _prune(_redact(arguments))
+    blocks = sorted((_render_entry(str(key), value, "") for key, value in pruned.items()), key=len)
+    return _cap_detail("\n".join(f"- {block}" for block in blocks) or _NO_ARGUMENTS)
+
+
+def _prune(value: Any) -> Any:
+    if isinstance(value, dict):
+        pruned = {key: _prune(item) for key, item in value.items()}
+        return {key: item for key, item in pruned.items() if not _is_empty(item)}
+    if isinstance(value, list):
+        return [item for item in map(_prune, value) if not _is_empty(item)]
+    return value
+
+
+def _is_empty(value: Any) -> bool:
+    return (
+        value is None
+        or (isinstance(value, str) and not value.strip())
+        or (isinstance(value, (dict, list)) and not value)
     )
-    return _cap_detail("\n".join(lines))
+
+
+def _render_entry(key: str, value: Any, indent: str) -> str:
+    label = f"{indent}{_escape(key)}:"
+    child_indent = f"{indent}  "
+    if isinstance(value, dict):
+        return "\n".join([label, *(_render_entry(str(name), child, child_indent) for name, child in value.items())])
+    if isinstance(value, list):
+        return "\n".join([label, *(_render_item(item, child_indent) for item in value)])
+    return f"{label} {_render_value(value)}"
+
+
+def _render_item(item: Any, indent: str) -> str:
+    if isinstance(item, dict):
+        body = "\n".join(_render_entry(str(name), child, f"{indent}  ") for name, child in item.items())
+        return f"{indent}- {body[len(indent) + 2 :]}"
+    return f"{indent}- {_render_value(item)}"
 
 
 def _cap_detail(text: str) -> str:
