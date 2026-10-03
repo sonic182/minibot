@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import logging
+import re
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
-from aiogram.enums import ChatAction
+from aiogram.enums import ChatAction, ParseMode
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import Message as TelegramMessage
 
@@ -32,6 +34,23 @@ from minibot.core.events import (
 _TYPING_INTERVAL_SECONDS = 4
 _DENIAL_DRAIN_SECONDS = 1.0
 _APPROVAL_CALLBACK_PREFIX = "approval"
+_APPROVAL_KEY = re.compile(r"([A-Za-z_][\w.-]*):(?= |$)")
+
+
+def _approval_detail_html(detail: str) -> str:
+    return "\n".join(_approval_line_html(line) for line in detail.splitlines())
+
+
+def _approval_line_html(line: str) -> str:
+    body = line.lstrip(" ")
+    indent = len(line) - len(body)
+    prefix = " " * indent
+    if body.startswith("- "):
+        body = body[2:]
+        prefix += "• " if indent == 0 else "◦ "
+    if match := _APPROVAL_KEY.match(body):
+        return f"{prefix}<b>{html.escape(match[1])}</b>:{html.escape(body[match.end() :])}"
+    return f"{prefix}{html.escape(body)}"
 
 
 class TelegramService:
@@ -199,7 +218,11 @@ class TelegramService:
         try:
             sent = await self._bot.send_message(
                 chat_id=event.chat_id,
-                text=f"Approval required: {event.tool_name}\n\n{event.detail}",
+                text=(
+                    f"🔐 Approval required\n<b>{html.escape(event.tool_name)}</b>\n\n"
+                    f"{_approval_detail_html(event.detail)}"
+                ),
+                parse_mode=ParseMode.HTML,
                 reply_markup=keyboard,
             )
         except Exception:

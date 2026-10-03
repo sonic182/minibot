@@ -219,6 +219,40 @@ async def test_approval_callback_for_expired_request_is_not_published() -> None:
 
 
 @pytest.mark.asyncio
+async def test_approval_prompt_is_html_with_escaped_detail() -> None:
+    service, bot, _, _ = _service(TelegramChannelConfig(bot_token="token"))
+    sent: dict[str, Any] = {}
+
+    async def _send(**kwargs: Any) -> Any:
+        sent.update(kwargs)
+        return type("Sent", (), {"message_id": 7})()
+
+    bot.send_message = _send
+    service._pending_approvals = {}
+
+    await service._send_approval_request(
+        ToolApprovalRequestedEvent(
+            approval_id="a1",
+            tool_name="t<b>",
+            channel="telegram",
+            chat_id=1,
+            detail="- to:\n  - <i>x</i>\n- files:\n  - path: /a & b\n    name: c",
+        )
+    )
+
+    nbsp = " "
+    assert sent["parse_mode"] == "HTML"
+    assert sent["text"] == (
+        "🔐 Approval required\n<b>t&lt;b&gt;</b>\n\n"
+        "• <b>to</b>:\n"
+        f"{nbsp * 2}◦ &lt;i&gt;x&lt;/i&gt;\n"
+        "• <b>files</b>:\n"
+        f"{nbsp * 2}◦ <b>path</b>: /a &amp; b\n"
+        f"{nbsp * 4}<b>name</b>: c"
+    )
+
+
+@pytest.mark.asyncio
 async def test_approval_prompt_that_fails_to_send_is_denied_at_once() -> None:
     service, bot, event_bus, _ = _service(TelegramChannelConfig(bot_token="token"))
 
