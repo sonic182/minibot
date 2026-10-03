@@ -352,7 +352,9 @@ def _build_worker_tools(
     bindings.extend(mcp_bindings)
 
     bindings.extend(extension_tools)
-    scoped = strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))
+    scoped = strip_reserved_delegation_tools(
+        filter_tools_for_agent(bindings, spec, mcp_name_prefix=settings.tools.mcp.name_prefix)
+    )
     return apply_tool_output_spill(
         scoped,
         storage=managed_storage,

@@ -154,8 +154,9 @@ Orchestration
 ``[orchestration.specialists].enabled`` (default ``true``) is the switch for using owner-defined
 specialist agents. With it off, the roster, ``fetch_agent_info`` and named delegation all
 disappear, while the generic task worker stays available as long as ``[tasks]`` is enabled.
-Specialists run on the task backend, so enabling this with ``[tasks].enabled = false`` fails config
-loading instead of exposing a roster nothing can use.
+Specialists run on the task backend, so the default follows ``[tasks].enabled``: with tasks off and
+this key omitted, the roster is disabled. Setting it to ``true`` explicitly while
+``[tasks].enabled = false`` fails config loading instead of exposing a roster nothing can use.
 
 ``[orchestration.agent_management]`` is opt-in and off by default: ``reload`` exposes
 ``reload_agents`` for hand-edited files, and ``write`` exposes controlled create/update/delete

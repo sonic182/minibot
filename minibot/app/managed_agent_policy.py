@@ -12,7 +12,7 @@ import dataclasses
 from pathlib import Path
 
 from minibot.app.agent_policies import RESERVED_DELEGATION_TOOL_NAMES
-from minibot.app.mcp_tool_name import is_mcp_tool_name
+from minibot.app.mcp_tool_name import DEFAULT_MCP_NAME_PREFIX, is_mcp_tool_name
 from minibot.app.tool_policy_utils import matches_any
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentSpec
@@ -42,6 +42,9 @@ class ManagedAgentPolicy:
     tool_patterns: tuple[str, ...]
     mcp_servers: frozenset[str]
     providers: frozenset[str]
+    # Must match ``[tools.mcp].name_prefix``: a managed tool grant is refused as an MCP claim by
+    # name shape, so a hardcoded prefix would let a renamed MCP tool through.
+    mcp_name_prefix: str = DEFAULT_MCP_NAME_PREFIX
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ManagedAgentPolicy:
@@ -52,6 +55,7 @@ class ManagedAgentPolicy:
             # Targeting the provider the daemon already runs on is not an escalation, so it stays
             # available even with an empty ceiling. Anything else has to be listed.
             providers=frozenset({*config.providers, settings.llm.provider}),
+            mcp_name_prefix=settings.tools.mcp.name_prefix,
         )
 
     def authorize(self, spec: AgentSpec) -> None:
@@ -77,7 +81,7 @@ class ManagedAgentPolicy:
                 f"{source}: managed tools_allow entry '{name}' is a pattern; list exact tool names so each "
                 "one can be checked against the ceiling"
             )
-        if is_mcp_tool_name(name):
+        if is_mcp_tool_name(name, prefix=self.mcp_name_prefix):
             raise ValueError(
                 f"{source}: '{name}' is an MCP tool; a managed agent claims MCP servers through mcp_servers, "
                 "not tools_allow"

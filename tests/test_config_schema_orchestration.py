@@ -23,9 +23,16 @@ def test_defaults_keep_specialists_on_and_management_off() -> None:
     assert settings.orchestration.agent_management.active is False
 
 
-def test_specialists_require_the_task_backend() -> None:
-    with pytest.raises(ValueError, match=r"\[orchestration\.specialists\]\.enabled requires"):
-        Settings.from_dict({"tasks": {"enabled": False}})
+def test_tasks_off_disables_specialists_by_default() -> None:
+    settings = Settings.from_dict({"tasks": {"enabled": False}})
+
+    assert settings.orchestration.specialists.enabled is False
+    assert settings.tasks.enabled is False
+
+
+def test_explicit_specialists_without_tasks_is_rejected() -> None:
+    with pytest.raises(ValueError, match=r"requires \[tasks\]\.enabled = true"):
+        Settings.from_dict({"tasks": {"enabled": False}, "orchestration": {"specialists": {"enabled": True}}})
 
 
 def test_tasks_without_specialists_is_allowed() -> None:

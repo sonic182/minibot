@@ -69,6 +69,18 @@ def test_delegation_tools_are_reserved(name: str) -> None:
         _policy(tools_allow=[name]).authorize(_spec(tools_allow=[name]))
 
 
+def test_a_renamed_mcp_tool_is_still_treated_as_an_mcp_claim() -> None:
+    settings = Settings.from_dict(
+        {
+            "orchestration": {"agent_management": {"write": True, "tools_allow": ["*"]}},
+            "tools": {"mcp": {"name_prefix": "tools"}},
+        }
+    )
+
+    with pytest.raises(ValueError, match="is an MCP tool"):
+        ManagedAgentPolicy.from_settings(settings).authorize(_spec(tools_allow=["tools_gmail__send"]))
+
+
 def test_an_unlisted_mcp_server_is_rejected() -> None:
     with pytest.raises(ValueError, match=r"is not in \[orchestration\.agent_management\]\.mcp_servers"):
         _policy().authorize(_spec(mcp_servers=["playwright"]))

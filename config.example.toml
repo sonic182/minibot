@@ -190,7 +190,8 @@ tools_deny = ["mcp*"]
 # Use owner-defined specialist agents from `directory`.
 # false removes the specialist roster, `fetch_agent_info` and named delegation, while the generic
 # task worker stays available as long as [tasks] is enabled. Specialists run on the task backend,
-# so `enabled = true` with `[tasks].enabled = false` is a config error.
+# so this default follows [tasks].enabled: with tasks off and the key omitted, the roster is
+# disabled. An explicit `enabled = true` with `[tasks].enabled = false` is a config error.
 [orchestration.specialists]
 enabled = true
 

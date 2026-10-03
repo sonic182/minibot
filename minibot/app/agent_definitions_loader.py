@@ -79,12 +79,13 @@ def parse_agent_definition(*, source_path: Path, text: str, strict_name: bool = 
     )
 
 
-def load_agent_specs(directory: str) -> list[AgentSpec]:
+def load_agent_specs(directory: str, *, strict_name: bool = False) -> list[AgentSpec]:
     """Load every enabled definition in one directory, rejecting duplicate names.
 
     Two files claiming the same agent name used to last-win silently, which made the roster depend
     on glob order. A collision is now an error, because a managed definition must never quietly
-    replace an owner-authored one.
+    replace an owner-authored one. ``strict_name`` turns the name-pattern warning into an error for
+    directories whose files must stay addressable by name, such as the managed one.
     """
     root = Path(directory)
     if not root.exists() or not root.is_dir():
@@ -92,7 +93,11 @@ def load_agent_specs(directory: str) -> list[AgentSpec]:
     specs: list[AgentSpec] = []
     seen: dict[str, Path] = {}
     for path in sorted(root.glob("*.md")):
-        spec = parse_agent_definition(source_path=path, text=path.read_text(encoding="utf-8"))
+        spec = parse_agent_definition(
+            source_path=path,
+            text=path.read_text(encoding="utf-8"),
+            strict_name=strict_name,
+        )
         if spec is None:
             continue
         previous = seen.get(spec.name)
@@ -120,7 +125,13 @@ def load_active_agent_specs(settings: Settings) -> list[AgentSpec]:
         return specs
     policy = ManagedAgentPolicy.from_settings(settings)
     owner_names = {spec.name for spec in specs}
-    for spec in load_agent_specs(management.directory):
+    for spec in load_agent_specs(management.directory, strict_name=True):
+        if spec.source_path.stem != spec.name:
+            raise ValueError(
+                f"managed agent '{spec.name}' in {spec.source_path} must be defined in "
+                f"'{spec.name}.md'; the frontmatter name has to match the file name so the "
+                "management tools can address it"
+            )
         if spec.name in owner_names:
             raise ValueError(
                 f"managed agent '{spec.name}' in {spec.source_path} collides with an owner-authored agent; "

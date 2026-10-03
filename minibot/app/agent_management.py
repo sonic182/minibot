@@ -91,7 +91,7 @@ class AgentManagementService:
                 if not self._store.exists(name):
                     return _failure("delete", name, f"managed agent '{name}' does not exist")
                 self._store.delete(name)
-            except ValueError as exc:
+            except (ValueError, OSError) as exc:
                 return _failure("delete", name, str(exc))
             return await self._finish("delete", name)
 
@@ -105,7 +105,7 @@ class AgentManagementService:
             if not replacing and exists:
                 return _failure(action, name, f"managed agent '{name}' already exists; use update_agent")
             self._store.write(name, content)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             return _failure(action, name, str(exc))
         return await self._finish(action, name)
 

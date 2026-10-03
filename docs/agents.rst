@@ -38,7 +38,8 @@ result, ``list_tasks`` to see what is running, and ``cancel_task`` to stop one.
 Two switches decide whether any of this exists. ``[orchestration.specialists].enabled`` (default
 ``true``) is the one for specialists themselves: with it off, the roster, ``fetch_agent_info`` and
 named delegation all disappear, and ``spawn_task`` still runs a generic worker. ``[tasks].enabled``
-(default ``true``) is the execution backend, so ``[orchestration.specialists].enabled = true`` with
+(default ``true``) is the execution backend, so the default follows it: with tasks off and the key
+omitted the roster is disabled. An explicit ``[orchestration.specialists].enabled = true`` with
 ``[tasks].enabled = false`` is a config error rather than a roster nothing can act on. Turning
 ``[tasks]`` off turns multi-agent orchestration off as well: the specialist roster is dropped from
 the system prompt along with the tool that could act on it.

@@ -464,8 +464,10 @@ class SpecialistsConfig(BaseModel):
 
     - ``enabled`` — use owner-defined specialist agents (default: ``true``). Off drops the roster,
       ``fetch_agent_info`` and named delegation, while the generic task worker stays available
-      whenever ``[tasks]`` is enabled. Specialists run on the task backend, so enabling this with
-      ``[tasks].enabled = false`` fails config loading rather than exposing a roster nothing can use.
+      whenever ``[tasks]`` is enabled. Specialists run on the task backend, so the default follows
+      ``[tasks].enabled``: with tasks off and this key omitted, the roster is disabled. Setting it
+      to ``true`` explicitly while ``[tasks].enabled = false`` fails config loading rather than
+      exposing a roster nothing can act on.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1169,15 +1171,20 @@ class Settings(BaseModel):
     def _validate_specialist_activation(self) -> Settings:
         """Specialists and agent management need their prerequisites enabled.
 
-        A roster that cannot be delegated to, or a management switch with no roster to manage, is a
-        misconfiguration rather than a silently inert feature.
+        ``specialists.enabled`` defaults to the task backend's own switch. With ``[tasks]`` off and
+        the key omitted, the roster is disabled rather than failing a config that used to load; an
+        explicit ``true`` while tasks are off is an error, because it asks for a roster nothing can
+        act on. A management switch with no roster to manage is always an error.
         """
-        if self.orchestration.specialists.enabled and not self.tasks.enabled:
-            raise ValueError(
-                "[orchestration.specialists].enabled requires [tasks].enabled = true; specialists run on the "
-                "task backend. Set [orchestration.specialists].enabled = false to keep tasks without specialists"
-            )
-        if self.orchestration.agent_management.active and not self.orchestration.specialists.enabled:
+        specialists = self.orchestration.specialists
+        if specialists.enabled and not self.tasks.enabled:
+            if "enabled" in specialists.model_fields_set:
+                raise ValueError(
+                    "[orchestration.specialists].enabled = true requires [tasks].enabled = true; specialists "
+                    "run on the task backend. Remove the key to follow [tasks].enabled, or set it to false"
+                )
+            specialists.enabled = False
+        if self.orchestration.agent_management.active and not specialists.enabled:
             raise ValueError("[orchestration.agent_management] requires [orchestration.specialists].enabled = true")
         return self
 

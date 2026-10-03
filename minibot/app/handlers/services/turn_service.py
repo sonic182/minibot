@@ -82,15 +82,21 @@ class LLMTurnService:
         self._runtime_service: RuntimeOrchestrationService | None = None
         self.set_runtime(runtime)
 
-    def replace_tools(self, tools: Sequence[ToolBinding]) -> None:
+    def replace_tools(
+        self,
+        tools: Sequence[ToolBinding],
+        *,
+        extension_prompt_fragments: Sequence[str],
+    ) -> None:
         """Swap the tool list after a roster reload.
 
         Four places snapshot the list — this service, the prompt service, the agent runtime and the
-        tool-use guardrail — so they move together. The next turn is the first to see the change;
-        a turn already in flight keeps what it started with.
+        tool-use guardrail — so they move together, and the extension prompt fragments are filtered
+        by tool name, so they move with it too. The next turn is the first to see the change; a turn
+        already in flight keeps what it started with.
         """
         self._tools = list(tools)
-        self._prompt_service.replace_tools(tools)
+        self._prompt_service.replace_tools(tools, extension_prompt_fragments=extension_prompt_fragments)
         self._tool_use_guardrail.replace_tools(tools)
         if self._runtime is not None:
             self._runtime.replace_tools(tools)

@@ -103,6 +103,40 @@ async def test_delete_rejects_a_missing_name(tmp_path: Path) -> None:
     assert outcome.error is not None and "does not exist" in outcome.error
 
 
+class _FailingStore:
+    """A store whose writes fail at the filesystem layer, not at validation."""
+
+    directory = Path("/nonexistent/managed")
+
+    def list_names(self) -> list[str]:
+        return []
+
+    def exists(self, name: str) -> bool:
+        del name
+        return False
+
+    def write(self, name: str, content: str) -> None:
+        del name, content
+        raise OSError("disk full")
+
+    def delete(self, name: str) -> None:
+        del name
+        raise OSError("disk full")
+
+
+@pytest.mark.asyncio
+async def test_a_store_oserror_is_reported_as_a_failure() -> None:
+    settings = Settings.from_dict(
+        {"orchestration": {"agent_management": {"write": True, "tools_allow": ["filesystem"]}}}
+    )
+    service = AgentManagementService(settings=settings, store=_FailingStore())
+
+    outcome = await service.create(name="helper_agent", content=_definition())
+
+    assert outcome.ok is False
+    assert outcome.error is not None and "disk full" in outcome.error
+
+
 @pytest.mark.asyncio
 async def test_an_unauthorized_tool_is_rejected_and_not_written(tmp_path: Path) -> None:
     service = _service(tmp_path, ceiling=["filesystem"])

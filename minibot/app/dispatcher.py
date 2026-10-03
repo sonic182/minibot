@@ -199,6 +199,7 @@ class Dispatcher:
             tools=tools,
             orchestration_config=self._settings.orchestration,
             agent_specs=self._agent_registry.all(),
+            mcp_name_prefix=self._settings.tools.mcp.name_prefix,
         )
 
     def refresh_agent_roster(self) -> AgentRosterChange:
@@ -213,7 +214,10 @@ class Dispatcher:
         view = self._main_agent_view(tools)
         self._all_tools = tools
         self._main_agent_tool_names = sorted(binding.tool.name for binding in view.tools)
-        self._turn_service.replace_tools(view.tools)
+        self._turn_service.replace_tools(
+            view.tools,
+            extension_prompt_fragments=self._extensions.prompt_fragments_for(view.tools),
+        )
         if view.hidden_tool_names:
             self._logger.info(
                 "main agent tools hidden due to exclusive ownership",

@@ -46,8 +46,8 @@ def write_config(
             f'tool_ownership_mode = "{tool_ownership_mode}"\n'
         ) + "\n".join(main_agent_lines)
     if not tasks_enabled:
-        # Specialists run on the task backend, so a config that turns tasks off has to turn them off
-        # too or it fails validation.
+        # Specialists run on the task backend; pin them off explicitly so the fixture does not
+        # depend on the default-follow behaviour.
         orchestration_block += "\n[orchestration.specialists]\nenabled = false\n"
     # An hour-long poll interval keeps the consumer from leasing what a test enqueues: the loop
     # polls once at start, before the turn runs, and a real worker subprocess would call a real

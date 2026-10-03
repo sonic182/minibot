@@ -108,3 +108,20 @@ def test_prompt_service_puts_the_fragments_in_the_system_prompt(tmp_path) -> Non
 
     assert prompt.startswith("base prompt")
     assert "## MCP servers\n\n### gmem\n\nUse recall first." in prompt
+
+
+def test_replace_tools_refreshes_the_extension_fragments(tmp_path) -> None:
+    service = PromptService(
+        llm_client=_StubLLMClient(str(tmp_path)),
+        tools=[_binding("mcp_gmem__recall")],
+        environment_prompt_fragment="",
+        logger=logging.getLogger("test.fragments"),
+        extension_prompt_fragments=["## MCP server: gmem\n\nUse recall first."],
+    )
+
+    service.replace_tools([], extension_prompt_fragments=["## MCP server: other"])
+
+    prompt = service.compose_system_prompt(channel=None)
+
+    assert "## MCP server: gmem" not in prompt
+    assert "## MCP server: other" in prompt

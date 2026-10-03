@@ -17,8 +17,10 @@ Use the management tools, never a file write:
 
 They validate the definition and the owner's ceiling **before** anything is written, and they refresh
 the roster, so a new agent is delegatable in the same conversation. Writing the file yourself with
-`filesystem` or `apply_patch` skips all of that: the roster will not see it, and if it is picked up
-later the ceiling check will reject it.
+`filesystem` or `apply_patch` skips all of that: the roster will not see it until a reload, and the
+reload only accepts it if it stays within the ceiling. A definition that exceeds the ceiling is
+rejected, and one that is written under a file name other than its `name` cannot be edited or
+deleted with these tools.
 
 ## 1. Decide what the agent is for
 

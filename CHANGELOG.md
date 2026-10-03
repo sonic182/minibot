@@ -26,10 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`[tasks].enabled = false` now also requires `[orchestration.specialists].enabled = false`.**
-  Specialists run on the task backend, so a config with tasks off and the new default
-  `specialists.enabled = true` fails loading with a message naming both keys. This is a breaking
-  change for a config that disabled tasks; add the second key to keep the previous behaviour.
+- **`[orchestration.specialists].enabled` follows `[tasks].enabled` when omitted.** Specialists run
+  on the task backend, so a config with `[tasks].enabled = false` and the key absent disables the
+  roster instead of failing loading, keeping an existing tasks-off config working. An explicit
+  `specialists.enabled = true` with tasks off is still a config error naming both keys.
 - **Duplicate agent names are an error.** Two files defining the same `name` used to last-win by
   glob order; the load now fails naming both files. A managed definition that collides with an
   owner-authored one is rejected rather than replacing it.

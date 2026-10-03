@@ -207,6 +207,22 @@ def test_owner_agents_are_not_bounded_by_the_managed_ceiling(tmp_path: Path) -> 
     assert [spec.tools_allow for spec in load_active_agent_specs(settings)] == [["bash"]]
 
 
+def test_load_active_agent_specs_rejects_a_managed_name_that_does_not_match_the_file(tmp_path: Path) -> None:
+    managed_dir = tmp_path / "managed"
+    managed_dir.mkdir(parents=True, exist_ok=True)
+    (managed_dir / "browser_agent.md").write_text(
+        "---\nname: files_agent\ndescription: files\nmode: agent\n---\n\nYou are files.",
+        encoding="utf-8",
+    )
+
+    settings = Settings.from_dict(
+        {"orchestration": {"agent_management": {"write": True, "directory": str(managed_dir)}}}
+    )
+
+    with pytest.raises(ValueError, match="must be defined in 'files_agent.md'"):
+        load_active_agent_specs(settings)
+
+
 def test_load_active_agent_specs_rejects_a_managed_name_collision(tmp_path: Path) -> None:
     owner_dir = tmp_path / "agents"
     managed_dir = tmp_path / "managed"

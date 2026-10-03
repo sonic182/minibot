@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
-from minibot.app.mcp_tool_name import extract_mcp_server, is_mcp_tool_name
+from minibot.app.mcp_tool_name import DEFAULT_MCP_NAME_PREFIX, extract_mcp_server, is_mcp_tool_name
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns, validate_allow_deny
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentSpec, normalize_model_overrides
@@ -21,7 +21,18 @@ RESERVED_DELEGATION_TOOL_NAMES = {
 }
 
 
-def filter_tools_for_agent(tools: Sequence[ToolBinding], spec: AgentSpec) -> list[ToolBinding]:
+def filter_tools_for_agent(
+    tools: Sequence[ToolBinding],
+    spec: AgentSpec,
+    *,
+    mcp_name_prefix: str = DEFAULT_MCP_NAME_PREFIX,
+) -> list[ToolBinding]:
+    """Apply a spec's allow/deny policy to ``tools``.
+
+    ``mcp_name_prefix`` has to match ``[tools.mcp].name_prefix``: MCP membership is what decides
+    whether a tool is gated by ``spec.mcp_servers`` or by ``tools_allow``/``tools_deny``, and a
+    hardcoded prefix would let a renamed MCP tool slip through as a native one.
+    """
     validate_allow_deny(spec.tools_allow, spec.tools_deny)
 
     allow_patterns = normalize_patterns(spec.tools_allow)
@@ -32,9 +43,9 @@ def filter_tools_for_agent(tools: Sequence[ToolBinding], spec: AgentSpec) -> lis
     filtered: list[ToolBinding] = []
     for binding in tools:
         tool_name = binding.tool.name
-        is_mcp = is_mcp_tool_name(tool_name)
+        is_mcp = is_mcp_tool_name(tool_name, prefix=mcp_name_prefix)
         if is_mcp:
-            server = extract_mcp_server(tool_name)
+            server = extract_mcp_server(tool_name, prefix=mcp_name_prefix)
             if server is None or server not in mcp_servers:
                 continue
             if deny_mode and matches_any(tool_name, deny_patterns):
