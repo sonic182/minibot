@@ -21,6 +21,10 @@ def _install_console_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
             return ExtensionRegistry([], logging.getLogger("test.extensions"))
 
         @classmethod
+        def bind_agent_roster_refresh(cls, refresh) -> None:
+            del refresh
+
+        @classmethod
         def configure(cls, config_path=None, *, entrypoint="daemon") -> None:
             calls["config_path"] = config_path
             calls["entrypoint"] = entrypoint
@@ -89,6 +93,9 @@ def _install_console_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
 
         async def stop(self) -> None:
             calls["dispatcher_stopped"] = True
+
+        def refresh_agent_roster(self) -> object:
+            return object()
 
     class _FakeConsoleService:
         def __init__(self, event_bus, *, chat_id, user_id, console) -> None:

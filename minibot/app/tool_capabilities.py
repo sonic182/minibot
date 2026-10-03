@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from minibot.app.agent_policies import filter_tools_for_agent
-from minibot.app.mcp_tool_name import extract_mcp_server, is_mcp_tool_name
+from minibot.app.mcp_tool_name import DEFAULT_MCP_NAME_PREFIX, extract_mcp_server, is_mcp_tool_name
 from minibot.app.tool_policy_utils import apply_allow_deny, normalize_patterns
 from minibot.config.schema import MainAgentConfig, OrchestrationConfig
 from minibot.core.agents import AgentSpec
@@ -22,6 +22,7 @@ def main_agent_tool_view(
     tools: Sequence[ToolBinding],
     orchestration_config: OrchestrationConfig,
     agent_specs: Sequence[AgentSpec],
+    mcp_name_prefix: str = DEFAULT_MCP_NAME_PREFIX,
 ) -> MainAgentToolView:
     main_agent_tools = _apply_main_agent_policy(list(tools), orchestration_config.main_agent)
     if orchestration_config.tool_ownership_mode not in {"exclusive", "exclusive_mcp"}:
@@ -30,11 +31,13 @@ def main_agent_tool_view(
     shared_servers = {name.strip() for name in orchestration_config.shared_mcp_servers if name.strip()}
     reserved_tool_names: set[str] = set()
     for spec in agent_specs:
-        for binding in filter_tools_for_agent(main_agent_tools, spec):
+        for binding in filter_tools_for_agent(main_agent_tools, spec, mcp_name_prefix=mcp_name_prefix):
             tool_name = binding.tool.name
-            if orchestration_config.tool_ownership_mode == "exclusive_mcp" and not is_mcp_tool_name(tool_name):
+            if orchestration_config.tool_ownership_mode == "exclusive_mcp" and not is_mcp_tool_name(
+                tool_name, prefix=mcp_name_prefix
+            ):
                 continue
-            if extract_mcp_server(tool_name) in shared_servers:
+            if extract_mcp_server(tool_name, prefix=mcp_name_prefix) in shared_servers:
                 continue
             reserved_tool_names.add(tool_name)
 

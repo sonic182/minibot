@@ -27,12 +27,29 @@ class PromptService:
         self._profile = LLMExecutionProfile.from_client(llm_client)
         self._tools = list(tools)
         self._environment_prompt_fragment = environment_prompt_fragment.strip()
-        self._extension_prompt_fragments = [text.strip() for text in extension_prompt_fragments if text.strip()]
+        self._extension_prompt_fragments = _normalize_fragments(extension_prompt_fragments)
         self._logger = logger
         self._prompts_dir = self._profile.prompts_dir
         self._agent_registry = agent_registry
         self._skill_registry = skill_registry
         self._preload_skill_catalog = preload_skill_catalog
+
+    def replace_tools(
+        self,
+        tools: Sequence[ToolBinding],
+        *,
+        extension_prompt_fragments: Sequence[str],
+    ) -> None:
+        """Swap the tool list after a roster reload.
+
+        The roster fragment and the capability-status fragment are both decided from the tool names
+        and the registry, so a stale list would describe a roster the turn will not offer.
+        ``extension_prompt_fragments`` is recomputed by the caller for the same reason: an extension
+        fragment is gated on a tool name, and the reload can hide or reveal one (an MCP server
+        claimed by a specialist under ``exclusive_mcp``, for instance).
+        """
+        self._tools = list(tools)
+        self._extension_prompt_fragments = _normalize_fragments(extension_prompt_fragments)
 
     @property
     def prompts_dir(self) -> str:
@@ -245,3 +262,7 @@ class PromptService:
             "- Do not use placeholder statements.\n\n"
             f"Original content:\n{original_content}"
         )
+
+
+def _normalize_fragments(fragments: Sequence[str]) -> list[str]:
+    return [text.strip() for text in fragments if text.strip()]

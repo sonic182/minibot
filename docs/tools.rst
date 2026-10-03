@@ -180,6 +180,17 @@ Tool Surface
      - ``list_secrets``
      - ``[vault] enabled`` (unlocked)
      - List the names of stored secrets; values are never exposed. See :doc:`vault`.
+   * - Agent management
+     - ``reload_agents``
+     - ``[orchestration.agent_management] reload``
+     - Re-read agent definition files and report which names were added, removed or updated. A failed
+       reload leaves the previous roster in place. See :doc:`agents`.
+   * - Agent management
+     - ``create_agent``, ``update_agent``, ``delete_agent``
+     - ``[orchestration.agent_management] write``
+     - Create, replace or remove a model-authored specialist. Every call is validated against the
+       owner's ceiling before anything is written, and a successful write refreshes the roster. The
+       bundled ``create-agent`` skill is hidden until this switch is on.
 
 Runtime Notes
 -------------

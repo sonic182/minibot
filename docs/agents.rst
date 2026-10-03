@@ -35,8 +35,69 @@ falls back to fire and forget instead of failing. A rate-limit retry notice stil
 user, and a continuing task that is cancelled does not report back. Use ``get_task`` to retrieve a
 result, ``list_tasks`` to see what is running, and ``cancel_task`` to stop one.
 
-Turning ``[tasks]`` off therefore turns multi-agent orchestration off: the specialist roster is
-dropped from the system prompt along with the tool that could act on it.
+Two switches decide whether any of this exists. ``[orchestration.specialists].enabled`` (default
+``true``) is the one for specialists themselves: with it off, the roster, ``fetch_agent_info`` and
+named delegation all disappear, and ``spawn_task`` still runs a generic worker. ``[tasks].enabled``
+(default ``true``) is the execution backend, so the default follows it: with tasks off and the key
+omitted the roster is disabled. An explicit ``[orchestration.specialists].enabled = true`` with
+``[tasks].enabled = false`` is a config error rather than a roster nothing can act on. Turning
+``[tasks]`` off turns multi-agent orchestration off as well: the specialist roster is dropped from
+the system prompt along with the tool that could act on it.
+
+Runtime Agent Management
+------------------------
+
+Runtime management is separate and off by default. ``[orchestration.agent_management]``
+``reload = true`` exposes ``reload_agents`` so an owner can hand-edit ``agents/*.md`` and re-read
+them without a restart; ``write = true`` additionally exposes controlled ``create_agent``,
+``update_agent`` and ``delete_agent`` tools for model-authored definitions. Neither switch changes
+how existing owner-authored agents run.
+
+The four modes, all reachable by config alone:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 39 39
+
+   * - Mode
+     - Config
+     - What exists
+   * - No specialists
+     - ``[orchestration.specialists] enabled = false``
+     - No roster, no ``fetch_agent_info``, no named delegation. ``spawn_task`` still runs a generic
+       worker while ``[tasks]`` is on.
+   * - Owner-only (default)
+     - both management switches false
+     - The roster and delegation, from files you write. No management tools or skill at all.
+   * - Reload only
+     - ``reload = true``
+     - Adds ``reload_agents``: edit a file yourself, then re-read it without a restart.
+   * - Managed agents
+     - ``write = true``
+     - Adds ``create_agent``/``update_agent``/``delete_agent``, the bundled ``create-agent`` skill,
+       and a managed definition directory the model may write to.
+
+A managed definition is never more powerful than the ceiling in
+``[orchestration.agent_management]``. It may not use ``tools_deny``, must grant exact tool names,
+claims MCP servers through ``mcp_servers``, and may only target a provider the owner listed. Owner
+files are not subject to the ceiling, so the two trust levels stay distinct. The loader records
+which directory each definition was read from; a symlink in the managed directory remains managed,
+including when the worker applies model overrides. Creating or updating a managed definition whose
+name collides with an enabled owner-authored agent is rejected before writing. See :doc:`config` for
+the field reference.
+
+Runtime definition reads and managed writes run off the event loop. Reload prepares and validates
+candidate definitions in a worker thread, then applies the roster and tool changes on the event-loop
+thread. Cancelling a managed write waits for its filesystem operation to finish before releasing
+the management lock; cancellation does not roll back a completed write.
+
+That ceiling bounds what an agent may be *told* to do; it is not a sandbox. A managed agent granted
+``bash`` or ``filesystem`` can reach anything the daemon's OS user can, exactly as an owner-authored
+one can. See :doc:`security`.
+
+Main-agent visibility is a separate thing from the managed ceiling. ``[orchestration.main_agent]``
+and ``tool_ownership_mode`` decide what the *main* agent sees; they never widen or narrow what a
+specialist may be granted, and a specialist may deliberately own a tool the main agent is denied.
 
 Agent Definitions
 -----------------

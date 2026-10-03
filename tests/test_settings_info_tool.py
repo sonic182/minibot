@@ -62,13 +62,56 @@ async def test_no_secret_field_reaches_the_result() -> None:
 @pytest.mark.asyncio
 async def test_disabled_features_are_absent() -> None:
     result = await _call(
-        Settings.from_dict({"tasks": {"enabled": False}, "scheduler": {"prompts": {"enabled": False}}})
+        Settings.from_dict(
+            {
+                "tasks": {"enabled": False},
+                # Specialists run on the task backend, so they go off with it.
+                "orchestration": {"specialists": {"enabled": False}},
+                "scheduler": {"prompts": {"enabled": False}},
+            }
+        )
     )
 
     assert result["channels"] == []
     assert not {"tasks", "scheduler", "vault"} & set(result)
     assert not {"bash", "mcp", "http_client", "file_storage"} & set(result["tools"])  # type: ignore[arg-type]
-    assert result["agents"] == {"directory": "./agents", "names": []}
+    assert result["agents"] == {"directory": "./agents", "specialists_enabled": False, "names": []}
+
+
+@pytest.mark.asyncio
+async def test_agent_management_is_absent_until_it_is_enabled() -> None:
+    result = await _call(Settings())
+
+    assert result["agents"]["specialists_enabled"] is True  # type: ignore[index]
+    assert "agent_management" not in result["agents"]  # type: ignore[operator]
+
+
+@pytest.mark.asyncio
+async def test_agent_management_reports_the_ceiling_and_switches() -> None:
+    settings = Settings.from_dict(
+        {
+            "orchestration": {
+                "agent_management": {
+                    "write": True,
+                    "directory": "./data/agents",
+                    "tools_allow": ["filesystem"],
+                    "mcp_servers": ["playwright"],
+                    "providers": ["anthropic"],
+                },
+            }
+        }
+    )
+
+    result = await _call(settings)
+
+    assert result["agents"]["agent_management"] == {  # type: ignore[index]
+        "reload": False,
+        "write": True,
+        "directory": "./data/agents",
+        "tools_allow": ["filesystem"],
+        "mcp_servers": ["playwright"],
+        "providers": ["anthropic"],
+    }
 
 
 @pytest.mark.asyncio

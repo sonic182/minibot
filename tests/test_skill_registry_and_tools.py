@@ -470,3 +470,28 @@ def test_frontmatter_reads_block_scalars_and_skips_list_items() -> None:
     )
 
     assert parsed == {"name": "x", "description": "Review a diff for bugs.", "compatibility": "Needs bash"}
+
+
+def test_create_agent_skill_is_hidden_until_runtime_writes_are_on() -> None:
+    from minibot.app.managed_agent_policy import native_skills_hidden_by_management
+    from minibot.config.schema import Settings
+
+    off = Settings()
+    on = Settings.from_dict({"orchestration": {"agent_management": {"write": True}}})
+
+    assert native_skills_hidden_by_management(off) == ["create-agent"]
+    assert native_skills_hidden_by_management(on) == []
+
+    hidden = SkillRegistry.from_config(off.tools.skills, extra_native_disabled=native_skills_hidden_by_management(off))
+    shown = SkillRegistry.from_config(on.tools.skills, extra_native_disabled=native_skills_hidden_by_management(on))
+
+    assert "create-agent" not in hidden.names()
+    assert "create-agent" in shown.names()
+
+
+def test_the_bundled_create_agent_skill_is_loadable() -> None:
+    spec = SkillRegistry(paths=[], native=True).get("create-agent")
+
+    assert spec is not None
+    assert spec.source is SkillSource.NATIVE
+    assert "create_agent" in spec.body

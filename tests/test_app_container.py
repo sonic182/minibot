@@ -64,7 +64,7 @@ async def test_app_container_configures_and_initializes_core_backends(monkeypatc
     monkeypatch.setattr(app_container, "SQLAlchemyMemoryBackend", _Backend)
     monkeypatch.setattr(app_container, "PendingTurnStore", _Backend)
     monkeypatch.setattr(app_container, "LLMClientFactory", _LLMFactory)
-    monkeypatch.setattr(app_container, "load_agent_specs", lambda *_: [])
+    monkeypatch.setattr(app_container, "load_active_agent_specs", lambda *_, **__: [])
 
     app_container.AppContainer.configure()
     await app_container.AppContainer.initialize_storage()

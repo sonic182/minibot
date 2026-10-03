@@ -20,6 +20,8 @@ def _write_agents_config(tmp_path: Path, provider: str) -> Path:
         provider=provider,
         db_name="test_console_minibot.db",
         orchestration_dir=tmp_path / "agents",
+        # The roster only exists when specialists are on, and those need the task backend.
+        tasks_enabled=True,
     )
 
 

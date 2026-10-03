@@ -149,6 +149,10 @@ Currently bundled:
   (the ``read_docs`` tool, which it enables), and routes questions about the running instance to the
   ``get_settings`` tool instead of answering them from the docs. It falls back to the published site through
   ``http_request`` only when the bundled docs are missing.
+- ``create-agent`` — how to author a specialist agent: using the management tools rather than a file
+  write, reading the ceiling from ``get_settings`` before granting anything, and what each validation
+  error means. Hidden unless ``[orchestration.agent_management] write = true``, because without it
+  the tools it describes do not exist. See :doc:`agents`.
 
 Where the agent writes new skills
 ---------------------------------

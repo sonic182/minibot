@@ -1,0 +1,11 @@
+Replace an existing managed specialist agent with a complete definition.
+
+Takes the same arguments and follows the same rules as create_agent, but requires that the agent
+already exists in the managed directory. Use create_agent for a new agent and this to change one.
+
+The whole file is replaced, so include everything that should remain — an omitted `tools_allow`, for
+example, means the updated agent grants no native tools. Owner-authored agents cannot be updated
+here; this only touches definitions in the managed directory.
+
+The result reports `ok`, the resulting roster, and an `error` naming exactly what to fix when the
+definition is rejected. A rejected update leaves the existing definition untouched.

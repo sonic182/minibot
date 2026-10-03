@@ -216,6 +216,35 @@ async def apply_runtime_token_autoconfig_async(
     return adjusted_specs
 
 
+def apply_cached_token_limits(settings: Settings, agent_specs: list[AgentSpec]) -> list[AgentSpec]:
+    """Fill in per-spec limits from the in-process catalog cache, with no network access.
+
+    This is the reload counterpart of :func:`apply_runtime_token_autoconfig_async`. A reload runs on
+    a live daemon, where a catalog fetch would block on a 20-second timeout, and boot has already
+    pre-warmed every model ``available_providers`` offers. A miss therefore means the owner named a
+    model outside the configured lists: that spec keeps its own frontmatter values and resolves on
+    the first delegation instead.
+
+    The main model is deliberately left alone. It did not change, and its budget was already
+    written into ``settings`` at boot; recomputing it here would read back the derived value as if
+    it were the owner's own cap.
+    """
+    ratio = settings.memory.context_ratio_before_compact
+    adjusted: list[AgentSpec] = []
+    for spec in agent_specs:
+        provider_name = spec.model_provider or settings.llm.provider
+        model_name = spec.model or settings.llm.model
+        limits = cached_model_limits(provider_name, model_name)
+        if limits is None:
+            adjusted.append(spec)
+            continue
+        derived_budget = max(1, int(limits["context"] * ratio))
+        ceilings = (limits["output"], derived_budget, spec.max_new_tokens)
+        derived_max_new_tokens = max(1, min(value for value in ceilings if value))
+        adjusted.append(replace(spec, max_new_tokens=derived_max_new_tokens, context_limit=limits["context"]))
+    return adjusted
+
+
 async def _prewarm_delegation_targets(
     *,
     settings: Settings,
