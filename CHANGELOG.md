@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-10-03
+
 ### Changed
 
 - **Clearer provider questions in `minibot configure`.** The wizard prints `Step n/6` headings, describes each
@@ -1208,7 +1210,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.25.1...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.25.2...HEAD
+[0.25.2]: https://github.com/sonic182/minibot/compare/0.25.1..0.25.2
 [0.25.1]: https://github.com/sonic182/minibot/compare/0.25.0..0.25.1
 [0.25.0]: https://github.com/sonic182/minibot/compare/0.24.0..0.25.0
 [0.24.0]: https://github.com/sonic182/minibot/compare/0.23.1..0.24.0
