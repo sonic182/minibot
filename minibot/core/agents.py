@@ -45,11 +45,7 @@ def normalize_model_overrides(payload: Mapping[str, Any] | None) -> dict[str, st
     if not payload:
         return {}
     keys = ("model_provider", "model", "reasoning_effort")
-    return {
-        key: value.strip()
-        for key in keys
-        if isinstance((value := payload.get(key)), str) and value.strip()
-    }
+    return {key: value.strip() for key in keys if isinstance((value := payload.get(key)), str) and value.strip()}
 
 
 @dataclass(frozen=True)
