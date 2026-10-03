@@ -95,7 +95,11 @@ class SettingsInfoTool:
     def _channels(self) -> list[str]:
         channels = self._settings.channels
         names = ["telegram"] if channels.telegram.enabled and channels.telegram.bot_token else []
-        names.extend(name for name, section in (channels.model_extra or {}).items() if section.get("enabled", True))
+        names.extend(
+            name
+            for name, section in (channels.model_extra or {}).items()
+            if isinstance(section, dict) and section.get("enabled", True)
+        )
         return names
 
     def _tools(self) -> dict[str, dict[str, Any]]:

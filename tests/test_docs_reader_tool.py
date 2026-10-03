@@ -42,6 +42,16 @@ async def test_unknown_page_is_a_structured_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_long_page_is_truncated(tmp_path: Path) -> None:
+    (tmp_path / "long.rst").write_text("Long\n====\n" + "x" * 40000, encoding="utf-8")
+
+    result = await _call(DocsReaderTool(root=tmp_path), page="long")
+
+    assert result["truncated"] is True
+    assert len(result["content"]) == 30000  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
 async def test_empty_root_reports_docs_unavailable(tmp_path: Path) -> None:
     result = await _call(DocsReaderTool(root=tmp_path / "missing"), page="config")
 

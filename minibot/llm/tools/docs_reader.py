@@ -25,8 +25,13 @@ _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 
 
 def docs_root() -> Path | None:
-    for candidate in (_PACKAGE_ROOT / "_docs", _PACKAGE_ROOT.parent / "docs"):
-        if candidate.is_dir() and any(path.suffix in _SUFFIXES for path in candidate.iterdir()):
+    repo_docs = _PACKAGE_ROOT.parent / "docs" if (_PACKAGE_ROOT.parent / "pyproject.toml").is_file() else None
+    for candidate in (_PACKAGE_ROOT / "_docs", repo_docs):
+        if (
+            candidate is not None
+            and candidate.is_dir()
+            and any(path.suffix in _SUFFIXES for path in candidate.iterdir())
+        ):
             return candidate
     return None
 
@@ -136,6 +141,6 @@ def _class_doc(dotted: str) -> str | None:
     module_name, _, attribute = dotted.rpartition(".")
     try:
         target = getattr(importlib.import_module(module_name), attribute)
-    except (ImportError, AttributeError):
+    except Exception:
         return None
     return inspect.getdoc(target)

@@ -29,8 +29,18 @@ packages = [
   { include = "minibot" },
   { include = "*", from = "docs", to = "minibot/_docs", format = ["wheel"] },
 ]
-exclude = ["docs/_static", "docs/_build", "docs/_templates"]
+exclude = [
+  "docs/_static",
+  "docs/_build",
+  "docs/_templates",
+  "docs/Makefile",
+  "docs/make.bat",
+  "docs/llms*.txt",
+]
 include = [
+  { path = "docs/*.rst", format = "sdist" },
+  { path = "docs/*.md", format = "sdist" },
+  { path = "docs/conf.py", format = "sdist" },
   # Tool descriptions live next to the module that builds the tool, wherever that module is.
   { path = "minibot/**/*.txt", format = ["sdist", "wheel"] },
   # Skills bundled with the package ([tools.skills] native).
