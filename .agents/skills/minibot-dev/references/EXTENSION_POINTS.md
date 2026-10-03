@@ -221,7 +221,7 @@ spawn_task (LLM tool)
       └─ worker_entry(pipe)                adapters/tasks/worker.py:73
           └─ run_agent_loop(payload)
               ├─ load_settings()
-              ├─ load_extensions(..., entrypoint="worker")   ← returns () for bundled modules
+              ├─ load_extensions(..., entrypoint="worker")   ← bundled modules: scheduler only
               ├─ _resolve_task_spec(...)
               ├─ _build_worker_tools(...)  worker.py:166
               └─ AgentRuntime(...)
@@ -229,9 +229,10 @@ spawn_task (LLM tool)
 
 Two traps:
 
-- **Workers load no bundled extensions at all** (`app/extensions.py:26`, worker branch returns
-  an empty tuple). Only user-configured `[extensions].modules` load there, and several bundled
-  tool modules self-narrow when `mb.entrypoint == "worker"`.
+- **Workers load only the scheduler bundle** (`app/extensions.py:26`, worker branch returns
+  just `minibot.extensions.services.scheduler`). Besides it, only user-configured
+  `[extensions].modules` load there, and several bundled tool modules self-narrow when
+  `mb.entrypoint == "worker"`.
 - **Workers build tools independently of `factory.py`.** To make a core tool worker-visible,
   add it to `_build_worker_tools` (`worker.py:166`) **and** `_WORKER_TOOL_ALLOWLIST`
   (`worker.py:45`). Extension tools are auto-appended and auto-allowlisted.

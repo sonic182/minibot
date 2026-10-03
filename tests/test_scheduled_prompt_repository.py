@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -30,6 +32,50 @@ async def prompt_store(tmp_path: Path) -> SQLAlchemyScheduledPromptStore:
     store = SQLAlchemyScheduledPromptStore(config)
     await store.initialize()
     return store
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_schema", [False, True], ids=["fresh", "legacy"])
+async def test_concurrent_first_use_initializes_shared_schema(tmp_path: Path, legacy_schema: bool) -> None:
+    database_path = tmp_path / "shared.db"
+    config = ScheduledPromptsConfig(enabled=True, sqlite_url=f"sqlite+aiosqlite:///{database_path}")
+    if legacy_schema:
+        seed_store = SQLAlchemyScheduledPromptStore(config)
+        try:
+            await seed_store.initialize()
+        finally:
+            await seed_store._engine.dispose()
+        with sqlite3.connect(database_path) as connection:
+            for column in (
+                "recurrence",
+                "recurrence_interval_seconds",
+                "recurrence_cron_expression",
+                "recurrence_end_at",
+            ):
+                connection.execute(f"ALTER TABLE scheduled_prompts DROP COLUMN {column}")
+
+    stores = [SQLAlchemyScheduledPromptStore(config) for _ in range(8)]
+    try:
+        results = await asyncio.gather(
+            *(store.list_jobs(owner_id="tenant") for store in stores), return_exceptions=True
+        )
+        assert results == [[] for _ in stores]
+        job = await stores[0].create(
+            ScheduledPromptCreate(
+                owner_id="tenant",
+                channel="telegram",
+                text="repeat",
+                run_at=_utcnow(),
+                recurrence=PromptRecurrence.INTERVAL,
+                recurrence_interval_seconds=600,
+            )
+        )
+        loaded = await stores[-1].get(job.id)
+        assert loaded is not None
+        assert loaded.recurrence == PromptRecurrence.INTERVAL
+        assert loaded.recurrence_interval_seconds == 600
+    finally:
+        await asyncio.gather(*(store._engine.dispose() for store in stores))
 
 
 @pytest.mark.asyncio

@@ -151,6 +151,25 @@ def register(mb):
     assert await binding.handler({}, ToolContext(channel="console")) == {"ok": True, "channel": "console"}
 
 
+@pytest.mark.asyncio
+async def test_run_agent_loop_gives_workers_the_scheduler_tools(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {"scheduler": {"prompts": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}"}}}
+    )
+
+    with (
+        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
+        patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.app.tasks.worker.AgentRuntime", _ToolCapturingRuntime),
+    ):
+        await worker.run_agent_loop(
+            {"task_id": "t1", "channel": "console", "prompt": "Remind me", "chat_id": 1, "user_id": 2}
+        )
+
+    names = {binding.tool.name for binding in _ToolCapturingRuntime.tools}
+    assert {"schedule", "schedule_prompt", "list_scheduled_prompts"} <= names
+
+
 class _EmptyCompletionRuntime:
     def __init__(self, **_: object) -> None:
         pass

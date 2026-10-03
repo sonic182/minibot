@@ -11,6 +11,7 @@ from llm_async.models import ToolCall
 from pydantic import ValidationError
 
 from minibot.adapters.config.schema import Settings
+from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext, load_extensions
 from minibot.core.channels import ChannelResponse
@@ -80,13 +81,76 @@ async def test_load_extensions_collects_tools_and_delivers_events(
     assert sys.modules["ext_ok"].seen_turns == ["turn-7"]
 
 
-def test_load_extensions_for_worker_skips_bundled_extensions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_extensions_for_worker_loads_only_the_scheduler_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write_module(tmp_path, monkeypatch, "ext_worker", "def register(mb):\n    pass\n")
-    settings = Settings.from_dict({"extensions": {"modules": ["ext_worker"]}})
+    settings = Settings.from_dict(
+        {"extensions": {"modules": ["ext_worker"]}, "scheduler": {"prompts": {"enabled": False}}}
+    )
 
     registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
 
-    assert registry.names() == ["ext_worker"]
+    assert registry.names() == ["minibot.extensions.services.scheduler", "ext_worker"]
+    assert registry.tools == []
+
+
+def test_load_extensions_for_worker_exposes_scheduler_tools_without_pages(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {
+            "scheduler": {
+                "prompts": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}"},
+            },
+            "http": {"enabled": True},
+        }
+    )
+
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+
+    assert {binding.tool.name for binding in registry.tools} >= {"schedule", "schedule_prompt"}
+    assert registry.pages() == []
+    assert registry.routes == []
+
+
+@pytest.mark.asyncio
+async def test_worker_scheduler_tool_initializes_schema_and_keeps_chat_context(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {
+            "runtime": {"owner_id": "owner-1"},
+            "scheduler": {
+                "prompts": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'fresh.db'}"},
+            },
+        }
+    )
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+    handlers = {binding.tool.name: binding.handler for binding in registry.tools}
+    context = ToolContext(owner_id="owner-1", channel="telegram", chat_id=42, user_id=7)
+
+    created = await handlers["schedule_prompt"]({"content": "stretch", "delay_seconds": 600}, context)
+    listed = await handlers["list_scheduled_prompts"]({}, context)
+
+    assert created["scheduled"] is True
+    assert [job["job_id"] for job in listed["jobs"]] == [created["job_id"]]
+
+    store = SQLAlchemyScheduledPromptStore(settings.scheduler.prompts)
+    try:
+        persisted = await store.get(created["job_id"])
+        assert persisted is not None
+        assert (persisted.owner_id, persisted.channel, persisted.chat_id, persisted.user_id) == (
+            "owner-1",
+            "telegram",
+            42,
+            7,
+        )
+    finally:
+        await store._engine.dispose()
+
+    for other_context in (
+        ToolContext(owner_id="owner-1", channel="telegram", chat_id=43, user_id=7),
+        ToolContext(owner_id="owner-1", channel="telegram", chat_id=42, user_id=8),
+    ):
+        other_jobs = await handlers["list_scheduled_prompts"]({}, other_context)
+        assert other_jobs["jobs"] == []
 
 
 def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

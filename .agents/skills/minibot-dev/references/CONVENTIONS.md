@@ -123,7 +123,8 @@ Extension tools skip all of this: the function docstring is the description.
 Eleven modules load automatically and appear nowhere in `config.toml`
 (`app/extensions.py:26`): rag, mcp, rabbitmq, scheduler, tasks, and the tool modules
 execution / media / memory / network / utility / workspace. Telegram is appended for the
-`daemon` entrypoint only. **Workers load none of them.**
+`daemon` entrypoint only. **Workers load none of them except the scheduler** (tools only, no
+service or page).
 
 Reading `[extensions].modules` and concluding "no extensions are active" is wrong.
 
