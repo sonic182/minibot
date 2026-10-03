@@ -2,6 +2,22 @@
 
 Possible roadmap to follow now...
 
+## Status at a glance
+
+| phase | topic | status |
+|---|---|---|
+| 0 | bash env default | done |
+| 1 | credential vault | done |
+| 2 | skills for specialist agents | done |
+| 3 | native skills, runtime self-knowledge, agent management | **in progress** — next: `reload_agents`, `get_settings`, `minibot-docs`, agent management skill |
+| 4 | MCP OAuth (#65) | pending |
+| 5 | guardrail enhancements | pending |
+| 6 | bash tool hardening | pending, priority depends on the Trust model |
+| 7 | share tool construction with task workers | done |
+
+Dropped: a native SMTP tool. Mail is covered by an MCP server (`docs/mcp_servers.rst`) behind the
+`[tools.approval]` gate, so there is nothing left for MiniBot to own.
+
 ## Trust model
 
 Security here isn't a property of the software alone — it's the combination
@@ -20,7 +36,7 @@ guarantee the software can't actually make.
 
 - **MiniBot's own responsibility**: safe-by-default config
   (`bash.pass_parent_env = false`), secrets never reaching the LLM (Phase 1),
-  guardrails on consequential actions (Phase 5's SMTP gate, Phase 6). These
+  guardrails on consequential actions (the `[tools.approval]` gate, Phase 5). These
   matter *regardless of deployment*, because the LLM provider itself — the
   remote API — sees whatever ends up in tool-call arguments and context, no
   matter how isolated the host is. No amount of sandboxing the process
@@ -28,7 +44,7 @@ guarantee the software can't actually make.
   place does. This is why the vault stays high priority even for an owner
   who already runs MiniBot in a throwaway VM.
 - **Deployment's responsibility**: OS/filesystem/process isolation for
-  `bash`/`python_exec` (Phase 7's jail/container options). An owner who
+  `bash`/`python_exec` (Phase 6's jail/container options). An owner who
   already isolates the host can reasonably set `sandbox_mode = "none"` and
   accept the ambient risk — that's a valid choice, not a bug to prevent.
 
@@ -80,8 +96,8 @@ Ansible-vault-style design, shipped as an optional extension (not core):
   on equal footing — ship with an explicit warning: Phase 0 only fixes env
   inheritance, it says nothing about `--vault-password-file`, which stays
   exposed to `bash` reading it directly off disk (no cwd jail at all — see
-  Phase 7) regardless of Phase 0. Both alternate methods stay a real risk
-  until Phase 7's filesystem isolation lands, not just the env-var one.
+  Phase 6) regardless of Phase 0. Both alternate methods stay a real risk
+  until Phase 6's filesystem isolation lands, not just the env-var one.
   Whichever method is used, that password/file becomes the thing to protect
   instead.
 - CLI helper `minibot vault edit <path>` — like `ansible-vault edit`:
@@ -99,8 +115,7 @@ Ansible-vault-style design, shipped as an optional extension (not core):
   destination without the LLM ever seeing the value. Instead, an admin binds
   a secret to a specific destination in config: `MCPClient` resolves its own
   server's stored token internally (server/issuer come from config, not LLM
-  input); the SMTP adapter resolves its own configured credential the same
-  way. `http_client` gets **no generic vault access** in v1 — either no
+  input). `http_client` gets **no generic vault access** in v1 — either no
   vault-backed auth at all for that tool, or, if a real need shows up later,
   a `[tools.http_client.credentials]` domain-allowlist that the adapter
   checks against the *actual request host*, attaching the header itself
@@ -252,7 +267,9 @@ v1 set, chosen for self-improvement and self-knowledge (`create-skill` and
   documentation. Done when a docs question is answered from
   `_sources/*.rst.txt` and a "do I have X enabled" question routes to
   `get_settings`.
-- `create-agent` — specialist authoring (`agents/<name>.md`). The tool-scoping
+- `create-agent` — specialist authoring (`agents/<name>.md`), covering create,
+  edit and delete: an edit rewrites the file and a delete removes it, and
+  `reload_agents` reports the result in `added` / `removed`. The tool-scoping
   rules are counterintuitive and documented nowhere the agent can see, so an
   agent writing a specialist without them produces one that looks correct and
   is broken:
@@ -519,20 +536,7 @@ implementation that happens to work against two test servers:
   editing the vault file while the daemon is running requires a restart to
   pick up the change.
 
-## [ ] Phase 5 — SMTP tool
-
-- `SMTPToolConfig` next to `HTTPClientToolConfig`.
-- Credentials bound to the SMTP adapter per Phase 1's destination-bound
-  model (config-supplied, not an LLM-writable reference).
-- No new credential-handling code — reuses Phase 1 vault.
-- Sending mail is more consequential than an HTTP GET (irreversible,
-  externally visible, a classic prompt-injection target). MiniBot has no
-  existing generic action-approval mechanism today, so don't build one for
-  this — keep it SMTP-scoped: a minimal confirm-before-send gate (e.g. an
-  owner-facing Telegram confirmation, or a `dry_run` default) rather than a
-  cross-cutting approval framework.
-
-## [ ] Phase 6 — Guardrail enhancements
+## [ ] Phase 5 — Guardrail enhancements
 
 Not a duplicate of Phase 1. Under the destination-bound model, the LLM never
 has a `secret://` reference to put in an argument at all, so there's nothing
@@ -549,7 +553,7 @@ call's arguments:
 - `GuardrailDecision` gains a `credential_exposure` field (structured, not
   regex/text classification, per project convention).
 
-## [ ] Phase 7 — bash tool hardening (mixed priority — see Trust model)
+## [ ] Phase 6 — bash tool hardening (mixed priority — see Trust model)
 
 Two different things live in this phase, deliberately split by who owns
 them:
@@ -643,7 +647,7 @@ deliverable — see Trust model):
 (The env-inheritance half of this is already fixed in Phase 0 — what's left
 here is the harder, undecided part: filesystem/process isolation.)
 
-## [x] Phase 8 — Share tool construction with task workers
+## [x] Phase 7 — Share tool construction with task workers
 
 `_build_worker_tools` (`minibot/app/tasks/worker.py`) keeps a narrower tool set
 than the main agent and does not load extensions. Shared calculator and skill
@@ -654,5 +658,6 @@ retains its own enablement and visibility rules.
 
 - MCP OAuth HTTP callback endpoint (issue #65 alternative 2).
 - MCP OAuth device flow (issue #65 alternative 3).
+- A native SMTP tool: sending mail goes through an MCP server, gated by `[tools.approval]`.
 
 Add either only if a remote MCP server actually in use requires it.
