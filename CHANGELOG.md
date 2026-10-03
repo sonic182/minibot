@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ChatGPT Codex model list missing newer models.** The `/models` request now sends client version `0.160.0`
   instead of the `0.157.1` hardcoded in `llm-async-codex`, so newer models such as `gpt-6.1-sol` are listed.
+  The value is configurable with `[codex] version = "..."` in `config.toml`.
 
 ## [0.25.1] - 2026-10-03
 

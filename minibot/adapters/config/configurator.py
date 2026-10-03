@@ -482,7 +482,7 @@ def _configure_chatgpt_codex(document: Any, settings: Settings) -> _ConfiguredPr
         )
         return None
     _set_value(document, ("providers", "chatgpt_codex", "api_format"), "chatgpt_codex")
-    models = _codex_models(credentials)
+    models = _codex_models(credentials, settings.codex.version)
     return _ConfiguredProvider(
         label=_LLM_TARGETS["chatgpt_codex"][0],
         api_format="chatgpt_codex",
@@ -506,11 +506,11 @@ def _ensure_codex_login(auth_path: Path) -> Any:
     return asyncio.run(login_to_codex(device_code=device_code, auth_path=auth_path))
 
 
-def _codex_models(credentials: Any) -> list[str]:
+def _codex_models(credentials: Any, client_version: str) -> list[str]:
     from minibot.app.codex_setup import list_codex_model_slugs
 
     try:
-        return asyncio.run(list_codex_model_slugs(credentials))
+        return asyncio.run(list_codex_model_slugs(credentials, client_version=client_version))
     except Exception:
         _logger.debug("Could not list Codex models", exc_info=True)
         _write("Could not fetch the Codex model list; enter the model name manually.\n")

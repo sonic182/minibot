@@ -210,6 +210,17 @@ Credentials default to ``~/.minibot/auth_codex.json``. To store them elsewhere, 
 ``auth_path`` under ``[providers.chatgpt_codex]``. ``minibot configure`` can perform the same login
 and model selection interactively.
 
+The Codex ``/models`` endpoint hides models newer than the client version it is told about, so a new
+model may be missing from the list until that version is raised. MiniBot sends ``0.160.0`` by default;
+change it with:
+
+.. code-block:: toml
+
+   [codex]
+   version = "0.161.0"
+
+The value is used by ``minibot configure`` and by the context-window lookup at startup.
+
 Compatible endpoints
 --------------------
 

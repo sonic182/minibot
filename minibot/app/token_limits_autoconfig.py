@@ -77,6 +77,7 @@ async def ensure_model_limits(
         model_name=model_name,
         base_url=effective_base_url(settings, provider_name=provider_name),
         auth_path=_effective_auth_path(settings, provider_name=provider_name),
+        codex_client_version=settings.codex.version,
         logger=logger,
     )
     # A failed fetch is not an answer: caching it would pin "no compaction" for the whole ttl.
@@ -111,6 +112,7 @@ async def apply_runtime_token_autoconfig_async(
         model_name=main_model,
         base_url=main_base_url,
         auth_path=main_auth_path,
+        codex_client_version=settings.codex.version,
         logger=logger,
     )
     prime_model_limits(main_provider, main_model, main_limits)
@@ -163,6 +165,7 @@ async def apply_runtime_token_autoconfig_async(
             model_name=model_name,
             base_url=base_url,
             auth_path=auth_path,
+            codex_client_version=settings.codex.version,
             logger=logger,
         )
         prime_model_limits(provider_name, model_name, limits)
@@ -237,6 +240,7 @@ async def _prewarm_delegation_targets(
                 model_name=model_name,
                 base_url=effective_base_url(settings, provider_name=option.name),
                 auth_path=_effective_auth_path(settings, provider_name=option.name),
+                codex_client_version=settings.codex.version,
                 logger=logger,
             )
             prime_model_limits(option.name, model_name, limits)
@@ -304,12 +308,15 @@ async def _resolve_limits(
     model_name: str,
     base_url: str | None,
     auth_path: str | None,
+    codex_client_version: str,
     logger: Logger,
 ) -> dict[str, Any] | None:
     target_provider = _catalog_provider_key(provider_name=provider_name, base_url=base_url)
 
     if target_provider == "chatgpt_codex":
-        return await _resolve_chatgpt_codex_limits(model_name=model_name, auth_path=auth_path, logger=logger)
+        return await _resolve_chatgpt_codex_limits(
+            model_name=model_name, auth_path=auth_path, client_version=codex_client_version, logger=logger
+        )
 
     if payload is None:
         return None
@@ -331,13 +338,16 @@ async def _resolve_chatgpt_codex_limits(
     *,
     model_name: str,
     auth_path: str | None,
+    client_version: str,
     logger: Logger,
 ) -> dict[str, Any] | None:
     """Query Codex's own `/models` endpoint — it isn't in the models.dev catalog."""
     from minibot.llm.services.codex_setup import get_model_capabilities, resolve_auth_path
 
     try:
-        capabilities = await get_model_capabilities(resolve_auth_path(auth_path), model_name)
+        capabilities = await get_model_capabilities(
+            resolve_auth_path(auth_path), model_name, client_version=client_version
+        )
     except Exception as exc:
         logger.warning(
             "chatgpt_codex token auto-config: /models lookup failed",
