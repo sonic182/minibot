@@ -41,6 +41,25 @@ class AgentCatalog(Protocol):
     def is_empty(self) -> bool: ...
 
 
+class ManagedAgentStore(Protocol):
+    """Persistence for model-authored agent definitions.
+
+    Implementations own the confinement rules: which directory may be written, which names are
+    legal, and how a write is made atomic. Callers pass a validated name and a full definition.
+    """
+
+    @property
+    def directory(self) -> Path: ...
+
+    def list_names(self) -> list[str]: ...
+
+    def exists(self, name: str) -> bool: ...
+
+    def write(self, name: str, content: str) -> None: ...
+
+    def delete(self, name: str) -> None: ...
+
+
 def normalize_model_overrides(payload: Mapping[str, Any] | None) -> dict[str, str]:
     if not payload:
         return {}

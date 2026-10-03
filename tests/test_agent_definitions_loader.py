@@ -8,10 +8,11 @@ from minibot.app.agent_definitions_loader import load_active_agent_specs, load_a
 from minibot.config.schema import Settings
 
 
-def _write_agent(directory: Path, name: str) -> None:
+def _write_agent(directory: Path, name: str, *, tools_allow: list[str] | None = None) -> None:
     directory.mkdir(parents=True, exist_ok=True)
+    tools = "" if not tools_allow else "tools_allow:\n" + "".join(f"  - {tool}\n" for tool in tools_allow)
     (directory / f"{name}.md").write_text(
-        (f"---\nname: {name}\ndescription: {name}\nmode: agent\n---\n\nYou are {name}."),
+        (f"---\nname: {name}\ndescription: {name}\nmode: agent\n{tools}---\n\nYou are {name}."),
         encoding="utf-8",
     )
 
@@ -175,6 +176,35 @@ def test_load_active_agent_specs_includes_managed_definitions(tmp_path: Path) ->
     )
 
     assert [spec.name for spec in load_active_agent_specs(settings)] == ["files_agent", "browser_agent"]
+
+
+def test_load_active_agent_specs_rejects_an_unauthorized_managed_definition(tmp_path: Path) -> None:
+    managed_dir = tmp_path / "managed"
+    _write_agent(managed_dir, "browser_agent", tools_allow=["bash"])
+
+    settings = Settings.from_dict(
+        {
+            "orchestration": {
+                "agent_management": {
+                    "write": True,
+                    "directory": str(managed_dir),
+                    "tools_allow": ["filesystem"],
+                }
+            }
+        }
+    )
+
+    with pytest.raises(ValueError, match="is not allowed by"):
+        load_active_agent_specs(settings)
+
+
+def test_owner_agents_are_not_bounded_by_the_managed_ceiling(tmp_path: Path) -> None:
+    owner_dir = tmp_path / "agents"
+    _write_agent(owner_dir, "files_agent", tools_allow=["bash"])
+
+    settings = Settings.from_dict({"orchestration": {"directory": str(owner_dir)}})
+
+    assert [spec.tools_allow for spec in load_active_agent_specs(settings)] == [["bash"]]
 
 
 def test_load_active_agent_specs_rejects_a_managed_name_collision(tmp_path: Path) -> None:

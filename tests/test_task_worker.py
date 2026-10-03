@@ -435,6 +435,61 @@ def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
     assert general.max_new_tokens == 8192
 
 
+def test_resolve_task_spec_rejects_an_unauthorized_managed_provider_override() -> None:
+    settings = Settings.from_dict(
+        {"orchestration": {"agent_management": {"write": True, "directory": "/tmp/managed", "providers": []}}}
+    )
+    specialist = AgentSpec(
+        name="general_agent",
+        description="generalist",
+        system_prompt="You are a generalist.",
+        source_path=worker.Path("/tmp/managed/general_agent.md"),
+    )
+    factory = _FakeFactory(settings)
+
+    with (
+        patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]),
+        pytest.raises(ValueError, match="is not allowed by"),
+    ):
+        worker._resolve_task_spec(
+            settings=settings,
+            llm_factory=factory,
+            environment_prompt_fragment="",
+            task={"agent_name": "general_agent", "model_overrides": {"model_provider": "opencode_go"}},
+        )
+
+
+def test_resolve_task_spec_allows_a_managed_override_to_the_listed_provider() -> None:
+    settings = Settings.from_dict(
+        {
+            "orchestration": {
+                "agent_management": {
+                    "write": True,
+                    "directory": "/tmp/managed",
+                    "providers": ["opencode_go"],
+                }
+            }
+        }
+    )
+    specialist = AgentSpec(
+        name="general_agent",
+        description="generalist",
+        system_prompt="You are a generalist.",
+        source_path=worker.Path("/tmp/managed/general_agent.md"),
+    )
+    factory = _FakeFactory(settings)
+
+    with patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]):
+        spec = worker._resolve_task_spec(
+            settings=settings,
+            llm_factory=factory,
+            environment_prompt_fragment="",
+            task={"agent_name": "general_agent", "model_overrides": {"model_provider": "opencode_go"}},
+        )
+
+    assert spec.model_provider == "opencode_go"
+
+
 class _ApprovalPipe:
     def __init__(self, *, answer: bool | None) -> None:
         self.answer = answer

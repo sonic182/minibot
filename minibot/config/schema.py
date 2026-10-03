@@ -483,11 +483,13 @@ class AgentManagementConfig(BaseModel):
       require ``reload``.
     - ``directory`` — where model-authored definitions live (default: ``"./data/agents"``). Must not
       overlap ``[orchestration].directory``, so owner- and model-authored files stay distinguishable.
-    - ``tools_allow`` — native tool name patterns a managed agent may grant itself (default: empty,
-      which grants none).
-    - ``mcp_servers`` — MCP server names a managed agent may claim (default: empty).
-    - ``providers`` — providers a managed agent may target (default: empty, meaning the main
-      ``[llm]`` provider only).
+    - ``tools_allow`` — fnmatch patterns naming the native tools a managed agent may grant itself
+      (default: empty, which grants none). A managed definition's own ``tools_allow`` must list exact
+      names, and it may not use ``tools_deny``.
+    - ``mcp_servers`` — MCP server names a managed agent may claim (default: empty). MCP access is
+      claimed here, never through a tool name.
+    - ``providers`` — providers a managed agent may target, including a ``spawn_task`` override
+      (default: empty, meaning the main ``[llm]`` provider only, which is always allowed).
     """
 
     model_config = ConfigDict(extra="forbid")

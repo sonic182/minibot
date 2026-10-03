@@ -22,6 +22,7 @@ from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.managed_agent_policy import ManagedAgentPolicy, is_managed_definition
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
@@ -434,7 +435,13 @@ def _resolve_task_spec(
         spec = registry.get(agent_name.strip())
         if spec is None:
             raise ValueError(f"agent '{agent_name.strip()}' is not available for async task execution")
-        spec = _capped_at(apply_agent_overrides(spec, overrides), settings, target_ceiling)
+        spec = apply_agent_overrides(spec, overrides)
+        # The base definition was authorized at load; an override can retarget the provider, so the
+        # ceiling has to be re-checked on the spec the worker will actually run.
+        management = settings.orchestration.agent_management
+        if management.active and is_managed_definition(spec, Path(management.directory)):
+            ManagedAgentPolicy.from_settings(settings).authorize(spec)
+        spec = _capped_at(spec, settings, target_ceiling)
         if not environment_prompt_fragment.strip():
             return spec
         # replace() rather than a field-by-field copy: the hand-written version silently dropped
