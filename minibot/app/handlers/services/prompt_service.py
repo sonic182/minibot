@@ -34,6 +34,14 @@ class PromptService:
         self._skill_registry = skill_registry
         self._preload_skill_catalog = preload_skill_catalog
 
+    def replace_tools(self, tools: Sequence[ToolBinding]) -> None:
+        """Swap the tool list after a roster reload.
+
+        The roster fragment and the capability-status fragment are both decided from the tool names
+        and the registry, so a stale list would describe a roster the turn will not offer.
+        """
+        self._tools = list(tools)
+
     @property
     def prompts_dir(self) -> str:
         return self._prompts_dir

@@ -437,3 +437,61 @@ async def test_resolve_limits_maps_fireworks_base_url_to_its_catalog_key() -> No
     )
 
     assert result == {"catalog_provider": "fireworks-ai", "context": 163840, "output": 16384}
+
+
+def _cached_limits_spec(**overrides: object) -> AgentSpec:
+    payload: dict[str, object] = {
+        "name": "researcher",
+        "description": "research specialist",
+        "system_prompt": "research things",
+        "source_path": Path("agents/researcher.md"),
+        "model_provider": "anthropic",
+        "model": "claude-long",
+    }
+    payload.update(overrides)
+    return AgentSpec(**payload)  # type: ignore[arg-type]
+
+
+def test_apply_cached_token_limits_fills_from_the_cache_without_fetching() -> None:
+    token_limits_autoconfig.reset_model_limits_cache()
+    token_limits_autoconfig.prime_model_limits(
+        "anthropic", "claude-long", {"catalog_provider": "anthropic", "context": 200000, "output": 64000}
+    )
+    settings = Settings()
+    settings.llm.provider = "anthropic"
+    settings.llm.model = "claude-long"
+
+    adjusted = token_limits_autoconfig.apply_cached_token_limits(settings, [_cached_limits_spec()])
+
+    assert adjusted[0].context_limit == 200000
+    assert adjusted[0].max_new_tokens == 64000
+
+
+def test_apply_cached_token_limits_leaves_an_uncached_model_alone() -> None:
+    token_limits_autoconfig.reset_model_limits_cache()
+    settings = Settings()
+    settings.llm.provider = "anthropic"
+    settings.llm.model = "claude-long"
+    spec = _cached_limits_spec(max_new_tokens=500)
+
+    adjusted = token_limits_autoconfig.apply_cached_token_limits(settings, [spec])
+
+    assert adjusted[0].context_limit is None
+    assert adjusted[0].max_new_tokens == 500
+
+
+def test_apply_cached_token_limits_does_not_touch_the_main_budget() -> None:
+    token_limits_autoconfig.reset_model_limits_cache()
+    token_limits_autoconfig.prime_model_limits(
+        "anthropic", "claude-long", {"catalog_provider": "anthropic", "context": 200000, "output": 64000}
+    )
+    settings = Settings()
+    settings.llm.provider = "anthropic"
+    settings.llm.model = "claude-long"
+    settings.llm.max_new_tokens = 777
+    settings.memory.max_history_tokens = 4242
+
+    token_limits_autoconfig.apply_cached_token_limits(settings, [_cached_limits_spec()])
+
+    assert settings.llm.max_new_tokens == 777
+    assert settings.memory.max_history_tokens == 4242

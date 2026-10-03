@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from pathlib import Path
@@ -61,6 +62,7 @@ def parse_agent_definition(*, source_path: Path, text: str, strict_name: bool = 
         description=cfg.description,
         system_prompt=system_prompt,
         source_path=source_path,
+        revision=hashlib.sha256(text.encode("utf-8")).hexdigest()[:12],
         model_provider=cfg.model_provider,
         model=cfg.model,
         temperature=cfg.temperature,

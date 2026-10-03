@@ -79,10 +79,7 @@ class SettingsInfoTool:
                 "max_history_tokens": settings.memory.max_history_tokens,
             },
             "tools": self._tools(),
-            "agents": {
-                "directory": settings.orchestration.directory,
-                "names": self._agent_names() if self._agent_names else [],
-            },
+            "agents": self._agents(),
         }
         if settings.tasks.enabled:
             result["tasks"] = {"backend": settings.tasks.backend}
@@ -91,6 +88,27 @@ class SettingsInfoTool:
         if settings.vault.enabled:
             result["vault"] = {"enabled": True}
         return result
+
+    def _agents(self) -> dict[str, Any]:
+        orchestration = self._settings.orchestration
+        payload: dict[str, Any] = {
+            "directory": orchestration.directory,
+            "specialists_enabled": orchestration.specialists.enabled,
+            "names": self._agent_names() if self._agent_names else [],
+        }
+        management = orchestration.agent_management
+        if management.active:
+            # The ceiling itself, so the agent can tell what it may grant without guessing. No
+            # entry here is a secret: they are tool patterns, server names and provider names.
+            payload["agent_management"] = {
+                "reload": management.reload,
+                "write": management.write,
+                "directory": management.directory,
+                "tools_allow": list(management.tools_allow),
+                "mcp_servers": list(management.mcp_servers),
+                "providers": list(management.providers),
+            }
+        return payload
 
     def _channels(self) -> list[str]:
         channels = self._settings.channels

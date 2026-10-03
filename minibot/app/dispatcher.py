@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from minibot.app.agent_registry import AgentRegistry
+from minibot.app.agent_roster import AgentRosterChange, reload_agent_roster
 from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionRegistry
@@ -19,7 +20,7 @@ from minibot.app.handlers.services import (
 )
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_registry import SkillRegistry
-from minibot.app.tool_capabilities import main_agent_tool_view
+from minibot.app.tool_capabilities import MainAgentToolView, main_agent_tool_view
 from minibot.app.tool_factory import build_enabled_tools
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.config.schema import Settings
@@ -36,6 +37,7 @@ from minibot.core.events import (
 from minibot.core.files import FileStorage
 from minibot.core.memory import MemoryBackend, PendingTurnRepository
 from minibot.llm.provider_factory import LLMClient
+from minibot.llm.tools.base import ToolBinding
 from minibot.shared.utils import humanize_token_count, summarize_items
 
 
@@ -77,22 +79,17 @@ class Dispatcher:
         self._history_subscription = event_bus.subscribe(types=(OutboundEvent,))
         self._memory = memory_backend
         self._pending_turns = pending_turns
-        tools = build_enabled_tools(
-            settings,
-            memory_backend,
-            event_bus=event_bus,
-            agent_registry=agent_registry,
-            llm_factory=llm_factory,
-            skill_registry=skill_registry,
-            extension_tools=extensions.tools,
-            managed_storage=managed_storage,
-            config_path=config_path,
-        )
-        main_agent_tools_view = main_agent_tool_view(
-            tools=tools,
-            orchestration_config=settings.orchestration,
-            agent_specs=agent_registry.all(),
-        )
+        # Kept so a roster reload can rebuild the tool list: fetch_agent_info only exists when the
+        # roster is non-empty, so a reload from zero agents has to add it, not just re-filter.
+        self._settings = settings
+        self._agent_registry = agent_registry
+        self._llm_factory = llm_factory
+        self._skill_registry = skill_registry
+        self._extensions = extensions
+        self._managed_storage = managed_storage
+        self._config_path = config_path
+        tools = self._build_tools()
+        main_agent_tools_view = self._main_agent_view(tools)
         guardrail_mode = settings.orchestration.main_tool_use_guardrail
         if guardrail_mode == "llm_classifier":
             tool_use_guardrail: NoopToolUseGuardrail | LLMClassifierToolUseGuardrail = LLMClassifierToolUseGuardrail(
@@ -135,6 +132,8 @@ class Dispatcher:
             extension_prompt_fragments=extensions.prompt_fragments_for(main_agent_tools_view.tools),
         )
         self._handler = LLMMessageHandler(turn_service)
+        self._turn_service = turn_service
+        self._all_tools = tools
         self._logger = logging.getLogger("minibot.dispatcher")
         strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
         self._main_agent_tool_names = sorted(binding.tool.name for binding in main_agent_tools_view.tools)
@@ -181,6 +180,46 @@ class Dispatcher:
             )
         self._task: asyncio.Task[None] | None = None
         self._history_task: asyncio.Task[None] | None = None
+
+    def _build_tools(self) -> list[ToolBinding]:
+        return build_enabled_tools(
+            self._settings,
+            self._memory,
+            event_bus=self._event_bus,
+            agent_registry=self._agent_registry,
+            llm_factory=self._llm_factory,
+            skill_registry=self._skill_registry,
+            extension_tools=self._extensions.tools,
+            managed_storage=self._managed_storage,
+            config_path=self._config_path,
+        )
+
+    def _main_agent_view(self, tools: list[ToolBinding]) -> MainAgentToolView:
+        return main_agent_tool_view(
+            tools=tools,
+            orchestration_config=self._settings.orchestration,
+            agent_specs=self._agent_registry.all(),
+        )
+
+    def refresh_agent_roster(self) -> AgentRosterChange:
+        """Re-read agent definitions and apply the new roster everywhere it is captured.
+
+        Raises whatever the loader raises — a bad file, a name collision or a ceiling violation —
+        without touching the running registry, so a rejected reload is a no-op. The whole tool list
+        is rebuilt rather than filtered so a reload from zero agents adds ``fetch_agent_info``.
+        """
+        change = reload_agent_roster(settings=self._settings, registry=self._agent_registry)
+        tools = self._build_tools()
+        view = self._main_agent_view(tools)
+        self._all_tools = tools
+        self._main_agent_tool_names = sorted(binding.tool.name for binding in view.tools)
+        self._turn_service.replace_tools(view.tools)
+        if view.hidden_tool_names:
+            self._logger.info(
+                "main agent tools hidden due to exclusive ownership",
+                extra={"hidden_tools": view.hidden_tool_names},
+            )
+        return change
 
     @property
     def main_agent_tool_names(self) -> list[str]:

@@ -1,0 +1,10 @@
+Re-read the agent definition files from disk and report what changed.
+
+Use this after you or the owner edited a definition file, so the change takes effect without a
+restart. The result lists the roster that is now active plus which names were added, removed or
+updated. A definition that fails to parse, collides with an existing name, or exceeds the ceiling
+set in [orchestration.agent_management] is reported as an error and the previous roster stays in
+place, so a failed reload changes nothing.
+
+Creating or editing definitions through create_agent, update_agent or delete_agent already reloads
+for you; call this only for files changed outside those tools.

@@ -12,6 +12,9 @@ class AgentSpec:
     description: str
     system_prompt: str
     source_path: Path
+    # Short hash of the definition text, used to report what a reload actually changed. Absent for
+    # specs built in code rather than parsed from a file.
+    revision: str | None = None
     model_provider: str | None = None
     model: str | None = None
     temperature: float | None = None

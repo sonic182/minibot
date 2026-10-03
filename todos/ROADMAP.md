@@ -9,7 +9,7 @@ Possible roadmap to follow now...
 | 0 | bash env default | done |
 | 1 | credential vault | done |
 | 2 | skills for specialist agents | done |
-| 3 | native skills, runtime self-knowledge, agent management | **in progress** — `get_settings` and `minibot-docs` done; next: `reload_agents`, then the agent management skill |
+| 3 | native skills, runtime self-knowledge, agent management | **done** — `get_settings`, `minibot-docs`, optional `reload_agents`, and optional model-authored agents with an owner ceiling |
 | 3b | mid-turn user messages and `/stop` | pending, after `reload_agents` and the agent management skill |
 | 4 | MCP OAuth (#65) | pending |
 | 5 | guardrail enhancements | pending |
@@ -207,12 +207,35 @@ and the fix is small.
 
 ## [ ] Phase 3 — Native skills & runtime self-knowledge
 
-**In progress** — shipped: version single-sourcing (#82), the native tier +
-`create-skill` (#83) and `install-skill` + `install_skill` (#84, released in
-0.18.0), then `get_settings` and the `minibot-docs` skill. Remaining, in
-delivery order: `reload_agents`, then the `create-agent` skill. Each is independently
-shippable, and tests and docs ride along with the change that introduces the
-behaviour.
+**Done** — version single-sourcing (#82), the native tier + `create-skill` (#83),
+`install-skill` + `install_skill` (#84, released in 0.18.0), `get_settings`, the
+`minibot-docs` skill, and then the runtime agent-management work below.
+
+Shipped differently from the sketch in this section, after a security review of the original
+`reload_agents` + `create-agent` plan:
+
+- **Separable activation.** `[orchestration.specialists].enabled` is the switch for *using*
+specialists; `[orchestration.agent_management]` `reload` and `write` are separate switches for
+*managing* them, both off by default. The four modes (none, owner-only, reload-only, managed) are
+reachable by config alone. See :doc:`agents`.
+- **A managed-agent ceiling, not a blanket tool cap.** The earlier sketch proposed capping every
+specialist at the main agent's visible tools. That is wrong: `exclusive`/`exclusive_mcp` ownership
+deliberately lets a specialist own a tool the main agent is denied, and the main agent's
+`tools_deny` is not a system-wide prohibition. The real problem was that a *model-authored*
+definition could grant itself anything globally enabled, so model-authored definitions are bounded
+by an owner ceiling and owner-authored ones are left alone. Provenance is the directory the loader
+read, never a frontmatter field.
+- **Enforcement is not tool-hiding.** The ceiling is applied at load, on reload, before a write and
+in the worker after model overrides, so writing a file by hand and reloading cannot bypass it.
+- **Writes go through a service, not the filesystem tools.** `AgentManagementService` validates the
+name, the definition and the ceiling, then persists atomically through a confined store; the tools
+only call it.
+
+Deferred, with the reasoning above as the reason: a specialist may still be authored by the owner
+only unless `write = true`, and the ceiling defaults to granting nothing.
+
+Still out of scope for Phase 3: the `create-agent` skill is bundled but hidden until `write = true`,
+and the agent-management tools stay unavailable to workers and specialists.
 
 Different theme from the phases around it — capability, not containment —
 but it lands two new LLM-facing surfaces, so the Trust model above still

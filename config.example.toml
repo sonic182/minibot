@@ -399,6 +399,10 @@ output_dir = "./data/files/browser"
 [tools.approval]
 require_approval = []
 # require_approval = ["mcp_mail__smtp_*"]
+# Recommended when [orchestration.agent_management] write = true: confirm every change to the agent
+# roster in the chat before it happens. The gate fails closed, so a turn with no way to ask (a
+# scheduled prompt, a delegated task) is denied rather than approved.
+# require_approval = ["create_agent", "update_agent", "delete_agent"]
 timeout_seconds = 1800
 
 # Optional sleep/wait tool.

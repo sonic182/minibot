@@ -22,7 +22,11 @@ from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
-from minibot.app.managed_agent_policy import ManagedAgentPolicy, is_managed_definition
+from minibot.app.managed_agent_policy import (
+    ManagedAgentPolicy,
+    is_managed_definition,
+    native_skills_hidden_by_management,
+)
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
@@ -337,7 +341,10 @@ def _build_worker_tools(
             )
     registry: SkillRegistry | None = None
     if settings.tools.skills.enabled:
-        registry = SkillRegistry.from_config(settings.tools.skills)
+        registry = SkillRegistry.from_config(
+            settings.tools.skills,
+            extra_native_disabled=native_skills_hidden_by_management(settings),
+        )
         bindings.extend(build_skill_loader_bindings(registry, managed_storage, settings.tools.bash.enabled))
     bindings.extend(
         SettingsInfoTool(settings, skill_names=registry.names if registry is not None else None).bindings()

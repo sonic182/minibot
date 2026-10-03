@@ -21,6 +21,10 @@ from minibot.core.agents import AgentSpec
 # tools exist and so the tool modules have one place to read the names from.
 MANAGEMENT_TOOL_NAMES = ("reload_agents", "create_agent", "update_agent", "delete_agent")
 
+# The bundled skill that walks the model through authoring a managed agent. It is hidden unless
+# writes are on, because without them the tools it tells the model to call do not exist.
+MANAGED_AGENT_SKILL = "create-agent"
+
 _FORBIDDEN_TOOL_NAMES = frozenset(MANAGEMENT_TOOL_NAMES) | frozenset(RESERVED_DELEGATION_TOOL_NAMES)
 _PATTERN_CHARS = ("*", "?", "[")
 
@@ -89,6 +93,13 @@ class ManagedAgentPolicy:
         raise ValueError(
             f"{source}: provider '{provider}' is not allowed by [orchestration.agent_management].providers"
         )
+
+
+def native_skills_hidden_by_management(settings: Settings) -> list[str]:
+    """Bundled skills whose prerequisite feature is off in this configuration."""
+    if settings.orchestration.agent_management.write:
+        return []
+    return [MANAGED_AGENT_SKILL]
 
 
 def is_managed_definition(spec: AgentSpec, managed_directory: Path) -> bool:

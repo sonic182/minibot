@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
+from minibot.adapters.agents.managed_store import LocalManagedAgentStore
 from minibot.adapters.config.loader import load_settings, resolve_config_path
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.logging.setup import configure_logging
@@ -11,10 +13,13 @@ from minibot.adapters.memory.pending_turns import PendingTurnStore
 from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 from minibot.adapters.vault import Vault, read_vault_password
 from minibot.app.agent_definitions_loader import load_active_agent_specs
+from minibot.app.agent_management import AgentManagementService
 from minibot.app.agent_registry import AgentRegistry
+from minibot.app.agent_roster import AgentRosterChange
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionRegistry, load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.managed_agent_policy import native_skills_hidden_by_management
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_async
 from minibot.config.environment import has_secret_references, has_secret_syntax
@@ -38,6 +43,8 @@ class AppContainer:
     _skill_registry: SkillRegistry | None = None
     _extensions: ExtensionRegistry | None = None
     _vault: Vault | None = None
+    _agent_management: AgentManagementService | None = None
+    _agent_roster_refresh: Callable[[], AgentRosterChange] | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -69,7 +76,12 @@ class AppContainer:
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
         cls._agent_registry = AgentRegistry(agent_specs)
-        cls._skill_registry = SkillRegistry.from_config(cls._settings.tools.skills)
+        cls._skill_registry = SkillRegistry.from_config(
+            cls._settings.tools.skills,
+            extra_native_disabled=native_skills_hidden_by_management(cls._settings),
+        )
+        cls._agent_roster_refresh = None
+        cls._agent_management = cls._build_agent_management()
         cls._token_autoconfig_applied = False
         # Last, so an extension's register() sees a fully built container even though the
         # context handed to it exposes only settings, the bus and a logger.
@@ -80,6 +92,7 @@ class AppContainer:
             entrypoint,
             vault=cls._vault,
             agent_registry=cls._agent_registry,
+            agent_management=cls._agent_management,
         )
 
     @classmethod
@@ -193,6 +206,38 @@ class AppContainer:
         if cls._extensions is None:
             raise RuntimeError("container not configured")
         return cls._extensions
+
+    @classmethod
+    def get_agent_management(cls) -> AgentManagementService | None:
+        """The runtime agent-management service, or ``None`` when the feature is off."""
+        return cls._agent_management
+
+    @classmethod
+    def bind_agent_roster_refresh(cls, refresh: Callable[[], AgentRosterChange]) -> None:
+        """Point the management service at the dispatcher that owns the live tool list.
+
+        Extensions register before the dispatcher exists, so the reload callback is bound late,
+        from the composition root that builds both.
+        """
+        cls._agent_roster_refresh = refresh
+
+    @classmethod
+    def _build_agent_management(cls) -> AgentManagementService | None:
+        settings = cls.get_settings()
+        if not settings.orchestration.agent_management.active:
+            return None
+
+        async def refresh_roster() -> AgentRosterChange:
+            callback = cls._agent_roster_refresh
+            if callback is None:
+                raise RuntimeError("the agent roster refresh is not bound yet")
+            return callback()
+
+        return AgentManagementService(
+            settings=settings,
+            store=LocalManagedAgentStore(settings.orchestration.agent_management.directory),
+            refresh=refresh_roster,
+        )
 
     @classmethod
     async def initialize_storage(cls) -> None:

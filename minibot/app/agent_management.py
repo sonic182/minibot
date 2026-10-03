@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from minibot.app.agent_definitions_loader import AGENT_NAME_RE, parse_agent_definition
+from minibot.app.agent_roster import AgentRosterChange
 from minibot.app.managed_agent_policy import ManagedAgentPolicy
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentSpec, ManagedAgentStore
@@ -30,7 +31,25 @@ class AgentManagementOutcome:
     action: str
     name: str | None = None
     names: list[str] = dataclasses.field(default_factory=list)
+    added: list[str] = dataclasses.field(default_factory=list)
+    removed: list[str] = dataclasses.field(default_factory=list)
+    updated: list[str] = dataclasses.field(default_factory=list)
     error: str | None = None
+
+    def as_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "ok": self.ok,
+            "action": self.action,
+            "names": list(self.names),
+            "added": list(self.added),
+            "removed": list(self.removed),
+            "updated": list(self.updated),
+        }
+        if self.name is not None:
+            payload["name"] = self.name
+        if self.error is not None:
+            payload["error"] = self.error
+        return payload
 
 
 class AgentManagementService:
@@ -39,7 +58,7 @@ class AgentManagementService:
         *,
         settings: Settings,
         store: ManagedAgentStore,
-        refresh: Callable[[], Awaitable[None]] | None = None,
+        refresh: Callable[[], Awaitable[AgentRosterChange]] | None = None,
     ) -> None:
         self._settings = settings
         self._store = store
@@ -52,6 +71,11 @@ class AgentManagementService:
 
     def list_names(self) -> list[str]:
         return self._store.list_names()
+
+    async def reload(self) -> AgentManagementOutcome:
+        """Re-read definitions. ``ok`` is false when the reload could not be applied."""
+        async with self._lock:
+            return await self._finish("reload", None)
 
     async def create(self, *, name: str, content: str) -> AgentManagementOutcome:
         async with self._lock:
@@ -85,22 +109,32 @@ class AgentManagementService:
             return _failure(action, name, str(exc))
         return await self._finish(action, name)
 
-    async def _finish(self, action: str, name: str) -> AgentManagementOutcome:
+    async def _finish(self, action: str, name: str | None) -> AgentManagementOutcome:
+        change: AgentRosterChange | None = None
         if self._refresh is not None:
             try:
-                await self._refresh()
+                change = await self._refresh()
             except Exception as exc:  # noqa: BLE001
-                _LOGGER.warning("agent registry refresh failed after a managed write", exc_info=True)
+                _LOGGER.warning("agent roster refresh failed", exc_info=True)
+                saved = f"'{name}' was saved but " if name is not None else ""
                 return AgentManagementOutcome(
                     ok=False,
                     action=action,
                     name=name,
                     error=(
-                        f"'{name}' was saved but the agent roster could not be refreshed: {exc}. "
+                        f"{saved}the agent roster could not be refreshed: {exc}. "
                         "It becomes available after the next successful reload or a restart."
                     ),
                 )
-        return AgentManagementOutcome(ok=True, action=action, name=name, names=self.list_names())
+        return AgentManagementOutcome(
+            ok=True,
+            action=action,
+            name=name,
+            names=change.names if change is not None else self.list_names(),
+            added=change.added if change is not None else [],
+            removed=change.removed if change is not None else [],
+            updated=change.updated if change is not None else [],
+        )
 
     def _authorize(self, *, name: str, content: str) -> AgentSpec:
         if not AGENT_NAME_RE.fullmatch(name):

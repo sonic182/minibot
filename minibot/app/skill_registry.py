@@ -41,14 +41,24 @@ class SkillRegistry:
         self._replace_specs(specs if specs is not None else self._load_specs())
 
     @classmethod
-    def from_config(cls, config: SkillsToolConfig) -> SkillRegistry:
-        """Build the registry ``[tools.skills]`` describes; empty when skills are disabled."""
+    def from_config(
+        cls,
+        config: SkillsToolConfig,
+        *,
+        extra_native_disabled: Iterable[str] = (),
+    ) -> SkillRegistry:
+        """Build the registry ``[tools.skills]`` describes; empty when skills are disabled.
+
+        ``extra_native_disabled`` hides a bundled skill whose prerequisite feature is off, such as
+        ``create-agent`` without runtime writes. It is a separate argument because
+        ``SkillsToolConfig`` deliberately knows nothing about orchestration.
+        """
         if not config.enabled:
             return cls([])
         return cls(
             paths=list(config.paths) or None,
             native=config.native,
-            native_disabled=config.disabled_native_skills,
+            native_disabled=[*config.disabled_native_skills, *extra_native_disabled],
             write_path=config.write_path,
         )
 
