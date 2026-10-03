@@ -9,7 +9,6 @@ managed agent may be told to do, applied wherever a managed definition can becom
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
 
 from minibot.app.agent_policies import RESERVED_DELEGATION_TOOL_NAMES
 from minibot.app.mcp_tool_name import DEFAULT_MCP_NAME_PREFIX, is_mcp_tool_name
@@ -104,15 +103,3 @@ def native_skills_hidden_by_management(settings: Settings) -> list[str]:
     if settings.orchestration.agent_management.write:
         return []
     return [MANAGED_AGENT_SKILL]
-
-
-def is_managed_definition(spec: AgentSpec, managed_directory: Path) -> bool:
-    """Whether a spec came from the managed directory.
-
-    Provenance is the directory the loader read, never a frontmatter field: a model-authored
-    definition must not be able to claim it is owner-authored by writing ``owner: true``.
-    """
-    try:
-        return spec.source_path.resolve().parent == managed_directory.resolve()
-    except OSError:
-        return False

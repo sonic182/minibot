@@ -24,7 +24,6 @@ from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.managed_agent_policy import (
     ManagedAgentPolicy,
-    is_managed_definition,
     native_skills_hidden_by_management,
 )
 from minibot.app.response_parser import extract_answer, resolve_reply_render
@@ -447,8 +446,7 @@ def _resolve_task_spec(
         spec = apply_agent_overrides(spec, overrides)
         # The base definition was authorized at load; an override can retarget the provider, so the
         # ceiling has to be re-checked on the spec the worker will actually run.
-        management = settings.orchestration.agent_management
-        if management.active and is_managed_definition(spec, Path(management.directory)):
+        if spec.managed:
             ManagedAgentPolicy.from_settings(settings).authorize(spec)
         spec = _capped_at(spec, settings, target_ceiling)
         if not environment_prompt_fragment.strip():

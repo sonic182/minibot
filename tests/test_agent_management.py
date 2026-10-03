@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from minibot.adapters.agents.managed_store import LocalManagedAgentStore
+from minibot.app.agent_definitions_loader import load_active_agent_specs
 from minibot.app.agent_management import AgentManagementService
 from minibot.config.schema import Settings
 
@@ -63,6 +64,37 @@ async def test_create_rejects_an_existing_name(tmp_path: Path) -> None:
 
     assert outcome.ok is False
     assert outcome.error is not None and "already exists" in outcome.error
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_an_owner_name_without_poisoning_the_roster(tmp_path: Path) -> None:
+    owner_dir = tmp_path / "owner"
+    owner_dir.mkdir()
+    owner_file = owner_dir / "different_filename.md"
+    owner_content = _definition()
+    owner_file.write_text(owner_content, encoding="utf-8")
+    managed_dir = tmp_path / "managed"
+    settings = Settings.from_dict(
+        {
+            "orchestration": {
+                "directory": str(owner_dir),
+                "agent_management": {
+                    "write": True,
+                    "directory": str(managed_dir),
+                    "tools_allow": ["filesystem"],
+                },
+            }
+        }
+    )
+    service = AgentManagementService(settings=settings, store=LocalManagedAgentStore(managed_dir))
+
+    outcome = await service.create(name="helper_agent", content=owner_content)
+
+    assert outcome.ok is False
+    assert outcome.error is not None and "owner-authored" in outcome.error
+    assert not (managed_dir / "helper_agent.md").exists()
+    assert owner_file.read_text(encoding="utf-8") == owner_content
+    assert [spec.name for spec in load_active_agent_specs(settings)] == ["helper_agent"]
 
 
 @pytest.mark.asyncio

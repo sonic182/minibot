@@ -80,7 +80,10 @@ The four modes, all reachable by config alone:
 A managed definition is never more powerful than the ceiling in
 ``[orchestration.agent_management]``. It may not use ``tools_deny``, must grant exact tool names,
 claims MCP servers through ``mcp_servers``, and may only target a provider the owner listed. Owner
-files are not subject to the ceiling, so the two trust levels stay distinct. See :doc:`config` for
+files are not subject to the ceiling, so the two trust levels stay distinct. The loader records
+which directory each definition was read from; a symlink in the managed directory remains managed,
+including when the worker applies model overrides. Creating or updating a managed definition whose
+name collides with an enabled owner-authored agent is rejected before writing. See :doc:`config` for
 the field reference.
 
 That ceiling bounds what an agent may be *told* to do; it is not a sandbox. A managed agent granted

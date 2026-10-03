@@ -7,7 +7,6 @@ import pytest
 from minibot.app.managed_agent_policy import (
     MANAGEMENT_TOOL_NAMES,
     ManagedAgentPolicy,
-    is_managed_definition,
 )
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentSpec
@@ -113,11 +112,3 @@ def test_a_listed_provider_is_allowed() -> None:
 
 def test_a_spec_with_no_grants_is_allowed() -> None:
     _policy().authorize(_spec())
-
-
-def test_is_managed_definition_uses_the_directory(tmp_path: Path) -> None:
-    managed = tmp_path / "managed"
-    owner = tmp_path / "owner"
-
-    assert is_managed_definition(_spec(source_path=managed / "helper_agent.md"), managed) is True
-    assert is_managed_definition(_spec(source_path=owner / "helper_agent.md"), managed) is False

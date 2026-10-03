@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from dataclasses import replace
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -139,5 +140,5 @@ def load_active_agent_specs(settings: Settings) -> list[AgentSpec]:
             )
         policy.authorize(spec)
         owner_names.add(spec.name)
-        specs.append(spec)
+        specs.append(replace(spec, managed=True))
     return specs

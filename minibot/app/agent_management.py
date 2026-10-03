@@ -14,7 +14,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from minibot.app.agent_definitions_loader import AGENT_NAME_RE, parse_agent_definition
+from minibot.app.agent_definitions_loader import AGENT_NAME_RE, load_agent_specs, parse_agent_definition
 from minibot.app.agent_roster import AgentRosterChange
 from minibot.app.managed_agent_policy import ManagedAgentPolicy
 from minibot.config.schema import Settings
@@ -116,14 +116,14 @@ class AgentManagementService:
                 change = await self._refresh()
             except Exception as exc:  # noqa: BLE001
                 _LOGGER.warning("agent roster refresh failed", exc_info=True)
-                saved = f"'{name}' was saved but " if name is not None else ""
+                saved = f"'{name}' was {'deleted' if action == 'delete' else 'saved'} but " if name is not None else ""
                 return AgentManagementOutcome(
                     ok=False,
                     action=action,
                     name=name,
                     error=(
                         f"{saved}the agent roster could not be refreshed: {exc}. "
-                        "It becomes available after the next successful reload or a restart."
+                        "Fix the reported error before retrying the reload or restarting."
                     ),
                 )
         return AgentManagementOutcome(
@@ -146,6 +146,9 @@ class AgentManagementService:
         if spec.name != name:
             raise ValueError(f"{source_path}: frontmatter name '{spec.name}' must match the requested name '{name}'")
         ManagedAgentPolicy.from_settings(self._settings).authorize(spec)
+        owner_specs = load_agent_specs(self._settings.orchestration.directory)
+        if any(owner.name == name for owner in owner_specs):
+            raise ValueError(f"managed agent '{name}' collides with an owner-authored agent; choose another name")
         return spec
 
 

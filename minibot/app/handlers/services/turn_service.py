@@ -92,8 +92,8 @@ class LLMTurnService:
 
         Four places snapshot the list — this service, the prompt service, the agent runtime and the
         tool-use guardrail — so they move together, and the extension prompt fragments are filtered
-        by tool name, so they move with it too. The next turn is the first to see the change; a turn
-        already in flight keeps what it started with.
+        by tool name, so they move with it too. An in-flight runtime turn sees the new tools on its
+        next iteration; a tool-call batch already executing keeps its captured bindings.
         """
         self._tools = list(tools)
         self._prompt_service.replace_tools(tools, extension_prompt_fragments=extension_prompt_fragments)

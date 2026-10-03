@@ -435,6 +435,41 @@ def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
     assert general.max_new_tokens == 8192
 
 
+def test_resolve_task_spec_enforces_the_ceiling_for_a_symlinked_managed_definition(tmp_path: Path) -> None:
+    managed_dir = tmp_path / "managed"
+    managed_dir.mkdir()
+    target = tmp_path / "helper_agent.md"
+    target.write_text("---\nname: helper_agent\nmode: agent\n---\n\nHelp.", encoding="utf-8")
+    (managed_dir / "helper_agent.md").symlink_to(target)
+    settings = Settings.from_dict(
+        {
+            "orchestration": {
+                "directory": str(tmp_path / "owner"),
+                "agent_management": {"write": True, "directory": str(managed_dir)},
+            }
+        }
+    )
+    task = {"agent_name": "helper_agent", "model_overrides": {"model_provider": "opencode_go"}}
+
+    with pytest.raises(ValueError, match="is not allowed by"):
+        worker._resolve_task_spec(
+            settings=settings,
+            llm_factory=_FakeFactory(settings),
+            environment_prompt_fragment="",
+            task=task,
+        )
+
+    settings.orchestration.agent_management.providers = ["opencode_go"]
+    spec = worker._resolve_task_spec(
+        settings=settings,
+        llm_factory=_FakeFactory(settings),
+        environment_prompt_fragment="Environment context.",
+        task=task,
+    )
+    assert spec.model_provider == "opencode_go"
+    assert spec.system_prompt.endswith("Environment context.")
+
+
 def test_resolve_task_spec_rejects_an_unauthorized_managed_provider_override() -> None:
     settings = Settings.from_dict(
         {"orchestration": {"agent_management": {"write": True, "directory": "/tmp/managed", "providers": []}}}
@@ -444,6 +479,7 @@ def test_resolve_task_spec_rejects_an_unauthorized_managed_provider_override() -
         description="generalist",
         system_prompt="You are a generalist.",
         source_path=worker.Path("/tmp/managed/general_agent.md"),
+        managed=True,
     )
     factory = _FakeFactory(settings)
 
@@ -476,6 +512,7 @@ def test_resolve_task_spec_allows_a_managed_override_to_the_listed_provider() ->
         description="generalist",
         system_prompt="You are a generalist.",
         source_path=worker.Path("/tmp/managed/general_agent.md"),
+        managed=True,
     )
     factory = _FakeFactory(settings)
 
