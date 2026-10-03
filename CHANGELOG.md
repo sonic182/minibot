@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-03
+
 ### Added
 
 - **`get_settings` tool.** A read-only, always-on tool that reports what this instance is running: version, config
@@ -1225,7 +1227,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.25.2...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.26.0...HEAD
+[0.26.0]: https://github.com/sonic182/minibot/compare/0.25.2..0.26.0
 [0.25.2]: https://github.com/sonic182/minibot/compare/0.25.1..0.25.2
 [0.25.1]: https://github.com/sonic182/minibot/compare/0.25.0..0.25.1
 [0.25.0]: https://github.com/sonic182/minibot/compare/0.24.0..0.25.0
