@@ -80,13 +80,35 @@ async def test_load_extensions_collects_tools_and_delivers_events(
     assert sys.modules["ext_ok"].seen_turns == ["turn-7"]
 
 
-def test_load_extensions_for_worker_skips_bundled_extensions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_extensions_for_worker_loads_only_the_scheduler_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write_module(tmp_path, monkeypatch, "ext_worker", "def register(mb):\n    pass\n")
-    settings = Settings.from_dict({"extensions": {"modules": ["ext_worker"]}})
+    settings = Settings.from_dict(
+        {"extensions": {"modules": ["ext_worker"]}, "scheduler": {"prompts": {"enabled": False}}}
+    )
 
     registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
 
-    assert registry.names() == ["ext_worker"]
+    assert registry.names() == ["minibot.extensions.services.scheduler", "ext_worker"]
+    assert registry.tools == []
+
+
+def test_load_extensions_for_worker_exposes_scheduler_tools_without_pages(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {
+            "scheduler": {
+                "prompts": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}"},
+            },
+            "http": {"enabled": True},
+        }
+    )
+
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+
+    assert {binding.tool.name for binding in registry.tools} >= {"schedule", "schedule_prompt"}
+    assert registry.pages() == []
+    assert registry.routes == []
 
 
 def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Task workers can schedule prompts.** A delegated agent (for example `general_agent` through `spawn_task`)
+  had no scheduler tools, so "create these reminders" answered that it had no tool. Workers now load the
+  scheduler tools (`schedule`, `schedule_prompt`, `list_scheduled_prompts`, `cancel_scheduled_prompt`,
+  `delete_scheduled_prompt`) whenever `[scheduler.prompts]` is enabled. The daemon still runs the poller, so a
+  job a worker creates fires on the daemon's next poll (`poll_interval_seconds`, default 60) and can be up to
+  one interval late. A specialist that sets `tools_allow` must list the tools it wants.
+
 ## [0.26.0] - 2026-10-03
 
 ### Added

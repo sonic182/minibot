@@ -31,7 +31,7 @@ class _SchedulerService:
 
 
 def register(mb: ExtensionContext) -> None:
-    if mb.entrypoint == "worker" or not mb.settings.scheduler.prompts.enabled:
+    if not mb.settings.scheduler.prompts.enabled:
         return
     config = mb.settings.scheduler.prompts
     store = SQLAlchemyScheduledPromptStore(config)
@@ -42,6 +42,8 @@ def register(mb: ExtensionContext) -> None:
             min_recurrence_interval_seconds=config.min_recurrence_interval_seconds,
         ).bindings()
     )
+    if mb.entrypoint == "worker":
+        return
     mb.add_service(_SchedulerService(store, scheduler, mb.entrypoint))
     if mb.settings.http.enabled:
         page = _build_page(scheduler, mb.settings.runtime.owner_id)
