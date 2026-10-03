@@ -54,8 +54,14 @@ def _build_tools(
     producer: _ProducerStub,
     task_manager: _TaskManagerStub,
     agent_registry: AgentRegistry | None = None,
+    specialists_enabled: bool = True,
 ) -> dict[str, Any]:
-    tools = TaskTools(cast(Any, producer), cast(Any, task_manager), agent_registry=agent_registry)
+    tools = TaskTools(
+        cast(Any, producer),
+        cast(Any, task_manager),
+        agent_registry=agent_registry,
+        specialists_enabled=specialists_enabled,
+    )
     return {binding.tool.name: binding for binding in tools.bindings()}
 
 
@@ -127,6 +133,37 @@ async def test_spawn_task_rejects_unregistered_agent_name() -> None:
         )
 
     assert producer.enqueued == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_rejects_named_agent_when_specialists_are_disabled() -> None:
+    producer = _ProducerStub()
+    registry = AgentRegistry(
+        [AgentSpec(name="general_agent", description="", system_prompt="", source_path=Path("agents/general.md"))]
+    )
+    bindings = _build_tools(producer, _TaskManagerStub(), agent_registry=registry, specialists_enabled=False)
+
+    with pytest.raises(ValueError, match=r"specialist agents are disabled"):
+        await bindings["spawn_task"].handler(
+            {"prompt": "Summarize logs", "agent_name": "general_agent"},
+            ToolContext(channel="console"),
+        )
+
+    assert producer.enqueued == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_still_accepts_a_generic_task_when_specialists_are_disabled() -> None:
+    producer = _ProducerStub()
+    bindings = _build_tools(producer, _TaskManagerStub(), specialists_enabled=False)
+
+    result = await bindings["spawn_task"].handler(
+        {"prompt": "Summarize logs"},
+        ToolContext(channel="console"),
+    )
+
+    assert result["status"] == "queued"
+    assert result["agent_name"] is None
 
 
 @pytest.mark.asyncio

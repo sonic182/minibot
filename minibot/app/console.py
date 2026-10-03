@@ -66,6 +66,7 @@ async def run(
         managed_storage=AppContainer.get_file_storage(),
         channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
     )
+    AppContainer.bind_agent_roster_refresh(dispatcher.refresh_agent_roster)
     strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     main_agent_tools_enabled = getattr(dispatcher, "main_agent_tool_names", None) or ["none"]
     tool_summary = summarize_items(main_agent_tools_enabled)

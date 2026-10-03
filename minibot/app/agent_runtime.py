@@ -101,6 +101,10 @@ class AgentRuntime:
             logger=self._logger,
         )
 
+    def replace_tools(self, tools: Sequence[ToolBinding] | None) -> None:
+        """Swap the tool list after a roster reload; the pre-response binding stays first."""
+        self._tools = [pre_response_binding(), *list(tools or [])]
+
     async def _publish_reasoning(self, message: Any, *, step: int, tool_context: ToolContext) -> None:
         """Telemetry must never break a turn: a stopped bus raises, and shutdown races are normal."""
         if self._event_bus is None:

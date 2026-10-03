@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.config.schema import MCPServerConfig, Settings
 from minibot.app.response_parser import EMPTY_REPLY_FALLBACK_TEXT
 from minibot.app.tasks import worker
@@ -214,7 +215,7 @@ async def test_run_agent_loop_resolves_specialist_agent() -> None:
     with (
         patch("minibot.app.tasks.worker.load_settings", return_value=settings),
         patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
-        patch("minibot.app.tasks.worker.load_agent_specs", return_value=[specialist]),
+        patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]),
         patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
         patch("minibot.app.tasks.worker.AgentRuntime", _FakeRuntime),
     ):
@@ -255,7 +256,7 @@ async def test_run_agent_loop_closes_the_mcp_clients_it_started() -> None:
     with (
         patch("minibot.app.tasks.worker.load_settings", return_value=settings),
         patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
-        patch("minibot.app.tasks.worker.load_agent_specs", return_value=[specialist]),
+        patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]),
         patch("minibot.app.tasks.worker.MCPClient", _fake_client),
         patch("minibot.app.tasks.worker.build_mcp_bindings_async", AsyncMock(return_value=[])),
         patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
@@ -369,7 +370,8 @@ def test_default_worker_gets_get_settings() -> None:
     assert "get_settings" in tool_names
 
 
-def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:
+@pytest.mark.asyncio
+async def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:
     settings = Settings()
     specialist = AgentSpec(
         name="general_agent",
@@ -384,14 +386,16 @@ def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:
     overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6", "reasoning_effort": "high"}
     factory = _FakeFactory(settings)
 
-    with patch("minibot.app.tasks.worker.load_agent_specs", return_value=[specialist]):
-        specialist_spec = worker._resolve_task_spec(
+    with patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]):
+        specialist_spec = await worker._resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
             settings=settings,
             llm_factory=factory,
             environment_prompt_fragment="",
             task={"agent_name": "general_agent", "model_overrides": overrides},
         )
-        default_spec = worker._resolve_task_spec(
+        default_spec = await worker._resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
             settings=settings,
             llm_factory=factory,
             environment_prompt_fragment="",
@@ -410,7 +414,8 @@ def test_resolve_task_spec_applies_model_overrides_to_both_branches() -> None:
     assert default_spec.name == "task_worker"
 
 
-def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
+@pytest.mark.asyncio
+async def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
     """The daemon knows the target's ceiling; only this process still has the user's own cap."""
     settings = Settings()
     settings.llm.max_new_tokens = 8192
@@ -426,23 +431,26 @@ def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
     overrides = {"model_provider": "opencode_go", "model": "deepseek-v3.6"}
     factory = _FakeFactory(settings)
 
-    with patch("minibot.app.tasks.worker.load_agent_specs", return_value=[specialist]):
+    with patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]):
         # Target allows more than the agent asked for: the agent's own cap wins.
-        generous = worker._resolve_task_spec(
+        generous = await worker._resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
             settings=settings,
             llm_factory=factory,
             environment_prompt_fragment="",
             task={"agent_name": "general_agent", "model_overrides": overrides, "max_new_tokens": 65536},
         )
         # Target allows less: its ceiling wins, since the agent cannot exceed what the model does.
-        tight = worker._resolve_task_spec(
+        tight = await worker._resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
             settings=settings,
             llm_factory=factory,
             environment_prompt_fragment="",
             task={"agent_name": "general_agent", "model_overrides": overrides, "max_new_tokens": 2048},
         )
         # No spec cap at all falls back to [llm]'s, also read from disk here.
-        general = worker._resolve_task_spec(
+        general = await worker._resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
             settings=settings,
             llm_factory=factory,
             environment_prompt_fragment="",
@@ -452,6 +460,105 @@ def test_resolve_task_spec_caps_at_the_lower_of_target_and_configured() -> None:
     assert generous.max_new_tokens == 4096
     assert tight.max_new_tokens == 2048
     assert general.max_new_tokens == 8192
+
+
+@pytest.mark.asyncio
+async def test_resolve_task_spec_enforces_the_ceiling_for_a_symlinked_managed_definition(tmp_path: Path) -> None:
+    managed_dir = tmp_path / "managed"
+    managed_dir.mkdir()
+    target = tmp_path / "helper_agent.md"
+    target.write_text("---\nname: helper_agent\nmode: agent\n---\n\nHelp.", encoding="utf-8")
+    (managed_dir / "helper_agent.md").symlink_to(target)
+    settings = Settings.from_dict(
+        {
+            "orchestration": {
+                "directory": str(tmp_path / "owner"),
+                "agent_management": {"write": True, "directory": str(managed_dir)},
+            }
+        }
+    )
+    task = {"agent_name": "helper_agent", "model_overrides": {"model_provider": "opencode_go"}}
+
+    with pytest.raises(ValueError, match="is not allowed by"):
+        await worker._resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
+            settings=settings,
+            llm_factory=_FakeFactory(settings),
+            environment_prompt_fragment="",
+            task=task,
+        )
+
+    settings.orchestration.agent_management.providers = ["opencode_go"]
+    spec = await worker._resolve_task_spec(
+        reader=LocalAgentDefinitionReader(),
+        settings=settings,
+        llm_factory=_FakeFactory(settings),
+        environment_prompt_fragment="Environment context.",
+        task=task,
+    )
+    assert spec.model_provider == "opencode_go"
+    assert spec.system_prompt.endswith("Environment context.")
+
+
+@pytest.mark.asyncio
+async def test_resolve_task_spec_rejects_an_unauthorized_managed_provider_override() -> None:
+    settings = Settings.from_dict(
+        {"orchestration": {"agent_management": {"write": True, "directory": "/tmp/managed", "providers": []}}}
+    )
+    specialist = AgentSpec(
+        name="general_agent",
+        description="generalist",
+        system_prompt="You are a generalist.",
+        source_path=worker.Path("/tmp/managed/general_agent.md"),
+        managed=True,
+    )
+    factory = _FakeFactory(settings)
+
+    with (
+        patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]),
+        pytest.raises(ValueError, match="is not allowed by"),
+    ):
+        await worker._resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
+            settings=settings,
+            llm_factory=factory,
+            environment_prompt_fragment="",
+            task={"agent_name": "general_agent", "model_overrides": {"model_provider": "opencode_go"}},
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_task_spec_allows_a_managed_override_to_the_listed_provider() -> None:
+    settings = Settings.from_dict(
+        {
+            "orchestration": {
+                "agent_management": {
+                    "write": True,
+                    "directory": "/tmp/managed",
+                    "providers": ["opencode_go"],
+                }
+            }
+        }
+    )
+    specialist = AgentSpec(
+        name="general_agent",
+        description="generalist",
+        system_prompt="You are a generalist.",
+        source_path=worker.Path("/tmp/managed/general_agent.md"),
+        managed=True,
+    )
+    factory = _FakeFactory(settings)
+
+    with patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]):
+        spec = await worker._resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
+            settings=settings,
+            llm_factory=factory,
+            environment_prompt_fragment="",
+            task={"agent_name": "general_agent", "model_overrides": {"model_provider": "opencode_go"}},
+        )
+
+    assert spec.model_provider == "opencode_go"
 
 
 class _ApprovalPipe:

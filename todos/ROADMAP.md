@@ -9,7 +9,8 @@ Possible roadmap to follow now...
 | 0 | bash env default | done |
 | 1 | credential vault | done |
 | 2 | skills for specialist agents | done |
-| 3 | native skills, runtime self-knowledge, agent management | **in progress** — `get_settings` and `minibot-docs` done; next: `reload_agents`, then the agent management skill |
+| 3 | native skills, runtime self-knowledge, agent management | **done** — `get_settings`, `minibot-docs`, optional `reload_agents`, and optional model-authored agents with an owner ceiling |
+| 3b | mid-turn user messages and `/stop` | pending, after `reload_agents` and the agent management skill |
 | 4 | MCP OAuth (#65) | pending |
 | 5 | guardrail enhancements | pending |
 | 6 | bash tool hardening | pending, priority depends on the Trust model |
@@ -206,12 +207,35 @@ and the fix is small.
 
 ## [ ] Phase 3 — Native skills & runtime self-knowledge
 
-**In progress** — shipped: version single-sourcing (#82), the native tier +
-`create-skill` (#83) and `install-skill` + `install_skill` (#84, released in
-0.18.0), then `get_settings` and the `minibot-docs` skill. Remaining, in
-delivery order: `reload_agents`, then the `create-agent` skill. Each is independently
-shippable, and tests and docs ride along with the change that introduces the
-behaviour.
+**Done** — version single-sourcing (#82), the native tier + `create-skill` (#83),
+`install-skill` + `install_skill` (#84, released in 0.18.0), `get_settings`, the
+`minibot-docs` skill, and then the runtime agent-management work below.
+
+Shipped differently from the sketch in this section, after a security review of the original
+`reload_agents` + `create-agent` plan:
+
+- **Separable activation.** `[orchestration.specialists].enabled` is the switch for *using*
+specialists; `[orchestration.agent_management]` `reload` and `write` are separate switches for
+*managing* them, both off by default. The four modes (none, owner-only, reload-only, managed) are
+reachable by config alone. See :doc:`agents`.
+- **A managed-agent ceiling, not a blanket tool cap.** The earlier sketch proposed capping every
+specialist at the main agent's visible tools. That is wrong: `exclusive`/`exclusive_mcp` ownership
+deliberately lets a specialist own a tool the main agent is denied, and the main agent's
+`tools_deny` is not a system-wide prohibition. The real problem was that a *model-authored*
+definition could grant itself anything globally enabled, so model-authored definitions are bounded
+by an owner ceiling and owner-authored ones are left alone. Provenance is the directory the loader
+read, never a frontmatter field.
+- **Enforcement is not tool-hiding.** The ceiling is applied at load, on reload, before a write and
+in the worker after model overrides, so writing a file by hand and reloading cannot bypass it.
+- **Writes go through a service, not the filesystem tools.** `AgentManagementService` validates the
+name, the definition and the ceiling, then persists atomically through a confined store; the tools
+only call it.
+
+Deferred, with the reasoning above as the reason: a specialist may still be authored by the owner
+only unless `write = true`, and the ceiling defaults to granting nothing.
+
+Still out of scope for Phase 3: the `create-agent` skill is bundled but hidden until `write = true`,
+and the agent-management tools stay unavailable to workers and specialists.
 
 Different theme from the phases around it — capability, not containment —
 but it lands two new LLM-facing surfaces, so the Trust model above still
@@ -492,6 +516,49 @@ populated.
 Open question: do bundled native skills need to be visible to task workers?
 Workers build their own `SkillRegistry` in `_build_worker_tools`; confirm the
 native tier is included there before relying on it in `create-agent`.
+
+## [ ] Phase 3b — Mid-turn user messages (steering) and `/stop`
+
+Lands after Phase 3 (`reload_agents` and the agent management skill). Today a message sent while the
+agent is working either waits for the turn to end or starts a competing turn. On Telegram the owner
+wants to say "also consider this", "use the other account" or "stop, I solved it" while the agent is
+still researching or running tools.
+
+Shape, KISS: **one pending-message inbox per conversation**, consulted by the runtime before each
+model call. No second agent, no classifier, no cancel-and-rebuild of the turn.
+
+1. The user writes while the agent is working.
+2. The message is stored in history and marked pending.
+3. The current tool call finishes.
+4. The runtime appends the pending messages as user messages before continuing, so the model sees
+   the tool result and the correction together and decides how to proceed.
+
+| action | behaviour |
+|---|---|
+| "Also add Barcelona" | folded in at the next continuation point |
+| "Better search only Madrid" | the agent reorients after the current tool |
+| `/stop` | explicit cancellation, handled without waiting for another model response |
+
+Injecting a message between tools steers; it does **not** guarantee an immediate stop. A tool call
+that takes two minutes delays the correction until it returns. So `/stop` stays an independent path
+that cancels execution where possible. An external action that already happened (a sent email)
+cannot be undone by cancelling.
+
+Details to get right from the start:
+
+- **One consumer per conversation.** The new message enters the active turn: no parallel second turn,
+  no duplicate in history.
+- **Check pending before closing the turn too.** A correction that arrives while the final answer is
+  being generated must be processed before the work is declared done.
+- **Several tool calls in one model response.** Check pending between executions; if there is a
+  correction, hand control back to the model before running the remaining calls. Calls skipped this
+  way must still be recorded correctly (call + result pairing) per each provider's protocol.
+
+Scope of v1: main agent and `/stop` only. Steering a specific worker or specialist is deferred: with
+several active tasks, "change this" needs an unambiguous addressee.
+
+Trust model: pending messages are owner input like any other, no new surface. `/stop` must remain
+owner-only.
 
 ## [ ] Phase 4 — MCP OAuth (issue #65)
 

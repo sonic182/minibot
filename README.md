@@ -40,6 +40,33 @@ MiniBot is built to be extended, and most changes need no Python:
 Start at the least powerful layer that does the job. The most common asks — a new
 capability — usually stop at an MCP server or a ~10-line extension:
 
+Security and trust model
+------------------------
+
+MiniBot can execute powerful tools such as shell commands and Python code. It is **not intended to be
+a security boundary by itself**. For untrusted workloads, or deployments with sensitive host data,
+run MiniBot inside an appropriately isolated environment.
+
+Its job is safe defaults, explicit escape hatches and a documented trust model — not a guarantee the
+software cannot make:
+
+- **MiniBot's own responsibility** is safe-by-default config (`bash.pass_parent_env = false`, the
+dangerous tools off), keeping secrets out of the LLM's reach (`[vault]`), and gating consequential
+actions (`[tools.approval]`). These matter regardless of deployment, because the remote provider sees
+whatever reaches a tool call, however isolated the host is.
+- **The deployment's responsibility** is OS, filesystem and process isolation for `bash` and
+`python_exec`. An owner who already isolates the host can reasonably accept the ambient risk.
+
+Filesystem- and shell-level controls inside MiniBot are advisory. A `bash` tool without a jail, or
+`file_storage` with `allow_outside_root = true`, can read and write anything the daemon's OS user
+can, including files this documentation says a feature keeps out of reach. Enable those tools only
+where the blast radius is acceptable. See
+[Security & Sandboxing](https://sonic182.github.io/minibot/security.html).
+
+Every capability is a config switch you own. Multi-agent orchestration, runtime agent reload and
+model-authored agents are all opt-in or trivially off; when you turn one on, what it may do is your
+decision and your responsibility.
+
 ```python
 # my_tool.py — add "my_tool" to [extensions].modules
 from pydantic import BaseModel, Field

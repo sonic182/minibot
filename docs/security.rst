@@ -9,6 +9,26 @@ MiniBot exposes a minimal tool surface by default. The most sensitive capabiliti
 ``python_execute``, ``bash``, and ``apply_patch`` — they can run arbitrary code or edit
 host files when enabled.
 
+Trust model
+-----------
+
+MiniBot is **not a security boundary by itself**. For untrusted workloads, or deployments with
+sensitive host data, run it inside an appropriately isolated environment.
+
+The goal is safe defaults, explicit escape hatches and this document — not a guarantee the software
+cannot make. Two responsibilities are separate:
+
+- **MiniBot's**: safe-by-default config, secrets the LLM cannot reach, and gates on consequential
+  actions. These matter however the daemon is deployed, because the remote provider sees whatever
+  reaches a tool call or the context, no matter how isolated the host is.
+- **The deployment's**: OS, filesystem and process isolation for ``bash`` and ``python_execute``. An
+  owner who already isolates the host can reasonably accept the ambient risk.
+
+The controls below are advisory. ``bash`` has no filesystem jail, so any path-level restriction
+elsewhere — a confined ``file_storage`` root, a managed agent directory, a vault password file — is
+reachable from a shell command unless the process itself is isolated. Read every "cannot" in this
+documentation as "cannot through the tool that owns the check".
+
 Recommendations
 ---------------
 

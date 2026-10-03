@@ -11,10 +11,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
-from minibot.app.agent_definitions_loader import load_agent_specs
+from minibot.app.agent_definitions_loader import load_active_agent_specs
 from minibot.app.agent_policies import apply_agent_overrides, filter_tools_for_agent, strip_reserved_delegation_tools
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
@@ -22,13 +23,17 @@ from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.managed_agent_policy import (
+    ManagedAgentPolicy,
+    native_skills_hidden_by_management,
+)
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
 from minibot.app.tool_constructors import build_calculator_tool, build_skill_loader_bindings
 from minibot.config.schema import Settings, task_limit
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
-from minibot.core.agents import AgentSpec
+from minibot.core.agents import AgentDefinitionReader, AgentSpec
 from minibot.core.channels import session_identifier
 from minibot.core.tasks import TaskLimits, TaskStopReason
 from minibot.core.tools import ToolContext
@@ -174,7 +179,8 @@ async def run_agent_loop(
         extensions = load_extensions(settings, EventBus(), _LOGGER, entrypoint="worker")
         llm_factory = LLMClientFactory(settings)
         environment_prompt_fragment = build_environment_prompt_fragment(settings)
-        spec = _resolve_task_spec(
+        spec = await _resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
             settings=settings,
             llm_factory=llm_factory,
             environment_prompt_fragment=environment_prompt_fragment,
@@ -336,7 +342,10 @@ def _build_worker_tools(
             )
     registry: SkillRegistry | None = None
     if settings.tools.skills.enabled:
-        registry = SkillRegistry.from_config(settings.tools.skills)
+        registry = SkillRegistry.from_config(
+            settings.tools.skills,
+            extra_native_disabled=native_skills_hidden_by_management(settings),
+        )
         bindings.extend(build_skill_loader_bindings(registry, managed_storage, settings.tools.bash.enabled))
     bindings.extend(
         SettingsInfoTool(settings, skill_names=registry.names if registry is not None else None).bindings()
@@ -344,7 +353,9 @@ def _build_worker_tools(
     bindings.extend(mcp_bindings)
 
     bindings.extend(extension_tools)
-    scoped = strip_reserved_delegation_tools(filter_tools_for_agent(bindings, spec))
+    scoped = strip_reserved_delegation_tools(
+        filter_tools_for_agent(bindings, spec, mcp_name_prefix=settings.tools.mcp.name_prefix)
+    )
     return apply_tool_output_spill(
         scoped,
         storage=managed_storage,
@@ -411,8 +422,9 @@ def _build_worker_spec(
     )
 
 
-def _resolve_task_spec(
+async def _resolve_task_spec(
     *,
+    reader: AgentDefinitionReader,
     settings: Settings,
     llm_factory: LLMClientFactory,
     environment_prompt_fragment: str,
@@ -425,11 +437,22 @@ def _resolve_task_spec(
     target_ceiling = _coerce_int(task.get("max_new_tokens"))
     agent_name = task.get("agent_name")
     if isinstance(agent_name, str) and agent_name.strip():
-        registry = AgentRegistry(load_agent_specs(settings.orchestration.directory))
+        if not settings.orchestration.specialists.enabled:
+            raise ValueError(
+                f"agent '{agent_name.strip()}' is not available: specialist agents are disabled by "
+                "[orchestration.specialists].enabled = false"
+            )
+        specs = await asyncio.to_thread(load_active_agent_specs, settings, reader=reader)
+        registry = AgentRegistry(specs)
         spec = registry.get(agent_name.strip())
         if spec is None:
             raise ValueError(f"agent '{agent_name.strip()}' is not available for async task execution")
-        spec = _capped_at(apply_agent_overrides(spec, overrides), settings, target_ceiling)
+        spec = apply_agent_overrides(spec, overrides)
+        # The base definition was authorized at load; an override can retarget the provider, so the
+        # ceiling has to be re-checked on the spec the worker will actually run.
+        if spec.managed:
+            ManagedAgentPolicy.from_settings(settings).authorize(spec)
+        spec = _capped_at(spec, settings, target_ceiling)
         if not environment_prompt_fragment.strip():
             return spec
         # replace() rather than a field-by-field copy: the hand-written version silently dropped

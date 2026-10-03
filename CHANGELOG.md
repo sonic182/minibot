@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Runtime agent management, off by default.** `[orchestration.agent_management]` `reload = true`
+  exposes `reload_agents`, so a hand-edited `agents/*.md` is re-read without a restart; `write = true`
+  adds `create_agent`, `update_agent` and `delete_agent` plus the bundled `create-agent` skill, for
+  definitions the model authors itself. Model-authored definitions live in their own `directory`
+  (default `./data/agents`) and are bounded by an owner-configured ceiling: `tools_allow` patterns,
+  `mcp_servers` and `providers`, all empty by default so a managed agent is granted nothing until the
+  owner lists it. A managed definition may not use `tools_deny` and must grant exact tool names. The
+  ceiling is re-checked at startup, on reload, before every write and in the worker after model
+  overrides, so a `spawn_task` provider override cannot widen it. Owner-authored agents are not
+  subject to the ceiling. `get_settings` reports the switches and the ceiling under `agents`.
+- **`[orchestration.specialists].enabled`.** Turns the specialist roster, `fetch_agent_info` and
+  named delegation off while leaving the generic task worker available. `reload_agents` reports
+  which names were added, removed or updated, and rebuilding the tool list means a reload from zero
+  agents makes `fetch_agent_info` available.
+
+### Changed
+
+- **`[orchestration.specialists].enabled` follows `[tasks].enabled` when omitted.** Specialists run
+  on the task backend, so a config with `[tasks].enabled = false` and the key absent disables the
+  roster instead of failing loading, keeping an existing tasks-off config working. An explicit
+  `specialists.enabled = true` with tasks off is still a config error naming both keys.
+- **Duplicate agent names are an error.** Two files defining the same `name` used to last-win by
+  glob order; the load now fails naming both files. A managed definition that collides with an
+  owner-authored one is rejected rather than replacing it.
+- **`fetch_agent_info` follows the specialists switch**, so it is absent when specialists are off
+  instead of describing a roster nothing can delegate to.
+
 ### Fixed
 
 - **Task workers can schedule prompts.** A delegated agent (for example `general_agent` through `spawn_task`)

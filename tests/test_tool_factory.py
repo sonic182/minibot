@@ -102,3 +102,30 @@ def test_a_registry_adds_only_fetch_agent_info() -> None:
 
     assert "fetch_agent_info" in names
     assert names & RESERVED_DELEGATION_TOOL_NAMES == {"fetch_agent_info"}
+
+
+def test_disabled_specialists_hide_fetch_agent_info() -> None:
+    settings = Settings.from_dict(
+        {
+            "tools": {"time": {"enabled": True}},
+            "orchestration": {"specialists": {"enabled": False}},
+        }
+    )
+    specialist = AgentSpec(
+        name="general_agent",
+        description="generalist",
+        system_prompt="do the work",
+        source_path=Path("agents/general.md"),
+    )
+
+    names = {
+        binding.tool.name
+        for binding in build_enabled_tools(
+            settings,
+            memory=_MemoryStub(),
+            agent_registry=AgentRegistry([specialist]),
+            llm_factory=LLMClientFactory(settings),
+        )
+    }
+
+    assert names & RESERVED_DELEGATION_TOOL_NAMES == set()

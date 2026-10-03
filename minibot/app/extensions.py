@@ -7,7 +7,7 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, get_type_hints
+from typing import TYPE_CHECKING, Any, Literal, Protocol, get_type_hints
 
 from pydantic import BaseModel, ValidationError
 
@@ -20,6 +20,9 @@ from minibot.core.tools import ToolContext, ToolPayload
 from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.extension import build_extension_tool_binding
 from minibot.shared.errors import ToolInputError
+
+if TYPE_CHECKING:
+    from minibot.app.agent_management import AgentManagementService
 
 EventHandler = Callable[[Any], Awaitable[None]]
 ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
@@ -34,6 +37,7 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
         "minibot.extensions.integrations.rabbitmq",
         "minibot.extensions.services.scheduler",
         "minibot.extensions.services.tasks",
+        "minibot.extensions.tools.agent_management",
         "minibot.extensions.tools.execution",
         "minibot.extensions.tools.media",
         "minibot.extensions.tools.memory",
@@ -87,6 +91,8 @@ class ExtensionContext:
     # The container's own registry, updated in place by token auto-config after registration —
     # so read specs off it when they are needed, not at register() time.
     agent_registry: AgentRegistry | None = None
+    # Present only when [orchestration.agent_management] turns on reload and/or writes.
+    agent_management: AgentManagementService | None = None
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
@@ -299,6 +305,7 @@ def load_extensions(
     entrypoint: ExtensionEntrypoint = "daemon",
     vault: SecretVault | None = None,
     agent_registry: AgentRegistry | None = None,
+    agent_management: AgentManagementService | None = None,
 ) -> ExtensionRegistry:
     """Import and register the bundled extensions, then every ``[extensions] modules`` entry.
 
@@ -324,6 +331,7 @@ def load_extensions(
             entrypoint=entrypoint,
             vault=vault,
             agent_registry=agent_registry,
+            agent_management=agent_management,
         )
         try:
             register(context)
