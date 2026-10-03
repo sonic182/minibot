@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.agents.managed_store import LocalManagedAgentStore
 from minibot.app.agent_definitions_loader import load_active_agent_specs
 from minibot.app.agent_management import AgentManagementService
@@ -39,6 +43,7 @@ def _service(tmp_path: Path, *, ceiling: list[str] | None = None, refresh=None) 
     return AgentManagementService(
         settings=settings,
         store=LocalManagedAgentStore(tmp_path / "managed"),
+        reader=LocalAgentDefinitionReader(),
         refresh=refresh,
     )
 
@@ -53,6 +58,43 @@ async def test_create_writes_and_lists(tmp_path: Path) -> None:
     assert outcome.action == "create"
     assert outcome.names == ["helper_agent"]
     assert (tmp_path / "managed" / "helper_agent.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_management_keeps_filesystem_io_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop_thread = threading.get_ident()
+    store = LocalManagedAgentStore(tmp_path / "managed")
+    reader = LocalAgentDefinitionReader()
+
+    def off_loop(operation: Callable[..., object]) -> Callable[..., object]:
+        def call(*args: object, **kwargs: object) -> object:
+            assert threading.get_ident() != loop_thread
+            return operation(*args, **kwargs)
+
+        return call
+
+    for name in ("exists", "write", "delete", "list_names"):
+        monkeypatch.setattr(store, name, off_loop(getattr(store, name)))
+    monkeypatch.setattr(reader, "read", off_loop(reader.read))
+    settings = Settings.from_dict(
+        {
+            "orchestration": {
+                "directory": str(tmp_path / "owner"),
+                "agent_management": {"write": True, "tools_allow": ["filesystem"]},
+            }
+        }
+    )
+    service = AgentManagementService(settings=settings, store=store, reader=reader)
+
+    created = await service.create(name="helper_agent", content=_definition())
+    updated = await service.update(name="helper_agent", content=_definition(tools=""))
+    deleted = await service.delete(name="helper_agent")
+
+    assert created.ok and updated.ok and deleted.ok
+    assert created.names == ["helper_agent"]
+    assert deleted.names == []
 
 
 @pytest.mark.asyncio
@@ -86,7 +128,9 @@ async def test_create_rejects_an_owner_name_without_poisoning_the_roster(tmp_pat
             }
         }
     )
-    service = AgentManagementService(settings=settings, store=LocalManagedAgentStore(managed_dir))
+    service = AgentManagementService(
+        settings=settings, store=LocalManagedAgentStore(managed_dir), reader=LocalAgentDefinitionReader()
+    )
 
     outcome = await service.create(name="helper_agent", content=owner_content)
 
@@ -94,7 +138,9 @@ async def test_create_rejects_an_owner_name_without_poisoning_the_roster(tmp_pat
     assert outcome.error is not None and "owner-authored" in outcome.error
     assert not (managed_dir / "helper_agent.md").exists()
     assert owner_file.read_text(encoding="utf-8") == owner_content
-    assert [spec.name for spec in load_active_agent_specs(settings)] == ["helper_agent"]
+    assert [spec.name for spec in load_active_agent_specs(settings, reader=LocalAgentDefinitionReader())] == [
+        "helper_agent"
+    ]
 
 
 @pytest.mark.asyncio
@@ -161,7 +207,7 @@ async def test_a_store_oserror_is_reported_as_a_failure() -> None:
     settings = Settings.from_dict(
         {"orchestration": {"agent_management": {"write": True, "tools_allow": ["filesystem"]}}}
     )
-    service = AgentManagementService(settings=settings, store=_FailingStore())
+    service = AgentManagementService(settings=settings, store=_FailingStore(), reader=LocalAgentDefinitionReader())
 
     outcome = await service.create(name="helper_agent", content=_definition())
 
@@ -240,9 +286,41 @@ async def test_a_failed_refresh_is_reported_and_the_file_remains(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_concurrent_creates_of_the_same_name_leave_one_definition(tmp_path: Path) -> None:
-    import asyncio
+async def test_cancelled_create_finishes_io_before_releasing_the_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    store = LocalManagedAgentStore(tmp_path / "managed")
+    original_write = store.write
 
+    def write(name: str, content: str) -> None:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("test did not release the write")
+        original_write(name, content)
+
+    monkeypatch.setattr(store, "write", write)
+    settings = Settings.from_dict(
+        {"orchestration": {"directory": str(tmp_path / "owner"), "agent_management": {"tools_allow": ["filesystem"]}}}
+    )
+    service = AgentManagementService(settings=settings, store=store, reader=LocalAgentDefinitionReader())
+    operation = asyncio.create_task(service.create(name="helper_agent", content=_definition()))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        operation.cancel()
+        await asyncio.sleep(0)
+        assert not operation.done()
+    finally:
+        release.set()
+        await asyncio.gather(operation, return_exceptions=True)
+
+    assert operation.cancelled()
+    assert (tmp_path / "managed" / "helper_agent.md").read_text(encoding="utf-8") == _definition()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_creates_of_the_same_name_leave_one_definition(tmp_path: Path) -> None:
     service = _service(tmp_path)
 
     outcomes = await asyncio.gather(*(service.create(name="helper_agent", content=_definition()) for _ in range(4)))

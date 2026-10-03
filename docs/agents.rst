@@ -86,6 +86,11 @@ including when the worker applies model overrides. Creating or updating a manage
 name collides with an enabled owner-authored agent is rejected before writing. See :doc:`config` for
 the field reference.
 
+Runtime definition reads and managed writes run off the event loop. Reload prepares and validates
+candidate definitions in a worker thread, then applies the roster and tool changes on the event-loop
+thread. Cancelling a managed write waits for its filesystem operation to finish before releasing
+the management lock; cancellation does not roll back a completed write.
+
 That ceiling bounds what an agent may be *told* to do; it is not a sandbox. A managed agent granted
 ``bash`` or ``filesystem`` can reach anything the daemon's OS user can, exactly as an owner-authored
 one can. See :doc:`security`.

@@ -12,13 +12,14 @@ import asyncio
 import dataclasses
 import logging
 from collections.abc import Awaitable, Callable
+from functools import partial
 from pathlib import Path
 
-from minibot.app.agent_definitions_loader import AGENT_NAME_RE, load_agent_specs, parse_agent_definition
+from minibot.app.agent_definitions_loader import load_agent_specs, parse_agent_definition
 from minibot.app.agent_roster import AgentRosterChange
 from minibot.app.managed_agent_policy import ManagedAgentPolicy
 from minibot.config.schema import Settings
-from minibot.core.agents import AgentSpec, ManagedAgentStore
+from minibot.core.agents import AGENT_NAME_RE, AgentDefinitionReader, AgentSpec, ManagedAgentStore
 
 _LOGGER = logging.getLogger("minibot.agent_management")
 
@@ -58,10 +59,12 @@ class AgentManagementService:
         *,
         settings: Settings,
         store: ManagedAgentStore,
+        reader: AgentDefinitionReader,
         refresh: Callable[[], Awaitable[AgentRosterChange]] | None = None,
     ) -> None:
         self._settings = settings
         self._store = store
+        self._reader = reader
         self._refresh = refresh
         self._lock = asyncio.Lock()
 
@@ -69,8 +72,8 @@ class AgentManagementService:
     def directory(self) -> Path:
         return self._store.directory
 
-    def list_names(self) -> list[str]:
-        return self._store.list_names()
+    async def list_names(self) -> list[str]:
+        return await _run_io(self._store.list_names)
 
     async def reload(self) -> AgentManagementOutcome:
         """Re-read definitions. ``ok`` is false when the reload could not be applied."""
@@ -87,15 +90,24 @@ class AgentManagementService:
 
     async def delete(self, *, name: str) -> AgentManagementOutcome:
         async with self._lock:
-            try:
-                if not self._store.exists(name):
-                    return _failure("delete", name, f"managed agent '{name}' does not exist")
-                self._store.delete(name)
-            except (ValueError, OSError) as exc:
-                return _failure("delete", name, str(exc))
-            return await self._finish("delete", name)
+            failure = await _run_io(partial(self._delete, name=name))
+            return failure if failure is not None else await self._finish("delete", name)
+
+    def _delete(self, *, name: str) -> AgentManagementOutcome | None:
+        try:
+            if not self._store.exists(name):
+                return _failure("delete", name, f"managed agent '{name}' does not exist")
+            self._store.delete(name)
+        except (ValueError, OSError) as exc:
+            return _failure("delete", name, str(exc))
+        return None
 
     async def _write(self, *, name: str, content: str, replacing: bool) -> AgentManagementOutcome:
+        action = "update" if replacing else "create"
+        failure = await _run_io(partial(self._persist, name=name, content=content, replacing=replacing))
+        return failure if failure is not None else await self._finish(action, name)
+
+    def _persist(self, *, name: str, content: str, replacing: bool) -> AgentManagementOutcome | None:
         action = "update" if replacing else "create"
         try:
             self._authorize(name=name, content=content)
@@ -107,7 +119,7 @@ class AgentManagementService:
             self._store.write(name, content)
         except (ValueError, OSError) as exc:
             return _failure(action, name, str(exc))
-        return await self._finish(action, name)
+        return None
 
     async def _finish(self, action: str, name: str | None) -> AgentManagementOutcome:
         change: AgentRosterChange | None = None
@@ -130,7 +142,7 @@ class AgentManagementService:
             ok=True,
             action=action,
             name=name,
-            names=change.names if change is not None else self.list_names(),
+            names=change.names if change is not None else await self.list_names(),
             added=change.added if change is not None else [],
             removed=change.removed if change is not None else [],
             updated=change.updated if change is not None else [],
@@ -146,10 +158,19 @@ class AgentManagementService:
         if spec.name != name:
             raise ValueError(f"{source_path}: frontmatter name '{spec.name}' must match the requested name '{name}'")
         ManagedAgentPolicy.from_settings(self._settings).authorize(spec)
-        owner_specs = load_agent_specs(self._settings.orchestration.directory)
+        owner_specs = load_agent_specs(self._settings.orchestration.directory, reader=self._reader)
         if any(owner.name == name for owner in owner_specs):
             raise ValueError(f"managed agent '{name}' collides with an owner-authored agent; choose another name")
         return spec
+
+
+async def _run_io[ResultT](operation: Callable[[], ResultT]) -> ResultT:
+    task = asyncio.create_task(asyncio.to_thread(operation))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await asyncio.gather(task, return_exceptions=True)
+        raise
 
 
 def _failure(action: str, name: str, error: str) -> AgentManagementOutcome:

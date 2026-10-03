@@ -5,7 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from minibot.app.agent_definitions_loader import AGENT_NAME_RE
+from minibot.core.agents import AGENT_NAME_RE
 
 MAX_MANAGED_DEFINITION_BYTES = 64_000
 

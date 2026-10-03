@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,11 +9,10 @@ from pydantic import ValidationError
 
 from minibot.app.managed_agent_policy import ManagedAgentPolicy
 from minibot.config.schema import AgentDefinitionConfig, Settings
-from minibot.core.agents import AgentSpec
+from minibot.core.agents import AGENT_NAME_RE, AgentDefinitionReader, AgentSpec
 from minibot.shared.frontmatter import parse_frontmatter, split_frontmatter
 
 logger = logging.getLogger("minibot.agent_definitions_loader")
-AGENT_NAME_RE = re.compile(r"^[a-zA-Z_]{3,30}$")
 _DESCRIPTION_MAX_CHARS = 1000
 
 
@@ -80,7 +78,7 @@ def parse_agent_definition(*, source_path: Path, text: str, strict_name: bool = 
     )
 
 
-def load_agent_specs(directory: str, *, strict_name: bool = False) -> list[AgentSpec]:
+def load_agent_specs(directory: str, *, reader: AgentDefinitionReader, strict_name: bool = False) -> list[AgentSpec]:
     """Load every enabled definition in one directory, rejecting duplicate names.
 
     Two files claiming the same agent name used to last-win silently, which made the roster depend
@@ -88,17 +86,10 @@ def load_agent_specs(directory: str, *, strict_name: bool = False) -> list[Agent
     replace an owner-authored one. ``strict_name`` turns the name-pattern warning into an error for
     directories whose files must stay addressable by name, such as the managed one.
     """
-    root = Path(directory)
-    if not root.exists() or not root.is_dir():
-        return []
     specs: list[AgentSpec] = []
     seen: dict[str, Path] = {}
-    for path in sorted(root.glob("*.md")):
-        spec = parse_agent_definition(
-            source_path=path,
-            text=path.read_text(encoding="utf-8"),
-            strict_name=strict_name,
-        )
+    for path, text in reader.read(directory):
+        spec = parse_agent_definition(source_path=path, text=text, strict_name=strict_name)
         if spec is None:
             continue
         previous = seen.get(spec.name)
@@ -109,7 +100,7 @@ def load_agent_specs(directory: str, *, strict_name: bool = False) -> list[Agent
     return specs
 
 
-def load_active_agent_specs(settings: Settings) -> list[AgentSpec]:
+def load_active_agent_specs(settings: Settings, *, reader: AgentDefinitionReader) -> list[AgentSpec]:
     """Load every definition directory the current switches activate.
 
     Owner definitions come from ``[orchestration].directory`` and model-authored ones from
@@ -120,13 +111,13 @@ def load_active_agent_specs(settings: Settings) -> list[AgentSpec]:
     """
     if not settings.orchestration.specialists.enabled:
         return []
-    specs = load_agent_specs(settings.orchestration.directory)
+    specs = load_agent_specs(settings.orchestration.directory, reader=reader)
     management = settings.orchestration.agent_management
     if not management.active:
         return specs
     policy = ManagedAgentPolicy.from_settings(settings)
     owner_names = {spec.name for spec in specs}
-    for spec in load_agent_specs(management.directory, strict_name=True):
+    for spec in load_agent_specs(management.directory, reader=reader, strict_name=True):
         if spec.source_path.stem != spec.name:
             raise ValueError(
                 f"managed agent '{spec.name}' in {spec.source_path} must be defined in "

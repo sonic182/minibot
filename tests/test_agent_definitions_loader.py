@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.app.agent_definitions_loader import load_active_agent_specs, load_agent_specs
 from minibot.config.schema import Settings
 
@@ -35,7 +36,7 @@ def test_load_agent_specs_accepts_tools_allow(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    specs = load_agent_specs(str(agents_dir))
+    specs = load_agent_specs(str(agents_dir), reader=LocalAgentDefinitionReader())
 
     assert len(specs) == 1
     assert specs[0].tools_allow == ["filesystem", "glob_files"]
@@ -61,7 +62,7 @@ def test_load_agent_specs_rejects_allow_and_deny_together(tmp_path: Path) -> Non
     )
 
     with pytest.raises(ValueError):
-        load_agent_specs(str(agents_dir))
+        load_agent_specs(str(agents_dir), reader=LocalAgentDefinitionReader())
 
 
 def test_load_agent_specs_rejects_unknown_frontmatter_keys(tmp_path: Path) -> None:
@@ -82,7 +83,7 @@ def test_load_agent_specs_rejects_unknown_frontmatter_keys(tmp_path: Path) -> No
     )
 
     with pytest.raises(ValueError, match="invalid agent frontmatter"):
-        load_agent_specs(str(agents_dir))
+        load_agent_specs(str(agents_dir), reader=LocalAgentDefinitionReader())
 
 
 def test_load_agent_specs_accepts_openrouter_provider_overrides(tmp_path: Path) -> None:
@@ -112,7 +113,7 @@ def test_load_agent_specs_accepts_openrouter_provider_overrides(tmp_path: Path) 
         encoding="utf-8",
     )
 
-    specs = load_agent_specs(str(agents_dir))
+    specs = load_agent_specs(str(agents_dir), reader=LocalAgentDefinitionReader())
 
     assert len(specs) == 1
     assert specs[0].openrouter_provider_overrides == {
@@ -134,7 +135,7 @@ def test_load_agent_specs_rejects_duplicate_names(tmp_path: Path) -> None:
         )
 
     with pytest.raises(ValueError, match="duplicate agent name 'files_agent'"):
-        load_agent_specs(str(agents_dir))
+        load_agent_specs(str(agents_dir), reader=LocalAgentDefinitionReader())
 
 
 def test_load_active_agent_specs_returns_nothing_when_specialists_are_disabled(tmp_path: Path) -> None:
@@ -144,7 +145,7 @@ def test_load_active_agent_specs_returns_nothing_when_specialists_are_disabled(t
 
     settings = Settings.from_dict({"orchestration": {"directory": str(agents_dir), "specialists": {"enabled": False}}})
 
-    assert load_active_agent_specs(settings) == []
+    assert load_active_agent_specs(settings, reader=LocalAgentDefinitionReader()) == []
 
 
 def test_load_active_agent_specs_skips_managed_directory_while_management_is_off(tmp_path: Path) -> None:
@@ -157,7 +158,9 @@ def test_load_active_agent_specs_skips_managed_directory_while_management_is_off
         {"orchestration": {"directory": str(owner_dir), "agent_management": {"directory": str(managed_dir)}}}
     )
 
-    assert [spec.name for spec in load_active_agent_specs(settings)] == ["files_agent"]
+    assert [spec.name for spec in load_active_agent_specs(settings, reader=LocalAgentDefinitionReader())] == [
+        "files_agent"
+    ]
 
 
 def test_load_active_agent_specs_includes_managed_definitions(tmp_path: Path) -> None:
@@ -175,7 +178,10 @@ def test_load_active_agent_specs_includes_managed_definitions(tmp_path: Path) ->
         }
     )
 
-    assert [spec.name for spec in load_active_agent_specs(settings)] == ["files_agent", "browser_agent"]
+    assert [spec.name for spec in load_active_agent_specs(settings, reader=LocalAgentDefinitionReader())] == [
+        "files_agent",
+        "browser_agent",
+    ]
 
 
 def test_load_active_agent_specs_rejects_an_unauthorized_managed_definition(tmp_path: Path) -> None:
@@ -195,7 +201,7 @@ def test_load_active_agent_specs_rejects_an_unauthorized_managed_definition(tmp_
     )
 
     with pytest.raises(ValueError, match="is not allowed by"):
-        load_active_agent_specs(settings)
+        load_active_agent_specs(settings, reader=LocalAgentDefinitionReader())
 
 
 def test_owner_agents_are_not_bounded_by_the_managed_ceiling(tmp_path: Path) -> None:
@@ -204,7 +210,9 @@ def test_owner_agents_are_not_bounded_by_the_managed_ceiling(tmp_path: Path) -> 
 
     settings = Settings.from_dict({"orchestration": {"directory": str(owner_dir)}})
 
-    assert [spec.tools_allow for spec in load_active_agent_specs(settings)] == [["bash"]]
+    assert [spec.tools_allow for spec in load_active_agent_specs(settings, reader=LocalAgentDefinitionReader())] == [
+        ["bash"]
+    ]
 
 
 def test_load_active_agent_specs_rejects_a_managed_name_that_does_not_match_the_file(tmp_path: Path) -> None:
@@ -220,7 +228,7 @@ def test_load_active_agent_specs_rejects_a_managed_name_that_does_not_match_the_
     )
 
     with pytest.raises(ValueError, match="must be defined in 'files_agent.md'"):
-        load_active_agent_specs(settings)
+        load_active_agent_specs(settings, reader=LocalAgentDefinitionReader())
 
 
 def test_load_active_agent_specs_rejects_a_managed_name_collision(tmp_path: Path) -> None:
@@ -239,7 +247,7 @@ def test_load_active_agent_specs_rejects_a_managed_name_collision(tmp_path: Path
     )
 
     with pytest.raises(ValueError, match="collides with an owner-authored agent"):
-        load_active_agent_specs(settings)
+        load_active_agent_specs(settings, reader=LocalAgentDefinitionReader())
 
 
 def test_load_agent_specs_rejects_unknown_openrouter_provider_override(tmp_path: Path) -> None:
@@ -260,4 +268,4 @@ def test_load_agent_specs_rejects_unknown_openrouter_provider_override(tmp_path:
     )
 
     with pytest.raises(ValueError, match="invalid agent frontmatter"):
-        load_agent_specs(str(agents_dir))
+        load_agent_specs(str(agents_dir), reader=LocalAgentDefinitionReader())

@@ -7,13 +7,14 @@ registry is touched, so a rejected reload leaves the running roster exactly as i
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 
 from minibot.app.agent_definitions_loader import load_active_agent_specs
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.token_limits_autoconfig import apply_cached_token_limits
 from minibot.config.schema import Settings
-from minibot.core.agents import AgentSpec
+from minibot.core.agents import AgentDefinitionReader, AgentSpec
 
 
 @dataclasses.dataclass(frozen=True)
@@ -26,14 +27,17 @@ class AgentRosterChange:
     updated: list[str]
 
 
-def reload_agent_roster(*, settings: Settings, registry: AgentRegistry) -> AgentRosterChange:
+async def reload_agent_roster(
+    *, settings: Settings, registry: AgentRegistry, reader: AgentDefinitionReader
+) -> AgentRosterChange:
     """Load the active definitions and swap them into ``registry`` in place.
 
     ``replace_all`` keeps the registry object, so anything already holding it — the delegation tool,
     the prompt service, the task manager — sees the new specs without further wiring.
     """
+    candidate = await asyncio.to_thread(load_active_agent_specs, settings, reader=reader)
     previous = {spec.name: spec.revision for spec in registry.all()}
-    candidate = apply_cached_token_limits(settings, load_active_agent_specs(settings))
+    candidate = apply_cached_token_limits(settings, candidate)
     change = diff_agent_roster(previous, candidate)
     registry.replace_all(candidate)
     return change

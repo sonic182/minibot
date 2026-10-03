@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.agents.managed_store import LocalManagedAgentStore
 from minibot.app.agent_management import AgentManagementService
 from minibot.app.agent_registry import AgentRegistry
@@ -37,11 +38,12 @@ def _context(tmp_path: Path, *, reload: bool, write: bool) -> ExtensionContext:
     registry = AgentRegistry([])
 
     async def refresh() -> AgentRosterChange:
-        return reload_agent_roster(settings=settings, registry=registry)
+        return await reload_agent_roster(settings=settings, registry=registry, reader=LocalAgentDefinitionReader())
 
     service = AgentManagementService(
         settings=settings,
         store=LocalManagedAgentStore(tmp_path / "managed"),
+        reader=LocalAgentDefinitionReader(),
         refresh=refresh,
     )
     return ExtensionContext(

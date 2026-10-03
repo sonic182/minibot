@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+
+AGENT_NAME_RE = re.compile(r"^[a-zA-Z_]{3,30}$")
+
+
+class AgentDefinitionReader(Protocol):
+    """Read definition sources without deciding whether they are valid or trusted."""
+
+    def read(self, directory: str) -> list[tuple[Path, str]]: ...
 
 
 @dataclass(frozen=True)

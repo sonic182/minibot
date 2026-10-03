@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.config.loader import load_settings
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient
@@ -32,7 +33,7 @@ from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_appro
 from minibot.app.tool_constructors import build_calculator_tool, build_skill_loader_bindings
 from minibot.config.schema import Settings, task_limit
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
-from minibot.core.agents import AgentSpec
+from minibot.core.agents import AgentDefinitionReader, AgentSpec
 from minibot.core.channels import session_identifier
 from minibot.core.tasks import TaskLimits, TaskStopReason
 from minibot.core.tools import ToolContext
@@ -178,7 +179,8 @@ async def run_agent_loop(
         extensions = load_extensions(settings, EventBus(), _LOGGER, entrypoint="worker")
         llm_factory = LLMClientFactory(settings)
         environment_prompt_fragment = build_environment_prompt_fragment(settings)
-        spec = _resolve_task_spec(
+        spec = await _resolve_task_spec(
+            reader=LocalAgentDefinitionReader(),
             settings=settings,
             llm_factory=llm_factory,
             environment_prompt_fragment=environment_prompt_fragment,
@@ -420,8 +422,9 @@ def _build_worker_spec(
     )
 
 
-def _resolve_task_spec(
+async def _resolve_task_spec(
     *,
+    reader: AgentDefinitionReader,
     settings: Settings,
     llm_factory: LLMClientFactory,
     environment_prompt_fragment: str,
@@ -439,7 +442,8 @@ def _resolve_task_spec(
                 f"agent '{agent_name.strip()}' is not available: specialist agents are disabled by "
                 "[orchestration.specialists].enabled = false"
             )
-        registry = AgentRegistry(load_active_agent_specs(settings))
+        specs = await asyncio.to_thread(load_active_agent_specs, settings, reader=reader)
+        registry = AgentRegistry(specs)
         spec = registry.get(agent_name.strip())
         if spec is None:
             raise ValueError(f"agent '{agent_name.strip()}' is not available for async task execution")

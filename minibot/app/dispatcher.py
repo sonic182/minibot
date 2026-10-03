@@ -24,6 +24,7 @@ from minibot.app.tool_capabilities import MainAgentToolView, main_agent_tool_vie
 from minibot.app.tool_factory import build_enabled_tools
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.config.schema import Settings
+from minibot.core.agents import AgentDefinitionReader
 from minibot.core.channels import ChannelCapabilities, ChannelResponse, RenderableResponse, session_identifier
 from minibot.core.events import (
     BaseEvent,
@@ -202,14 +203,14 @@ class Dispatcher:
             mcp_name_prefix=self._settings.tools.mcp.name_prefix,
         )
 
-    def refresh_agent_roster(self) -> AgentRosterChange:
+    async def refresh_agent_roster(self, reader: AgentDefinitionReader) -> AgentRosterChange:
         """Re-read agent definitions and apply the new roster everywhere it is captured.
 
         Raises whatever the loader raises — a bad file, a name collision or a ceiling violation —
         without touching the running registry, so a rejected reload is a no-op. The whole tool list
         is rebuilt rather than filtered so a reload from zero agents adds ``fetch_agent_info``.
         """
-        change = reload_agent_roster(settings=self._settings, registry=self._agent_registry)
+        change = await reload_agent_roster(settings=self._settings, registry=self._agent_registry, reader=reader)
         tools = self._build_tools()
         view = self._main_agent_view(tools)
         self._all_tools = tools

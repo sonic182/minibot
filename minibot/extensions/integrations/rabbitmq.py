@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.tasks.retention import TaskRetentionService
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
 from minibot.app.agent_definitions_loader import load_active_agent_specs
@@ -19,7 +20,9 @@ def register(mb: ExtensionContext) -> None:
 
     settings = mb.settings
     store = SQLiteTaskStore(settings.tasks.sqlite)
-    agent_registry = mb.agent_registry or AgentRegistry(load_active_agent_specs(settings))
+    agent_registry = mb.agent_registry or AgentRegistry(
+        load_active_agent_specs(settings, reader=LocalAgentDefinitionReader())
+    )
     manager = TaskManager(
         mb.event_bus,
         settings.tasks.worker_timeout_seconds,

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import inspect
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.agents.managed_store import LocalManagedAgentStore
 from minibot.adapters.config.loader import load_settings, resolve_config_path
 from minibot.adapters.files.local_storage import LocalFileStorage
@@ -24,6 +25,7 @@ from minibot.app.skill_registry import SkillRegistry
 from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_async
 from minibot.config.environment import has_secret_references, has_secret_syntax
 from minibot.config.schema import Settings
+from minibot.core.agents import AgentDefinitionReader
 from minibot.core.files import FileStorage
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
@@ -44,7 +46,7 @@ class AppContainer:
     _extensions: ExtensionRegistry | None = None
     _vault: Vault | None = None
     _agent_management: AgentManagementService | None = None
-    _agent_roster_refresh: Callable[[], AgentRosterChange] | None = None
+    _agent_roster_refresh: Callable[[AgentDefinitionReader], Awaitable[AgentRosterChange]] | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -60,7 +62,7 @@ class AppContainer:
         # every secret-bearing field in the schema currently is.
         if has_secret_syntax(cls._settings.model_dump(mode="python")):
             cls._settings = load_settings(config_path, cls._vault.as_mapping() if cls._vault else {})
-        agent_specs = load_active_agent_specs(cls._settings)
+        agent_specs = load_active_agent_specs(cls._settings, reader=LocalAgentDefinitionReader())
         cls._event_bus = EventBus()
         cls._memory_backend = SQLAlchemyMemoryBackend(cls._settings.memory)
         cls._pending_turn_store = PendingTurnStore(cls._settings.memory)
@@ -213,7 +215,9 @@ class AppContainer:
         return cls._agent_management
 
     @classmethod
-    def bind_agent_roster_refresh(cls, refresh: Callable[[], AgentRosterChange]) -> None:
+    def bind_agent_roster_refresh(
+        cls, refresh: Callable[[AgentDefinitionReader], Awaitable[AgentRosterChange]]
+    ) -> None:
         """Point the management service at the dispatcher that owns the live tool list.
 
         Extensions register before the dispatcher exists, so the reload callback is bound late,
@@ -227,15 +231,18 @@ class AppContainer:
         if not settings.orchestration.agent_management.active:
             return None
 
+        reader = LocalAgentDefinitionReader()
+
         async def refresh_roster() -> AgentRosterChange:
             callback = cls._agent_roster_refresh
             if callback is None:
                 raise RuntimeError("the agent roster refresh is not bound yet")
-            return callback()
+            return await callback(reader)
 
         return AgentManagementService(
             settings=settings,
             store=LocalManagedAgentStore(settings.orchestration.agent_management.directory),
+            reader=reader,
             refresh=refresh_roster,
         )
 
