@@ -62,8 +62,9 @@ Quickstart (Poetry)
 1. ``poetry install --all-extras``
 2. Run ``poetry run minibot configure`` to create or update ``config.toml`` interactively.
    New files start from the ``Example`` profile by default; ``YOLO`` enables broad host execution and integrations.
-3. Configure Telegram, pick which LLM providers to set up (several are fine — keys, models and which one
-   the main agent uses), then select enabled tools with arrows and Space.
+3. Configure Telegram, pick which LLM providers to set up (several are fine), choose which one the main
+   agent uses, then enter each provider's API key and pick the main agent's model, and finally select
+   enabled tools with arrows and Space. The wizard prints ``Step n/6`` headings as it goes.
    If ``tasks`` is enabled, you'll also be asked for the task queue backend (``sqlite`` or ``rabbitmq``).
 4. The configurator stores tokens and API keys in plain text; keep ``config.toml`` private.
 5. ``poetry run minibot``

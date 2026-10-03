@@ -62,6 +62,29 @@ _LLM_TARGETS = {
     "opencode_go": ("OpenCode Go", "openai", "https://opencode.ai/zen/go/v1"),
     "chatgpt_codex": ("ChatGPT Codex subscription (OAuth)", "chatgpt_codex", ""),
 }
+_LLM_TARGET_HINTS = {
+    "openai": "Chat Completions; also OpenAI-compatible servers (Ollama, LM Studio, proxies)",
+    "openai_responses": "Responses API; server keeps conversation state",
+    "xai": "Grok models via the xAI API",
+    "zai": "GLM models on the z.ai Coding Plan",
+    "opencode_zen": "curated models via OpenCode Zen",
+    "opencode_go": "open models via OpenCode Go",
+    "chatgpt_codex": "uses your ChatGPT subscription, log in instead of an API key",
+}
+_OFFICIAL_ENDPOINT = "official"
+_CUSTOM_ENDPOINT = "custom"
+_BASE_URL_PRESETS = {
+    "Fireworks": "https://api.fireworks.ai/inference/v1",
+    "Together": "https://api.together.xyz/v1",
+    "Groq": "https://api.groq.com/openai/v1",
+    "DeepInfra": "https://api.deepinfra.com/v1/openai",
+    "OpenRouter": "https://openrouter.ai/api/v1",
+    "Ollama (local)": "http://localhost:11434/v1",
+    "LM Studio (local)": "http://localhost:1234/v1",
+}
+_CODEX_BROWSER_LOGIN = "Browser (opens a page on this machine)"
+_CODEX_DEVICE_LOGIN = "Device code (for servers without a browser)"
+_TOTAL_STEPS = 6
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _ENVIRONMENTS = ENVIRONMENT_CHOICES
 _TOOLS = {
@@ -113,17 +136,23 @@ _CLEAR = object()
 def configure(path: Path) -> bool:
     document, profile = _load_document(path)
     settings = _settings_for_document(document)
-    _write("\nMinibot configuration\n\n")
+    _write("\nMinibot configuration\n")
+    _write_step(1, "Runtime")
     _configure_runtime(document, settings)
     settings = _settings_for_document(document)
+    _write_step(2, "Telegram")
     _configure_telegram(document, settings.channels.telegram)
     settings = _settings_for_document(document)
+    _write_step(3, "LLM providers")
     _configure_llm(document, settings)
     settings = _settings_for_document(document)
+    _write_step(4, "Tools")
     _configure_tools(document, settings)
     settings = _settings_for_document(document)
+    _write_step(5, "HTTP server")
     _configure_http(document, settings)
     settings = _settings_for_document(document)
+    _write_step(6, "Credential vault")
     _configure_vault(document, settings)
     text = tomlkit.dumps(document)
     settings = Settings.from_dict(tomllib.loads(text))
@@ -135,6 +164,10 @@ def configure(path: Path) -> bool:
     _write(f"Wrote {path}\n")
     _provision_prompts(path)
     return True
+
+
+def _write_step(number: int, title: str) -> None:
+    _write(f"\nStep {number}/{_TOTAL_STEPS} — {title}\n")
 
 
 def _configure_runtime(document: Any, settings: Settings) -> None:
@@ -168,28 +201,42 @@ def _configure_telegram(document: Any, telegram: TelegramChannelConfig) -> None:
 
 
 def _configure_llm(document: Any, settings: Settings) -> None:
+    _write("A provider is a service that runs the language model. Pick every one you want to set up;\n")
+    _write("you choose which one the main agent uses next.\n")
     selected = _ask_multiselect(
         "Providers to configure",
-        [(target, f"{target} — {label}") for target, (label, _, _) in _LLM_TARGETS.items()],
+        [(target, f"{label} — {_LLM_TARGET_HINTS[target]}") for target, (label, _, _) in _LLM_TARGETS.items()],
         _configured_targets(settings),
     )
     if not selected:
         _write("No provider selected; leaving the LLM configuration unchanged.\n")
         return
     _release_legacy_sections(document, settings, selected)
+    ordered = [target for target in _LLM_TARGETS if target in selected]
+    main_target = _ask_main_provider(
+        {target: _LLM_TARGETS[target][0] for target in ordered}, _current_llm_target(settings)
+    )
     configured: dict[str, _ConfiguredProvider] = {}
-    for target in _LLM_TARGETS:
-        if target not in selected:
-            continue
+    main_model = ""
+    for target in [main_target, *(target for target in ordered if target != main_target)]:
         provider = _configure_provider(document, settings, target)
-        if provider is not None:
-            configured[target] = provider
+        if provider is None:
+            continue
+        configured[target] = provider
+        if target == main_target:
+            main_model = _choose_model(provider.models, settings.llm.model)
+        _configure_model_roster(document, settings, target, provider)
     if not configured:
         return
-    main_target = _ask_main_provider(configured, _current_llm_target(settings))
+    if main_target not in configured:
+        _write("The chosen main provider could not be set up; pick another one.\n")
+        main_target = _ask_main_provider(
+            {target: provider.label for target, provider in configured.items()}, next(iter(configured))
+        )
+        main_model = _choose_model(configured[main_target].models, settings.llm.model)
     main = configured[main_target]
     _set_value(document, ("llm", "provider"), main_target)
-    _set_value(document, ("llm", "model"), _choose_model(main.models, settings.llm.model))
+    _set_value(document, ("llm", "model"), main_model)
     # Responses providers keep turn state server-side, so a tool loop can send just the delta instead
     # of resending the whole history every step. Chat Completions (openai, openrouter) is stateless and
     # resends regardless, and Codex forces store=False, so it can never reference a prior response.
@@ -201,16 +248,24 @@ def _configure_llm(document: Any, settings: Settings) -> None:
 def _configure_provider(document: Any, settings: Settings, target: str) -> _ConfiguredProvider | None:
     """Write one ``[providers.<target>]`` section and return what the main-agent pick needs."""
     label, api_format, base_url = _LLM_TARGETS[target]
-    _write(f"\n{label} → [providers.{target}]\n")
+    _write(f"\nSetting up {label}\n")
     if target == "chatgpt_codex":
         return _configure_chatgpt_codex(document, settings)
     provider_config = settings.providers.get(target, ProviderConfig())
+    if base_url:
+        _write(f"Endpoint: {base_url}\n")
     if target in _RESPONSES_OPTIONAL_TARGETS and _ask_bool(
-        "Use Responses API", provider_config.api_format == "openai_responses"
+        "Use the Responses API instead of Chat Completions (newer API; the server keeps conversation state)",
+        provider_config.api_format == "openai_responses",
     ):
         api_format = "openai_responses"
-    base_url = provider_config.base_url or base_url
-    api_key = _ask_secret("API key", provider_config.api_key)
+    if base_url:
+        base_url = provider_config.base_url or base_url
+    else:
+        base_url = _ask_base_url(provider_config.base_url)
+    api_key = _ask_secret("API key (paste it, or ${ENV_VAR} to read an environment variable)", provider_config.api_key)
+    if not api_key:
+        _write("No API key set: fine for a local server, otherwise requests will fail.\n")
     _set_value(document, ("providers", target, "api_format"), api_format)
     _set_value(document, ("providers", target, "api_key"), api_key)
     _set_value(document, ("providers", target, "base_url"), base_url)
@@ -224,9 +279,13 @@ def _configure_provider(document: Any, settings: Settings, target: str) -> _Conf
     if api_key != resolved_api_key:
         resolved_api_key = cast(str, expand_environment(api_key, os.environ, path=f"providers.{target}.api_key"))
     models = _provider_models(api_format, base_url, resolved_api_key)
-    if models:
-        _set_value(document, ("providers", target, "models"), _ask_models(models, provider_config.models))
     return _ConfiguredProvider(label=label, api_format=api_format, models=models)
+
+
+def _configure_model_roster(document: Any, settings: Settings, target: str, provider: _ConfiguredProvider) -> None:
+    if provider.models:
+        current = settings.providers.get(target, ProviderConfig()).models
+        _set_value(document, ("providers", target, "models"), _ask_models(provider.models, current))
 
 
 def _release_legacy_sections(document: Any, settings: Settings, selected: set[str]) -> None:
@@ -259,13 +318,13 @@ def _configured_targets(settings: Settings) -> set[str]:
     return targets
 
 
-def _ask_main_provider(configured: dict[str, _ConfiguredProvider], default: str) -> str:
-    if len(configured) == 1:
-        return next(iter(configured))
+def _ask_main_provider(labels: dict[str, str], default: str) -> str:
+    if len(labels) == 1:
+        return next(iter(labels))
     return choice(
-        "Main agent provider",
-        options=[(target, provider.label) for target, provider in configured.items()],
-        default=default if default in configured else next(iter(configured)),
+        "Which provider should the main agent use?",
+        options=list(labels.items()),
+        default=default if default in labels else next(iter(labels)),
     )
 
 
@@ -358,6 +417,7 @@ def _configure_graph_module(document: Any, settings: Settings, *, enabled: bool)
 
 
 def _provider_models(api_format: str, base_url: str, api_key: str) -> list[str]:
+    _write("Fetching available models…\n")
     return asyncio.run(_fetch_models(api_format, base_url, api_key))
 
 
@@ -401,7 +461,7 @@ def _ask_models(models: list[str], current: list[str]) -> list[str]:
     """Pick the advisory `models` roster the main agent may delegate to on this provider."""
     narrowed = _narrow_models(models)
     selected = _ask_multiselect(
-        "Models to offer the main agent",
+        "Other models the main agent may delegate to on this provider (optional; Enter with none selected skips)",
         [(model, model) for model in narrowed],
         [model for model in current if model in narrowed],
     )
@@ -423,8 +483,6 @@ def _configure_chatgpt_codex(document: Any, settings: Settings) -> _ConfiguredPr
         return None
     _set_value(document, ("providers", "chatgpt_codex", "api_format"), "chatgpt_codex")
     models = _codex_models(credentials)
-    if models:
-        _set_value(document, ("providers", "chatgpt_codex", "models"), _ask_models(models, provider_config.models))
     return _ConfiguredProvider(
         label=_LLM_TARGETS["chatgpt_codex"][0],
         api_format="chatgpt_codex",
@@ -440,7 +498,10 @@ def _ensure_codex_login(auth_path: Path) -> Any:
     except CodexCredentialsError:
         pass
     _write(f"Not logged in to ChatGPT Codex yet (looked for {auth_path}).\n")
-    device_code = _ask_bool("Use device-code login (no local browser needed)", False)
+    method = _ask_single_select(
+        "How do you want to log in to ChatGPT", (_CODEX_BROWSER_LOGIN, _CODEX_DEVICE_LOGIN), _CODEX_BROWSER_LOGIN
+    )
+    device_code = method == _CODEX_DEVICE_LOGIN
     _write("Starting Codex login" + (" (device code)...\n" if device_code else " (browser)...\n"))
     return asyncio.run(login_to_codex(device_code=device_code, auth_path=auth_path))
 
@@ -470,7 +531,7 @@ async def _fetch_models(provider: str, base_url: str, api_key: str) -> list[str]
         )
     except Exception:
         _logger.debug("Could not list models for provider %s", provider, exc_info=True)
-        _write("Could not fetch the model list; enter the model name manually.\n")
+        _write("Could not fetch the model list; you will be asked to type the model name instead.\n")
         return []
     finally:
         await provider_client.client.connector.cleanup()
@@ -531,6 +592,22 @@ def _ask_multiselect(
 def _ask_secret(label: str, value: str) -> str:
     result = _ask_string_change(label, value, secret=True)
     return "" if result is _CLEAR else value if result is _KEEP else result
+
+
+def _ask_base_url(current: str) -> str:
+    known = current in _BASE_URL_PRESETS.values()
+    options = [
+        (_OFFICIAL_ENDPOINT, "Official endpoint (default)"),
+        *((url, f"{name} — {url}") for name, url in _BASE_URL_PRESETS.items()),
+        (_CUSTOM_ENDPOINT, "Custom URL…"),
+    ]
+    default = current if known else _CUSTOM_ENDPOINT if current else _OFFICIAL_ENDPOINT
+    selected = choice("Which endpoint should it use?", options=options, default=default)
+    if selected == _OFFICIAL_ENDPOINT:
+        return ""
+    if selected == _CUSTOM_ENDPOINT:
+        return _ask_required("Base URL", "" if known else current)
+    return selected
 
 
 def _ask_required_secret(label: str, value: str) -> str:

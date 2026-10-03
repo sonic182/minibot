@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Clearer provider questions in `minibot configure`.** The wizard prints `Step n/6` headings, describes each
+  provider in plain words, asks which provider the main agent uses before configuring them, and asks that
+  agent's model right after its provider, followed by the optional list of other models it may delegate to.
+  The API key prompt explains `${ENV_VAR}` references, the model fetch announces itself, the OpenAI targets
+  offer a list of known endpoints (Fireworks, Together, Groq, DeepInfra, OpenRouter, Ollama, LM Studio) or a
+  custom base URL, and the Codex login offers "browser" or "device code" instead of a yes/no question.
+
+### Fixed
+
+- **ChatGPT Codex model list missing newer models.** The `/models` request now sends client version `0.160.0`
+  instead of the `0.157.1` hardcoded in `llm-async-codex`, so newer models such as `gpt-6.1-sol` are listed.
+
 ## [0.25.1] - 2026-10-03
 
 ### Changed

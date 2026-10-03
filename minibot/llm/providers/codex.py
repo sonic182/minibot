@@ -7,13 +7,27 @@ from llm_async_codex import CodexProvider
 
 from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvider
 
+CODEX_MODELS_CLIENT_VERSION = "0.160.0"
+
 
 class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
     """Codex subscriptions reject stream=False; minibot's pipeline only calls the plain,
     non-streaming ``acomplete`` contract. Force streaming and drain it here so callers get a
     fully-populated ``Response`` like every other provider.
 
-    Base order keeps MiniBot's native tool formatting while retaining Codex-specific behaviour."""
+    Base order keeps MiniBot's native tool formatting while retaining Codex-specific behaviour.
+
+    The model list is requested with ``CODEX_MODELS_CLIENT_VERSION`` rather than the version
+    ``llm-async-codex`` hardcodes, because the endpoint hides models newer than the client version."""
+
+    async def _ensure_models_cache(self) -> list[dict[str, Any]]:
+        await self._ensure_fresh_credentials()
+        if self._models_cache is None:
+            payload = await self.request("GET", f"/models?client_version={CODEX_MODELS_CLIENT_VERSION}")
+            models = payload.get("models") if isinstance(payload, dict) else None
+            entries = models if isinstance(models, list) else []
+            self._models_cache = [entry for entry in entries if isinstance(entry, dict)]
+        return self._models_cache
 
     async def acomplete(self, *args: Any, **kwargs: Any) -> Response:
         kwargs["stream"] = True

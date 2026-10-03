@@ -14,6 +14,7 @@ def _stub_wizard(
     use_responses_api: bool = False,
     main_target: str | None = None,
     models: list[str] | None = None,
+    base_url: str = "",
 ) -> tuple[dict[tuple[str, ...], Any], set[tuple[str, ...]]]:
     written: dict[tuple[str, ...], Any] = {}
     removed: set[tuple[str, ...]] = set()
@@ -22,6 +23,7 @@ def _stub_wizard(
     monkeypatch.setattr(configurator, "_ask_multiselect", lambda *_, **__: targets)
     monkeypatch.setattr(configurator, "_ask_bool", lambda *_, **__: use_responses_api)
     monkeypatch.setattr(configurator, "_ask_secret", lambda *_, **__: "key")
+    monkeypatch.setattr(configurator, "_ask_base_url", lambda current: base_url or current)
     monkeypatch.setattr(configurator, "_provider_models", lambda *_, **__: list(models or ["some-model"]))
     monkeypatch.setattr(configurator, "_ask_models", lambda available, _current: list(available))
     monkeypatch.setattr(configurator, "_choose_model", lambda *_, **__: "some-model")
@@ -91,6 +93,15 @@ def test_wizard_configures_several_providers_and_one_main_agent(monkeypatch: pyt
     assert written[("providers", "opencode_go", "base_url")] == "https://opencode.ai/zen/go/v1"
     assert written[("providers", "opencode_go", "models")] == ["deepseek-v3.6", "mimo-v2.5"]
     assert written[("llm", "provider")] == "opencode_go"
+
+
+def test_wizard_writes_a_custom_base_url_for_a_generic_openai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(configurator, "_current_llm_target", lambda _: "openai")
+    written, _ = _stub_wizard(monkeypatch, targets={"openai"}, base_url="http://localhost:11434/v1")
+
+    configurator._configure_llm(object(), configurator.Settings())
+
+    assert written[("providers", "openai", "base_url")] == "http://localhost:11434/v1"
 
 
 def test_wizard_moves_a_third_party_endpoint_out_of_its_format_named_section(
