@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from minibot.app.agent_registry import AgentRegistry
@@ -19,6 +20,7 @@ from minibot.llm.tools.agent_info import AgentInfoTool
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.chat_memory import ChatMemoryTool
 from minibot.llm.tools.output_spill import apply_tool_output_spill
+from minibot.llm.tools.settings_info import SettingsInfoTool
 from minibot.llm.tools.tool_events import apply_tool_call_events
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -38,6 +40,7 @@ def build_enabled_tools(
     task_producer: TaskProducer | None = None,
     extension_tools: Sequence[ToolBinding] | None = None,
     managed_storage: FileStorage | None = None,
+    config_path: Path | None = None,
 ) -> list[ToolBinding]:
     """Build core tools, then merge contributions from loaded extensions.
 
@@ -45,6 +48,14 @@ def build_enabled_tools(
     accepted temporarily for callers outside the daemon; their tools are bundled extensions now.
     """
     tools = ChatMemoryTool(memory, max_history_messages=settings.memory.max_history_messages).bindings()
+    tools.extend(
+        SettingsInfoTool(
+            settings,
+            config_path=config_path,
+            agent_names=agent_registry.names if agent_registry is not None else None,
+            skill_names=skill_registry.names if skill_registry is not None else None,
+        ).bindings()
+    )
     if settings.tools.calculator.enabled:
         calculator = settings.tools.calculator
         tools.extend(

@@ -9,7 +9,7 @@ Possible roadmap to follow now...
 | 0 | bash env default | done |
 | 1 | credential vault | done |
 | 2 | skills for specialist agents | done |
-| 3 | native skills, runtime self-knowledge, agent management | **in progress** — next: `reload_agents`, `get_settings`, `minibot-docs`, agent management skill |
+| 3 | native skills, runtime self-knowledge, agent management | **in progress** — `get_settings` and `minibot-docs` done; next: `reload_agents`, then the agent management skill |
 | 4 | MCP OAuth (#65) | pending |
 | 5 | guardrail enhancements | pending |
 | 6 | bash tool hardening | pending, priority depends on the Trust model |
@@ -176,9 +176,9 @@ changes.
 
 Specialists cannot load skills today, whatever their `tools_allow` says. Before 0.20,
 `invoke_agent` ran a specialist inside the daemon against the main agent's tool list, which
-includes `list_skills` and `activate_skill` (`llm/tools/factory.py:56-59`). Since #93 every
+includes `list_skills` and `activate_skill` (`app/tool_factory.py:56-59`). Since #93 every
 delegation goes through `spawn_task`, and the worker subprocess builds its own tools in
-`_build_worker_tools` (`adapters/tasks/worker.py:227`): time, calculator, HTTP, Python, bash,
+`_build_worker_tools` (`app/tasks/worker.py:227`): time, calculator, HTTP, Python, bash,
 files, grep, MCP and extension tools — **no skill tools**. `filter_tools_for_agent` has nothing to
 let through, so an agent listing `activate_skill` silently runs without it. The skill catalog
 (`preload_catalog`) is only composed into the main agent's prompt (`app/dispatcher.py:110`), so a
@@ -208,8 +208,8 @@ and the fix is small.
 
 **In progress** — shipped: version single-sourcing (#82), the native tier +
 `create-skill` (#83) and `install-skill` + `install_skill` (#84, released in
-0.18.0). Remaining, in delivery order: `reload_agents`, `get_settings`, the
-`minibot-docs` skill, then the `create-agent` skill. Each is independently
+0.18.0), then `get_settings` and the `minibot-docs` skill. Remaining, in
+delivery order: `reload_agents`, then the `create-agent` skill. Each is independently
 shippable, and tests and docs ride along with the change that introduces the
 behaviour.
 
@@ -232,7 +232,7 @@ skills silently. Gated by the existing `[tools.skills] enabled`, plus a
 needs no config and turning one off is one line.
 
 v1 set, chosen for self-improvement and self-knowledge (`create-skill` and
-`install-skill` shipped; `minibot-docs` and `create-agent` remain):
+`install-skill` and `minibot-docs` shipped; `create-agent` remains):
 
 - `create-skill` — authoring, including the places MiniBot's parser is
   stricter than the agentskills.io spec (flat `key: value` frontmatter, not
@@ -324,7 +324,7 @@ Three supporting changes, each small, in delivery order:
   with no further wiring. Three things to get right:
   - **`fetch_agent_info` must exist even when the roster started empty.**
     `build_enabled_tools` only builds it when `not agent_registry.is_empty()`
-    (`llm/tools/factory.py:67`), so a first specialist reloaded into an empty
+    (`app/tool_factory.py:67`), so a first specialist reloaded into an empty
     roster could not be inspected. Drop the gate (the tool already handles an
     unknown name) or build it whenever `reload_agents` is built. `spawn_task`
     is unaffected: it comes from the tasks extension, gated on
@@ -337,7 +337,7 @@ Three supporting changes, each small, in delivery order:
   - **Not for specialists.** Add `reload_agents` to
     `RESERVED_DELEGATION_TOOL_NAMES` (`app/agent_policies.py:10`); a delegated
     agent must not rewrite the roster it was picked from. Task workers build
-    their own registry per run (`adapters/tasks/worker.py`), so they see new
+    their own registry per run (`app/tasks/worker.py`), so they see new
     files anyway — no worker wiring.
 
   Accepted consequence: the roster is part of the system prompt
@@ -347,7 +347,7 @@ Three supporting changes, each small, in delivery order:
 
   Files: `minibot/llm/tools/agent_reload.py` (`.bindings()`),
   `minibot/llm/tools/reload_agents.txt` (description sidecar — an empty or
-  missing file aborts startup), one branch in `factory.py`, the reserved-name
+  missing file aborts startup), one branch in `app/tool_factory.py`, the reserved-name
   addition. Tests: write a new `agents/*.md` after startup, call
   `reload_agents`, assert it is delegatable; a broken file returns
   `ok: false` and leaves the previous roster in place. Docs:
@@ -355,7 +355,11 @@ Three supporting changes, each small, in delivery order:
   when a specialist written at runtime is delegatable in the same session after
   one `reload_agents` call, including from a zero-agent start, and its roster
   line appears in the next system prompt.
-- **`get_settings`** — a read-only always-on core tool answering "what am I
+- **`get_settings`** — **done** (`llm/tools/settings_info.py`, built in
+  `app/tool_factory.py` and for task workers in `app/tasks/worker.py`). It
+  emits `vault: {"enabled": ...}` only: whether the vault is *unlocked* is held
+  outside `Settings`, so the `unlocked` field below was dropped. A read-only
+  always-on core tool answering "what am I
   actually running?", sibling to `chat_history_info`
   (`llm/tools/chat_memory.py:26`, built unconditionally in
   `build_enabled_tools`). Independent of any skill; it benefits every turn where
@@ -390,7 +394,7 @@ Trust model, for the two new surfaces:
 
 Files: `minibot/llm/tools/settings_info.py` (`.bindings()`),
 `minibot/llm/tools/get_settings.txt` (description sidecar — an empty or missing
-file aborts startup), one branch in `factory.py`. The name is free of the alias
+file aborts startup), one branch in `app/tool_factory.py`. The name is free of the alias
 table (`http_client`, `calculator`, `datetime_now`, `artifact_insert` —
 `llm/services/tool_executor.py:29`), which is what uniqueness is keyed on.
 
@@ -470,9 +474,9 @@ for on every turn (cwd, managed root, confined/yolo mode, version, config path).
 The broad enabled-map costs nothing until asked, so it lives behind this tool.
 
 Wiring:
-- **Workers.** A tool wired only into `factory.py` does not exist for task
+- **Workers.** A tool wired only into `app/tool_factory.py` does not exist for task
   workers. Add it to `_build_worker_tools` and `_WORKER_TOOL_ALLOWLIST`
-  (`adapters/tasks/worker.py`). Probably yes — workers ask the same questions.
+  (`app/tasks/worker.py`). Probably yes — workers ask the same questions.
 - **Specialists.** A specialist with neither `tools_allow` nor `tools_deny` gets
   zero non-MCP tools, so `get_settings` must be listed explicitly in any agent
   that needs it.

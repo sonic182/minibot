@@ -28,6 +28,13 @@ Tool Surface
      - ``chat_history_trim``
      - Always available
      - Remove old history entries for the current conversation.
+   * - Runtime
+     - ``get_settings``
+     - Always available
+     - Read-only report of what this instance is running: version, config path, channels, LLM provider and
+       model, enabled tools with their non-secret settings, agents, and whether tasks, the scheduler and the
+       vault are on. A feature that is off is absent. Never returns tokens, API keys or credential URLs. A
+       specialist that sets ``tools_allow`` must list it explicitly.
    * - Memory
      - ``memory``
      - ``[tools.kv_memory]``

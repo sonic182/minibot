@@ -181,6 +181,16 @@ async def test_activate_skill_reports_compatibility_and_ignores_the_enabled_flag
     assert result["compatibility"] == "Requires bash and git"
 
 
+def test_bundled_minibot_docs_skill_is_loadable(tmp_path: Path) -> None:
+    spec = SkillRegistry(paths=[str(tmp_path)], native=True).get("minibot-docs")
+
+    assert spec is not None
+    assert spec.source is SkillSource.NATIVE
+    assert spec.description
+    assert "get_settings" in spec.body
+    assert "_sources" in spec.body
+
+
 def test_native_skills_load_only_when_enabled(tmp_path: Path, native_skills_dir: Path) -> None:
     skills_dir = tmp_path / "skills"
     _write_skill(skills_dir, "python-review", name="python-review", description="Review Python changes.")

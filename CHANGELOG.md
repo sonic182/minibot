@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`get_settings` tool.** A read-only, always-on tool that reports what this instance is running: version, config
+  path, channels, LLM provider and model, memory limits, enabled tools with their non-secret settings, agent
+  names and whether tasks, the scheduler and the vault are on. A disabled feature is absent. Every field is
+  allowlisted one by one, so tokens, API keys, credential URLs, headers and MCP secrets are never returned.
+  Task workers get it too; a specialist that sets `tools_allow` must list it.
+- **`minibot-docs` bundled skill.** Answers "how does MiniBot work" questions from the published documentation
+  (`llms.txt` and the `_sources/*.rst.txt` pages) instead of from memory, and sends "what do I have enabled"
+  questions to `get_settings`. Needs `http_request`; turn it off with `[tools.skills] native_disabled`.
+
 ## [0.25.2] - 2026-10-03
 
 ### Changed
