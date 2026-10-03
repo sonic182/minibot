@@ -1,6 +1,28 @@
-# aiosonic/
-# llm-async/
 logs/
+
+# Version control, CI, and local agent/editor state
+.git/
+.github/
+.agents/
+.claude/
+.codex/
+.githooks/
+.opencode/
+
+# Development-only sources and artifacts
+tests/
+examples/
+demo_pics/
+todos/
+ARCHITECTURE.md
+CHANGELOG.md
+CLAUDE.md
+AGENTS.md
+Makefile
+minibot.service
+pytest.ini
+.jscpd.json
+.tool-versions
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
