@@ -99,9 +99,12 @@ an agent may request. It is what the main agent is shown when it asks which prov
 available (see :doc:`agents`), so list the ids you actually want it to pick from.
 
 ``minibot configure`` writes these sections: it asks which of its known targets to set up — OpenAI,
-OpenAI Responses, xAI, z.ai, OpenCode Zen, OpenCode Go, ChatGPT Codex — configures each as
-``[providers.<target>]`` with its ``api_format``, key, base URL and ``models``, then asks which one the
-main agent uses. A target that an older wizard had put in a format-named section (z.ai inside
+OpenAI Responses, xAI, z.ai, OpenCode Zen, OpenCode Go, ChatGPT Codex — asks which one the main agent
+uses, then configures each as ``[providers.<target>]`` with its ``api_format``, key, base URL and
+``models``. The generic OpenAI targets offer the official endpoint, a list of known ones (Fireworks,
+Together, Groq, DeepInfra, OpenRouter, Ollama, LM Studio) or a custom URL; the other targets have a fixed
+endpoint. The main agent's model is asked right after its provider, followed by the optional ``models``
+list of other models it may delegate to. A target that an older wizard had put in a format-named section (z.ai inside
 ``[providers.openai]``, say) is moved into its own section, and the old one is emptied. Endpoints the
 wizard does not know about are still written by hand.
 
@@ -206,6 +209,17 @@ select a model returned by the login flow:
 Credentials default to ``~/.minibot/auth_codex.json``. To store them elsewhere, add the optional
 ``auth_path`` under ``[providers.chatgpt_codex]``. ``minibot configure`` can perform the same login
 and model selection interactively.
+
+The Codex ``/models`` endpoint hides models newer than the client version it is told about, so a new
+model may be missing from the list until that version is raised. MiniBot sends ``0.160.0`` by default;
+change it with:
+
+.. code-block:: toml
+
+   [codex]
+   version = "0.161.0"
+
+The value is used by ``minibot configure`` and by the context-window lookup at startup.
 
 Compatible endpoints
 --------------------

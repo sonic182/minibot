@@ -1051,10 +1051,23 @@ class HTTPServerConfig(BaseModel):
         return self
 
 
+class CodexConfig(BaseModel):
+    """ChatGPT Codex client settings. TOML section: ``[codex]``
+
+    - ``version`` — Codex client version sent when listing models. The endpoint hides models newer than the
+      client version, so raise it when a new model is missing from the list (default: ``0.160.0``).
+    """
+
+    version: str = Field(default="0.160.0", min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class Settings(BaseModel):
     runtime: RuntimeConfig = RuntimeConfig()
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    codex: CodexConfig = CodexConfig()
     llm: LLMMConfig = LLMMConfig()
     orchestration: OrchestrationConfig = OrchestrationConfig()
     memory: MemoryConfig = MemoryConfig()

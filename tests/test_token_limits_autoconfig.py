@@ -58,6 +58,7 @@ async def test_resolve_limits_returns_provider_scoped_values() -> None:
         model_name="gpt-4.1-mini",
         base_url=None,
         auth_path=None,
+        codex_client_version="0.160.0",
         logger=logging.getLogger("test.token_limits.resolve_limits"),
     )
 
@@ -85,6 +86,7 @@ async def test_resolve_limits_returns_none_when_provider_misses_even_if_other_pr
         model_name="gpt-4.1-mini",
         base_url="https://proxy.example/v1",
         auth_path=None,
+        codex_client_version="0.160.0",
         logger=logging.getLogger("test.token_limits.resolve_limits_miss"),
     )
 
@@ -430,6 +432,7 @@ async def test_resolve_limits_maps_fireworks_base_url_to_its_catalog_key() -> No
         model_name="accounts/fireworks/models/deepseek-v4p1-flash",
         base_url="https://api.fireworks.ai/inference/v1",
         auth_path=None,
+        codex_client_version="0.160.0",
         logger=logging.getLogger("test.token_limits.fireworks"),
     )
 

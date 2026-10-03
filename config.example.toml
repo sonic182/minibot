@@ -156,6 +156,10 @@ base_url = ""
 api_key = ""
 base_url = ""
 
+# ChatGPT Codex client version sent when listing models; raise it if a new model is missing from the list.
+# [codex]
+# version = "0.160.0"
+
 [orchestration]
 directory = "./agents"
 # Tool ownership mode controls whether specialist-agent claimed tools are hidden from main agent.

@@ -126,3 +126,24 @@ async def test_complete_once_replays_raw_reasoning_through_full_history(monkeypa
     assert result[1] == reasoning_item
     assert result[2]["call_id"] == "call_1"
     assert result[3]["call_id"] == "call_1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("configured", "expected"), [(None, "0.160.0"), ("0.200.1", "0.200.1")])
+async def test_codex_lists_models_with_the_configured_client_version(configured: str | None, expected: str) -> None:
+    requested: list[str] = []
+
+    async def request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        requested.append(path)
+        return {"models": [{"slug": "gpt-6.1-sol"}]}
+
+    async def fresh_credentials() -> None:
+        return None
+
+    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"), models_client_version=configured)
+    provider.request = request
+    provider._ensure_fresh_credentials = fresh_credentials
+
+    await provider._ensure_models_cache()
+
+    assert requested == [f"/models?client_version={expected}"]
