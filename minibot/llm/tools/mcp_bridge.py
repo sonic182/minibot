@@ -422,7 +422,8 @@ def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
-_NAME_MAP_KEYWORDS = frozenset({"properties", "$defs"})
+_NAME_MAP_KEYWORDS = frozenset({"properties", "$defs", "definitions", "patternProperties"})
+_LITERAL_VALUE_KEYWORDS = frozenset({"default", "const", "enum", "examples"})
 _OPENAI_STRING_FORMATS = frozenset(
     {"date-time", "time", "date", "duration", "email", "hostname", "ipv4", "ipv6", "uuid"}
 )
@@ -434,7 +435,8 @@ def _drop_unsupported_keywords(value: Any) -> Any:
     for each ``z.record(z.string(), ...)``) and a string ``format`` outside OpenAI's list, such as ``uri``.
     Both only constrain values the MCP server validates again on the call, so dropping them loosens nothing
     the model could rely on. Keys inside a ``properties`` or ``$defs`` map are names the schema defines, so
-    a property literally called ``propertyNames`` or ``format`` survives.
+    a property literally called ``propertyNames`` or ``format`` survives. Values under ``default``, ``const``,
+    ``enum`` and ``examples`` are data, not schema, so they are left untouched.
     """
     if isinstance(value, list):
         return [_drop_unsupported_keywords(item) for item in value]
@@ -442,7 +444,9 @@ def _drop_unsupported_keywords(value: Any) -> Any:
         return value
     return {
         key: (
-            {name: _drop_unsupported_keywords(item) for name, item in child.items()}
+            child
+            if key in _LITERAL_VALUE_KEYWORDS
+            else {name: _drop_unsupported_keywords(item) for name, item in child.items()}
             if key in _NAME_MAP_KEYWORDS and isinstance(child, dict)
             else _drop_unsupported_keywords(child)
         )

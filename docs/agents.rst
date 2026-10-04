@@ -33,8 +33,8 @@ continuing tasks is limited to three levels. ``[tasks] continue_turn_default = t
 continuing the default when the model leaves ``continue_turn`` unset; past the limits such a task
 falls back to fire and forget instead of failing. ``[tasks] continue_turn_mode = "always"`` goes
 further: the model's ``continue_turn`` is ignored and every task continues the turn, with the same
-fallback past the limits. The default, ``"auto"``, leaves the choice to the model. A rate-limit retry notice still goes straight to the
-user, and a continuing task that is cancelled does not report back. Use ``get_task`` to retrieve a
+fallback past the limits. The default, ``"auto"``, leaves the choice to the model. A rate-limit retry
+notice still goes straight to the user, and a continuing task that is cancelled does not report back. Use ``get_task`` to retrieve a
 result, ``list_tasks`` to see what is running, and ``cancel_task`` to stop one.
 
 Two switches decide whether any of this exists. ``[orchestration.specialists].enabled`` (default

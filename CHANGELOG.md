@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MCP tools with free-form object arguments no longer break OpenAI requests.** Zod 4 emits `propertyNames` for
   `z.record(z.string(), ...)` and OpenAI rejects the whole request (`'propertyNames' is not permitted`), so one
   such tool made every turn fail. The same goes for a string `format` outside OpenAI's list, such as `uri`. The MCP
-  bridge now drops both from tool schemas.
+  bridge now drops both from tool schemas, leaving property names and the values under `default`, `const`, `enum`
+  and `examples` untouched.
 
 ## [0.27.0] - 2026-10-03
 

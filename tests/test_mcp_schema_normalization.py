@@ -33,11 +33,13 @@ def test_drops_string_formats_openai_rejects_and_keeps_the_supported_ones() -> N
             "mediaUrl": {"anyOf": [{"type": "string", "format": "uri"}, {"type": "null"}]},
             "when": {"type": "string", "format": "date-time"},
             "format": {"type": "string"},
+            "opts": {"type": "object", "default": {"format": "uri"}},
         },
     }
 
     normalized = _normalize_schema(schema)
 
+    assert normalized["properties"]["opts"]["default"] == {"format": "uri"}
     assert normalized["properties"]["mediaUrl"] == {"anyOf": [{"type": "string"}, {"type": "null"}]}
     assert normalized["properties"]["when"] == {"type": "string", "format": "date-time"}
     assert normalized["properties"]["format"] == {"type": "string"}
