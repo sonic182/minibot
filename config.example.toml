@@ -184,6 +184,7 @@ main_tool_use_guardrail = "disabled"
 # [decision]
 # enabled = true
 # model = "inception/mercury-decide:free"  # or "~typesafe/jev-latest"
+# base_url = "https://openrouter.ai/api/alpha/decisions"
 # api_key = "${secret:openrouter_api_key}"
 # timeout_seconds = 3.0
 

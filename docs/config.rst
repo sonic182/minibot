@@ -202,6 +202,7 @@ Keep the key in the vault:
    [decision]
    enabled = true
    model = "inception/mercury-decide:free"
+   base_url = "https://openrouter.ai/api/alpha/decisions"
    api_key = "${secret:openrouter_api_key}"
 
 ``~typesafe/jev-latest`` is a drop-in alternative for ``model``; it bills a small per-request fee.
