@@ -357,6 +357,24 @@ async def test_spawn_task_continue_turn_default_applies_when_unset_and_falls_bac
 
 
 @pytest.mark.asyncio
+async def test_spawn_task_always_mode_ignores_the_model_choice_and_falls_back_at_the_limit() -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(
+        cast(Any, producer), cast(Any, _TaskManagerStub()), config=TasksConfig(continue_turn_mode="always")
+    )
+    spawn = {binding.tool.name: binding for binding in tools.bindings()}["spawn_task"]
+
+    opted_out = await spawn.handler({"prompt": "no", "continue_turn": False}, ToolContext(channel="console"))
+    unset = await spawn.handler({"prompt": "unset"}, ToolContext(channel="console"))
+    at_limit = await spawn.handler(
+        {"prompt": "too deep", "continue_turn": True}, ToolContext(channel="console", task_chain_depth=3)
+    )
+
+    assert [task.continuation_depth for task in producer.enqueued] == [1, 1, None]
+    assert [opted_out["continue_turn"], unset["continue_turn"], at_limit["continue_turn"]] == [True, True, False]
+
+
+@pytest.mark.asyncio
 async def test_cancel_and_get_task_use_the_full_id_resolved_from_a_prefix() -> None:
     full_id = "a0dbc23f-1111-4000-8000-000000000001"
     record = TaskRecord(request=TaskRequest(task_id=full_id, channel="console", prompt="p"), status=TaskStatus.RUNNING)

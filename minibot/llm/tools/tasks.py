@@ -176,7 +176,12 @@ class TaskTools:
             )
         task_context = _coerce_task_context(payload)
         limits = _resolve_limits(payload, self._config, spec_timeout_seconds=spec.timeout_seconds if spec else None)
-        continuation_depth = _resolve_continuation_depth(payload, context, default=self._config.continue_turn_default)
+        continuation_depth = _resolve_continuation_depth(
+            payload,
+            context,
+            default=self._config.continue_turn_default,
+            mode=self._config.continue_turn_mode,
+        )
         try:
             await self._producer.enqueue(
                 TaskRequest(
@@ -308,8 +313,14 @@ def _resolve_limits(
     )
 
 
-def _resolve_continuation_depth(payload: dict[str, Any], context: ToolContext, *, default: bool) -> int | None:
-    continue_turn = payload.get("continue_turn")
+def _resolve_continuation_depth(
+    payload: dict[str, Any], context: ToolContext, *, default: bool, mode: str = "auto"
+) -> int | None:
+    if mode == "always":
+        continue_turn = None
+        default = True
+    else:
+        continue_turn = payload.get("continue_turn")
     if continue_turn is not None and not isinstance(continue_turn, bool):
         raise ToolInputError("continue_turn must be a boolean or null", error_code="invalid_tool_arguments")
     if continue_turn is None:

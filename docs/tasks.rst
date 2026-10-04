@@ -58,7 +58,8 @@ Tool Surface
        tool calls are bounded only by ``worker_max_steps`` / ``worker_max_tool_calls``.
        ``continue_turn`` returns the result to the main agent as a new turn instead of sending the
        worker's answer straight to the user; when unset, ``[tasks] continue_turn_default`` decides
-       (default ``false``). See :doc:`agents`.
+       (default ``false``), and ``[tasks] continue_turn_mode = "always"`` overrides the model's choice.
+       See :doc:`agents`.
    * - ``cancel_task``
      - Cancel an active task by ``task_id``.
    * - ``list_tasks``
@@ -102,6 +103,9 @@ Worker limits live on ``[tasks]``:
 - ``max_concurrent_workers`` — maximum parallel handlers (default ``4``).
 - ``continue_turn_default`` — what ``spawn_task`` does when ``continue_turn`` is unset (default ``false``);
   see :doc:`agents`.
+- ``continue_turn_mode`` — ``"auto"`` (default) lets the model choose per task through ``continue_turn``;
+  ``"always"`` ignores the model's choice and returns every result to the main agent as a new turn, falling
+  back to direct delivery past the continuation limit. ``continue_turn_default`` has no effect in that mode.
 
 .. warning::
 

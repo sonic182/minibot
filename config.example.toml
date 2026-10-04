@@ -623,6 +623,10 @@ max_concurrent_workers = 4
 # What spawn_task does when the model leaves continue_turn unset: false delivers the worker's answer straight to
 # the chat (it is also recorded in the history); true returns it to the main agent as a new turn.
 continue_turn_default = true
+# "auto" (default): the model chooses per task through continue_turn; continue_turn_default covers an unset value.
+# "always": the model's choice is ignored and every result returns to the main agent as a new turn (falling back
+# to direct delivery past the continuation limit). continue_turn_default has no effect in that mode.
+continue_turn_mode = "auto"
 
 # Queue storage used when tasks.backend = "sqlite". No external broker required.
 [tasks.sqlite]
