@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-04
+
 ### Added
 
 - **`[tasks] continue_turn_mode`.** `"always"` ignores the model's `continue_turn` and returns every task result
@@ -1282,7 +1284,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.27.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.28.0...HEAD
+[0.28.0]: https://github.com/sonic182/minibot/compare/0.27.0..0.28.0
 [0.27.0]: https://github.com/sonic182/minibot/compare/0.26.0..0.27.0
 [0.26.0]: https://github.com/sonic182/minibot/compare/0.25.2..0.26.0
 [0.25.2]: https://github.com/sonic182/minibot/compare/0.25.1..0.25.2
