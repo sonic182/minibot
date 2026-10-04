@@ -101,6 +101,7 @@ class TelegramService:
             )
         )
         self._pending_approvals: dict[str, tuple[int, int]] = {}
+        self._approval_requesters: dict[str, int] = {}
         self._approval_denials: set[asyncio.Task[None]] = set()
 
         self._dp.message.register(self._handle_message)
@@ -234,6 +235,8 @@ class TelegramService:
             denial.add_done_callback(self._denial_finished)
             return
         self._pending_approvals[event.approval_id] = (event.chat_id, sent.message_id)
+        if event.requester_user_id is not None:
+            self._approval_requesters[event.approval_id] = event.requester_user_id
 
     async def _handle_approval_callback(self, callback: CallbackQuery) -> None:
         prefix, _, rest = (callback.data or "").partition(":")
@@ -250,7 +253,16 @@ class TelegramService:
             )
             await callback.answer("Access denied.")
             return
+        requester = self._approval_requesters.get(approval_id)
+        if requester is not None and callback.from_user.id != requester:
+            self._logger.warning(
+                "blocked approval from a user who did not request it",
+                extra={"chat_id": chat_id, "user_id": callback.from_user.id},
+            )
+            await callback.answer("Only the requester can answer this.")
+            return
         pending = self._pending_approvals.pop(approval_id, None)
+        self._approval_requesters.pop(approval_id, None)
         if pending is None:
             await callback.answer("Expired")
             return
@@ -262,6 +274,7 @@ class TelegramService:
         await self._close_approval_prompt(*pending, "✅ Approved" if approved else "❌ Denied")
 
     async def _expire_approval(self, approval_id: str) -> None:
+        self._approval_requesters.pop(approval_id, None)
         pending = self._pending_approvals.pop(approval_id, None)
         if pending is not None:
             await self._close_approval_prompt(*pending, "⌛ No answer: denied")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -21,6 +22,12 @@ from minibot.llm.tools.schema_utils import nullable_string, strict_object
 from minibot.shared.html_compact import html_to_compact
 
 _SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+_TOTAL_TIMEOUT_FACTOR = 3
+
+
+def _loggable_url(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
 
 class HTTPClientTool:
@@ -83,10 +90,11 @@ class HTTPClientTool:
         try:
             self._logger.info(
                 "http tool request",
-                extra={"method": method, "url": url, "owner_id": context.owner_id},
+                extra={"method": method, "url": _loggable_url(url), "owner_id": context.owner_id},
             )
-            response = await self._client.request(url, method=method, **request_kwargs)
-            content = await response.content()
+            async with asyncio.timeout(self._config.timeout_seconds * _TOTAL_TIMEOUT_FACTOR):
+                response = await self._client.request(url, method=method, **request_kwargs)
+                content = await self._read_body(response, self._read_limit())
             truncated = len(content) > self._config.max_bytes
             content_type = _extract_content_type(response.headers)
             processed_body, processor_used = _process_response_text(
@@ -243,6 +251,24 @@ class HTTPClientTool:
                 extra={"url": url, "subdir": self._config.spill_subdir},
             )
             return None
+
+    def _read_limit(self) -> int:
+        spill_bytes = self._config.max_spill_bytes if self._can_spill() else 0
+        return max(self._config.max_bytes, self._config.max_parse_bytes, spill_bytes) + 1
+
+    @staticmethod
+    async def _read_body(response: Any, limit: int) -> bytes:
+        if not getattr(response, "chunked", False):
+            return await response.content()
+        body = bytearray()
+        async for chunk in response.read_chunks():
+            body.extend(chunk[: limit - len(body)])
+            if len(body) >= limit:
+                connection = getattr(response, "_connection", None)
+                if connection is not None:
+                    connection.keep = False
+                break
+        return bytes(body)
 
     def _decode_budget(self, content_type: str) -> int:
         """Bytes to decode before processing.

@@ -28,7 +28,10 @@ How It Works
   (``recurrence_type = "cron"`` with a standard 5-field ``recurrence_cron_expression``,
   evaluated with `croniter <https://github.com/kiorky/croniter>`_); the model picks the
   right recurrence from your phrasing, and the job re-schedules itself after each run.
+- Cron expressions are evaluated in UTC. ``0 9 * * *`` fires at 09:00 UTC, so convert from your local time.
 - Jobs survive restarts — they are stored in SQLite and polled on startup.
+- A job is retried (up to its ``max_attempts``) only when injecting the prompt fails. If the turn it
+  starts fails later, the job is not retried; the user gets a short failure reply instead.
 - The minimum recurrence interval is ``scheduler.prompts.min_recurrence_interval_seconds`` (default: ``60`` seconds).
 
 Configuration

@@ -307,6 +307,8 @@ class AgentRuntime:
                             AgentMessage(role="user", content=[MessagePart(type="text", text=_TRUNCATED_PATCH)])
                         )
                         continue
+                    if tool_calls:
+                        truncated_tool_call_count = 0
                     if (
                         not tool_calls
                         and pseudo_nudge_count < MAX_PSEUDO_TOOL_NUDGES

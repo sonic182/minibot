@@ -205,7 +205,7 @@ way the main agent is"), and why adding `list_skills` / `activate_skill` to an a
 Ahead of everything below because it is a regression in shipped behaviour, not new capability,
 and the fix is small.
 
-## [ ] Phase 3 — Native skills & runtime self-knowledge
+## [x] Phase 3 — Native skills & runtime self-knowledge
 
 **Done** — version single-sourcing (#82), the native tier + `create-skill` (#83),
 `install-skill` + `install_skill` (#84, released in 0.18.0), `get_settings`, the
@@ -595,7 +595,8 @@ implementation that happens to work against two test servers:
   conversation memory (SQLite), then compaction summaries, permanently. This
   is the redaction check from Phase 1's tool-executor bullet, applied here
   concretely.
-- MCP token refresh has no lock. `MCPClient` is per-server with no mutex
+- MCP token refresh will need a lock once the OAuth client exists (there is none yet).
+  `MCPClient` is per-server with no mutex
   around refresh — two tool calls near token expiry could both refresh
   concurrently; some providers invalidate the old refresh token when issuing
   a new one, so the loser of that race gets locked out. Needs a lock keyed by
@@ -724,6 +725,19 @@ here is the harder, undecided part: filesystem/process isolation.)
 than the main agent and does not load extensions. Shared calculator and skill
 loader constructors live in `minibot/app/tool_constructors.py`; each caller
 retains its own enablement and visibility rules.
+
+## Known gaps
+
+- Stdio MCP clients are bound to one event loop: `MCPClient._ensure_stdio_runtime` kills and respawns the
+  server process whenever a different loop calls in (startup `asyncio.run` versus the daemon loop).
+- `Retry-After` from the provider cannot be honoured: `llm_async` raises a bare `Exception("HTTP 429: ...")`
+  without headers, so `_build_error_metadata` (`app/tasks/worker.py`) keeps a fixed 30 s backoff.
+- A lazy MCP `call_tool` is recognised by tool name suffix in `app/tool_approval.py`; an eager remote tool
+  literally named `call_tool` that also takes a `tool_name` argument would be misread. Fixing it needs an
+  explicit marker carried through every `ToolBinding` wrapper.
+- `http_request`: aiosonic reads a `Content-Length` body in full before any cap can apply; only chunked
+  bodies are cut at the limit.
+- `bash` spill files hold at most `max_output_bytes`, since the cap is now applied while reading.
 
 ## Explicitly deferred
 

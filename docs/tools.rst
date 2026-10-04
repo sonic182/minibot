@@ -82,7 +82,7 @@ Tool Surface
    * - Host execution
      - ``bash``
      - ``[tools.bash]``
-     - Run shell commands through ``/bin/bash -lc``.
+     - Run shell commands through ``/bin/bash -c`` (``-lc``, a login shell that re-reads profile files, only when ``pass_parent_env = true``).
    * - Editing
      - ``apply_patch``
      - ``[tools.apply_patch]``

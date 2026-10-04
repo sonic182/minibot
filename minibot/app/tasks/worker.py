@@ -88,13 +88,17 @@ _WORKER_SYSTEM_PROMPT_SUFFIX = (
 
 
 def worker_entry(pipe: Any) -> None:
-    # The worker is forked from the daemon, which installs an asyncio no-op SIGTERM/SIGINT
-    # handler for graceful shutdown; forked children inherit that disposition, so
-    # TaskManager.cancel()'s proc.terminate() would otherwise be swallowed instead of
-    # killing this process. Reset to default so terminate() actually stops the worker.
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    asyncio.run(_worker_async(pipe))
+    with contextlib.suppress(asyncio.CancelledError):
+        asyncio.run(_run_worker(pipe))
+
+
+async def _run_worker(pipe: Any) -> None:
+    loop = asyncio.get_running_loop()
+    main_task = asyncio.current_task()
+    assert main_task is not None
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, main_task.cancel)
+    await _worker_async(pipe)
 
 
 async def _worker_async(pipe: Any) -> None:

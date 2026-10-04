@@ -43,6 +43,8 @@ from minibot.llm.provider_factory import LLMClient
 from minibot.llm.tools.base import ToolBinding
 from minibot.shared.utils import humanize_token_count, summarize_items
 
+_INTERNAL_ERROR_REPLY = "Sorry, I couldn't answer right now."
+
 
 def _token_trace_log_fields(token_trace: object) -> dict[str, object]:
     """Log-friendly view of a response's token trace, shared by both handler paths."""
@@ -391,8 +393,26 @@ class Dispatcher:
                     error=str(exc),
                 )
             )
+            await self._publish_failure_reply(event)
         finally:
             await self._pending_turns.clear_pending(event.event_id)
+
+    async def _publish_failure_reply(self, event: MessageEvent) -> None:
+        message = event.message
+        try:
+            await self._event_bus.publish(
+                OutboundEvent(
+                    response=ChannelResponse(
+                        channel=message.channel,
+                        chat_id=message.chat_id or message.user_id or 0,
+                        text=_INTERNAL_ERROR_REPLY,
+                        render=RenderableResponse(kind="text", text=_INTERNAL_ERROR_REPLY),
+                        metadata={"should_reply": True},
+                    )
+                )
+            )
+        except Exception:
+            self._logger.exception("failed to publish the failure reply", extra={"event_id": event.event_id})
 
     async def _handle_format_repair(self, event: OutboundFormatRepairEvent) -> None:
         try:

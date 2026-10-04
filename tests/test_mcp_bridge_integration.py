@@ -15,6 +15,7 @@ import pytest
 
 pytest.importorskip("mcp")
 
+from minibot import __version__ as minibot_version
 from minibot.adapters.config.schema import (
     CalculatorToolConfig,
     FileStorageToolConfig,
@@ -435,7 +436,7 @@ def test_mcp_client_reads_initialization_metadata(monkeypatch: pytest.MonkeyPatc
 
     async def request(method: str, params: dict[str, object]) -> dict[str, object]:
         assert method == "initialize"
-        assert params["clientInfo"] == {"name": "minibot", "version": "0.0.3"}
+        assert params["clientInfo"] == {"name": "minibot", "version": minibot_version}
         return {
             "result": {
                 "serverInfo": {"name": "remote-name", "version": "1.2.3"},
@@ -443,7 +444,11 @@ def test_mcp_client_reads_initialization_metadata(monkeypatch: pytest.MonkeyPatc
             }
         }
 
+    async def notify(method: str, params: dict[str, object]) -> None:
+        assert method == "notifications/initialized"
+
     monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(client, "_notify_http", notify)
 
     metadata = asyncio.run(client.get_server_metadata())
 
@@ -553,3 +558,99 @@ def test_lazy_mcp_bridge_reloads_an_expired_catalog() -> None:
     asyncio.run(bindings["mcp_expiring__call_tool"].handler({"tool_name": "ping", "arguments": {}}, ToolContext()))
 
     assert client.list_tools_calls == 2
+
+
+class _ScriptedMCPServer:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+        self.headers: list[dict[str, str]] = []
+        self.expire_session_once = False
+        self.sse = False
+        self.fail_status: int | None = None
+
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        raw = await reader.readuntil(b"\r\n\r\n")
+        head = raw.decode().split("\r\n")
+        headers = {line.split(":", 1)[0].lower(): line.split(":", 1)[1].strip() for line in head[1:] if ":" in line}
+        body = json.loads(await reader.readexactly(int(headers.get("content-length", "0"))))
+        self.requests.append(body)
+        self.headers.append(headers)
+        status, payload, content_type = self._respond(body, headers)
+        data = payload.encode()
+        writer.write(
+            f"HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\nMcp-Session-Id: sess-1\r\n"
+            f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
+            + data
+        )
+        await writer.drain()
+        writer.close()
+
+    def _respond(self, body: dict[str, object], headers: dict[str, str]) -> tuple[int, str, str]:
+        method = body.get("method")
+        if self.fail_status is not None and method == "tools/list":
+            return self.fail_status, "boom", "text/plain"
+        if self.expire_session_once and method == "tools/list":
+            self.expire_session_once = False
+            return 404, "session gone", "text/plain"
+        if "id" not in body:
+            return 202, "", "text/plain"
+        if method == "initialize":
+            result: dict[str, object] = {"protocolVersion": "2025-03-26", "serverInfo": {"name": "scripted"}}
+        else:
+            result = {"tools": [{"name": "ping", "description": "", "inputSchema": {}}]}
+        message = json.dumps({"jsonrpc": "2.0", "id": body["id"], "result": result})
+        if self.sse:
+            note = json.dumps({"jsonrpc": "2.0", "method": "notifications/message", "params": {}})
+            return 200, f"event: message\ndata: {note}\n\nevent: message\ndata: {message}\n\n", "text/event-stream"
+        return 200, message, "application/json"
+
+
+async def _with_scripted_server(script: _ScriptedMCPServer, scenario) -> None:
+    server = await asyncio.start_server(script.handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        client = MCPClient(server_name="s", transport="http", timeout_seconds=5, url=f"http://127.0.0.1:{port}/mcp")
+        await scenario(client)
+        await client.aclose()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+def test_mcp_http_initializes_with_notification_protocol_header_and_sse_matching() -> None:
+    script = _ScriptedMCPServer()
+    script.sse = True
+
+    async def scenario(client: MCPClient) -> None:
+        tools = await client.list_tools()
+        assert [tool.name for tool in tools] == ["ping"]
+
+    asyncio.run(_with_scripted_server(script, scenario))
+
+    assert [req.get("method") for req in script.requests] == ["initialize", "notifications/initialized", "tools/list"]
+    assert "mcp-protocol-version" not in script.headers[0]
+    assert script.headers[2]["mcp-protocol-version"] == "2025-03-26"
+    assert script.headers[2]["mcp-session-id"] == "sess-1"
+
+
+def test_mcp_http_reinitializes_once_when_the_session_expires() -> None:
+    script = _ScriptedMCPServer()
+    script.expire_session_once = True
+
+    async def scenario(client: MCPClient) -> None:
+        assert [tool.name for tool in await client.list_tools()] == ["ping"]
+
+    asyncio.run(_with_scripted_server(script, scenario))
+
+    assert [req.get("method") for req in script.requests].count("initialize") == 2
+
+
+def test_mcp_http_reports_non_success_status() -> None:
+    script = _ScriptedMCPServer()
+    script.fail_status = 500
+
+    async def scenario(client: MCPClient) -> None:
+        with pytest.raises(RuntimeError, match="status 500"):
+            await client.list_tools()
+
+    asyncio.run(_with_scripted_server(script, scenario))

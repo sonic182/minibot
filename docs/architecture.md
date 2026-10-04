@@ -65,6 +65,13 @@ minibot/
    runs it. Its answer is published later as its own `OutboundEvent`.
 8. The handler returns `ChannelResponse` with metadata (`primary_agent`, token trace).
 9. The dispatcher publishes `OutboundEvent`; the active channel renders it to the user.
+   If the handler raises, the dispatcher publishes `TurnFailedEvent` and a short generic
+   failure reply, never the exception text.
+
+The dispatcher awaits each turn before taking the next message, so turns run strictly one at a
+time. One slow turn, or a tool approval wait (up to `[tools.approval].timeout_seconds`), queues
+every message behind it. That fits a single owner; delegated tasks run in their own worker
+processes and do not hold the queue.
 
 ## Console agent invocation
 

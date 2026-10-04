@@ -262,6 +262,21 @@ async def test_bash_truncates_output_when_over_limit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bash_caps_endless_output_while_streaming() -> None:
+    binding = _binding(BashToolConfig(max_output_bytes=1000))
+    result = cast(
+        dict[str, Any],
+        await binding.handler(
+            {"command": "yes", "timeout_seconds": 1, "cwd": None, "env": None},
+            ToolContext(),
+        ),
+    )
+    assert result["timed_out"] is True
+    assert result["truncated"] is True
+    assert len(result["stdout"] + result["stderr"]) <= 1000
+
+
+@pytest.mark.asyncio
 async def test_bash_rejects_invalid_cwd() -> None:
     binding = _binding(BashToolConfig())
     with pytest.raises(ValueError, match="cwd does not exist"):

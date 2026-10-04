@@ -341,7 +341,9 @@ async def test_dispatcher_clears_pending_turn_after_handler_exception(monkeypatc
         await bus.publish(event)
         outbound = await _wait_outbound(subscription)
 
-    assert outbound is None
+    assert outbound is not None
+    assert outbound.response.text == "Sorry, I couldn't answer right now."
+    assert "exploded" not in outbound.response.text
     assert pending_store.marked == [event.event_id]
     assert pending_store.cleared == [event.event_id]
 
@@ -398,7 +400,7 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
         async def _drain() -> None:
             async for event in subscription:
                 collected.append(event)
-                if len(collected) == 5:
+                if len(collected) == 6:
                     break
 
         with contextlib.suppress(TimeoutError):
@@ -407,6 +409,8 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
     started = [e for e in collected if isinstance(e, TurnStartedEvent)]
     completed = [e for e in collected if isinstance(e, TurnCompletedEvent)]
     failed = [e for e in collected if isinstance(e, TurnFailedEvent)]
+    replies = [e.response.text for e in collected if isinstance(e, OutboundEvent)]
+    assert "Sorry, I couldn't answer right now." in replies
 
     assert {e.turn_id for e in started} == {ok_event.event_id, bad_event.event_id}
     assert len(completed) == 1

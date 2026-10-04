@@ -228,6 +228,7 @@ class LLMTurnService:
         )
         prompt_cache_key = _prompt_cache_key(message) if self._profile.prompt_cache_enabled else None
         runtime_result = None
+        generation_failed = False
         try:
             if self._runtime_service is None:
                 generation = await self._llm_client.generate(
@@ -308,6 +309,7 @@ class LLMTurnService:
             self._logger.exception("LLM call failed", exc_info=exc)
             render = plain_render(self._format_runtime_error_message(exc))
             should_reply = True
+            generation_failed = True
         await self._turn_decision.finish(
             pending_decision,
             session_id=session_id,
@@ -324,10 +326,11 @@ class LLMTurnService:
         answer = render.text
         if should_reply and answer.strip():
             visible_messages.append(answer)
-        for index, message_text in enumerate(visible_messages):
-            reasoning = reasoning_text if index == len(visible_messages) - 1 else None
+        stored_messages = visible_messages[:-1] if generation_failed and visible_messages else visible_messages
+        for index, message_text in enumerate(stored_messages):
+            reasoning = reasoning_text if index == len(stored_messages) - 1 else None
             await self._memory.append_history(session_id, "assistant", message_text, reasoning=reasoning)
-        if visible_messages:
+        if stored_messages:
             await self._enforce_history_limit(session_id)
         compact_prompt_cache_key = prompt_cache_key or f"{session_id}:runtime"
         compaction_result = await self._compaction_service.compact_history_if_needed(

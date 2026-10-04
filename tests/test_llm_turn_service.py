@@ -680,15 +680,18 @@ async def test_turn_service_uses_compact_prompt_from_prompts_dir(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_turn_service_runtime_exception_returns_fallback_response() -> None:
-    service, _, _ = _service(
+    service, _, memory = _service(
         "unused",
     )
     service.set_runtime(cast(Any, FailingRuntime()))
+    event = _message_event("ping")
 
-    response = await service.handle(_message_event("ping"))
+    response = await service.handle(event)
 
     assert response.metadata.get("should_reply") is True
     assert response.text == "Sorry, I couldn't answer right now."
+    history = await memory.get_history(session_id_for(event.message))
+    assert [(entry.role, entry.content) for entry in history] == [("user", "ping")]
 
 
 @pytest.mark.asyncio

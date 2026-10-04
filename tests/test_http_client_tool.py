@@ -504,3 +504,41 @@ async def test_request_failure_reports_a_reason_the_model_can_act_on(tmp_path: A
     # marks the call so agent_runtime's repeated-failure guardrail can stop an endless retry loop
     assert result["is_repeated_failure_candidate"] is True
     assert result["failure_signature"]
+
+
+@pytest.mark.asyncio
+async def test_http_tool_stops_reading_a_chunked_body_at_the_limit(unused_tcp_port: int) -> None:
+    sent = {"chunks": 0}
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.read(65536)
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n")
+        try:
+            for _ in range(200):
+                writer.write(b"400\r\n" + b"a" * 1024 + b"\r\n")
+                await writer.drain()
+                sent["chunks"] += 1
+                await asyncio.sleep(0)
+            writer.write(b"0\r\n\r\n")
+            await writer.drain()
+        except ConnectionError:
+            pass
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", unused_tcp_port)
+    await server.start_serving()
+    try:
+        config = HTTPClientToolConfig(enabled=True, timeout_seconds=5, max_bytes=1024, max_parse_bytes=2048)
+        binding = HTTPClientTool(config).bindings()[0]
+        result = await binding.handler(
+            {"method": "GET", "url": f"http://127.0.0.1:{unused_tcp_port}/"},
+            ToolContext(owner_id="tester"),
+        )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert result["status"] == 200
+    assert result["truncated"] is True
+    assert len(result["body"]) <= 1024

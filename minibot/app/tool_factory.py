@@ -117,6 +117,7 @@ def _event_bus_approver(event_bus: EventBus | None, timeout_seconds: float) -> A
             chat_id=context.chat_id,
             timeout_seconds=timeout_seconds,
             supports_tool_approval=context.channel_capabilities.supports_tool_approval,
+            requester_user_id=context.user_id,
         )
 
     return approve

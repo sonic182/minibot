@@ -313,13 +313,13 @@ Tool Configuration
      - Key options
    * - ``[tools.approval]``
      - ``ToolApprovalConfig``
-     - ``require_approval`` (fnmatch tool-name patterns, default empty), ``timeout_seconds``; Telegram approve/deny buttons before a matching call runs, denied on timeout or outside Telegram
+     - ``require_approval`` (fnmatch tool-name patterns, default empty), ``timeout_seconds``; Telegram approve/deny buttons before a matching call runs, denied on timeout or outside Telegram. The buttons answer only for an authorized user, and only for the user whose request triggered the call when it is known (a scheduled job has no requester, so any authorized user may answer)
    * - ``[tools.kv_memory]``
      - ``KeyValueMemoryConfig``
      - ``enabled``, ``sqlite_url``, ``default_limit``, ``max_limit``
    * - ``[tools.http_client]``
      - ``HTTPClientToolConfig``
-     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings
+     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings. A chunked response is read only up to the largest of ``max_bytes``, ``max_parse_bytes`` and the spill ceiling; the whole request, body included, is bounded to three times ``timeout_seconds``. A response with a ``Content-Length`` is still read in full by the HTTP client before the cap applies
    * - ``[tools.time]``
      - ``TimeToolConfig``
      - ``enabled``, ``default_format``
@@ -343,7 +343,7 @@ Tool Configuration
      - ``enabled``, ``command_prefix``
    * - ``[tools.bash]``
      - ``BashToolConfig``
-     - ``enabled``, timeout/output limits, parent environment and allowlist policy
+     - ``enabled``, timeout/output limits, parent environment and allowlist policy. ``max_output_bytes`` is enforced while the command runs: output beyond it is read and discarded, never buffered, and a spilled file holds at most that many bytes
    * - ``[vault]``
      - ``VaultConfig``
      - ``enabled``, ``path``, ``password_file``; see `Vault`_ above
