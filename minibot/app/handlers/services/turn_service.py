@@ -19,6 +19,7 @@ from minibot.app.response_parser import extract_answer, plain_render, resolve_re
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
+from minibot.app.turn_decision import NoopTurnDecision, TurnDecision, executed_tool_names
 from minibot.core.channels import (
     ChannelCapabilities,
     ChannelMessage,
@@ -60,7 +61,9 @@ class LLMTurnService:
         logger: logging.Logger,
         runtime: AgentRuntime | None = None,
         task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
+        turn_decision: TurnDecision | None = None,
     ) -> None:
+        self._turn_decision: TurnDecision = turn_decision or NoopTurnDecision()
         self._memory = memory
         self._llm_client = llm_client
         self._tools = list(tools)
@@ -98,6 +101,7 @@ class LLMTurnService:
         self._tools = list(tools)
         self._prompt_service.replace_tools(tools, extension_prompt_fragments=extension_prompt_fragments)
         self._tool_use_guardrail.replace_tools(tools)
+        self._turn_decision.replace_tools(tools)
         if self._runtime is not None:
             self._runtime.replace_tools(tools)
 
@@ -213,6 +217,7 @@ class LLMTurnService:
                 metadata=metadata,
             )
 
+        pending_decision = self._turn_decision.start(model_text)
         history = list(await self._memory.get_history(session_id))
         system_prompt = self._prompt_service.compose_system_prompt(message.channel)
         use_previous_response_id = self._use_previous_response_id()
@@ -303,6 +308,12 @@ class LLMTurnService:
             self._logger.exception("LLM call failed", exc_info=exc)
             render = plain_render(self._format_runtime_error_message(exc))
             should_reply = True
+        await self._turn_decision.finish(
+            pending_decision,
+            session_id=session_id,
+            tools_used=executed_tool_names(runtime_result.runtime_state if runtime_result is not None else None),
+            handed_off=handed_off_to_task,
+        )
         reasoning_text = _extract_reasoning_text(runtime_result.runtime_state) if runtime_result is not None else None
         visible_messages: list[str] = []
         response_updates_payload: list[dict[str, Any]] = []
@@ -574,6 +585,7 @@ def build_llm_turn_service(
     event_bus: EventBus | None = None,
     task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
     extension_prompt_fragments: Sequence[str] = (),
+    turn_decision: TurnDecision | None = None,
 ) -> LLMTurnService:
     service_logger = logger or logging.getLogger("minibot.handler")
     tool_bindings = list(tools or [])
@@ -637,4 +649,5 @@ def build_llm_turn_service(
         logger=service_logger,
         runtime=runtime,
         task_handoff_callback=task_handoff_callback,
+        turn_decision=turn_decision,
     )

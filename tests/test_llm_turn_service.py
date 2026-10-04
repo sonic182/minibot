@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from llm_async.models import Tool
@@ -16,8 +18,10 @@ from minibot.app.handlers.services import (
     build_llm_turn_service,
 )
 from minibot.app.tool_use_guardrail import NoopToolUseGuardrail
+from minibot.app.turn_decision import ShadowTurnDecision
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse, session_id_for
+from minibot.core.decisions import DecisionAnswer, DecisionResult
 from minibot.core.events import MessageEvent
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient, LLMGeneration
@@ -704,3 +708,71 @@ async def test_turn_service_keeps_history_per_chat_for_one_owner() -> None:
     assert [entry.role for entry in owner_history] == ["user", "assistant", "user", "assistant"]
     assert len(other_history) == 2
     assert not [entry for entry in other_history if "question" in entry.content]
+
+
+class _RecordCollector(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def decision_records() -> Any:
+    collector = _RecordCollector()
+    logger = logging.getLogger("minibot.turn_decision")
+    previous_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(collector)
+    yield collector.records
+    logger.removeHandler(collector)
+    logger.setLevel(previous_level)
+
+
+async def _drain_background_tasks() -> None:
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_turn_service_shadow_decision_logs_choice_without_changing_the_reply(decision_records: Any) -> None:
+    decision_client = AsyncMock()
+    decision_client.ask.return_value = DecisionResult(
+        model="inception/mercury-decide-20260930",
+        answers={
+            "route": DecisionAnswer(
+                type="choice", choice="answer_directly", probabilities={"answer_directly": 0.98}, confidence=0.98
+            ),
+            "needs_web": DecisionAnswer(type="noul", noul=0.02),
+        },
+        cost=0.0,
+        latency_seconds=0.31,
+    )
+    shadow = ShadowTurnDecision(client=decision_client, tools=[], timeout_seconds=3.0)
+    service, _, _ = _service("hello", turn_decision=shadow)
+
+    response = await service.handle(_message_event("ping"))
+    await _drain_background_tasks()
+
+    assert response.text == "hello"
+    assert decision_client.ask.await_args.args[0]["user_message"] == "ping"
+    record = next(item for item in decision_records if item.getMessage() == "turn decision")
+    assert record.route == "answer_directly"
+    assert record.needs_web == 0.02
+    assert record.handed_off is False
+
+
+@pytest.mark.asyncio
+async def test_turn_service_shadow_decision_failure_never_breaks_the_turn(decision_records: Any) -> None:
+    decision_client = AsyncMock()
+    decision_client.ask.side_effect = RuntimeError("decision backend down")
+    shadow = ShadowTurnDecision(client=decision_client, tools=[], timeout_seconds=3.0)
+    service, _, _ = _service("hello", turn_decision=shadow)
+
+    response = await service.handle(_message_event("ping"))
+    await _drain_background_tasks()
+
+    assert response.text == "hello"
+    assert [item.getMessage() for item in decision_records] == ["turn decision failed"]

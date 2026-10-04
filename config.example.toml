@@ -179,6 +179,14 @@ shared_mcp_servers = []
 #   Enable only if you observe the model frequently claiming to act without actually calling tools.
 main_tool_use_guardrail = "disabled"
 
+# Optional decision model. Each turn also asks OpenRouter's decisions endpoint how the message should
+# be handled and logs "turn decision" next to what the agent actually did. It never changes a reply.
+# [decision]
+# enabled = true
+# model = "inception/mercury-decide:free"  # or "~typesafe/jev-latest"
+# api_key = "${secret:openrouter_api_key}"
+# timeout_seconds = 3.0
+
 [orchestration.main_agent]
 name = "minibot"
 # Keep built-in tools enabled and hide direct MCP tools from main agent.

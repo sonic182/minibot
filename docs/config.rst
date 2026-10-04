@@ -183,6 +183,32 @@ ceiling, so their permissions stay exactly as the owner wrote them.
 .. autoclass:: minibot.adapters.config.schema.AgentManagementConfig
    :no-members:
 
+Decision
+--------
+
+``[decision]`` is opt-in and off by default. When enabled, every main-agent turn also asks a
+decision model (OpenRouter's ``/api/alpha/decisions`` endpoint, not ``/chat/completions``) four fixed
+questions about the user's message: ``route`` (answer directly, use tools, or delegate a task),
+``needs_memory``, ``needs_web`` and ``complexity``. The request runs in parallel with the real
+generation and is logged as a ``turn decision`` line next to the tools the agent actually used and
+whether the turn was handed off to a task, so the model's choices can be compared with reality before
+anything acts on them. It never changes a reply, adds no latency, and a timeout or any failure is
+logged and ignored.
+
+Keep the key in the vault:
+
+.. code-block:: toml
+
+   [decision]
+   enabled = true
+   model = "inception/mercury-decide:free"
+   api_key = "${secret:openrouter_api_key}"
+
+``~typesafe/jev-latest`` is a drop-in alternative for ``model``; it bills a small per-request fee.
+
+.. autoclass:: minibot.adapters.config.schema.DecisionConfig
+   :no-members:
+
 Scheduler
 ---------
 
