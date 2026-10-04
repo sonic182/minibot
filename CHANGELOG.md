@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`[tasks] continue_turn_mode`.** `"always"` ignores the model's `continue_turn` and returns every task result
+  to the main agent as a new turn, falling back to direct delivery past the continuation limit. The default
+  `"auto"` keeps today's behaviour. The `spawn_task` description and the task-handling prompt now tell the model
+  to set `continue_turn` to true whenever a step remains after the result.
+
+### Fixed
+
+- **MCP tools with free-form object arguments no longer break OpenAI requests.** Zod 4 emits `propertyNames` for
+  `z.record(z.string(), ...)` and OpenAI rejects the whole request (`'propertyNames' is not permitted`), so one
+  such tool made every turn fail. The same goes for a string `format` outside OpenAI's list, such as `uri`. The MCP
+  bridge now drops both from tool schemas.
+
 ## [0.27.0] - 2026-10-03
 
 ### Added

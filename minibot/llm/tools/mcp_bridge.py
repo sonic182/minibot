@@ -416,10 +416,40 @@ def _build_server_summary(server_name: str, metadata: MCPServerMetadata | None) 
 def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if not schema:
         return {"type": "object", "properties": {}, "additionalProperties": True}
-    schema = _inline_ref_siblings(schema, schema)
+    schema = _drop_unsupported_keywords(_inline_ref_siblings(schema, schema))
     if "type" not in schema:
         return {"type": "object", **schema}
     return schema
+
+
+_NAME_MAP_KEYWORDS = frozenset({"properties", "$defs"})
+_OPENAI_STRING_FORMATS = frozenset(
+    {"date-time", "time", "date", "duration", "email", "hostname", "ipv4", "ipv6", "uuid"}
+)
+
+
+def _drop_unsupported_keywords(value: Any) -> Any:
+    """Remove schema keywords that OpenAI's function-calling validation rejects outright, since one such
+    tool makes every request fail: ``propertyNames`` ("'propertyNames' is not permitted", emitted by Zod 4
+    for each ``z.record(z.string(), ...)``) and a string ``format`` outside OpenAI's list, such as ``uri``.
+    Both only constrain values the MCP server validates again on the call, so dropping them loosens nothing
+    the model could rely on. Keys inside a ``properties`` or ``$defs`` map are names the schema defines, so
+    a property literally called ``propertyNames`` or ``format`` survives.
+    """
+    if isinstance(value, list):
+        return [_drop_unsupported_keywords(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    return {
+        key: (
+            {name: _drop_unsupported_keywords(item) for name, item in child.items()}
+            if key in _NAME_MAP_KEYWORDS and isinstance(child, dict)
+            else _drop_unsupported_keywords(child)
+        )
+        for key, child in value.items()
+        if key != "propertyNames"
+        and not (key == "format" and isinstance(child, str) and child not in _OPENAI_STRING_FORMATS)
+    }
 
 
 def _inline_ref_siblings(value: Any, root: dict[str, Any]) -> Any:

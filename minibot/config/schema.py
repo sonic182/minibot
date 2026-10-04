@@ -998,6 +998,10 @@ class TasksConfig(BaseModel):
     - ``continue_turn_default`` — what ``spawn_task`` does when the model leaves ``continue_turn`` unset
       (default: ``false``). ``true`` returns every result to the main agent as a new turn; once a turn reaches
       the continuation limit, further tasks fall back to delivering straight to the chat instead of failing.
+    - ``continue_turn_mode`` — ``"auto"`` (default) lets the model choose per task through ``continue_turn``, with
+      ``continue_turn_default`` covering an unset value. ``"always"`` ignores the model's choice and returns every
+      result to the main agent as a new turn, falling back to direct delivery at the continuation limit;
+      ``continue_turn_default`` has no effect in that mode.
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
@@ -1008,6 +1012,7 @@ class TasksConfig(BaseModel):
     worker_max_tool_calls: TaskLimitValue = "unlimited"
     max_concurrent_workers: PositiveInt = 4
     continue_turn_default: bool = False
+    continue_turn_mode: Literal["auto", "always"] = "auto"
     sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
 
     @model_validator(mode="after")

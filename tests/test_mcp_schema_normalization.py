@@ -9,6 +9,40 @@ def test_keeps_a_plain_schema_untouched() -> None:
     assert _normalize_schema(schema) == schema
 
 
+def test_drops_property_names_but_keeps_a_property_called_that() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "webhook": {"type": "object", "propertyNames": {"type": "string"}, "additionalProperties": {}},
+            "propertyNames": {"type": "string"},
+        },
+        "$defs": {"Headers": {"type": "object", "propertyNames": {"type": "string"}}},
+    }
+
+    normalized = _normalize_schema(schema)
+
+    assert normalized["properties"]["webhook"] == {"type": "object", "additionalProperties": {}}
+    assert normalized["properties"]["propertyNames"] == {"type": "string"}
+    assert normalized["$defs"]["Headers"] == {"type": "object"}
+
+
+def test_drops_string_formats_openai_rejects_and_keeps_the_supported_ones() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "mediaUrl": {"anyOf": [{"type": "string", "format": "uri"}, {"type": "null"}]},
+            "when": {"type": "string", "format": "date-time"},
+            "format": {"type": "string"},
+        },
+    }
+
+    normalized = _normalize_schema(schema)
+
+    assert normalized["properties"]["mediaUrl"] == {"anyOf": [{"type": "string"}, {"type": "null"}]}
+    assert normalized["properties"]["when"] == {"type": "string", "format": "date-time"}
+    assert normalized["properties"]["format"] == {"type": "string"}
+
+
 def _has_allof(value: object) -> bool:
     if isinstance(value, dict):
         return "allOf" in value or any(_has_allof(item) for item in value.values())

@@ -31,7 +31,9 @@ and timeouts come back the same way, so the agent can explain or retry. Worker o
 model marked as untrusted data. One turn can start at most three continuing tasks, and a chain of
 continuing tasks is limited to three levels. ``[tasks] continue_turn_default = true`` makes
 continuing the default when the model leaves ``continue_turn`` unset; past the limits such a task
-falls back to fire and forget instead of failing. A rate-limit retry notice still goes straight to the
+falls back to fire and forget instead of failing. ``[tasks] continue_turn_mode = "always"`` goes
+further: the model's ``continue_turn`` is ignored and every task continues the turn, with the same
+fallback past the limits. The default, ``"auto"``, leaves the choice to the model. A rate-limit retry notice still goes straight to the
 user, and a continuing task that is cancelled does not report back. Use ``get_task`` to retrieve a
 result, ``list_tasks`` to see what is running, and ``cancel_task`` to stop one.
 
