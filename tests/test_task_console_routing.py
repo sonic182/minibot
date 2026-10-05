@@ -51,7 +51,7 @@ class _FakeProc:
 @pytest.mark.asyncio
 async def test_task_result_preserves_console_channel_for_outbound_routing() -> None:
     bus = EventBus()
-    manager = TaskManager(event_bus=bus, worker_timeout_seconds=1.0)
+    manager = TaskManager(event_bus=bus, worker_timeout_seconds=1.0, worker_target=lambda _pipe: None)
     console = ConsoleService(bus)
     await console.start()
 

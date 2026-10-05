@@ -17,7 +17,7 @@ from aiopipe import aioduplex
 from minibot.app.agent_policies import is_retargeted, resolve_delegation_target
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
-from minibot.app.tasks.worker import task_message_text, worker_entry
+from minibot.app.tasks.worker import task_message_text
 from minibot.app.token_limits_autoconfig import ensure_model_limits
 from minibot.app.tool_approval import request_tool_approval
 from minibot.config.schema import Settings
@@ -152,8 +152,11 @@ class TaskManager:
         approval_timeout_seconds: float = 90,
         channel_capabilities: Mapping[str, ChannelCapabilities] | None = None,
         history_store: MemoryBackend | None = None,
+        *,
+        worker_target: Callable[[Any], None],
     ) -> None:
         self._event_bus = event_bus
+        self._worker_target = worker_target
         self._history_store = history_store
         self._approval_timeout_seconds = approval_timeout_seconds
         self._channel_capabilities = dict(channel_capabilities or {})
@@ -322,7 +325,7 @@ class TaskManager:
     def _start_worker_process(self) -> tuple[Any, Process]:
         mainpipe, chpipe = aioduplex()
         with chpipe.detach() as detached_pipe:
-            proc = Process(target=worker_entry, args=(detached_pipe,), daemon=True)
+            proc = Process(target=self._worker_target, args=(detached_pipe,), daemon=True)
             proc.start()
         return mainpipe, proc
 

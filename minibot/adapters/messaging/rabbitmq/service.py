@@ -9,9 +9,9 @@ from typing import Any
 import aio_pika
 import aio_pika.abc
 
-from minibot.app.agent_policies import normalize_model_overrides
 from minibot.app.event_bus import EventBus
 from minibot.config.schema import RabbitMQConsumerConfig
+from minibot.core.agents import normalize_model_overrides
 from minibot.core.tasks import TaskLimits, TaskManager, TaskRepository, TaskRequest, TaskStatus
 
 

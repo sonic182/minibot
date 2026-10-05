@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 
 def resolve_sqlite_storage_path(sqlite_url: str) -> Path | None:
@@ -20,6 +20,23 @@ def ensure_parent_dir(path: Path) -> None:
     directory = path.parent
     if directory and not directory.exists():
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def build_engine(
+    url: str, *, echo: bool = False, pool_size: int | None = None
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    """Create the async engine and session factory for ``url``, making the SQLite parent directory first.
+
+    ``pool_size`` only applies to non-SQLite URLs.
+    """
+    storage_path = resolve_sqlite_storage_path(url)
+    if storage_path:
+        ensure_parent_dir(storage_path)
+    engine_kwargs: dict[str, Any] = {"future": True, "echo": echo}
+    if pool_size is not None and not make_url(url).drivername.startswith("sqlite"):
+        engine_kwargs["pool_size"] = pool_size
+    engine = create_async_engine(url, **engine_kwargs)
+    return engine, async_sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def like_pattern(value: str) -> str:

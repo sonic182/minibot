@@ -8,11 +8,11 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, delete, func, select, text, update
-from sqlalchemy.engine import Connection, make_url
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, lease_rows, like_pattern, resolve_sqlite_storage_path
+from minibot.adapters.sqlalchemy_utils import build_engine, lease_rows, like_pattern
 from minibot.config.schema import ScheduledPromptsConfig
 from minibot.core.jobs import (
     PromptRecurrence,
@@ -64,19 +64,8 @@ class ScheduledPromptModel(Base):
 class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
     def __init__(self, config: ScheduledPromptsConfig) -> None:
         self._config = config
-        self._database_url = make_url(config.sqlite_url)
-        storage_path = resolve_sqlite_storage_path(config.sqlite_url)
-        if storage_path:
-            ensure_parent_dir(storage_path)
-
-        engine_kwargs: dict[str, Any] = {"future": True, "echo": config.echo}
-        if not self._database_url.drivername.startswith("sqlite"):
-            engine_kwargs["pool_size"] = config.pool_size
-
-        self._engine: AsyncEngine = create_async_engine(config.sqlite_url, **engine_kwargs)
-        self._session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-            bind=self._engine,
-            expire_on_commit=False,
+        self._engine, self._session_factory = build_engine(
+            config.sqlite_url, echo=config.echo, pool_size=config.pool_size
         )
         self._initialized = False
         self._init_lock = asyncio.Lock()

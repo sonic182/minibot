@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
+from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
+from minibot.adapters.tasks.retention import TaskRetentionService
+from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
+from minibot.adapters.tasks.worker_process import worker_entry
+from minibot.app.agent_definitions_loader import load_active_agent_specs
+from minibot.app.agent_registry import AgentRegistry
+from minibot.app.extensions import ExtensionContext
+from minibot.app.llm_client_factory import available_providers
+from minibot.app.tasks.manager import TaskManager, resolve_delegation_budget
+from minibot.core.memory import MemoryBackend
+from minibot.core.tasks import TaskProducer
+from minibot.llm.tools.tasks import TaskTools
+
+
+def wire_task_runtime(
+    mb: ExtensionContext,
+    make_producer: Callable[[SQLiteTaskStore], TaskProducer],
+    *,
+    history_store: MemoryBackend | None = None,
+) -> tuple[SQLiteTaskStore, TaskManager]:
+    settings = mb.settings
+    store = SQLiteTaskStore(settings.tasks.sqlite)
+    agent_registry = mb.agent_registry or AgentRegistry(
+        load_active_agent_specs(settings, reader=LocalAgentDefinitionReader())
+    )
+    manager = TaskManager(
+        mb.event_bus,
+        settings.tasks.worker_timeout_seconds,
+        store,
+        settings.tasks.sqlite.lease_timeout_seconds,
+        secrets=mb.vault.as_mapping() if mb.vault else None,
+        budget_for=lambda name, ov: resolve_delegation_budget(agent_registry, settings, name, ov),
+        approval_timeout_seconds=settings.tools.approval.timeout_seconds,
+        channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
+        history_store=history_store,
+        worker_target=worker_entry,
+    )
+    mb.add_service(TaskRetentionService(store, settings.tasks.sqlite.done_retention_seconds))
+    mb.add_tool(
+        TaskTools(
+            producer=make_producer(store),
+            task_manager=manager,
+            task_repository=store,
+            config=settings.tasks,
+            agent_registry=agent_registry,
+            specialists_enabled=settings.orchestration.specialists.enabled,
+            providers=available_providers(settings),
+        ).bindings()
+    )
+    return store, manager
