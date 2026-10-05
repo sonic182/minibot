@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
+from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
 from minibot.adapters.tasks.retention import TaskRetentionService
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskProducer, SQLiteTaskStore
@@ -10,7 +11,12 @@ from minibot.app.extensions import ExtensionContext
 from minibot.app.llm_client_factory import available_providers
 from minibot.app.task_consumer_service import SQLiteTaskConsumerService
 from minibot.app.tasks.manager import TaskManager, resolve_delegation_budget
+from minibot.config.schema import Settings
 from minibot.llm.tools.tasks import TaskTools
+
+
+def build_task_history_store(settings: Settings) -> SQLAlchemyMemoryBackend | None:
+    return SQLAlchemyMemoryBackend(settings.memory) if settings.tasks.history else None
 
 
 class _SQLiteTasksService:
@@ -43,6 +49,7 @@ def register(mb: ExtensionContext) -> None:
         budget_for=lambda name, ov: resolve_delegation_budget(agent_registry, settings, name, ov),
         approval_timeout_seconds=settings.tools.approval.timeout_seconds,
         channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
+        history_store=build_task_history_store(settings),
     )
     producer = SQLiteTaskProducer(store)
     consumer = SQLiteTaskConsumerService(

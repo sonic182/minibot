@@ -58,6 +58,8 @@ class TaskRequest:
     owner_id: str = "primary"
     limits: TaskLimits = field(default_factory=lambda: TaskLimits(timeout_seconds=1800))
     continuation_depth: int | None = None
+    fresh: bool = False
+    history_session: str | None = None
 
 
 @dataclass(slots=True)

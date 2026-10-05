@@ -14,7 +14,7 @@ class _StubTurnService:
         self.handle_calls: list[MessageEvent] = []
         self.repair_calls: list[dict[str, Any]] = []
 
-    async def handle(self, event: MessageEvent) -> ChannelResponse:
+    async def handle(self, event: MessageEvent, turn_input: object = None) -> ChannelResponse:
         self.handle_calls.append(event)
         return ChannelResponse(
             channel="telegram",

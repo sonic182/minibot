@@ -15,6 +15,14 @@ _SUMMARY_SYSTEM_PROMPT = (
     "leave out is lost. Do not include preamble."
 )
 _SUMMARY_USER_PREFIX = "Compact this working transcript:\n\n"
+_HISTORY_SUMMARY_SYSTEM_PROMPT = (
+    "You are compacting the history of earlier tasks a worker agent completed for the same requester. "
+    "Return a concise but complete summary that keeps every fact, decision, identifier, name and result a "
+    "later task may rely on. The worker sees only your summary of these tasks, so anything you leave out "
+    "is lost. Do not include preamble."
+)
+_HISTORY_SUMMARY_USER_PREFIX = "Compact this task history:\n\n"
+TASK_PROMPT_METADATA_KEY = "task_prompt"
 
 
 @dataclass(frozen=True)
@@ -71,6 +79,27 @@ class RuntimeCompactor:
         if outcome.performed and outcome.summary:
             _rewrite_state(state, outcome.summary)
         return outcome
+
+    async def summarize_history(self, messages: list[AgentMessage], prompt_cache_key: str | None) -> str | None:
+        transcript = "\n".join(f"[{message.role}] {text}" for message in messages if (text := _message_text(message)))
+        if not transcript:
+            return None
+        try:
+            generation = await self._llm_client.generate(
+                [],
+                f"{_HISTORY_SUMMARY_USER_PREFIX}{transcript}",
+                user_content=None,
+                tools=[],
+                tool_context=None,
+                prompt_cache_key=f"{prompt_cache_key}:history" if prompt_cache_key else None,
+                previous_response_id=None,
+                system_prompt_override=_HISTORY_SUMMARY_SYSTEM_PROMPT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("task history compaction failed", extra={"error": str(exc)}, exc_info=True)
+            return None
+        summary = generation.payload if isinstance(generation.payload, str) else str(generation.payload or "")
+        return summary.strip() or None
 
     def _can_compact_natively(self, previous_response_id: str | None) -> bool:
         return (
@@ -140,29 +169,33 @@ def threshold_from_context_limit(context_limit: int | None, ratio: float) -> int
 
 def _rewrite_state(state: AgentState, summary: str) -> None:
     """Keep the system prompt and the original task, replace everything else with the summary."""
-    head: list[AgentMessage] = []
-    for message in state.messages:
-        if message.role == "system":
-            head.append(message)
-            continue
-        if message.role == "user":
-            head.append(message)
-            break
+    head = [message for message in state.messages if message.role == "system"]
+    task = _task_message(state)
+    if task is not None:
+        head.append(task)
     state.messages[:] = [
         *head,
         AgentMessage(role="assistant", content=[MessagePart(type="text", text=summary)]),
     ]
 
 
+def _task_message(state: AgentState) -> AgentMessage | None:
+    marked = next((message for message in state.messages if message.metadata.get(TASK_PROMPT_METADATA_KEY)), None)
+    return marked or next((message for message in state.messages if message.role == "user"), None)
+
+
 def _transcript(state: AgentState) -> str:
+    task = _task_message(state)
     lines: list[str] = []
     for message in state.messages:
-        if message.role not in ("assistant", "tool") or message.name == "pre_response":
+        if message is task or message.name == "pre_response":
+            continue
+        if message.role not in ("assistant", "tool", "user"):
             continue
         text = _message_text(message)
         if not text:
             continue
-        label = "assistant" if message.role == "assistant" else f"tool:{message.name or 'unknown'}"
+        label = f"tool:{message.name or 'unknown'}" if message.role == "tool" else message.role
         lines.append(f"[{label}] {text[:_TRANSCRIPT_CHARS_PER_MESSAGE]}")
     return "\n".join(lines)
 

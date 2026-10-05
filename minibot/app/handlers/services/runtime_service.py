@@ -9,10 +9,30 @@ from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.handlers.services.session_state_service import SessionStateService
 from minibot.app.response_parser import extract_answer, plain_render, resolve_reply_render
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
-from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, MessageRole
+from minibot.core.agent_runtime import (
+    STEERING_METADATA_KEY,
+    AgentMessage,
+    AgentState,
+    MessagePart,
+    MessageRole,
+    TurnInput,
+)
 from minibot.core.channels import RenderableResponse
 from minibot.core.tools import ToolContext
 from minibot.llm.provider_factory import LLMClient
+
+
+def user_message(
+    text: str,
+    content: str | list[dict[str, Any]] | None,
+    metadata: dict[str, Any] | None = None,
+) -> AgentMessage:
+    meta = dict(metadata or {})
+    if content is None:
+        return AgentMessage(role="user", content=[MessagePart(type="text", text=text)], metadata=meta)
+    if isinstance(content, str):
+        return AgentMessage(role="user", content=[MessagePart(type="text", text=content)], metadata=meta)
+    return AgentMessage(role="user", content=[MessagePart(type="text", text=text)], raw_content=content, metadata=meta)
 
 
 def count_tool_messages(state: AgentState) -> int:
@@ -59,6 +79,7 @@ class RuntimeOrchestrationService:
         previous_response_id: str | None,
         chat_id: int | None,
         channel: str | None,
+        turn_input: TurnInput | None = None,
     ) -> AgentRuntimeResult:
         tokens_used = 0
         response_updates: list[RenderableResponse] = []
@@ -74,6 +95,7 @@ class RuntimeOrchestrationService:
             tool_context=tool_context,
             prompt_cache_key=prompt_cache_key,
             initial_previous_response_id=previous_response_id,
+            turn_input=turn_input,
         )
         tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
         self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
@@ -124,11 +146,15 @@ class RuntimeOrchestrationService:
                 user_content=model_user_content,
                 system_prompt=retry_system_prompt,
             )
+            retry_state.messages.extend(
+                message for message in generation.state.messages if message.metadata.get(STEERING_METADATA_KEY)
+            )
             generation = await self._runtime.run(
                 state=retry_state,
                 tool_context=tool_context,
                 prompt_cache_key=prompt_cache_key,
                 initial_previous_response_id=None,
+                turn_input=turn_input,
             )
             tokens_used += self._session_state.track_tokens(session_id, getattr(generation, "total_tokens", None))
             self._session_state.set_latest_input_tokens(session_id, generation.input_tokens)
@@ -184,16 +210,5 @@ class RuntimeOrchestrationService:
                 )
             )
 
-        if user_content is None:
-            messages.append(AgentMessage(role="user", content=[MessagePart(type="text", text=user_text)]))
-        elif isinstance(user_content, str):
-            messages.append(AgentMessage(role="user", content=[MessagePart(type="text", text=user_content)]))
-        else:
-            messages.append(
-                AgentMessage(
-                    role="user",
-                    content=[MessagePart(type="text", text=user_text)],
-                    raw_content=user_content,
-                )
-            )
+        messages.append(user_message(user_text, user_content))
         return AgentState(messages=messages)

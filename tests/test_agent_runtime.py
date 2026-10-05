@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from llm_async.models import Tool, ToolCall
 
 from minibot.app.agent_runtime import _CONTINUE_AFTER_COMPACTION, AgentRuntime
 from minibot.core.agent_runtime import (
@@ -16,7 +18,8 @@ from minibot.core.agent_runtime import (
 )
 from minibot.core.tasks import TaskStopReason
 from minibot.llm.provider_factory import LLMClient, LLMCompletionStep, ToolExecutionRecord
-from minibot.llm.tools.base import ToolContext
+from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
+from minibot.llm.tools.base import ToolBinding, ToolContext
 from tests.fixtures.llm.fakes import FakeMessage as _FakeMessage
 from tests.fixtures.llm.fakes import FakeToolCall as _FakeToolCall
 
@@ -575,3 +578,116 @@ async def test_runtime_without_a_compactor_is_unchanged() -> None:
 
     assert result.payload == "done"
     assert llm_client.complete_once_calls == 2
+
+
+class _FakeTurnInput:
+    def __init__(self) -> None:
+        self.pending: list[str] = []
+
+    def has_pending(self) -> bool:
+        return bool(self.pending)
+
+    async def drain(self) -> list[AgentMessage]:
+        texts, self.pending = self.pending, []
+        return [AgentMessage(role="user", content=[MessagePart(type="text", text=text)]) for text in texts]
+
+
+def _texts(state: AgentState) -> list[tuple[str, str | None]]:
+    return [(message.role, message.content[0].text if message.content else None) for message in state.messages]
+
+
+@pytest.mark.asyncio
+async def test_runtime_folds_a_message_sent_during_a_tool_call_into_the_next_model_call() -> None:
+    turn_input = _FakeTurnInput()
+
+    class _Client(_StubRuntimeLLMClient):
+        async def execute_tool_calls_for_runtime(self, *args: Any, **kwargs: Any) -> list[ToolExecutionRecord]:
+            assert kwargs["should_interrupt"] == turn_input.has_pending
+            turn_input.pending.append("also Barcelona")
+            return await super().execute_tool_calls_for_runtime(*args, **kwargs)
+
+    llm_client = _Client(
+        steps=[_tool_step(_http_tool_call(), "resp-1"), _final_step("resp-2", content="Madrid and Barcelona")],
+        executions=[[_http_record(content="ok")]],
+    )
+
+    result = await _runtime(llm_client).run(
+        state=_ping_state(), tool_context=ToolContext(owner_id="1"), turn_input=turn_input
+    )
+
+    assert result.payload == "Madrid and Barcelona"
+    assert [role for role, _ in _texts(result.state)] == ["user", "assistant", "tool", "user", "assistant"]
+    assert _texts(result.state)[3] == ("user", "also Barcelona")
+
+
+@pytest.mark.asyncio
+async def test_runtime_answers_again_when_a_message_arrives_with_the_final_answer() -> None:
+    turn_input = _FakeTurnInput()
+
+    class _Client(_StubRuntimeLLMClient):
+        async def complete_once(self, **kwargs: Any) -> LLMCompletionStep:
+            if self.complete_once_calls == 0:
+                turn_input.pending.append("only Madrid")
+            return await super().complete_once(**kwargs)
+
+    llm_client = _Client(
+        steps=[_final_step("resp-1", content="draft"), _final_step("resp-2", content="Madrid only")],
+        executions=[],
+    )
+
+    result = await _runtime(llm_client).run(
+        state=_ping_state(), tool_context=ToolContext(owner_id="1"), turn_input=turn_input
+    )
+
+    assert result.payload == "Madrid only"
+    assert _texts(result.state)[1:] == [("assistant", "draft"), ("user", "only Madrid"), ("assistant", "Madrid only")]
+
+
+def _search_call(call_id: str, city: str) -> ToolCall:
+    arguments = f'{{"city": "{city}"}}'
+    return ToolCall(id=call_id, type="function", name="search", function={"name": "search", "arguments": arguments})
+
+
+@pytest.mark.asyncio
+async def test_remaining_tool_calls_are_skipped_once_a_new_message_is_pending() -> None:
+    pending: list[str] = []
+    ran: list[str] = []
+
+    async def handler(arguments: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+        ran.append(arguments["city"])
+        pending.append("stop searching")
+        return {"ok": True}
+
+    records = await execute_tool_calls_for_runtime(
+        [_search_call("call_1", "Madrid"), _search_call("call_2", "Paris")],
+        [ToolBinding(tool=Tool(name="search", description="d", parameters={"type": "object"}), handler=handler)],
+        ToolContext(owner_id="primary"),
+        responses_mode=False,
+        logger=logging.getLogger("test.steering"),
+        should_interrupt=lambda: bool(pending),
+    )
+
+    assert ran == ["Madrid"]
+    assert [record.call_id for record in records] == ["call_1", "call_2"]
+    assert records[1].result.content["skipped"] is True
+    assert records[1].message_payload["tool_call_id"] == "call_2"
+
+
+@pytest.mark.asyncio
+async def test_runtime_keeps_the_final_answer_when_no_step_is_left_for_a_late_message() -> None:
+    turn_input = _FakeTurnInput()
+
+    class _Client(_StubRuntimeLLMClient):
+        async def complete_once(self, **kwargs: Any) -> LLMCompletionStep:
+            turn_input.pending.append("only Madrid")
+            return await super().complete_once(**kwargs)
+
+    llm_client = _Client(steps=[_final_step("resp-1", content="answer")], executions=[])
+
+    result = await _runtime(llm_client, limits=RuntimeLimits(max_steps=1)).run(
+        state=_ping_state(), tool_context=ToolContext(owner_id="1"), turn_input=turn_input
+    )
+
+    assert result.payload == "answer"
+    assert result.stop_reason == TaskStopReason.COMPLETED
+    assert turn_input.pending == ["only Madrid"]

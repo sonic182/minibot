@@ -5,10 +5,10 @@ from typing import Any
 
 import pytest
 
-from minibot.adapters.decisions import OpenRouterDecisionClient
 from minibot.app.turn_decision import TURN_QUESTIONS
 from minibot.config.schema import DecisionConfig
 from minibot.core.decisions import DecisionHTTPError
+from minibot.llm.providers.decisions import DecisionsProvider
 
 MERCURY_RESPONSE = {
     "model": "inception/mercury-decide-20260930",
@@ -53,20 +53,23 @@ class _FakeHTTP:
         return self._response
 
 
-def _client(response: _FakeResponse) -> tuple[OpenRouterDecisionClient, _FakeHTTP]:
-    client = OpenRouterDecisionClient(DecisionConfig(enabled=True, api_key="test-key"))
+def _client(response: _FakeResponse) -> tuple[DecisionsProvider, _FakeHTTP]:
+    config = DecisionConfig(enabled=True, api_key="test-key")
+    client = DecisionsProvider(
+        config.api_key, config.base_url, model=config.model, timeout_seconds=config.timeout_seconds
+    )
     http = _FakeHTTP(response)
-    client._client = http  # type: ignore[assignment]
+    client.client = http  # type: ignore[assignment]
     return client, http
 
 
 @pytest.mark.asyncio
-async def test_openrouter_decision_client_sends_typed_questions_and_parses_answers() -> None:
+async def test_decisions_provider_sends_typed_questions_and_parses_answers() -> None:
     client, http = _client(_FakeResponse(200, MERCURY_RESPONSE))
 
     result = await client.ask({"user_message": "weather in Madrid?"}, TURN_QUESTIONS)
 
-    sent = json.loads(http.calls[0]["data"])
+    sent = http.calls[0]["json"]
     assert http.calls[0]["url"] == "https://openrouter.ai/api/alpha/decisions"
     assert http.calls[0]["headers"]["Authorization"] == "Bearer test-key"
     assert sent["model"] == "~typesafe/jev-latest"
@@ -79,7 +82,7 @@ async def test_openrouter_decision_client_sends_typed_questions_and_parses_answe
 
 
 @pytest.mark.asyncio
-async def test_openrouter_decision_client_raises_typed_error_on_http_failure() -> None:
+async def test_decisions_provider_raises_typed_error_on_http_failure() -> None:
     client, _ = _client(_FakeResponse(400, {"error": {"code": 400, "message": "bad"}}))
 
     with pytest.raises(DecisionHTTPError) as excinfo:

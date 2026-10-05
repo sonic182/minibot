@@ -7,6 +7,7 @@ import pytest
 
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.llm.services.runtime_compaction import (
+    TASK_PROMPT_METADATA_KEY,
     RuntimeCompactor,
     build_compactor,
     threshold_from_context_limit,
@@ -130,6 +131,32 @@ async def test_a_failing_compaction_leaves_the_run_untouched() -> None:
 
     assert outcome.performed is False
     assert state.messages == before
+
+
+@pytest.mark.asyncio
+async def test_compaction_keeps_the_current_task_after_earlier_task_history() -> None:
+    client = _ClientStub(native=False)
+    compactor = RuntimeCompactor(llm_client=client, threshold_tokens=10, logger=LOGGER)
+    state = AgentState(
+        messages=[
+            AgentMessage(role="system", content=[MessagePart(type="text", text="system prompt")]),
+            AgentMessage(role="user", content=[MessagePart(type="text", text="an earlier task")]),
+            AgentMessage(role="assistant", content=[MessagePart(type="text", text="its answer")]),
+            AgentMessage(
+                role="user",
+                content=[MessagePart(type="text", text="the current task")],
+                metadata={TASK_PROMPT_METADATA_KEY: True},
+            ),
+            AgentMessage(role="tool", name="grep", content=[MessagePart(type="text", text="a big tool result")]),
+        ]
+    )
+
+    await compactor.compact(state, previous_response_id=None, prompt_cache_key="k")
+
+    assert "an earlier task" in client.generate_calls[0]
+    assert "the current task" not in client.generate_calls[0]
+    assert [message.role for message in state.messages] == ["system", "user", "assistant"]
+    assert state.messages[1].content[0].text == "the current task"
 
 
 def test_build_compactor_needs_a_threshold() -> None:

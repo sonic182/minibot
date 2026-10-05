@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from minibot.adapters.config.schema import SqliteTaskQueueConfig, TasksConfig
 
@@ -29,3 +30,8 @@ def test_rabbitmq_backend_ignores_the_lease_guard() -> None:
     # The lease only exists for the sqlite queue, so a long worker timeout must not be rejected here.
     config = TasksConfig(backend="rabbitmq", worker_timeout_seconds=600)
     assert config.worker_timeout_seconds == 600
+
+
+def test_task_history_requires_the_sqlite_backend() -> None:
+    with pytest.raises(ValidationError):
+        TasksConfig(backend="rabbitmq", history=True)

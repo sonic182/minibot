@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,7 +12,7 @@ from llm_async.models import Tool
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
-from minibot.llm.errors import ProviderHTTPError
+from minibot.llm.errors import ProviderHTTPError, ProviderResponseError
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.services.tool_executor import (
     canonical_tool_name,
@@ -235,6 +236,93 @@ async def test_complete_once_wraps_bare_http_error_from_provider(monkeypatch: py
 
     assert exc_info.value.status_code == 402
     assert exc_info.value.quota_detail == "out of credits"
+
+
+def _scripted_provider(responses: list[_FakeResponse]) -> type[_FakeProvider]:
+    class _ScriptedProvider(_FakeProvider):
+        async def acomplete(self, **kwargs: Any) -> _FakeResponse:
+            self.calls.append(kwargs)
+            return responses[min(len(self.calls), len(responses)) - 1]
+
+    return _ScriptedProvider
+
+
+def _failed_response(code: str) -> _FakeResponse:
+    return _FakeResponse(
+        main_response=_FakeMessage(content="", tool_calls=None),
+        original={"id": "resp-failed", "status": "failed", "error": {"code": code, "message": "boom"}, "output": []},
+    )
+
+
+def _retry_client(monkeypatch: pytest.MonkeyPatch, responses: list[_FakeResponse]) -> LLMClient:
+    from minibot.llm.services import provider_registry
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openai_responses", _scripted_provider(responses))
+    return LLMClient(
+        LLMMConfig(
+            provider="openai_responses", api_key="secret", model="x", retry_attempts=2, retry_delay_seconds=0.01
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_complete_once_retries_failed_response_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    ok = _FakeResponse(main_response=_FakeMessage(content="ok"), original={"id": "resp-ok", "status": "completed"})
+    client = _retry_client(monkeypatch, [_failed_response("server_error"), ok])
+
+    result = await client.complete_once(messages=[{"role": "user", "content": "hello"}])
+
+    assert result.response_id == "resp-ok"
+    assert len(client._provider.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_complete_once_does_not_retry_non_retryable_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _retry_client(monkeypatch, [_failed_response("context_length_exceeded")])
+
+    with pytest.raises(ProviderResponseError) as exc_info:
+        await client.complete_once(messages=[{"role": "user", "content": "hello"}])
+
+    assert exc_info.value.code == "context_length_exceeded"
+    assert len(client._provider.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_complete_once_returns_the_empty_step_after_persistent_empty_responses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty = _FakeResponse(main_response=_FakeMessage(content=""), original={"id": "resp-empty", "output": []})
+    client = _retry_client(monkeypatch, [empty])
+
+    result = await client.complete_once(messages=[{"role": "user", "content": "hello"}])
+
+    assert not result.message.content
+    assert len(client._provider.calls) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        _FakeResponse(
+            main_response=_FakeMessage(content="", tool_calls=None),
+            original={"status": "failed", "error": {"type": "invalid_request_error", "code": "bad_param"}},
+        ),
+        _FakeResponse(
+            main_response=_FakeMessage(content=""),
+            original={"id": "chat-1", "choices": [{"finish_reason": "length"}]},
+        ),
+    ],
+)
+async def test_complete_once_does_not_retry_invalid_requests_or_length_cuts(
+    monkeypatch: pytest.MonkeyPatch, response: _FakeResponse
+) -> None:
+    client = _retry_client(monkeypatch, [response])
+
+    with contextlib.suppress(ProviderResponseError):
+        await client.complete_once(messages=[{"role": "user", "content": "hello"}])
+
+    assert len(client._provider.calls) == 1
 
 
 @pytest.mark.asyncio

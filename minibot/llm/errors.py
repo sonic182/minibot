@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
+from typing import Any
 
 _HTTP_ERROR_PATTERN = re.compile(r"^HTTP (\d{3}): (.*)$", re.DOTALL)
 _QUOTA_STATUSES = {402, 429}
@@ -55,3 +57,61 @@ def wrap_provider_exception(exc: Exception) -> Exception:
     if not match:
         return exc
     return ProviderHTTPError(int(match.group(1)), match.group(2))
+
+
+_NON_RETRYABLE_RESPONSE_CODES = {"context_length_exceeded", "invalid_prompt"}
+_NON_RETRYABLE_RESPONSE_TYPES = {"invalid_request_error"}
+
+
+class ProviderResponseError(Exception):
+    """Raised when the provider accepted the request but its response reports a failure.
+
+    Covers Responses API streams that end in ``response.failed`` or an ``error`` event. Fields come
+    from the provider's structured ``status`` and ``error`` payload.
+    """
+
+    def __init__(
+        self,
+        *,
+        status: str | None,
+        code: str | None = None,
+        error_type: str | None = None,
+        message: str | None = None,
+        response_id: str | None = None,
+    ) -> None:
+        self.status = status
+        self.code = code
+        self.error_type = error_type
+        self.message = message
+        self.response_id = response_id
+        super().__init__(f"provider response {status or 'unknown'}: {code or error_type or message or 'no detail'}")
+
+    @property
+    def retryable(self) -> bool:
+        return self.code not in _NON_RETRYABLE_RESPONSE_CODES and self.error_type not in _NON_RETRYABLE_RESPONSE_TYPES
+
+    @classmethod
+    def from_payload(cls, original: Mapping[str, Any]) -> ProviderResponseError:
+        error = original.get("error")
+        error = error if isinstance(error, Mapping) else {}
+        return cls(
+            status=_opt_str(original.get("status")),
+            code=_opt_str(error.get("code")),
+            error_type=_opt_str(error.get("type")),
+            message=_opt_str(error.get("message")),
+            response_id=_opt_str(original.get("id")),
+        )
+
+
+class EmptyProviderResponseError(ProviderResponseError):
+    """Raised when the provider finished without any text or tool calls."""
+
+    response: Any = None
+
+    @property
+    def retryable(self) -> bool:
+        return True
+
+
+def _opt_str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None

@@ -12,6 +12,7 @@ from minibot.app.llm_client_factory import ProviderOption
 from minibot.core.agents import AgentSpec
 from minibot.core.tasks import AmbiguousTaskIdError, TaskRecord, TaskRequest, TaskResult, TaskStatus
 from minibot.llm.tools.base import ToolContext
+from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.tasks import TaskTools
 from minibot.shared.errors import ToolInputError
 
@@ -525,3 +526,71 @@ async def test_spawn_task_rejects_provider_without_configured_credentials() -> N
         )
 
     assert producer.enqueued == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("history", [False, True])
+async def test_spawn_task_describes_and_accepts_fresh_only_with_task_history(history: bool) -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(cast(Any, producer), cast(Any, _TaskManagerStub()), config=TasksConfig(history=history))
+    spawn = {binding.tool.name: binding for binding in tools.bindings()}["spawn_task"]
+
+    await spawn.handler(
+        {"prompt": "Send it", "agent_name": "mailer", "fresh": True},
+        ToolContext(channel="console", chat_id=1, user_id=2),
+    )
+
+    expected = load_tool_description("spawn_task_history" if history else "spawn_task")
+    assert spawn.tool.description == expected
+    properties = spawn.tool.parameters["properties"]
+    assert ("fresh" in properties, "session" in properties) == (history, history)
+    assert producer.enqueued[0].fresh is history
+    assert producer.enqueued[0].history_session == ("task:console:1:mailer" if history else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("agent_name", "session", "expected"),
+    [
+        ("mailer", "inmo-a", "task:console:1:mailer:inmo-a"),
+        (None, "inmo-a", "task:console:1:task_worker:inmo-a"),
+        (None, None, None),
+    ],
+)
+async def test_spawn_task_history_session_combines_agent_and_session(
+    agent_name: str | None, session: str | None, expected: str | None
+) -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(cast(Any, producer), cast(Any, _TaskManagerStub()), config=TasksConfig(history=True))
+    spawn = {binding.tool.name: binding for binding in tools.bindings()}["spawn_task"]
+
+    await spawn.handler(
+        {"prompt": "Send it", "agent_name": agent_name, "session": session, "fresh": True},
+        ToolContext(channel="console", chat_id=1, user_id=2),
+    )
+
+    assert producer.enqueued[0].history_session == expected
+    assert producer.enqueued[0].fresh is (expected is not None)
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_rejects_an_invalid_session_name() -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(cast(Any, producer), cast(Any, _TaskManagerStub()), config=TasksConfig(history=True))
+    spawn = {binding.tool.name: binding for binding in tools.bindings()}["spawn_task"]
+
+    with pytest.raises(ValueError, match="session"):
+        await spawn.handler({"prompt": "Send it", "session": "a b/c"}, ToolContext(channel="console", chat_id=1))
+
+    assert producer.enqueued == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_task_without_a_chat_gets_no_history_session() -> None:
+    producer = _ProducerStub()
+    tools = TaskTools(cast(Any, producer), cast(Any, _TaskManagerStub()), config=TasksConfig(history=True))
+    spawn = {binding.tool.name: binding for binding in tools.bindings()}["spawn_task"]
+
+    await spawn.handler({"prompt": "Send it", "agent_name": "mailer"}, ToolContext(channel="console", user_id=2))
+
+    assert producer.enqueued[0].history_session is None

@@ -122,7 +122,12 @@ Known gaps, deliberately left:
   bodies are cut at the limit.
 - `bash` spill files hold at most `max_output_bytes`, since the cap is now applied while reading.
 
-## [ ] Phase 3b — Mid-turn user messages (steering) and `/stop` (priority 2)
+## [x] Phase 3b — Mid-turn user messages (steering) and `/stop` (priority 2)
+
+Done for the main agent: the dispatcher hands same-chat messages to the running turn (`app/turn_inbox.py`),
+the runtime folds them in before each model call, skips the remaining tool calls of a response, and re-asks
+the model when one arrives with the final answer; `/stop` exists on Telegram only. Still deferred: steering a
+worker or specialist, and `/stop` on the console and web channels.
 
 Lands after Phase 3 (`reload_agents` and the agent management skill). Today a message sent while the
 agent is working either waits for the turn to end or starts a competing turn. On Telegram the owner

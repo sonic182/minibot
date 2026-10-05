@@ -14,6 +14,7 @@ from minibot.core.agent_runtime import (
     AppendMessageDirective,
     MessagePart,
     RuntimeLimits,
+    TurnInput,
 )
 from minibot.core.events import ReasoningEvent
 from minibot.core.tasks import TaskStopReason
@@ -133,6 +134,7 @@ class AgentRuntime:
         prompt_cache_key: str | None = None,
         initial_previous_response_id: str | None = None,
         progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        turn_input: TurnInput | None = None,
     ) -> RuntimeResult:
         tool_calls_count = 0
         step = 0
@@ -207,6 +209,17 @@ class AgentRuntime:
                     # Either way, wait for a fresh measurement before considering it again.
                     input_tokens = None
                     output_tokens = None
+
+                if turn_input is not None:
+                    steering = await turn_input.drain()
+                    if steering:
+                        self._log_steering(step, len(steering))
+                        state.messages.extend(steering)
+                        if responses_followup_messages is not None:
+                            responses_followup_messages = [
+                                *responses_followup_messages,
+                                *self._message_renderer.render_messages(AgentState(messages=steering)),
+                            ]
 
                 call_messages = self._message_renderer.render_messages(state)
                 if (
@@ -325,6 +338,21 @@ class AgentRuntime:
                 if not tool_calls:
                     assistant_message = self._message_renderer.from_provider_assistant_message(completion.message)
                     state.messages.append(assistant_message)
+                    if (
+                        turn_input is not None
+                        and turn_input.has_pending()
+                        and (self._limits.max_steps is None or step + 1 < self._limits.max_steps)
+                    ):
+                        steering = await turn_input.drain()
+                        if steering:
+                            self._log_steering(step, len(steering))
+                            state.messages.extend(steering)
+                            if use_responses_followup:
+                                responses_followup_messages = self._message_renderer.render_messages(
+                                    AgentState(messages=steering)
+                                )
+                            step += 1
+                            continue
                     self._logger.debug(
                         "agent runtime step returned final assistant message",
                         extra={"step": step, "response_id": completion.response_id},
@@ -369,6 +397,7 @@ class AgentRuntime:
                     self._tools,
                     tool_context,
                     responses_mode=self._llm_client.is_responses_provider(),
+                    should_interrupt=turn_input.has_pending if turn_input is not None else None,
                 )
                 if progress_callback is not None:
                     await progress_callback(
@@ -473,6 +502,9 @@ class AgentRuntime:
                         stop_reason=TaskStopReason.REPEATED_ITERATION,
                     )
                 step += 1
+
+    def _log_steering(self, step: int, count: int) -> None:
+        self._logger.info("agent runtime folded new user messages into the turn", extra={"step": step, "count": count})
 
     @staticmethod
     def _is_repeated_failure_candidate(content: Any) -> bool:

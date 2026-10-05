@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 PartType = Literal["text", "image", "file", "json"]
 MessageRole = Literal["system", "user", "assistant", "tool"]
@@ -60,6 +60,17 @@ class AgentMessage:
 class AgentState:
     messages: list[AgentMessage] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
+
+
+STEERING_METADATA_KEY = "steering"
+
+
+class TurnInput(Protocol):
+    """User messages that arrive while a turn is running, folded into it between steps."""
+
+    def has_pending(self) -> bool: ...
+
+    async def drain(self) -> list[AgentMessage]: ...
 
 
 @dataclass(frozen=True)

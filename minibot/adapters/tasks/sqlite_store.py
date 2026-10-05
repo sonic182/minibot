@@ -6,10 +6,24 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, Text, and_, delete, or_, select, text, update
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    and_,
+    delete,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import Mapped, declarative_base, mapped_column
+from sqlalchemy.orm import Mapped, aliased, declarative_base, mapped_column
 
 from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
 from minibot.config.schema import SqliteTaskQueueConfig
@@ -42,6 +56,8 @@ class TaskModel(TaskBase):
     context: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     model_overrides: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     continuation_depth: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fresh: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    history_session: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
     lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -110,6 +126,8 @@ class SQLiteTaskStore:
             "max_tool_calls": "INTEGER",
             "model_overrides": "JSON NOT NULL DEFAULT '{}'",
             "continuation_depth": "INTEGER",
+            "fresh": "BOOLEAN NOT NULL DEFAULT 0",
+            "history_session": "VARCHAR(255)",
             "progress": "JSON NOT NULL DEFAULT '{}'",
             "result_text": "TEXT",
             "result_attachments": "JSON NOT NULL DEFAULT '[]'",
@@ -123,6 +141,7 @@ class SQLiteTaskStore:
                 connection.execute(text(f"ALTER TABLE tasks ADD COLUMN {name} {definition}"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_owner_id ON tasks (owner_id)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_lease_token ON tasks (lease_token)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_history_session ON tasks (history_session)"))
 
     async def create(self, task: TaskRequest) -> None:
         async with self._session_factory() as session:
@@ -146,15 +165,20 @@ class SQLiteTaskStore:
                     or_(TaskModel.lease_expires_at.is_(None), TaskModel.lease_expires_at <= now),
                 ),
             )
-            candidates = list(
-                (
-                    await session.execute(
-                        select(TaskModel).where(claimable).order_by(TaskModel.created_at).limit(limit * 4)
-                    )
-                )
-                .scalars()
-                .all()
+            busy = aliased(TaskModel)
+            session_free = or_(
+                TaskModel.history_session.is_(None),
+                ~(
+                    select(busy.id)
+                    .where(busy.history_session == TaskModel.history_session)
+                    .where(busy.id != TaskModel.id)
+                    .where(busy.status.in_([TaskStatus.LEASED.value, TaskStatus.RUNNING.value]))
+                    .where(busy.lease_expires_at > now)
+                    .exists()
+                ),
             )
+            due = select(TaskModel).where(claimable, session_free).order_by(TaskModel.created_at).limit(limit * 4)
+            candidates = list((await session.execute(due)).scalars().all())
             records: list[TaskModel] = []
             for candidate in candidates:
                 if len(records) >= limit:
@@ -164,6 +188,7 @@ class SQLiteTaskStore:
                     update(TaskModel)
                     .where(TaskModel.id == candidate.id)
                     .where(claimable)
+                    .where(session_free)
                     .values(
                         status=TaskStatus.LEASED.value,
                         lease_token=lease_token,
@@ -440,6 +465,8 @@ class SQLiteTaskStore:
             context=dict(task.context or {}),
             model_overrides=dict(task.model_overrides or {}),
             continuation_depth=task.continuation_depth,
+            fresh=task.fresh,
+            history_session=task.history_session,
             status=TaskStatus.PENDING.value,
             retry_count=0,
             max_attempts=self._config.max_attempts,
@@ -483,6 +510,8 @@ def _to_domain(model: TaskModel) -> TaskRecord:
                 max_tool_calls=model.max_tool_calls,
             ),
             continuation_depth=model.continuation_depth,
+            fresh=bool(model.fresh),
+            history_session=model.history_session,
         ),
         status=TaskStatus(model.status),
         retry_count=model.retry_count,

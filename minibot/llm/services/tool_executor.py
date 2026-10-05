@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +27,7 @@ _SENSITIVE_ARGUMENT_KEY_PARTS = (
     "authorization",
     "cookie",
 )
+_SKIPPED_FOR_NEW_MESSAGE_REASON = "The user sent a new message before this call ran; it was not executed."
 _TOOL_NAME_ALIASES = {
     "http_client": "http_request",
     "calculator": "calculate_expression",
@@ -281,6 +282,7 @@ async def execute_tool_calls_for_runtime(
     *,
     responses_mode: bool,
     logger: logging.Logger,
+    should_interrupt: Callable[[], bool] | None = None,
 ) -> list[ToolExecutionRecord]:
     tool_map = _build_tool_map(tools)
     records: list[ToolExecutionRecord] = []
@@ -289,6 +291,23 @@ async def execute_tool_calls_for_runtime(
         call_id = prepared.call_id
         tool_name = prepared.tool_name
         arguments = prepared.arguments
+        if should_interrupt is not None and should_interrupt():
+            logger.info("tool call skipped for a new user message", extra={"tool": tool_name, "call_id": call_id})
+            result = ToolResult(content={"ok": False, "skipped": True, "reason": _SKIPPED_FOR_NEW_MESSAGE_REASON})
+            records.append(
+                ToolExecutionRecord(
+                    tool_name=tool_name,
+                    call_id=call_id,
+                    message_payload=_build_message_payload(
+                        responses_mode=responses_mode,
+                        call_id=call_id,
+                        tool_name=tool_name,
+                        content=result.content,
+                    ),
+                    result=result,
+                )
+            )
+            continue
         try:
             tool_name, arguments = parse_tool_call(call)
             binding = tool_map.get(tool_name)
