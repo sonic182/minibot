@@ -196,9 +196,16 @@ whether the turn was handed off to a task, so the model's choices can be compare
 anything acts on them. It never changes a reply, adds no latency, and a timeout or any failure is
 logged and ignored.
 
-Every turn sends the user's message text and the names of the main agent's tools to OpenRouter and the
-model provider behind it, so enable it only where that is acceptable and check the provider's data
-policy for the chosen model.
+It runs as the bundled ``minibot.extensions.integrations.decision`` extension, listening to the turn
+events (see :doc:`events`), so it is active in the daemon and console but not in the task worker. It is
+also asked for turns that end before the model is called, such as unsupported media. It is a lossy
+observer: an event dropped by the event bus means no ``turn decision`` line for that turn, and at most 32
+turns wait for an answer at once.
+
+Every turn sends the user's message text, exactly as received (not the text prepared for the model, so
+transcribed audio and recent files are not included), and the names of the main agent's tools to
+OpenRouter and the model provider behind it, so enable it only where that is acceptable and check the
+provider's data policy for the chosen model.
 
 Keep the key in the vault:
 
