@@ -56,6 +56,7 @@ max_new_tokens = 50000
 request_timeout_seconds = 180
 sock_connect_timeout_seconds = 10
 sock_read_timeout_seconds = 180
+# Retries for failed HTTP requests and for responses that end failed or empty.
 retry_attempts = 3
 retry_delay_seconds = 2.0
 # Responses API state mode for the main agent.
@@ -185,7 +186,7 @@ main_tool_use_guardrail = "disabled"
 # enabled = true
 # Each turn sends the user's message and tool names to OpenRouter.
 # model = "~typesafe/jev-latest"  # paid per request; or "inception/mercury-decide:free"
-# base_url = "https://openrouter.ai/api/alpha/decisions"
+# base_url = "https://openrouter.ai/api/alpha"  # requests go to <base_url>/decisions
 # api_key = "${secret:openrouter_api_key}"
 # timeout_seconds = 3.0
 
@@ -640,6 +641,10 @@ continue_turn_default = true
 # "always": the model's choice is ignored and every result returns to the main agent as a new turn (falling back
 # to direct delivery past the continuation limit). continue_turn_default has no effect in that mode.
 continue_turn_mode = "auto"
+# Persistent history per worker conversation (default false; needs backend = "sqlite"). A conversation is a named
+# agent in a chat, optionally split by a `session` name from spawn_task; its tasks run one at a time and see earlier
+# prompts and answers, summarized when they grow. spawn_task gains `fresh` to clear that history first.
+history = false
 
 # Queue storage used when tasks.backend = "sqlite". No external broker required.
 [tasks.sqlite]

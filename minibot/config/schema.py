@@ -298,6 +298,11 @@ class LLMMConfig(BaseModel):
     - ``max_new_tokens`` — max tokens to generate per turn.
     - ``max_tool_iterations`` — maximum tool-call rounds before forcing a final answer (default: ``15``).
     - ``request_timeout_seconds`` — HTTP timeout per LLM request (min: ``45``).
+    - ``retry_attempts`` — extra attempts for a failed HTTP request, and for a main-agent step whose response
+      ends with status ``failed`` or has no text and no tool calls (default: ``3``). Context-length and
+      invalid-prompt failures are not retried.
+    - ``retry_delay_seconds`` — initial delay between attempts; step retries back off exponentially up to
+      ``min(4 * retry_delay_seconds, 10)`` seconds (default: ``2.0``).
     - ``system_prompt`` — inline system prompt (overridden by ``system_prompt_file``).
     - ``system_prompt_file`` — path to the main system prompt markdown file.
     - ``prompts_dir`` — directory for runtime prompt fragments.
@@ -556,7 +561,8 @@ class DecisionConfig(BaseModel):
     - ``model`` — an OpenRouter decisions model (default: ``"~typesafe/jev-latest"``, billed per request;
       ``"inception/mercury-decide:free"`` also works). Each turn sends the user's message text and the
       main agent's tool names to OpenRouter.
-    - ``base_url`` — the decisions endpoint (default: ``"https://openrouter.ai/api/alpha/decisions"``).
+    - ``base_url`` — root of a decisions API; requests go to ``<base_url>/decisions`` (default:
+      ``"https://openrouter.ai/api/alpha"``).
     - ``api_key`` — OpenRouter API key, required when enabled. Accepts ``${secret:NAME}``.
     - ``timeout_seconds`` — per-request timeout; a timeout or any failure is logged and the turn goes on
       untouched (default: ``3.0``).
@@ -566,7 +572,7 @@ class DecisionConfig(BaseModel):
 
     enabled: bool = False
     model: str = Field(default="~typesafe/jev-latest", min_length=1)
-    base_url: HttpUrlValue = "https://openrouter.ai/api/alpha/decisions"
+    base_url: HttpUrlValue = "https://openrouter.ai/api/alpha"
     api_key: str = ""
     timeout_seconds: float = Field(default=3.0, gt=0)
 
@@ -1036,6 +1042,13 @@ class TasksConfig(BaseModel):
       ``continue_turn_default`` covering an unset value. ``"always"`` ignores the model's choice and returns every
       result to the main agent as a new turn, falling back to direct delivery at the continuation limit;
       ``continue_turn_default`` has no effect in that mode.
+    - ``history`` — keep a persistent history per worker conversation (default: ``false``; needs
+      ``backend = "sqlite"``). A conversation is a named agent in a chat, ``task:<channel>:<chat_id>:<agent_name>``,
+      or that plus a ``session`` name passed to ``spawn_task``; general workers only get one when given a
+      ``session``. Each task sees the conversation's earlier prompts and answers (each capped at 8000 characters),
+      stored in the ``[memory]`` database, and tasks of one conversation run one at a time, later ones waiting in
+      the queue. A large history is summarized before the next task when the model's context limit is known, and
+      ``spawn_task`` gains ``fresh`` to clear it first. With ``false`` every worker starts with no history.
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
@@ -1047,6 +1060,7 @@ class TasksConfig(BaseModel):
     max_concurrent_workers: PositiveInt = 4
     continue_turn_default: bool = False
     continue_turn_mode: Literal["auto", "always"] = "auto"
+    history: bool = False
     sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
 
     @model_validator(mode="after")
@@ -1058,6 +1072,8 @@ class TasksConfig(BaseModel):
                 "tasks.sqlite.lease_timeout_seconds must be greater than tasks.worker_timeout_seconds "
                 "or a running task can be leased twice"
             )
+        if self.history and self.backend != "sqlite":
+            raise ValueError('tasks.history requires tasks.backend = "sqlite"')
         return self
 
 

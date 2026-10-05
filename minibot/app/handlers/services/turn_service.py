@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
@@ -12,7 +13,7 @@ from minibot.app.handlers.services.input_service import UserInputService
 from minibot.app.handlers.services.metadata_service import ResponseMetadataService
 from minibot.app.handlers.services.prompt_service import PromptService
 from minibot.app.handlers.services.recent_file_tracking_service import RecentFileTrackingService
-from minibot.app.handlers.services.runtime_service import RuntimeOrchestrationService
+from minibot.app.handlers.services.runtime_service import RuntimeOrchestrationService, user_message
 from minibot.app.handlers.services.session_state_service import SessionStateService
 from minibot.app.incoming_files_context import build_history_user_entry
 from minibot.app.response_parser import extract_answer, plain_render, resolve_reply_render
@@ -20,6 +21,8 @@ from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
 from minibot.app.turn_decision import NoopTurnDecision, TurnDecision, executed_tool_names
+from minibot.app.turn_inbox import TurnInbox
+from minibot.core.agent_runtime import STEERING_METADATA_KEY, AgentMessage
 from minibot.core.channels import (
     ChannelCapabilities,
     ChannelMessage,
@@ -121,7 +124,7 @@ class LLMTurnService:
         self._runtime = runtime
         self._runtime_service = self._build_runtime_service(runtime) if runtime is not None else None
 
-    async def handle(self, event: MessageEvent) -> ChannelResponse:
+    async def handle(self, event: MessageEvent, turn_input: TurnInbox | None = None) -> ChannelResponse:
         message = event.message
         session_id = session_id_for(message)
         turn_total_tokens = 0
@@ -162,16 +165,7 @@ class LLMTurnService:
             claim_task_continuation=_claim_task_continuation,
             release_task_continuation=_release_task_continuation,
         )
-        input_message = message
-        if self._audio_auto_transcription_service is not None:
-            auto_result = await self._audio_auto_transcription_service.transcribe_incoming_audio(
-                message=message,
-                context=tool_context,
-            )
-            transcribed_text = self._audio_auto_transcription_service.apply_to_model_text(message.text, auto_result)
-            if transcribed_text != message.text:
-                input_message = message.model_copy(update={"text": transcribed_text})
-        model_text, model_user_content = self._input_service.build_model_user_input(input_message)
+        model_text, model_user_content = await self._model_input(message, tool_context)
         if message.attachments:
             self._logger.debug(
                 "prepared multimodal message",
@@ -186,6 +180,8 @@ class LLMTurnService:
                 },
             )
         await self._memory.append_history(session_id, "user", build_history_user_entry(message, model_text))
+        if turn_input is not None:
+            turn_input.user_message_recorded = True
         await self._enforce_history_limit(session_id)
         model_text_for_generation = self._recent_file_tracking_service.augment_model_text_with_recent_files(
             session_id,
@@ -277,6 +273,9 @@ class LLMTurnService:
                     previous_response_id=previous_response_id,
                     chat_id=message.chat_id,
                     channel=message.channel,
+                    turn_input=_SteeringInput(self, turn_input, session_id, tool_context)
+                    if turn_input is not None
+                    else None,
                 )
                 turn_total_tokens += runtime_result.tokens_used
                 self._session_state.track_usage(
@@ -305,11 +304,17 @@ class LLMTurnService:
                 "response parsed",
                 extra={"kind": render.kind, "content_length": len(render.text), "should_reply": should_reply},
             )
+        except asyncio.CancelledError:
+            if pending_decision is not None:
+                pending_decision.cancel()
+            raise
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
             render = plain_render(self._format_runtime_error_message(exc))
             should_reply = True
             generation_failed = True
+        if turn_input is not None:
+            turn_input.answer_ready = True
         await self._turn_decision.finish(
             pending_decision,
             turn_id=event.event_id,
@@ -377,6 +382,29 @@ class LLMTurnService:
             render=render,
             metadata=metadata,
         )
+
+    async def _model_input(
+        self, message: ChannelMessage, tool_context: ToolContext
+    ) -> tuple[str, str | list[dict[str, Any]] | None]:
+        input_message = message
+        if self._audio_auto_transcription_service is not None:
+            auto_result = await self._audio_auto_transcription_service.transcribe_incoming_audio(
+                message=message,
+                context=tool_context,
+            )
+            transcribed_text = self._audio_auto_transcription_service.apply_to_model_text(message.text, auto_result)
+            if transcribed_text != message.text:
+                input_message = message.model_copy(update={"text": transcribed_text})
+        return self._input_service.build_model_user_input(input_message)
+
+    async def steering_message(self, event: MessageEvent, session_id: str, tool_context: ToolContext) -> AgentMessage:
+        model_text, model_user_content = await self._model_input(event.message, tool_context)
+        await self._memory.append_history(session_id, "user", build_history_user_entry(event.message, model_text))
+        model_text = self._recent_file_tracking_service.augment_model_text_with_recent_files(session_id, model_text)
+        return user_message(model_text, model_user_content, {STEERING_METADATA_KEY: True})
+
+    async def enforce_history_limit(self, session_id: str) -> None:
+        await self._enforce_history_limit(session_id)
 
     async def repair_format_response(
         self,
@@ -489,6 +517,31 @@ class LLMTurnService:
                 detail = f"{detail[:200]}..."
             return f"LLM error ({error_name}): {detail}"
         return f"LLM error ({error_name})."
+
+
+class _SteeringInput:
+    def __init__(self, service: LLMTurnService, inbox: TurnInbox, session_id: str, tool_context: ToolContext) -> None:
+        self._service = service
+        self._inbox = inbox
+        self._session_id = session_id
+        self._tool_context = tool_context
+
+    def has_pending(self) -> bool:
+        return self._inbox.has_pending()
+
+    async def drain(self) -> list[AgentMessage]:
+        events = self._inbox.take_all()
+        messages: list[AgentMessage] = []
+        for index, event in enumerate(events):
+            try:
+                messages.append(await self._service.steering_message(event, self._session_id, self._tool_context))
+            except BaseException:
+                self._inbox.requeue(events[index:])
+                raise
+            self._inbox.mark_consumed(event.event_id)
+        if messages:
+            await self._service.enforce_history_limit(self._session_id)
+        return messages
 
 
 def _is_task_result(message: ChannelMessage) -> bool:

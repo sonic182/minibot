@@ -283,10 +283,14 @@ async def test_model_overrides_round_trip_and_are_added_to_existing_tables(task_
 async def test_continuation_depth_round_trips_and_is_added_to_existing_tables(task_store: SQLiteTaskStore) -> None:
     request = _request("task-continue")
     request.continuation_depth = 2
+    request.fresh = True
+    request.history_session = "task:telegram:1:data_agent"
     await task_store.create(request)
 
     leased = await task_store.lease_due_tasks(now=_utcnow(), limit=10, lease_timeout_seconds=30)
     assert leased[0].request.continuation_depth == 2
+    assert leased[0].request.fresh is True
+    assert leased[0].request.history_session == "task:telegram:1:data_agent"
 
     async with task_store._engine.begin() as connection:
         await connection.execute(text("ALTER TABLE tasks DROP COLUMN continuation_depth"))
@@ -295,3 +299,22 @@ async def test_continuation_depth_round_trips_and_is_added_to_existing_tables(ta
     reloaded = await task_store.get("task-legacy", "primary")
     assert reloaded is not None
     assert reloaded.request.continuation_depth is None
+
+
+@pytest.mark.asyncio
+async def test_tasks_of_one_history_session_are_leased_one_at_a_time(task_store: SQLiteTaskStore) -> None:
+    for task_id, session in (("a", "s1"), ("b", "s1"), ("c", "s2"), ("d", None)):
+        request = _request(task_id)
+        request.history_session = session
+        await task_store.create(request)
+
+    first = await task_store.lease_due_tasks(now=_utcnow(), limit=10, lease_timeout_seconds=30)
+    assert [record.request.task_id for record in first] == ["a", "c", "d"]
+    assert await task_store.lease_due_tasks(now=_utcnow(), limit=10, lease_timeout_seconds=30) == []
+
+    token = await task_store.claim_execution(
+        "a", expected_status=TaskStatus.LEASED, lease_token=first[0].lease_token, lease_timeout_seconds=30
+    )
+    assert await task_store.mark_done("a", lease_token=token)
+    second = await task_store.lease_due_tasks(now=_utcnow(), limit=10, lease_timeout_seconds=30)
+    assert [record.request.task_id for record in second] == ["b"]

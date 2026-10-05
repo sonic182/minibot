@@ -779,3 +779,65 @@ async def test_turn_service_shadow_decision_failure_never_breaks_the_turn(decisi
 
     assert response.text == "hello"
     assert [item.getMessage() for item in decision_records] == ["turn decision failed"]
+
+
+@pytest.mark.asyncio
+async def test_turn_service_records_and_forwards_messages_sent_during_the_turn() -> None:
+    from minibot.app.turn_inbox import TurnInbox
+
+    inbox = TurnInbox()
+    drained: list[AgentMessage] = []
+
+    class _SteeredRuntime(StubRuntime):
+        async def run(self, **kwargs: Any) -> RuntimeResult:
+            inbox.put(_message_event("also Barcelona"))
+            turn_input = kwargs["turn_input"]
+            assert turn_input.has_pending()
+            drained.extend(await turn_input.drain())
+            return await super().run(**kwargs)
+
+    service, _, memory = _service("unused", provider="openrouter")
+    result = RuntimeResult(payload="Madrid and Barcelona", response_id=None, state=AgentState())
+    service.set_runtime(cast(Any, _SteeredRuntime([result])))
+
+    response = await service.handle(_message_event("search Madrid"), turn_input=inbox)
+
+    assert response.text == "Madrid and Barcelona"
+    assert [(message.role, message.content[0].text, message.metadata) for message in drained] == [
+        ("user", "also Barcelona", {"steering": True})
+    ]
+    history = await memory.get_history(session_id_for(_message(chat_id=1)))
+    assert [(entry.role, entry.content) for entry in history] == [
+        ("user", "search Madrid"),
+        ("user", "also Barcelona"),
+        ("assistant", "Madrid and Barcelona"),
+    ]
+    assert len(inbox.consumed) == 1
+
+
+@pytest.mark.asyncio
+async def test_turn_service_requeues_a_mid_turn_message_it_could_not_record() -> None:
+    from minibot.app.turn_inbox import TurnInbox
+
+    class _FailingMemory(StubMemory):
+        async def append_history(self, session_id: str, role: str, content: str, **kwargs: Any) -> None:
+            if content == "also Barcelona":
+                raise RuntimeError("database is locked")
+            await super().append_history(session_id, role, content, **kwargs)
+
+    inbox = TurnInbox()
+
+    class _SteeredRuntime(StubRuntime):
+        async def run(self, **kwargs: Any) -> RuntimeResult:
+            inbox.put(_message_event("also Barcelona"))
+            await kwargs["turn_input"].drain()
+            return await super().run(**kwargs)
+
+    service, _, _ = _service("unused", provider="openrouter", memory=_FailingMemory())
+    result = RuntimeResult(payload="unused", response_id=None, state=AgentState())
+    service.set_runtime(cast(Any, _SteeredRuntime([result])))
+
+    await service.handle(_message_event("search Madrid"), turn_input=inbox)
+
+    assert inbox.consumed == []
+    assert [event.message.text for event in inbox.leftover()] == ["also Barcelona"]

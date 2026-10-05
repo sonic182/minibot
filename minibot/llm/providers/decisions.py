@@ -4,40 +4,38 @@ import json
 import time
 from typing import Any
 
-import aiosonic
 from aiosonic.timeout import Timeouts
+from llm_async.providers.base import BaseProvider
 
-from minibot.config.schema import DecisionConfig
 from minibot.core.decisions import DecisionAnswer, DecisionHTTPError, DecisionQuestion, DecisionResult
 
 
-class OpenRouterDecisionClient:
-    def __init__(self, config: DecisionConfig) -> None:
-        self._config = config
-        self._client = aiosonic.HTTPClient()
+class DecisionsProvider(BaseProvider):
+    BASE_URL = "https://openrouter.ai/api/alpha"
+
+    def __init__(self, api_key: str, base_url: str = "", *, model: str, timeout_seconds: float) -> None:
+        super().__init__(api_key, base_url.rstrip("/"))
+        self.model = model
+        self.timeout_seconds = timeout_seconds
 
     async def ask(self, state: dict[str, Any], questions: dict[str, DecisionQuestion]) -> DecisionResult:
         body = {
-            "model": self._config.model,
+            "model": self.model,
             "state": state,
             "questions": {
                 key: question.model_dump(mode="json", exclude_none=True) for key, question in questions.items()
             },
         }
         timeouts = Timeouts(
-            sock_connect=self._config.timeout_seconds,
-            sock_read=self._config.timeout_seconds,
-            request_timeout=self._config.timeout_seconds,
+            sock_connect=self.timeout_seconds,
+            sock_read=self.timeout_seconds,
+            request_timeout=self.timeout_seconds,
         )
         started = time.perf_counter()
-        response = await self._client.post(
-            self._config.base_url,
-            data=json.dumps(body, separators=(",", ":")).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._config.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+        response = await self.client.post(
+            f"{self.base_url}/decisions",
+            json=body,
+            headers=self._headers_for_request({"Accept": "application/json"}),
             timeouts=timeouts,
         )
         raw = await response.content()

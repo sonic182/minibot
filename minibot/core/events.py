@@ -86,6 +86,15 @@ class TurnFailedEvent(BaseEvent):
     error: str
 
 
+class TurnStopRequestedEvent(BaseEvent):
+    """Emitted when the owner asks to stop the turn running in a chat."""
+
+    event_type: str = "turn_stop_requested"
+    channel: str
+    chat_id: int
+    user_id: int | None = None
+
+
 class ReasoningEvent(BaseEvent):
     """Emitted as soon as one provider step returns reasoning, before the turn finishes.
 

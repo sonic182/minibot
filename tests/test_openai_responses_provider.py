@@ -6,7 +6,9 @@ from llm_async_codex import CodexCredentials
 
 from minibot.adapters.config.schema import LLMMConfig
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
+from minibot.llm.errors import ProviderResponseError
 from minibot.llm.provider_factory import LLMClient
+from minibot.llm.providers import openai_responses as openai_responses_module
 from minibot.llm.providers.codex import PatchedCodexProvider
 from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvider
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
@@ -147,3 +149,58 @@ async def test_codex_lists_models_with_the_configured_client_version(configured:
     await provider._ensure_models_cache()
 
     assert requested == [f"/models?client_version={expected}"]
+
+
+def _fake_stream(events: list[dict[str, Any]]) -> Any:
+    async def _stream(*_: Any, **__: Any) -> Any:
+        for event in events:
+            yield event
+
+    return _stream
+
+
+async def _drain(provider: PatchedOpenAIResponsesProvider) -> Any:
+    response = provider._stream_responses_request("https://example.test/responses", {}, {})
+    async for _ in response.stream_generator:
+        pass
+    return response
+
+
+@pytest.mark.asyncio
+async def test_stream_keeps_terminal_response_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    item = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "hi"}]}
+    events = [
+        {"type": "response.output_item.done", "item": item},
+        {
+            "type": "response.completed",
+            "response": {"id": "resp-1", "status": "completed", "usage": {"total_tokens": 7}},
+        },
+    ]
+    monkeypatch.setattr(openai_responses_module, "stream_json", _fake_stream(events))
+
+    response = await _drain(_provider())
+
+    assert response.original["status"] == "completed"
+    assert response.original["usage"] == {"total_tokens": 7}
+    assert response.main_response.content == "hi"
+
+
+@pytest.mark.asyncio
+async def test_stream_raises_structured_error_on_failed_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    events = [
+        {
+            "type": "response.failed",
+            "response": {"id": "resp-2", "status": "failed", "error": {"code": "server_error", "message": "x"}},
+        }
+    ]
+    monkeypatch.setattr(openai_responses_module, "stream_json", _fake_stream(events))
+
+    with pytest.raises(ProviderResponseError) as exc_info:
+        await _drain(_provider())
+
+    assert exc_info.value.code == "server_error"
+    assert exc_info.value.response_id == "resp-2"
+
+
+def test_codex_provider_uses_patched_stream() -> None:
+    assert PatchedCodexProvider._stream_responses_request is PatchedOpenAIResponsesProvider._stream_responses_request

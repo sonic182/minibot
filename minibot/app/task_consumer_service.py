@@ -96,6 +96,8 @@ class SQLiteTaskConsumerService:
                 owner_id=request.owner_id,
                 limits=request.limits,
                 continuation_depth=request.continuation_depth,
+                fresh=request.fresh,
+                history_session=request.history_session,
                 expected_status=record.status,
                 lease_token=record.lease_token,
                 ack_cb=ack_cb,

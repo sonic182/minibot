@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from llm_async.models.tool_call import ToolCall
 
 from minibot.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
-from minibot.llm.errors import wrap_provider_exception
+from minibot.llm.errors import EmptyProviderResponseError, ProviderResponseError, wrap_provider_exception
 from minibot.llm.services.client_bootstrap import (
     build_openrouter_provider_payload,
     create_provider,
@@ -37,7 +37,7 @@ from minibot.llm.services.schema_policy import prepare_tool_specs
 from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
 from minibot.llm.services.usage_parser import extract_response_id, extract_usage_from_response
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.shared.retries import AsyncRetriesService
+from minibot.shared.retries import AsyncRetriesService, RetryPolicy
 from minibot.shared.utils import humanize_token_count
 
 
@@ -67,6 +67,12 @@ class LLMClient:
         self._compaction_retry_base_delay_seconds = float(config.retry_delay_seconds)
         self._compaction_retry_max_delay_seconds = min(self._compaction_retry_base_delay_seconds * 4, 10.0)
         self._retries_service = AsyncRetriesService()
+        self._response_retry_policy = RetryPolicy(
+            max_attempts=config.retry_attempts + 1,
+            base_delay_seconds=float(config.retry_delay_seconds),
+            max_delay_seconds=min(float(config.retry_delay_seconds) * 4, 10.0),
+            retry_exceptions=(ProviderResponseError,),
+        )
         self._openrouter_models = tuple(getattr(getattr(config, "openrouter", None), "models", []) or [])
         self._openrouter_provider = build_openrouter_provider_payload(config)
         self._openrouter_reasoning_enabled = resolve_openrouter_reasoning_enabled(config)
@@ -173,17 +179,20 @@ class LLMClient:
             extra={"reasoning": call_kwargs.get("reasoning")},
         )
 
-        response = await self._complete(call_kwargs)
-        log_provider_response(
-            logger=self._logger,
-            response=response,
-            context="complete_once",
-            provider_name=self.provider_name(),
-            strip_logs=self._strip_logs,
-        )
+        try:
+            response = await self._retries_service.run(
+                lambda: self._complete_checked(call_kwargs),
+                policy=self._response_retry_policy,
+                should_retry=lambda exc: isinstance(exc, ProviderResponseError) and exc.retryable,
+                on_retry=self._log_response_retry,
+            )
+        except EmptyProviderResponseError as exc:
+            self._logger.warning(
+                "provider returned an empty response after retries",
+                extra={"provider": self.provider_name(), "response_id": exc.response_id},
+            )
+            response = exc.response
         message = response.main_response
-        if not message:
-            raise RuntimeError("LLM did not return a completion")
         if self._is_responses_provider and isinstance(response.original, Mapping):
             reasoning = extract_reasoning_text_from_responses(response.original)
             if reasoning:
@@ -237,6 +246,7 @@ class LLMClient:
         tools: Sequence[ToolBinding],
         context: ToolContext,
         responses_mode: bool = False,
+        should_interrupt: Callable[[], bool] | None = None,
     ) -> list[ToolExecutionRecord]:
         return await execute_tool_calls_for_runtime(
             tool_calls,
@@ -244,6 +254,7 @@ class LLMClient:
             context,
             responses_mode=responses_mode,
             logger=self._logger,
+            should_interrupt=should_interrupt,
         )
 
     def provider_name(self) -> str:
@@ -289,6 +300,45 @@ class LLMClient:
     def provider_capability_hints(self) -> tuple[str, ...]:
         return self._provider_capability_hints
 
+    async def _complete_checked(self, call_kwargs: dict[str, Any]) -> Any:
+        response = await self._complete(call_kwargs)
+        log_provider_response(
+            logger=self._logger,
+            response=response,
+            context="complete_once",
+            provider_name=self.provider_name(),
+            strip_logs=self._strip_logs,
+        )
+        message = response.main_response
+        if not message:
+            raise RuntimeError("LLM did not return a completion")
+        original = response.original if isinstance(response.original, Mapping) else {}
+        status = original.get("status")
+        if status == "failed":
+            raise ProviderResponseError.from_payload(original)
+        content = message.content
+        has_content = bool(content.strip()) if isinstance(content, str) else bool(content)
+        if not has_content and not message.tool_calls and status != "incomplete" and not _hit_length_limit(original):
+            error = EmptyProviderResponseError.from_payload(original)
+            error.response = response
+            raise error
+        return response
+
+    def _log_response_retry(self, exc: Exception, attempt: int, delay: float) -> None:
+        self._logger.warning(
+            "provider response failed; retrying",
+            extra={
+                "provider": self.provider_name(),
+                "attempt": attempt,
+                "delay_seconds": round(delay, 2),
+                "error_class": type(exc).__name__,
+                "response_status": getattr(exc, "status", None),
+                "error_code": getattr(exc, "code", None),
+                "error_type": getattr(exc, "error_type", None),
+                "response_id": getattr(exc, "response_id", None),
+            },
+        )
+
     async def _complete(self, call_kwargs: dict[str, Any]) -> Any:
         try:
             return await self._provider.acomplete(**call_kwargs)
@@ -316,3 +366,10 @@ class LLMClient:
             openrouter_plugins=self._openrouter_plugins,
             provider_native_tools=self._provider_native_tools if include_provider_native_tools else (),
         )
+
+
+def _hit_length_limit(original: Mapping[str, Any]) -> bool:
+    choices = original.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], Mapping):
+        return False
+    return choices[0].get("finish_reason") == "length"

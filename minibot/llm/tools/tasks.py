@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from typing import Any
 from uuid import uuid4
@@ -34,6 +35,7 @@ from minibot.llm.tools.schema_utils import strict_object
 from minibot.shared.errors import ToolInputError
 
 _RESULT_PREVIEW_CHARS = 300
+_SESSION_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _AMBIGUOUS_PREFIX_REASON = "ambiguous task id prefix: more than one task matches, use more characters of the id"
 
 
@@ -68,48 +70,67 @@ class TaskTools:
         ]
 
     def _spawn_schema(self) -> Tool:
+        properties: dict[str, Any] = {
+            "prompt": {
+                "type": "string",
+                "description": (
+                    "Task prompt for the worker agent. The worker cannot see this conversation, so include every "
+                    "fact it needs."
+                ),
+            },
+            "agent_name": {
+                "type": ["string", "null"],
+                "description": "Optional exact specialist agent name to run asynchronously.",
+            },
+            "context_json": {
+                "type": ["string", "null"],
+                "description": (
+                    "Optional JSON object string with structured context for the worker task. The worker cannot "
+                    "see this conversation: pass the texts, ids and data it needs here or in prompt."
+                ),
+            },
+            "timeout_seconds": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "description": "Optional timeout no greater than the configured task-worker timeout.",
+            },
+            "model_provider": {
+                "type": ["string", "null"],
+                "description": "Optional provider name with configured credentials to run this task on.",
+            },
+            "model": {
+                "type": ["string", "null"],
+                "description": "Optional model id served by that provider.",
+            },
+            "reasoning_effort": {
+                "type": ["string", "null"],
+                "description": "Optional reasoning budget for this task (provider-specific).",
+            },
+            "continue_turn": {
+                "type": ["boolean", "null"],
+                "description": (
+                    "True to get the result back as a new turn so you can keep working on it; "
+                    "false to deliver the worker's answer straight to the user; null uses the "
+                    "configured default."
+                ),
+            },
+        }
+        if self._config.history:
+            properties["fresh"] = {
+                "type": ["boolean", "null"],
+                "description": "True clears this worker's history before the task so it starts with no memory.",
+            }
+            properties["session"] = {
+                "type": ["string", "null"],
+                "description": (
+                    "Optional conversation name (letters, digits, '_', '-', '.'; max 64) to keep a separate history "
+                    "with the same agent. Tasks with the same session run one at a time."
+                ),
+            }
         return Tool(
             name="spawn_task",
-            description=load_tool_description("spawn_task"),
-            parameters=strict_object(
-                properties={
-                    "prompt": {"type": "string", "description": "Task prompt for the worker agent."},
-                    "agent_name": {
-                        "type": ["string", "null"],
-                        "description": "Optional exact specialist agent name to run asynchronously.",
-                    },
-                    "context_json": {
-                        "type": ["string", "null"],
-                        "description": "Optional JSON object string with structured context for the worker task.",
-                    },
-                    "timeout_seconds": {
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "description": "Optional timeout no greater than the configured task-worker timeout.",
-                    },
-                    "model_provider": {
-                        "type": ["string", "null"],
-                        "description": "Optional provider name with configured credentials to run this task on.",
-                    },
-                    "model": {
-                        "type": ["string", "null"],
-                        "description": "Optional model id served by that provider.",
-                    },
-                    "reasoning_effort": {
-                        "type": ["string", "null"],
-                        "description": "Optional reasoning budget for this task (provider-specific).",
-                    },
-                    "continue_turn": {
-                        "type": ["boolean", "null"],
-                        "description": (
-                            "True to get the result back as a new turn so you can keep working on it; "
-                            "false to deliver the worker's answer straight to the user; null uses the "
-                            "configured default."
-                        ),
-                    },
-                },
-                required=["prompt"],
-            ),
+            description=load_tool_description("spawn_task_history" if self._config.history else "spawn_task"),
+            parameters=strict_object(properties=properties, required=["prompt"]),
         )
 
     def _cancel_schema(self) -> Tool:
@@ -176,6 +197,7 @@ class TaskTools:
             )
         task_context = _coerce_task_context(payload)
         limits = _resolve_limits(payload, self._config, spec_timeout_seconds=spec.timeout_seconds if spec else None)
+        history_session = self._history_session(payload, channel, context.chat_id, agent_name)
         continuation_depth = _resolve_continuation_depth(
             payload,
             context,
@@ -196,6 +218,8 @@ class TaskTools:
                     owner_id=owner_id,
                     limits=limits,
                     continuation_depth=continuation_depth,
+                    fresh=history_session is not None and payload.get("fresh") is True,
+                    history_session=history_session,
                 )
             )
         except Exception:
@@ -220,6 +244,19 @@ class TaskTools:
             "limits": _limits_payload(limits),
             "continue_turn": continuation_depth is not None,
         }
+
+    def _history_session(
+        self, payload: dict[str, Any], channel: str, chat_id: int | None, agent_name: str | None
+    ) -> str | None:
+        if not self._config.history:
+            return None
+        session = optional_str(payload.get("session"))
+        if session is not None and not _SESSION_NAME.fullmatch(session):
+            raise ValueError("session must be 1-64 letters, digits, '_', '-' or '.'")
+        if chat_id is None or (agent_name is None and session is None):
+            return None
+        key = f"task:{channel}:{chat_id}:{agent_name or 'task_worker'}"
+        return f"{key}:{session}" if session else key
 
     async def _cancel_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         task_id = require_non_empty_str(payload, "task_id")

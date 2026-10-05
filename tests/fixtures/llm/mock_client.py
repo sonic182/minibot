@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from minibot.core.agent_runtime import ToolResult
@@ -116,7 +116,9 @@ class ScriptedLLMClient:
         tools: Sequence[ToolBinding],
         context: ToolContext,
         responses_mode: bool = False,
+        should_interrupt: Callable[[], bool] | None = None,
     ) -> list[ToolExecutionRecord]:
+        del should_interrupt
         tool_map = {binding.tool.name: binding for binding in tools}
         records: list[ToolExecutionRecord] = []
         for call in tool_calls:

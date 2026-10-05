@@ -9,6 +9,7 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ChatAction, ParseMode
+from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import Message as TelegramMessage
 
@@ -29,6 +30,7 @@ from minibot.core.events import (
     TurnCompletedEvent,
     TurnFailedEvent,
     TurnStartedEvent,
+    TurnStopRequestedEvent,
 )
 
 _TYPING_INTERVAL_SECONDS = 4
@@ -104,6 +106,7 @@ class TelegramService:
         self._approval_requesters: dict[str, int] = {}
         self._approval_denials: set[asyncio.Task[None]] = set()
 
+        self._dp.message.register(self._handle_stop, Command("stop"))
         self._dp.message.register(self._handle_message)
         self._dp.callback_query.register(self._handle_approval_callback)
 
@@ -113,18 +116,32 @@ class TelegramService:
         self._outgoing_task = asyncio.create_task(self._publish_outgoing())
         self._outgoing_task.add_done_callback(self._log_outgoing_task_end)
 
+    async def _reject_unauthorized(self, message: TelegramMessage) -> bool:
+        if is_authorized(self._config, message):
+            return False
+        user_id = message.from_user.id if message.from_user else None
+        chat_id = message.chat.id
+        self._logger.warning(
+            "blocked unauthorized sender",
+            extra={"chat_id": chat_id, "user_id": user_id},
+        )
+        await self._bot.send_message(
+            chat_id=chat_id,
+            text=(f"User not recognized. Access denied. chat_id={chat_id} user_id={user_id}"),
+        )
+        return True
+
+    async def _handle_stop(self, message: TelegramMessage) -> None:
+        if await self._reject_unauthorized(message):
+            return
+        user_id = message.from_user.id if message.from_user else None
+        self._logger.info("received stop command", extra={"chat_id": message.chat.id, "user_id": user_id})
+        await self._event_bus.publish(
+            TurnStopRequestedEvent(channel="telegram", chat_id=message.chat.id, user_id=user_id)
+        )
+
     async def _handle_message(self, message: TelegramMessage) -> None:
-        if not is_authorized(self._config, message):
-            user_id = message.from_user.id if message.from_user else None
-            chat_id = message.chat.id
-            self._logger.warning(
-                "blocked unauthorized sender",
-                extra={"chat_id": chat_id, "user_id": user_id},
-            )
-            await self._bot.send_message(
-                chat_id=chat_id,
-                text=(f"User not recognized. Access denied. chat_id={chat_id} user_id={user_id}"),
-            )
+        if await self._reject_unauthorized(message):
             return
 
         incoming_files, incoming_errors = await self._incoming_media_collector.collect(message)
@@ -235,6 +252,10 @@ class TelegramService:
             denial.add_done_callback(self._denial_finished)
             return
         self._pending_approvals[event.approval_id] = (event.chat_id, sent.message_id)
+        self._logger.info(
+            "tool approval prompt sent",
+            extra={"approval_id": event.approval_id, "chat_id": event.chat_id, "tool_name": event.tool_name},
+        )
         if event.requester_user_id is not None:
             self._approval_requesters[event.approval_id] = event.requester_user_id
 

@@ -17,6 +17,7 @@ from minibot.core.events import (
     OutboundEvent,
     ToolApprovalRequestedEvent,
     ToolApprovalResolvedEvent,
+    TurnStopRequestedEvent,
 )
 
 
@@ -127,6 +128,28 @@ async def test_handle_message_sends_denied_response_when_unauthorized() -> None:
     assert not event_bus.events
     assert len(bot.calls) == 1
     assert "Access denied" in bot.calls[0]["text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allowed_user_ids, expected_stop", [([2], True), ([10], False)])
+async def test_stop_command_requests_a_stop_only_for_authorized_senders(
+    allowed_user_ids: list[int], expected_stop: bool
+) -> None:
+    config = TelegramChannelConfig(bot_token="token", allowed_user_ids=allowed_user_ids, require_authorized=False)
+    service, bot, event_bus, _ = _service(config)
+    message = _Message(chat=_Chat(1), from_user=_User(2), message_id=7, text="/stop")
+
+    await service._handle_stop(message)  # type: ignore[arg-type]
+
+    if expected_stop:
+        assert len(event_bus.events) == 1
+        stop = event_bus.events[0]
+        assert isinstance(stop, TurnStopRequestedEvent)
+        assert (stop.channel, stop.chat_id, stop.user_id) == ("telegram", 1, 2)
+        assert not bot.calls
+    else:
+        assert not event_bus.events
+        assert "Access denied" in bot.calls[0]["text"]
 
 
 class _FailingOnceSender:

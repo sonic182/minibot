@@ -35,6 +35,22 @@ A normal turn flows through these events in order:
        B --> H["ReasoningEvent (per provider step)"]
        D --> G["OutboundFileEvent (sending files)"]
 
+Turns run one at a time. A message from the chat whose turn is running does not start a
+second turn: it is stored in the history and handed to that turn, which shows it to the
+model before its next call — after the current tool returns, in place of the tool calls that
+model response still had queued (they are reported to the model as skipped), or right after
+a final answer, which is then replaced by a new one. A tool that is already running is never
+interrupted by a message. A message that arrives after the turn's last check, or with a final
+answer when the turn has no step left, becomes the next turn. Task results and scheduled
+prompts always get a turn of their own, and a message that arrives while one of them runs
+waits for its own turn too.
+
+``TurnStopRequestedEvent`` (``/stop`` on Telegram) cancels the running turn of that chat
+instead, whether it answers the owner, a task result or a scheduled prompt. The dispatcher then publishes ``TurnFailedEvent`` with ``error = "stopped by user"``
+and a ``Stopped.`` reply, and records the stop in the history. Messages still waiting for that
+turn are saved to the history without being run. A tool call cancelled midway is not undone:
+an email already sent stays sent. Background tasks keep running; use ``cancel_task`` for them.
+
 Event reference
 ---------------
 
@@ -90,6 +106,17 @@ Payload:
 
 - ``turn_id``, ``channel``, ``chat_id``.
 - ``error`` — the exception message.
+
+TurnStopRequestedEvent
+~~~~~~~~~~~~~~~~~~~~~~
+
+**Fires when**: an authorized Telegram user sends ``/stop``. The dispatcher cancels that chat's
+running turn, or answers ``Nothing is running.`` when there is none or the model has already
+produced its answer.
+
+Payload:
+
+- ``channel``, ``chat_id``, ``user_id``.
 
 ReasoningEvent
 ~~~~~~~~~~~~~~

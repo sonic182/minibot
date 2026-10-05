@@ -13,11 +13,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenRouter decisions model (default `~typesafe/jev-latest`) four fixed questions (`route`, `needs_memory`,
   `needs_web`, `complexity`) and logs a `turn decision` line with `turn_id` next to the tools the agent actually used.
   It never changes a reply, and a timeout or failure is only logged. Each turn sends the user's message text and the
-  main agent's tool names to OpenRouter.
+  main agent's tool names to OpenRouter. `base_url` is the API root (default `https://openrouter.ai/api/alpha`) and
+  requests go to `<base_url>/decisions`, so any compatible decisions API can be used.
 - **`[tools.http_client] follow_redirects` and `max_redirects`.** Redirects are still returned as-is by default;
   `follow_redirects = true` follows up to `max_redirects` (default `5`).
+- **`[tasks] history` keeps a persistent history per worker conversation.** Opt-in, off by default, and SQLite
+  backend only. A conversation is a named agent in a chat, optionally split by a `session` name passed to
+  `spawn_task`; general workers only get one with a `session`. Each task sees the conversation's earlier prompts
+  and answers (capped at 8000 characters each, summarized when the history grows), tasks of one conversation run
+  one at a time with later ones waiting in the queue, and `fresh` clears the history first.
+- **Log line when a tool approval prompt is sent on Telegram** (`tool approval prompt sent`).
+- **Messages sent while the bot is working join the running turn.** A message from the same chat is stored in
+  the history and shown to the model before its next call — after the current tool returns, in place of the
+  remaining tool calls of that response (reported as skipped), or before the final answer is accepted —
+  instead of waiting for a turn of its own. Task results and scheduled prompts still get their own turn.
+- **`/stop` on Telegram cancels the running turn** of that chat, replies `Stopped.` and records the stop in the
+  history. Background tasks keep running.
 
 ### Changed
+
+- **The `spawn_task` description states that the worker cannot see the conversation**, so the main agent puts
+  every needed fact, text, recipient and id in `prompt` or `context_json` instead of referring to earlier messages.
 
 - **`bash` runs `/bin/bash -c`.** A login shell (`-lc`) that re-reads profile files is used only when
   `pass_parent_env = true`.
@@ -25,6 +41,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The scheduler list tools describe themselves as reminders and scheduled messages**, and say how to include
+  past ones, so the agent uses them when asked about a reminder instead of answering that it has no such tool.
+- **Failed or empty provider responses are retried.** A main-agent step whose response ends with status `failed`
+  (or a stream `error` event) or with no text and no tool calls is retried up to `[llm] retry_attempts` times
+  before replying "I didn't get a response there"; a step still empty after the retries falls back to that reply.
+  Context-length, invalid-prompt and `invalid_request_error` failures, and Chat Completions answers cut by
+  `finish_reason = "length"`, are not retried.
+  The provider response log now includes `response_status`, `incomplete_reason`, `error_code`, `error_type`,
+  `error_message`, and `output_types`.
 - **Cancelling a task stops its worker cleanly.** The worker closes its MCP clients and subprocess groups on
   cancellation, and a worker that ignores termination is killed after five seconds.
 - **Tool output stays bounded while it is read.** `bash` and `python_exec` keep at most `max_output_bytes` per stream,

@@ -110,6 +110,10 @@ If you'd rather test without Telegram first, skip to `Console Test Channel`_ bel
 3. Run ``poetry run minibot`` and send a message to your bot.
 4. Monitor ``logs/`` (logfmt via ``logfmter``) for structured output.
 
+While the bot is working you can keep writing: corrections such as "also check Barcelona" are
+folded into the running turn after the current tool returns. Send ``/stop`` to cancel the
+running turn (see :doc:`events`).
+
 Console Test Channel
 --------------------
 

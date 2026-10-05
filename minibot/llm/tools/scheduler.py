@@ -72,7 +72,10 @@ class SchedulePromptTool:
     def _schedule_unified_schema(self) -> Tool:
         return Tool(
             name="schedule",
-            description="Scheduled prompt management. Use action=create|list|cancel|delete.",
+            description=(
+                "Scheduled prompt management (reminders, scheduled messages, recurring jobs). "
+                "Use action=create|list|cancel|delete; list shows their content and run time."
+            ),
             parameters=strict_object(
                 properties={
                     "action": {
@@ -172,7 +175,11 @@ class SchedulePromptTool:
     def _list_schema(self) -> Tool:
         return Tool(
             name="list_scheduled_prompts",
-            description="List scheduled prompt jobs for this owner/chat context.",
+            description=(
+                "List the scheduled prompts of this owner/chat: reminders, scheduled messages and recurring jobs, "
+                "with their content and run time. Use it whenever the user asks about a reminder or something "
+                "scheduled; set active_only=false to include sent, cancelled and failed ones."
+            ),
             parameters=strict_object(
                 properties=pagination_properties(include_active_only=True),
                 required=["active_only", "limit", "offset"],

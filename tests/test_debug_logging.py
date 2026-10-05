@@ -72,6 +72,28 @@ def test_log_provider_response_strips_raw_payloads_and_previews(caplog: pytest.L
     assert not hasattr(record, "message_tool_calls")
 
 
+def test_log_provider_response_records_terminal_status_and_error(caplog: pytest.LogCaptureFixture) -> None:
+    logger = logging.getLogger("test.debug_logging")
+    response = _FakeResponse(
+        main_response=_FakeMessage(content=""),
+        original={
+            "id": "resp-2",
+            "status": "failed",
+            "error": {"code": "server_error", "type": "server"},
+            "output": [],
+        },
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=logger.name):
+        log_provider_response(logger=logger, response=response, context="complete_once", provider_name="codex")
+
+    record = caplog.records[-1]
+    assert record.response_status == "failed"
+    assert record.error_code == "server_error"
+    assert record.error_type == "server"
+    assert record.output_types == []
+
+
 @pytest.mark.asyncio
 async def test_execute_tool_calls_logs_only_argument_keys(caplog: pytest.LogCaptureFixture) -> None:
     logger = logging.getLogger("test.tool_executor")

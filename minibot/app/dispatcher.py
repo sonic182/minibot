@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections import deque
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from minibot.app.agent_registry import AgentRegistry
@@ -18,15 +20,24 @@ from minibot.app.handlers.services import (
     ToolBindingAudioTranscriptionExecutor,
     build_llm_turn_service,
 )
+from minibot.app.incoming_files_context import build_history_user_entry
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_capabilities import MainAgentToolView, main_agent_tool_view
 from minibot.app.tool_factory import build_enabled_tools
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.app.turn_decision import NoopTurnDecision, ShadowTurnDecision
+from minibot.app.turn_inbox import TurnInbox
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentDefinitionReader
-from minibot.core.channels import ChannelCapabilities, ChannelResponse, RenderableResponse, session_identifier
+from minibot.core.channels import (
+    ChannelCapabilities,
+    ChannelMessage,
+    ChannelResponse,
+    RenderableResponse,
+    session_id_for,
+    session_identifier,
+)
 from minibot.core.decisions import DecisionClient
 from minibot.core.events import (
     BaseEvent,
@@ -36,6 +47,7 @@ from minibot.core.events import (
     TurnCompletedEvent,
     TurnFailedEvent,
     TurnStartedEvent,
+    TurnStopRequestedEvent,
 )
 from minibot.core.files import FileStorage
 from minibot.core.memory import MemoryBackend, PendingTurnRepository
@@ -44,6 +56,23 @@ from minibot.llm.tools.base import ToolBinding
 from minibot.shared.utils import humanize_token_count, summarize_items
 
 _INTERNAL_ERROR_REPLY = "Sorry, I couldn't answer right now."
+_STOPPED_REPLY = "Stopped."
+_NOTHING_TO_STOP_REPLY = "Nothing is running."
+_STOPPED_HISTORY_NOTE = "[Stopped by the user before finishing.]"
+_STOPPED_ERROR = "stopped by user"
+
+
+@dataclass
+class _ActiveTurn:
+    session_id: str
+    event: MessageEvent
+    inbox: TurnInbox
+    task: asyncio.Task[None] | None = None
+    stopped: bool = False
+
+
+def _is_steerable(message: ChannelMessage) -> bool:
+    return message.metadata.get("source") != "task_result" and not message.metadata.get("scheduled")
 
 
 def _token_trace_log_fields(token_trace: object) -> dict[str, object]:
@@ -81,7 +110,12 @@ class Dispatcher:
     ) -> None:
         self._event_bus = event_bus
         self._channel_capabilities = dict(channel_capabilities or {})
-        self._subscription = event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
+        self._subscription = event_bus.subscribe(
+            types=(MessageEvent, OutboundFormatRepairEvent, TurnStopRequestedEvent)
+        )
+        self._backlog: deque[MessageEvent | OutboundFormatRepairEvent] = deque()
+        self._backlog_ready = asyncio.Event()
+        self._active: _ActiveTurn | None = None
         self._history_subscription = event_bus.subscribe(types=(OutboundEvent,))
         self._memory = memory_backend
         self._pending_turns = pending_turns
@@ -194,6 +228,7 @@ class Dispatcher:
             )
         self._task: asyncio.Task[None] | None = None
         self._history_task: asyncio.Task[None] | None = None
+        self._worker_task: asyncio.Task[None] | None = None
 
     def _build_tools(self) -> list[ToolBinding]:
         return build_enabled_tools(
@@ -245,6 +280,7 @@ class Dispatcher:
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run())
+        self._worker_task = asyncio.create_task(self._work())
         self._history_task = asyncio.create_task(self._record_outbound_history())
 
     async def _record_outbound_history(self) -> None:
@@ -265,12 +301,145 @@ class Dispatcher:
 
     async def _run(self) -> None:
         async for event in self._subscription:
-            if isinstance(event, MessageEvent):
-                self._logger.info("processing message event", extra={"event_id": event.event_id})
-                await self._handle_message(event)
-            if isinstance(event, OutboundFormatRepairEvent):
-                self._logger.info("processing outbound format repair event", extra={"event_id": event.event_id})
-                await self._handle_format_repair(event)
+            try:
+                await self._route(event)
+            except Exception:
+                self._logger.exception("failed to route event", extra={"event_id": event.event_id})
+
+    async def _route(self, event: BaseEvent) -> None:
+        if isinstance(event, TurnStopRequestedEvent):
+            await self._request_stop(event)
+            return
+        if isinstance(event, MessageEvent):
+            event = self._with_channel_capabilities(event)
+            active = self._active
+            if (
+                active is not None
+                and not active.stopped
+                and _is_steerable(active.event.message)
+                and _is_steerable(event.message)
+                and session_id_for(event.message) == active.session_id
+            ):
+                await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
+                if self._active is active and not active.stopped:
+                    active.inbox.put(event)
+                    self._logger.info(
+                        "message queued into the running turn",
+                        extra={"event_id": event.event_id, "turn_id": active.event.event_id},
+                    )
+                    return
+        if isinstance(event, (MessageEvent, OutboundFormatRepairEvent)):
+            self._backlog.append(event)
+            self._backlog_ready.set()
+
+    async def _work(self) -> None:
+        while True:
+            if not self._backlog:
+                self._backlog_ready.clear()
+                await self._backlog_ready.wait()
+                continue
+            event = self._backlog.popleft()
+            try:
+                if isinstance(event, MessageEvent):
+                    self._logger.info("processing message event", extra={"event_id": event.event_id})
+                    await self._run_turns(event, TurnInbox())
+                else:
+                    self._logger.info("processing outbound format repair event", extra={"event_id": event.event_id})
+                    await self._handle_format_repair(event)
+            except Exception:
+                self._logger.exception("failed to process event", extra={"event_id": event.event_id})
+
+    async def _run_turns(self, event: MessageEvent, inbox: TurnInbox) -> None:
+        next_event: MessageEvent | None = event
+        while next_event is not None:
+            active = _ActiveTurn(session_id=session_id_for(next_event.message), event=next_event, inbox=inbox)
+            self._active = active
+            try:
+                active.task = asyncio.create_task(self._handle_message(active))
+                try:
+                    await active.task
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if not active.stopped or (current is not None and current.cancelling()):
+                        raise
+                except Exception:
+                    self._backlog.extendleft(reversed(inbox.leftover()))
+                    self._backlog_ready.set()
+                    raise
+                if active.stopped and active.task.cancelled():
+                    await self._finish_stopped(active)
+                    return
+            finally:
+                self._active = None
+            leftover = inbox.leftover()
+            if not leftover:
+                return
+            next_event = leftover[0]
+            inbox = TurnInbox()
+            for queued in leftover[1:]:
+                inbox.put(queued)
+
+    async def _request_stop(self, event: TurnStopRequestedEvent) -> None:
+        active = self._active
+        if (
+            active is None
+            or active.stopped
+            or active.inbox.answer_ready
+            or active.task is None
+            or active.task.done()
+            or active.session_id != session_identifier(event.channel, event.chat_id)
+        ):
+            await self._publish_text(event.channel, event.chat_id, _NOTHING_TO_STOP_REPLY)
+            return
+        self._logger.info("stopping the running turn", extra={"turn_id": active.event.event_id})
+        active.stopped = True
+        active.task.cancel()
+
+    async def _finish_stopped(self, active: _ActiveTurn) -> None:
+        message = active.event.message
+        chat_id = message.chat_id or message.user_id or 0
+        await self._publish_lifecycle(
+            TurnFailedEvent(
+                turn_id=active.event.event_id,
+                channel=message.channel,
+                chat_id=message.chat_id,
+                error=_STOPPED_ERROR,
+            )
+        )
+        try:
+            if not active.inbox.user_message_recorded:
+                await self._memory.append_history(
+                    active.session_id, "user", build_history_user_entry(message, message.text)
+                )
+            await self._memory.append_history(active.session_id, "assistant", _STOPPED_HISTORY_NOTE)
+        except Exception:
+            self._logger.exception("failed to record the stopped turn", extra={"turn_id": active.event.event_id})
+        for queued in active.inbox.leftover():
+            try:
+                await self._memory.append_history(
+                    active.session_id, "user", build_history_user_entry(queued.message, queued.message.text)
+                )
+            except Exception:
+                self._logger.exception("failed to record a stopped message", extra={"event_id": queued.event_id})
+            finally:
+                await self._pending_turns.clear_pending(queued.event_id)
+        await self._publish_text(message.channel, chat_id, _STOPPED_REPLY)
+
+    async def _publish_text(self, channel: str, chat_id: int, text: str) -> None:
+        try:
+            await self._event_bus.publish(
+                OutboundEvent(
+                    response=ChannelResponse(
+                        channel=channel,
+                        chat_id=chat_id,
+                        text=text,
+                        render=RenderableResponse(kind="text", text=text),
+                        metadata={"should_reply": True},
+                    )
+                )
+            )
+        except Exception:
+            self._logger.exception("failed to publish a dispatcher reply", extra={"chat_id": chat_id})
 
     async def _publish_lifecycle(self, event: BaseEvent) -> None:
         """Publish turn telemetry without ever failing the turn.
@@ -289,8 +458,9 @@ class Dispatcher:
         message = event.message.model_copy(update={"capabilities": capabilities})
         return event.model_copy(update={"message": message})
 
-    async def _handle_message(self, event: MessageEvent) -> None:
-        event = self._with_channel_capabilities(event)
+    async def _handle_message(self, active: _ActiveTurn) -> None:
+        event = active.event
+        inbox = active.inbox
         await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
         reply_settled = False
         try:
@@ -312,7 +482,8 @@ class Dispatcher:
                     "text_length": len(message.text),
                 },
             )
-            response = await self._handler.handle(event)
+            response = await self._handler.handle(event, turn_input=inbox)
+            inbox.answer_ready = True
             should_reply = response.metadata.get("should_reply", True)
             token_trace = response.metadata.get("token_trace")
             self._logger.debug(
@@ -400,23 +571,12 @@ class Dispatcher:
                 await self._publish_failure_reply(event)
         finally:
             await self._pending_turns.clear_pending(event.event_id)
+            for event_id in inbox.consumed:
+                await self._pending_turns.clear_pending(event_id)
 
     async def _publish_failure_reply(self, event: MessageEvent) -> None:
         message = event.message
-        try:
-            await self._event_bus.publish(
-                OutboundEvent(
-                    response=ChannelResponse(
-                        channel=message.channel,
-                        chat_id=message.chat_id or message.user_id or 0,
-                        text=_INTERNAL_ERROR_REPLY,
-                        render=RenderableResponse(kind="text", text=_INTERNAL_ERROR_REPLY),
-                        metadata={"should_reply": True},
-                    )
-                )
-            )
-        except Exception:
-            self._logger.exception("failed to publish the failure reply", extra={"event_id": event.event_id})
+        await self._publish_text(message.channel, message.chat_id or message.user_id or 0, _INTERNAL_ERROR_REPLY)
 
     async def _handle_format_repair(self, event: OutboundFormatRepairEvent) -> None:
         try:
@@ -467,7 +627,7 @@ class Dispatcher:
     async def stop(self) -> None:
         await self._subscription.close()
         await self._history_subscription.close()
-        for task in (self._task, self._history_task):
+        for task in (self._task, self._worker_task, self._history_task):
             if task:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

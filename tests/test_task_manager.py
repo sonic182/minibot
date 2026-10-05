@@ -5,11 +5,13 @@ import json
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from minibot.adapters.config.schema import Settings
+from minibot.adapters.config.schema import MemoryConfig, Settings
+from minibot.adapters.memory.sqlalchemy import SQLAlchemyMemoryBackend
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
 from minibot.app.tasks.manager import DelegationBudget, TaskManager, _join_worker, resolve_delegation_budget
@@ -149,6 +151,8 @@ async def _spawn(
     agent_name: str | None = None,
     model_overrides: dict[str, str] | None = None,
     continuation_depth: int | None = None,
+    fresh: bool = False,
+    history_session: str | None = None,
 ):
     """Spawn a task with a fake pipe and return the mocked callbacks + semaphore."""
     ack_cb = AsyncMock()
@@ -172,6 +176,8 @@ async def _spawn(
             chat_id=1,
             user_id=2,
             continuation_depth=continuation_depth,
+            fresh=fresh,
+            history_session=history_session,
             ack_cb=ack_cb,
             nack_cb=nack_cb,
             semaphore=sem,
@@ -850,6 +856,80 @@ async def test_budget_is_resolved_before_the_execution_lease_is_claimed() -> Non
     await asyncio.wait_for(reader_task, timeout=1.0)
 
     assert order == ["budget", "claim"]
+
+
+@pytest.mark.asyncio
+async def test_task_history_carries_over_compacts_and_resets_on_fresh(tmp_path: Path) -> None:
+    store = SQLAlchemyMemoryBackend(MemoryConfig(sqlite_url=f"sqlite+aiosqlite:///{tmp_path}/history.db"))
+    await store.initialize()
+    manager = TaskManager(EventBus(), 5.0, history_store=store)
+    seen: list[dict] = []
+    original = manager._read_worker_result
+
+    async def _capture(mainpipe, payload, *args):
+        seen.append(payload)
+        return await original(mainpipe, payload, *args)
+
+    manager._read_worker_result = _capture  # type: ignore[method-assign]
+
+    async def _run(task_id: str, prompt: str, result: dict, *, fresh: bool = False) -> None:
+        pipe = _PipeSuccess({"type": "result", "task_id": task_id, "status": "done", **result})
+        _, _, _, _, reader_task = await _spawn(
+            manager, pipe, task_id=task_id, prompt=prompt, agent_name="mailer", fresh=fresh, history_session=session_id
+        )
+        await asyncio.wait_for(reader_task, timeout=1.0)
+
+    session_id = "task:console:1:mailer"
+
+    async def _stored() -> list[tuple[str, str]]:
+        return [(entry.role, entry.content) for entry in await store.get_history(session_id)]
+
+    await _run("t1", "draft for Ana", {"text": "draft A"})
+    await _run("t2", "send it", {"text": "sent", "history_summary": "Drafted A for Ana."})
+    assert seen[0]["history"] == []
+    assert seen[1]["history"] == [
+        {"role": "user", "content": "draft for Ana"},
+        {"role": "assistant", "content": "draft A"},
+    ]
+    assert await _stored() == [("assistant", "Drafted A for Ana."), ("user", "send it"), ("assistant", "sent")]
+
+    await _run("t3", "unrelated", {"text": "done"}, fresh=True)
+    assert seen[2]["history"] == []
+    assert await _stored() == [("user", "unrelated"), ("assistant", "done")]
+
+    await _run("t4", "dump the file", {"text": "y" * 20_000})
+    await _run("t5", "next", {"text": "ok"})
+    last_answer = seen[4]["history"][-1]["content"]
+    assert [message["role"] for message in seen[4]["history"]] == ["user", "assistant", "user", "assistant"]
+    assert len(last_answer) <= 8_000
+    assert last_answer.endswith("[truncated 12040 chars]")
+
+
+@pytest.mark.asyncio
+async def test_task_history_is_saved_before_the_session_lease_is_released(tmp_path: Path) -> None:
+    store = SQLAlchemyMemoryBackend(MemoryConfig(sqlite_url=f"sqlite+aiosqlite:///{tmp_path}/history.db"))
+    await store.initialize()
+    seen_at_done: list[list[str]] = []
+
+    class _Repository:
+        async def claim_execution(self, *_args, **_kwargs) -> str:
+            return "lease-1"
+
+        async def renew_execution(self, *_args) -> bool:
+            return True
+
+        async def mark_done(self, *_args) -> bool:
+            seen_at_done.append([entry.content for entry in await store.get_history("task:console:1:mailer")])
+            return True
+
+    manager = TaskManager(EventBus(), 5.0, cast(Any, _Repository()), history_store=store)
+    pipe = _PipeSuccess({"type": "result", "task_id": "t1", "status": "done", "text": "sent"})
+    _, _, _, _, reader_task = await _spawn(
+        manager, pipe, task_id="t1", prompt="send it", agent_name="mailer", history_session="task:console:1:mailer"
+    )
+    await asyncio.wait_for(reader_task, timeout=1.0)
+
+    assert seen_at_done == [["send it", "sent"]]
 
 
 class _PipeScripted:

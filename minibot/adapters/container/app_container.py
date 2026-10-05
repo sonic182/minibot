@@ -8,7 +8,6 @@ from pathlib import Path
 from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.agents.managed_store import LocalManagedAgentStore
 from minibot.adapters.config.loader import load_settings, resolve_config_path
-from minibot.adapters.decisions import OpenRouterDecisionClient
 from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.logging.setup import configure_logging
 from minibot.adapters.memory.pending_turns import PendingTurnStore
@@ -31,6 +30,7 @@ from minibot.core.decisions import DecisionClient
 from minibot.core.files import FileStorage
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
+from minibot.llm.providers.decisions import DecisionsProvider
 
 
 class AppContainer:
@@ -80,8 +80,16 @@ class AppContainer:
         )
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
+        decision = cls._settings.decision
         cls._decision_client = (
-            OpenRouterDecisionClient(cls._settings.decision) if cls._settings.decision.enabled else None
+            DecisionsProvider(
+                decision.api_key,
+                decision.base_url,
+                model=decision.model,
+                timeout_seconds=decision.timeout_seconds,
+            )
+            if decision.enabled
+            else None
         )
         cls._agent_registry = AgentRegistry(agent_specs)
         cls._skill_registry = SkillRegistry.from_config(

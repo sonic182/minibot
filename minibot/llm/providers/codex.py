@@ -19,6 +19,8 @@ class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
     The model list is requested with ``models_client_version`` (``[codex] version``) rather than the
     version ``llm-async-codex`` hardcodes, because the endpoint hides models newer than the client version."""
 
+    _stream_responses_request = PatchedOpenAIResponsesProvider._stream_responses_request
+
     def __init__(self, *args: Any, models_client_version: str | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._models_client_version = models_client_version or CodexConfig().version

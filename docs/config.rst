@@ -187,7 +187,8 @@ Decision
 --------
 
 ``[decision]`` is opt-in and off by default. When enabled, every main-agent turn also asks a
-decision model (OpenRouter's ``/api/alpha/decisions`` endpoint, not ``/chat/completions``) four fixed
+decision model (a ``<base_url>/decisions`` endpoint, OpenRouter's ``/api/alpha/decisions`` by default,
+not ``/chat/completions``) four fixed
 questions about the user's message: ``route`` (answer directly, use tools, or delegate a task),
 ``needs_memory``, ``needs_web`` and ``complexity``. The request runs in parallel with the real
 generation and is logged as a ``turn decision`` line next to the tools the agent actually used and
@@ -206,7 +207,7 @@ Keep the key in the vault:
    [decision]
    enabled = true
    model = "~typesafe/jev-latest"
-   base_url = "https://openrouter.ai/api/alpha/decisions"
+   base_url = "https://openrouter.ai/api/alpha"
    api_key = "${secret:openrouter_api_key}"
 
 The default ``~typesafe/jev-latest`` bills a small per-request fee. ``inception/mercury-decide:free`` is a
@@ -236,6 +237,31 @@ configures the first, ``[rabbitmq]`` the second.
 
 The default is ``"sqlite"``. A config written before that default changed and left ``backend``
 unset now uses the SQLite queue; set ``backend = "rabbitmq"`` explicitly to keep using the broker.
+
+By default a worker starts with no context: it sees only its system prompt, the task ``prompt`` and
+``context_json``, and the ``spawn_task`` description tells the main agent so. ``[tasks].history = true``
+gives worker conversations a persistent history instead. It needs ``backend = "sqlite"``.
+
+A conversation is a named agent in a chat, or that agent plus a ``session`` name the main agent passes to
+``spawn_task`` (for example one per client). A general worker only gets a conversation when it is given a
+``session``; otherwise it starts empty as before. Every finished task appends its prompt and answer to the
+conversation, each capped at 8000 characters (failed or timed-out tasks append nothing), and the next task
+receives it before its own prompt. Tasks of one conversation run one at a time: the queue does not lease a
+task while another task of the same conversation is leased or running, so a later task waits and then sees
+the earlier result. Different sessions run in parallel. When the stored history grows past roughly 16 KB
+and the model's context limit is known, the worker summarizes it before running and the summary replaces
+it; when the limit is unknown nothing is summarized and the worker only receives the newest messages that
+fit in about 32 KB. Tasks without a chat (no ``chat_id``) never get a history. ``fresh = true`` on ``spawn_task`` clears the conversation before a task, and the tool description
+switches to explain all this:
+
+.. code-block:: toml
+
+   [tasks]
+   history = true
+
+The history lives in the ``[memory]`` database under the session
+``task:<channel>:<chat_id>:<agent_name>[:<session>]`` (``task_worker`` for the general worker), so it is
+visible in the web console's session list.
 
 .. autoclass:: minibot.adapters.config.schema.TasksConfig
    :no-members:
@@ -388,7 +414,7 @@ Tool Configuration
      - ``enabled``, ``backend``, ``sqlite_url``/``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
    * - ``[tasks]``
      - ``TasksConfig``
-     - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``worker_max_steps``, ``worker_max_tool_calls``, ``max_concurrent_workers``, ``continue_turn_default``, ``continue_turn_mode``, ``sqlite``
+     - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``worker_max_steps``, ``worker_max_tool_calls``, ``max_concurrent_workers``, ``continue_turn_default``, ``continue_turn_mode``, ``history``, ``sqlite``
    * - ``[tasks.sqlite]``
      - ``SqliteTaskQueueConfig``
      - ``sqlite_url``, ``poll_interval_seconds``, ``lease_timeout_seconds``, ``batch_size``, ``max_attempts``, ``done_retention_seconds``; terminal rows and compact event history are retained for 30 days by default

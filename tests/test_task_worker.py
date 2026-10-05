@@ -635,3 +635,56 @@ async def test_worker_caps_the_tool_name_it_sends() -> None:
 
     request_line = next(line for line in pipe.written if b"approval_request" in line)
     assert len(request_line) < 10_000
+
+
+class _StateCapturingRuntime(_FakeRuntime):
+    states: list[object] = []
+
+    async def run(self, *, state, **kwargs: object):
+        type(self).states.append(state)
+        return await super().run(**kwargs)
+
+
+class _HistoryCompactor:
+    def __init__(self) -> None:
+        self.summarized: list[list[str]] = []
+
+    async def summarize_history(self, messages, prompt_cache_key):
+        self.summarized.append([message.content[0].text for message in messages])
+        return "Earlier: drafted a reply to Ana."
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_summarizes_a_large_history_before_the_task() -> None:
+    compactor = _HistoryCompactor()
+    old_answer = "x" * worker.HISTORY_COMPACT_BYTES
+    _StateCapturingRuntime.states = []
+
+    with (
+        patch("minibot.app.tasks.worker.load_settings", return_value=Settings()),
+        patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
+        patch("minibot.app.tasks.worker.AgentRuntime", _StateCapturingRuntime),
+        patch("minibot.app.tasks.worker.build_compactor", return_value=compactor),
+    ):
+        result = await worker.run_agent_loop(
+            {
+                "task_id": "t1",
+                "channel": "console",
+                "prompt": "Send it",
+                "context": {"to": "ana@example.com"},
+                "history": [
+                    {"role": "user", "content": "Draft a reply to Ana"},
+                    {"role": "assistant", "content": old_answer},
+                ],
+            }
+        )
+
+    assert compactor.summarized == [["Draft a reply to Ana", old_answer]]
+    assert result["history_summary"] == "Earlier: drafted a reply to Ana."
+    messages = _StateCapturingRuntime.states[0].messages
+    assert [message.role for message in messages] == ["system", "assistant", "user"]
+    assert messages[1].content[0].text == "Earlier: drafted a reply to Ana."
+    assert messages[2].content[0].text == worker.task_message_text("Send it", {"to": "ana@example.com"})
+    assert messages[2].metadata == {"task_prompt": True}
+    assert "previous tasks" in messages[0].content[0].text

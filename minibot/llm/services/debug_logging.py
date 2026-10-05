@@ -3,6 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from minibot.llm.services.usage_parser import incomplete_reason
+
+_ERROR_MESSAGE_LIMIT = 300
+
 
 def log_provider_response(
     *,
@@ -19,6 +23,10 @@ def log_provider_response(
     message = getattr(response, "main_response", None)
     content = getattr(message, "content", None) if message is not None else None
     tool_calls = getattr(message, "tool_calls", None) if message is not None else None
+    payload = original if isinstance(original, dict) else {}
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    output = payload.get("output")
+    error_message = error.get("message")
 
     logger.debug(
         "provider raw response",
@@ -32,6 +40,14 @@ def log_provider_response(
             "message_tool_call_names": [
                 item["name"] for item in (_serialize_tool_call(tc) for tc in (tool_calls or []))
             ],
+            "response_status": payload.get("status"),
+            "incomplete_reason": incomplete_reason(payload),
+            "error_code": error.get("code"),
+            "error_type": error.get("type"),
+            "error_message": error_message[:_ERROR_MESSAGE_LIMIT] if isinstance(error_message, str) else None,
+            "output_types": [item.get("type") for item in output if isinstance(item, dict)]
+            if isinstance(output, list)
+            else None,
             "logs_stripped": strip_logs,
         },
     )
