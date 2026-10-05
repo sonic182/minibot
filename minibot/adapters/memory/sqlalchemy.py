@@ -6,15 +6,9 @@ from typing import Any, cast
 
 from sqlalchemy import Column, DateTime, Integer, String, Text, and_, case, column, delete, func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
-from minibot.adapters.sqlalchemy_utils import (
-    ensure_parent_dir,
-    fts_match_query,
-    like_pattern,
-    resolve_sqlite_storage_path,
-)
+from minibot.adapters.sqlalchemy_utils import build_engine, fts_match_query, like_pattern
 from minibot.config.schema import MemoryConfig
 from minibot.core.memory import HistoryPage, MemoryBackend, MemoryEntry, SessionPage, SessionSummary
 from minibot.shared.datetime_utils import utcnow
@@ -35,15 +29,7 @@ class Message(Base):
 class SQLAlchemyMemoryBackend(MemoryBackend):
     def __init__(self, config: MemoryConfig) -> None:
         self._config = config
-        self._storage_path = resolve_sqlite_storage_path(config.sqlite_url)
-        if self._storage_path:
-            ensure_parent_dir(self._storage_path)
-
-        self._engine: AsyncEngine = create_async_engine(config.sqlite_url, future=True)
-        self._session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-            bind=self._engine,
-            expire_on_commit=False,
-        )
+        self._engine, self._session_factory = build_engine(config.sqlite_url)
         self._fts_enabled = False
 
     async def initialize(self) -> None:

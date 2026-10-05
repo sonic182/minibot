@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from sqlalchemy import Boolean, Column, Connection, DateTime, String, Text, delete, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.adapters.sqlalchemy_utils import build_engine
 from minibot.config.schema import MemoryConfig
 from minibot.shared.datetime_utils import utcnow
 
@@ -30,14 +29,7 @@ class PendingTurnStore:
     """
 
     def __init__(self, config: MemoryConfig) -> None:
-        storage_path = resolve_sqlite_storage_path(config.sqlite_url)
-        if storage_path:
-            ensure_parent_dir(storage_path)
-        self._engine: AsyncEngine = create_async_engine(config.sqlite_url, future=True)
-        self._session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-            bind=self._engine,
-            expire_on_commit=False,
-        )
+        self._engine, self._session_factory = build_engine(config.sqlite_url)
 
     async def initialize(self) -> None:
         async with self._engine.begin() as connection:

@@ -6,10 +6,10 @@ from typing import Any
 
 import numpy as np
 from sqlalchemy import JSON, Index, Integer, LargeBinary, String, delete, select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, resolve_sqlite_storage_path
+from minibot.adapters.sqlalchemy_utils import build_engine
 from minibot.config.schema import RagToolConfig
 
 # Each store module owns its declarative base so create_all only touches its own tables.
@@ -58,15 +58,7 @@ class SqliteVectorStore:
     """
 
     def __init__(self, config: RagToolConfig) -> None:
-        storage_path = resolve_sqlite_storage_path(config.sqlite_url)
-        if storage_path:
-            ensure_parent_dir(storage_path)
-
-        self._engine: AsyncEngine = create_async_engine(config.sqlite_url, future=True, echo=config.echo)
-        self._session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-            bind=self._engine,
-            expire_on_commit=False,
-        )
+        self._engine, self._session_factory = build_engine(config.sqlite_url, echo=config.echo)
 
     async def ensure_collection(self, collection_name: str, vector_size: int) -> None:
         async with self._engine.begin() as connection:

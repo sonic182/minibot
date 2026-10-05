@@ -6,16 +6,12 @@ import json
 import logging
 import os
 import signal
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
-from minibot.adapters.config.loader import load_settings
-from minibot.adapters.files.local_storage import LocalFileStorage
-from minibot.adapters.mcp.client import MCPClient
 from minibot.app.agent_definitions_loader import load_active_agent_specs
 from minibot.app.agent_policies import apply_agent_overrides, filter_tools_for_agent, strip_reserved_delegation_tools
 from minibot.app.agent_registry import AgentRegistry
@@ -36,6 +32,8 @@ from minibot.config.schema import Settings, task_limit
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentDefinitionReader, AgentSpec
 from minibot.core.channels import session_identifier
+from minibot.core.files import FileStorage
+from minibot.core.mcp import MCPClient
 from minibot.core.tasks import TaskLimits, TaskStopReason
 from minibot.core.tools import ToolContext
 from minibot.llm.errors import ProviderHTTPError
@@ -94,12 +92,20 @@ _WORKER_HISTORY_NOTE = (
 HISTORY_COMPACT_BYTES = 16_000
 
 
-def worker_entry(pipe: Any) -> None:
+@dataclass(frozen=True)
+class WorkerBackends:
+    load_settings: Callable[[Mapping[str, str] | None], Settings]
+    agent_reader: AgentDefinitionReader
+    build_mcp_client: Callable[..., MCPClient]
+    build_storage: Callable[[Settings], FileStorage | None]
+
+
+def worker_entry(pipe: Any, backends: WorkerBackends) -> None:
     with contextlib.suppress(asyncio.CancelledError):
-        asyncio.run(_run_worker(pipe))
+        asyncio.run(_run_worker(pipe, backends))
 
 
-async def _run_worker(pipe: Any) -> None:
+async def _run_worker(pipe: Any, backends: WorkerBackends) -> None:
     loop = asyncio.get_running_loop()
     main_task = asyncio.current_task()
     assert main_task is not None
@@ -118,10 +124,10 @@ async def _run_worker(pipe: Any) -> None:
     else:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, cancel_once)
-    await _worker_async(pipe)
+    await _worker_async(pipe, backends)
 
 
-async def _worker_async(pipe: Any) -> None:
+async def _worker_async(pipe: Any, backends: WorkerBackends) -> None:
     async with pipe.open() as (reader_pipe, writer_pipe):
         raw = await reader_pipe.readline()
 
@@ -179,6 +185,7 @@ async def _worker_async(pipe: Any) -> None:
                     payload,
                     progress_callback=emit_progress,
                     approval_callback=request_approval,
+                    backends=backends,
                 )
             finally:
                 reader.cancel()
@@ -189,6 +196,8 @@ async def run_agent_loop(
     task: dict[str, Any],
     progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     approval_callback: Approver | None = None,
+    *,
+    backends: WorkerBackends,
 ) -> dict[str, Any]:
     task_id = str(task.get("task_id") or "")
     mcp_clients: list[MCPClient] = []
@@ -196,7 +205,7 @@ async def run_agent_loop(
         channel = _require_string(task.get("channel"), "channel")
         prompt = _require_string(task.get("prompt"), "prompt")
         secrets = task.pop("secrets", None)
-        settings = load_settings(secrets=secrets)
+        settings = backends.load_settings(secrets)
         # ponytail: no vault object here, so a user extension sees `mb.vault is None` even though
         # ${secret:} resolved above. Only the scheduler loads in a worker and it needs no vault; build a
         # Vault from `secrets` if a user extension ever needs one.
@@ -204,7 +213,7 @@ async def run_agent_loop(
         llm_factory = LLMClientFactory(settings)
         environment_prompt_fragment = build_environment_prompt_fragment(settings)
         spec = await _resolve_task_spec(
-            reader=LocalAgentDefinitionReader(),
+            reader=backends.agent_reader,
             settings=settings,
             llm_factory=llm_factory,
             environment_prompt_fragment=environment_prompt_fragment,
@@ -212,10 +221,16 @@ async def run_agent_loop(
             extension_tool_names=[binding.tool.name for binding in extensions.tools],
         )
         llm_client = llm_factory.create_for_agent(spec)
-        mcp_bindings = await _build_worker_mcp_bindings(settings=settings, spec=spec, clients=mcp_clients)
+        mcp_bindings = await _build_worker_mcp_bindings(
+            settings=settings, spec=spec, clients=mcp_clients, build_client=backends.build_mcp_client
+        )
         tools = apply_tool_approval(
             _build_worker_tools(
-                settings=settings, spec=spec, extension_tools=extensions.tools, mcp_bindings=mcp_bindings
+                settings=settings,
+                spec=spec,
+                managed_storage=backends.build_storage(settings),
+                extension_tools=extensions.tools,
+                mcp_bindings=mcp_bindings,
             ),
             patterns=settings.tools.approval.require_approval,
             approve=approval_callback or _deny_approval,
@@ -339,11 +354,11 @@ def _build_worker_tools(
     *,
     settings: Settings,
     spec: AgentSpec,
+    managed_storage: FileStorage | None,
     extension_tools: Sequence[ToolBinding] = (),
     mcp_bindings: Sequence[ToolBinding] = (),
 ) -> list[ToolBinding]:
     bindings: list[ToolBinding] = []
-    managed_storage = _build_managed_storage(settings)
 
     if settings.tools.time.enabled:
         bindings.extend(CurrentTimeTool(settings.tools.time.default_format).bindings())
@@ -401,7 +416,7 @@ def _build_worker_tools(
 
 
 async def _build_worker_mcp_bindings(
-    *, settings: Settings, spec: AgentSpec, clients: list[MCPClient]
+    *, settings: Settings, spec: AgentSpec, clients: list[MCPClient], build_client: Callable[..., MCPClient]
 ) -> list[ToolBinding]:
     bindings: list[ToolBinding] = []
     if not settings.tools.mcp.enabled or not spec.mcp_servers:
@@ -409,7 +424,7 @@ async def _build_worker_mcp_bindings(
     for server in settings.tools.mcp.servers:
         if server.name not in spec.mcp_servers:
             continue
-        client = MCPClient(
+        client = build_client(
             server_name=server.name,
             transport=server.transport,
             timeout_seconds=settings.tools.mcp.timeout_seconds,
@@ -559,16 +574,6 @@ def _coerce_history(value: Any) -> list[dict[str, str]]:
         and isinstance(item.get("content"), str)
         and item["content"].strip()
     ]
-
-
-def _build_managed_storage(settings: Settings) -> LocalFileStorage | None:
-    if not settings.tools.file_storage.enabled:
-        return None
-    return LocalFileStorage(
-        root_dir=settings.tools.file_storage.root_dir,
-        max_write_bytes=settings.tools.file_storage.max_write_bytes,
-        allow_outside_root=settings.tools.file_storage.allow_outside_root,
-    )
 
 
 def _worker_prompt_cache_key(*, tool_context: ToolContext, task_id: str) -> str:

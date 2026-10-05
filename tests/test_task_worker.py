@@ -11,10 +11,21 @@ import pytest
 
 from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.config.schema import MCPServerConfig, Settings
+from minibot.adapters.mcp.client import MCPClient
+from minibot.adapters.tasks.worker_process import build_managed_storage
 from minibot.app.response_parser import EMPTY_REPLY_FALLBACK_TEXT
 from minibot.app.tasks import worker
 from minibot.core.agents import AgentSpec
 from minibot.llm.tools.base import ToolContext
+
+
+def _backends(settings: Settings, build_mcp_client=MCPClient) -> worker.WorkerBackends:
+    return worker.WorkerBackends(
+        load_settings=lambda _secrets: settings,
+        agent_reader=LocalAgentDefinitionReader(),
+        build_mcp_client=build_mcp_client,
+        build_storage=build_managed_storage,
+    )
 
 
 class _PipeCapture:
@@ -83,7 +94,7 @@ class _ToolCapturingRuntime(_FakeRuntime):
 async def test_worker_async_writes_error_for_invalid_payload() -> None:
     pipe = _PipeCapture(b"not-json\n")
 
-    await worker._worker_async(pipe)
+    await worker._worker_async(pipe, _backends(Settings()))
 
     assert pipe.written is not None
     result = json.loads(pipe.written)
@@ -95,13 +106,13 @@ async def test_run_agent_loop_returns_structured_success() -> None:
     settings = Settings()
 
     with (
-        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
         patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
         patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
         patch("minibot.app.tasks.worker.AgentRuntime", _FakeRuntime),
     ):
         result = await worker.run_agent_loop(
-            {"task_id": "t1", "channel": "console", "prompt": "Summarize this", "chat_id": 1, "user_id": 2}
+            {"task_id": "t1", "channel": "console", "prompt": "Summarize this", "chat_id": 1, "user_id": 2},
+            backends=_backends(settings),
         )
 
     assert result["task_id"] == "t1"
@@ -139,12 +150,12 @@ def register(mb):
     settings = Settings.from_dict({"extensions": {"modules": [extension_name]}})
 
     with (
-        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
         patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
         patch("minibot.app.tasks.worker.AgentRuntime", _ToolCapturingRuntime),
     ):
         await worker.run_agent_loop(
-            {"task_id": "t1", "channel": "console", "prompt": "Greet Ana", "chat_id": 1, "user_id": 2}
+            {"task_id": "t1", "channel": "console", "prompt": "Greet Ana", "chat_id": 1, "user_id": 2},
+            backends=_backends(settings),
         )
 
     binding = next(binding for binding in _ToolCapturingRuntime.tools if binding.tool.name == "worker_greet")
@@ -158,12 +169,12 @@ async def test_run_agent_loop_gives_workers_the_scheduler_tools(tmp_path: Path) 
     )
 
     with (
-        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
         patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
         patch("minibot.app.tasks.worker.AgentRuntime", _ToolCapturingRuntime),
     ):
         await worker.run_agent_loop(
-            {"task_id": "t1", "channel": "console", "prompt": "Remind me", "chat_id": 1, "user_id": 2}
+            {"task_id": "t1", "channel": "console", "prompt": "Remind me", "chat_id": 1, "user_id": 2},
+            backends=_backends(settings),
         )
 
     names = {binding.tool.name for binding in _ToolCapturingRuntime.tools}
@@ -187,13 +198,13 @@ async def test_run_agent_loop_falls_back_to_placeholder_text_on_empty_completion
     settings = Settings()
 
     with (
-        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
         patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
         patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
         patch("minibot.app.tasks.worker.AgentRuntime", _EmptyCompletionRuntime),
     ):
         result = await worker.run_agent_loop(
-            {"task_id": "t1", "channel": "console", "prompt": "Summarize this", "chat_id": 1, "user_id": 2}
+            {"task_id": "t1", "channel": "console", "prompt": "Summarize this", "chat_id": 1, "user_id": 2},
+            backends=_backends(settings),
         )
 
     assert result["task_id"] == "t1"
@@ -213,7 +224,6 @@ async def test_run_agent_loop_resolves_specialist_agent() -> None:
     )
 
     with (
-        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
         patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
         patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]),
         patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
@@ -227,7 +237,8 @@ async def test_run_agent_loop_resolves_specialist_agent() -> None:
                 "agent_name": "playwright_mcp_agent",
                 "chat_id": 1,
                 "user_id": 2,
-            }
+            },
+            backends=_backends(settings),
         )
 
     assert result["metadata"]["agent_name"] == "playwright_mcp_agent"
@@ -254,10 +265,8 @@ async def test_run_agent_loop_closes_the_mcp_clients_it_started() -> None:
         return client
 
     with (
-        patch("minibot.app.tasks.worker.load_settings", return_value=settings),
         patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
         patch("minibot.app.tasks.worker.load_active_agent_specs", return_value=[specialist]),
-        patch("minibot.app.tasks.worker.MCPClient", _fake_client),
         patch("minibot.app.tasks.worker.build_mcp_bindings_async", AsyncMock(return_value=[])),
         patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
         patch("minibot.app.tasks.worker.AgentRuntime", _FakeRuntime),
@@ -270,7 +279,8 @@ async def test_run_agent_loop_closes_the_mcp_clients_it_started() -> None:
                 "agent_name": "playwright_mcp_agent",
                 "chat_id": 1,
                 "user_id": 2,
-            }
+            },
+            backends=_backends(settings, _fake_client),
         )
 
     assert result["status"] == "done"
@@ -288,7 +298,8 @@ def test_build_worker_tools_excludes_orchestration_tools() -> None:
     settings.tools.wait.enabled = True
 
     spec = worker._build_worker_spec(system_prompt="You are Minibot.", environment_prompt_fragment="")
-    bindings = worker._build_worker_tools(settings=settings, spec=spec)
+    storage = build_managed_storage(settings)
+    bindings = worker._build_worker_tools(settings=settings, spec=spec, managed_storage=storage)
     tool_names = {binding.tool.name for binding in bindings}
 
     assert "current_datetime" in tool_names
@@ -316,7 +327,8 @@ def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
         tools_allow=["http_request", "spawn_task", "cancel_task", "list_tasks", "fetch_agent_info"],
     )
 
-    bindings = worker._build_worker_tools(settings=settings, spec=spec)
+    storage = build_managed_storage(settings)
+    bindings = worker._build_worker_tools(settings=settings, spec=spec, managed_storage=storage)
     tool_names = {binding.tool.name for binding in bindings}
 
     assert "http_request" in tool_names
@@ -343,7 +355,11 @@ async def test_build_worker_tools_scopes_skill_tools_to_the_spec(tmp_path: Path)
         tools_allow=["activate_skill", "install_skill"],
     )
 
-    bindings = {binding.tool.name: binding for binding in worker._build_worker_tools(settings=settings, spec=spec)}
+    storage = build_managed_storage(settings)
+    bindings = {
+        binding.tool.name: binding
+        for binding in worker._build_worker_tools(settings=settings, spec=spec, managed_storage=storage)
+    }
 
     assert set(bindings) == {"activate_skill"}
     result = await bindings["activate_skill"].handler({"name": "deploy"}, ToolContext())
@@ -356,7 +372,12 @@ def test_default_worker_gets_skill_tools_only_when_skills_enabled(enabled: bool)
     settings.tools.skills.enabled = enabled
     spec = worker._build_worker_spec(system_prompt="You are Minibot.", environment_prompt_fragment="")
 
-    tool_names = {binding.tool.name for binding in worker._build_worker_tools(settings=settings, spec=spec)}
+    tool_names = {
+        binding.tool.name
+        for binding in worker._build_worker_tools(
+            settings=settings, spec=spec, managed_storage=build_managed_storage(settings)
+        )
+    }
 
     assert ({"list_skills", "activate_skill"} <= tool_names) is enabled
     assert "install_skill" not in tool_names
@@ -365,7 +386,12 @@ def test_default_worker_gets_skill_tools_only_when_skills_enabled(enabled: bool)
 def test_default_worker_gets_get_settings() -> None:
     spec = worker._build_worker_spec(system_prompt="You are Minibot.", environment_prompt_fragment="")
 
-    tool_names = {binding.tool.name for binding in worker._build_worker_tools(settings=Settings(), spec=spec)}
+    tool_names = {
+        binding.tool.name
+        for binding in worker._build_worker_tools(
+            settings=Settings(), spec=spec, managed_storage=build_managed_storage(Settings())
+        )
+    }
 
     assert "get_settings" in tool_names
 
@@ -596,7 +622,7 @@ class _ApprovalPipe:
 async def _run_worker_asking_approval(pipe: _ApprovalPipe, tool_name: str = "mcp_mail__smtp_send_message") -> bool:
     outcome: list[bool] = []
 
-    async def _fake_loop(_task, progress_callback=None, approval_callback=None):
+    async def _fake_loop(_task, progress_callback=None, approval_callback=None, *, backends):
         outcome.append(
             await approval_callback(
                 tool_name,
@@ -607,7 +633,7 @@ async def _run_worker_asking_approval(pipe: _ApprovalPipe, tool_name: str = "mcp
         return {"type": "result", "task_id": "t1", "status": "done", "text": "ok"}
 
     with patch.object(worker, "run_agent_loop", _fake_loop):
-        await worker._worker_async(pipe)
+        await worker._worker_async(pipe, _backends(Settings()))
     return outcome[0]
 
 
@@ -661,7 +687,6 @@ async def test_run_agent_loop_summarizes_a_large_history_before_the_task() -> No
     _StateCapturingRuntime.states = []
 
     with (
-        patch("minibot.app.tasks.worker.load_settings", return_value=Settings()),
         patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
         patch("minibot.app.tasks.worker._build_worker_tools", return_value=[]),
         patch("minibot.app.tasks.worker.AgentRuntime", _StateCapturingRuntime),
@@ -677,7 +702,8 @@ async def test_run_agent_loop_summarizes_a_large_history_before_the_task() -> No
                     {"role": "user", "content": "Draft a reply to Ana"},
                     {"role": "assistant", "content": old_answer},
                 ],
-            }
+            },
+            backends=_backends(Settings()),
         )
 
     assert compactor.summarized == [["Draft a reply to Ana", old_answer]]

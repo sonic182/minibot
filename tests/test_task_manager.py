@@ -129,6 +129,10 @@ class _FakeProc:
 # ---------------------------------------------------------------------------
 
 
+def _noop_worker(_pipe: object) -> None:
+    return None
+
+
 def _make_manager(
     bus: EventBus,
     timeout: float = 5.0,
@@ -139,6 +143,7 @@ def _make_manager(
         event_bus=bus,
         worker_timeout_seconds=timeout,
         channel_capabilities=channel_capabilities,
+        worker_target=_noop_worker,
     )
 
 
@@ -656,7 +661,7 @@ async def test_spawn_sends_the_compaction_threshold_to_the_worker() -> None:
     async def _budget(name: str | None, _overrides: dict) -> DelegationBudget:
         return DelegationBudget(compact_threshold_tokens=4321) if name == "prospector" else DelegationBudget()
 
-    manager = TaskManager(bus, 5.0, budget_for=_budget)
+    manager = TaskManager(bus, 5.0, budget_for=_budget, worker_target=_noop_worker)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
 
     seen: list[dict] = []
@@ -686,7 +691,7 @@ async def test_spawn_forwards_model_overrides_to_the_budget_resolver() -> None:
             return DelegationBudget(compact_threshold_tokens=777, max_new_tokens=16384)
         return DelegationBudget(compact_threshold_tokens=4321)
 
-    manager = TaskManager(bus, 5.0, budget_for=_budget)
+    manager = TaskManager(bus, 5.0, budget_for=_budget, worker_target=_noop_worker)
     pipe = _PipeSuccess({"task_id": "t1", "text": "ok"})
 
     seen: list[dict] = []
@@ -850,7 +855,7 @@ async def test_budget_is_resolved_before_the_execution_lease_is_claimed() -> Non
     repository.claim_execution = _claim
     repository.mark_done = AsyncMock(return_value=True)
     repository.append_event = AsyncMock()
-    manager = TaskManager(bus, 5.0, task_repository=repository, budget_for=_budget)
+    manager = TaskManager(bus, 5.0, task_repository=repository, budget_for=_budget, worker_target=_noop_worker)
 
     _, _, _, _, reader_task = await _spawn(manager, _PipeSuccess({"task_id": "t1", "text": "ok"}), task_id="t1")
     await asyncio.wait_for(reader_task, timeout=1.0)
@@ -862,7 +867,7 @@ async def test_budget_is_resolved_before_the_execution_lease_is_claimed() -> Non
 async def test_task_history_carries_over_compacts_and_resets_on_fresh(tmp_path: Path) -> None:
     store = SQLAlchemyMemoryBackend(MemoryConfig(sqlite_url=f"sqlite+aiosqlite:///{tmp_path}/history.db"))
     await store.initialize()
-    manager = TaskManager(EventBus(), 5.0, history_store=store)
+    manager = TaskManager(EventBus(), 5.0, history_store=store, worker_target=_noop_worker)
     seen: list[dict] = []
     original = manager._read_worker_result
 
@@ -922,7 +927,7 @@ async def test_task_history_is_saved_before_the_session_lease_is_released(tmp_pa
             seen_at_done.append([entry.content for entry in await store.get_history("task:console:1:mailer")])
             return True
 
-    manager = TaskManager(EventBus(), 5.0, cast(Any, _Repository()), history_store=store)
+    manager = TaskManager(EventBus(), 5.0, cast(Any, _Repository()), history_store=store, worker_target=_noop_worker)
     pipe = _PipeSuccess({"type": "result", "task_id": "t1", "status": "done", "text": "sent"})
     _, _, _, _, reader_task = await _spawn(
         manager, pipe, task_id="t1", prompt="send it", agent_name="mailer", history_session="task:console:1:mailer"

@@ -34,10 +34,10 @@ from sqlalchemy import (
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.event import listens_for
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.schema import CreateIndex, CreateTable
 
-from minibot.adapters.sqlalchemy_utils import ensure_parent_dir, like_pattern, resolve_sqlite_storage_path
+from minibot.adapters.sqlalchemy_utils import build_engine, like_pattern
 from minibot.shared.datetime_utils import ensure_utc, utcnow
 
 DEFAULT_SQLITE_URL = "sqlite+aiosqlite:///./data/graph.db"
@@ -79,13 +79,9 @@ class SqliteGraphStore:
     """Typed relations between entities, with history via ``valid_to``."""
 
     def __init__(self, sqlite_url: str = DEFAULT_SQLITE_URL, *, echo: bool = False) -> None:
-        storage_path = resolve_sqlite_storage_path(sqlite_url)
-        if storage_path:
-            ensure_parent_dir(storage_path)
-        self._engine: AsyncEngine = create_async_engine(sqlite_url, future=True, echo=echo)
+        self._engine, self._session_factory = build_engine(sqlite_url, echo=echo)
         if make_url(sqlite_url).drivername.startswith("sqlite"):
             _apply_sqlite_pragmas(self._engine)
-        self._session_factory = async_sessionmaker(bind=self._engine, expire_on_commit=False)
         self._ready = False
         self._ready_lock = asyncio.Lock()
 
