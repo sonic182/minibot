@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Turn events carry what a turn saw and did.** `TurnStartedEvent` has `text` and `available_tools`;
+  `TurnCompletedEvent` has `tools_used` and `task_handoff`.
+
+### Changed
+
+- **The `[decision]` shadow-mode model runs as a bundled extension** (`minibot.extensions.integrations.decision`)
+  that listens to the turn events instead of being called from the turn service. The configuration and the
+  `turn decision` log line are unchanged. The question now gets the message text as received, and it is also asked
+  for turns that end before the model is called.
+
 ## [0.29.0] - 2026-10-05
 
 ### Added

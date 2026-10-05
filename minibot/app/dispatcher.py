@@ -26,7 +26,6 @@ from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_capabilities import MainAgentToolView, main_agent_tool_view
 from minibot.app.tool_factory import build_enabled_tools
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
-from minibot.app.turn_decision import NoopTurnDecision, ShadowTurnDecision
 from minibot.app.turn_inbox import TurnInbox
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentDefinitionReader
@@ -38,7 +37,6 @@ from minibot.core.channels import (
     session_id_for,
     session_identifier,
 )
-from minibot.core.decisions import DecisionClient
 from minibot.core.events import (
     BaseEvent,
     MessageEvent,
@@ -106,7 +104,6 @@ class Dispatcher:
         extensions: ExtensionRegistry,
         managed_storage: FileStorage | None,
         channel_capabilities: Mapping[str, ChannelCapabilities] | None = None,
-        decision_client: DecisionClient | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._channel_capabilities = dict(channel_capabilities or {})
@@ -138,13 +135,6 @@ class Dispatcher:
             )
         else:
             tool_use_guardrail = NoopToolUseGuardrail()
-        turn_decision: NoopTurnDecision | ShadowTurnDecision = NoopTurnDecision()
-        if decision_client is not None:
-            turn_decision = ShadowTurnDecision(
-                client=decision_client,
-                tools=main_agent_tools_view.tools,
-                timeout_seconds=settings.decision.timeout_seconds,
-            )
         audio_transcription_cfg = getattr(settings.tools, "audio_transcription", None)
         auto_transcribe_enabled = bool(getattr(audio_transcription_cfg, "auto_transcribe_short_incoming", False))
         auto_transcribe_max_duration_seconds = int(
@@ -177,7 +167,6 @@ class Dispatcher:
             event_bus=event_bus,
             task_handoff_callback=task_handoff_callback,
             extension_prompt_fragments=extensions.prompt_fragments_for(main_agent_tools_view.tools),
-            turn_decision=turn_decision,
         )
         self._handler = LLMMessageHandler(turn_service)
         self._turn_service = turn_service
@@ -471,6 +460,8 @@ class Dispatcher:
                     channel=message.channel,
                     chat_id=message.chat_id,
                     user_id=message.user_id,
+                    text=message.text,
+                    available_tools=list(self._main_agent_tool_names),
                 )
             )
             self._logger.debug(
@@ -555,6 +546,8 @@ class Dispatcher:
                     compaction_performed=token_trace.get("compaction_performed")
                     if isinstance(token_trace, dict)
                     else None,
+                    tools_used=list(response.metadata.get("tools_used") or []),
+                    task_handoff=bool(response.metadata.get("task_handoff")),
                 )
             )
         except Exception as exc:

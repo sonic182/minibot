@@ -26,11 +26,9 @@ from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_a
 from minibot.config.environment import has_secret_references, has_secret_syntax
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentDefinitionReader
-from minibot.core.decisions import DecisionClient
 from minibot.core.files import FileStorage
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
-from minibot.llm.providers.decisions import DecisionsProvider
 
 
 class AppContainer:
@@ -43,7 +41,6 @@ class AppContainer:
     _file_storage: FileStorage | None = None
     _llm_client: LLMClient | None = None
     _llm_factory: LLMClientFactory | None = None
-    _decision_client: DecisionClient | None = None
     _agent_registry: AgentRegistry | None = None
     _skill_registry: SkillRegistry | None = None
     _extensions: ExtensionRegistry | None = None
@@ -80,17 +77,6 @@ class AppContainer:
         )
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
-        decision = cls._settings.decision
-        cls._decision_client = (
-            DecisionsProvider(
-                decision.api_key,
-                decision.base_url,
-                model=decision.model,
-                timeout_seconds=decision.timeout_seconds,
-            )
-            if decision.enabled
-            else None
-        )
         cls._agent_registry = AgentRegistry(agent_specs)
         cls._skill_registry = SkillRegistry.from_config(
             cls._settings.tools.skills,
@@ -168,10 +154,6 @@ class AppContainer:
         if cls._llm_client is None:
             raise RuntimeError("LLM client not configured")
         return cls._llm_client
-
-    @classmethod
-    def get_decision_client(cls) -> DecisionClient | None:
-        return cls._decision_client
 
     @classmethod
     def get_llm_factory(cls) -> LLMClientFactory:

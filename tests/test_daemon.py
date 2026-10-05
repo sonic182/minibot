@@ -67,10 +67,6 @@ def _make_container(extensions: object) -> type:
             return extensions
 
         @classmethod
-        def get_decision_client(cls) -> None:
-            return None
-
-        @classmethod
         def bind_agent_roster_refresh(cls, refresh) -> None:
             del refresh
 

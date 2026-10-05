@@ -65,7 +65,6 @@ async def run(
         extensions=AppContainer.get_extensions(),
         managed_storage=AppContainer.get_file_storage(),
         channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
-        decision_client=AppContainer.get_decision_client(),
     )
     AppContainer.bind_agent_roster_refresh(dispatcher.refresh_agent_roster)
     strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))

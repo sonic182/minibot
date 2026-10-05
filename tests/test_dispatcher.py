@@ -386,7 +386,13 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
                 channel="telegram",
                 chat_id=1,
                 text="ok",
-                metadata={"should_reply": True, "llm_provider": "openai", "llm_model": "gpt-4o-mini"},
+                metadata={
+                    "should_reply": True,
+                    "llm_provider": "openai",
+                    "llm_model": "gpt-4o-mini",
+                    "tools_used": ["memory"],
+                    "task_handoff": True,
+                },
             )
 
     event_types = (TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent, OutboundEvent)
@@ -414,9 +420,13 @@ async def test_dispatcher_publishes_turn_lifecycle_events(monkeypatch: pytest.Mo
     assert "Sorry, I couldn't answer right now." in replies
 
     assert {e.turn_id for e in started} == {ok_event.event_id, bad_event.event_id}
+    assert {e.text for e in started} == {"hello", "boom"}
+    assert all(isinstance(e.available_tools, list) for e in started)
     assert len(completed) == 1
     assert completed[0].turn_id == ok_event.event_id
     assert completed[0].llm_model == "gpt-4o-mini"
+    assert completed[0].tools_used == ["memory"]
+    assert completed[0].task_handoff is True
     assert completed[0].should_reply is True
     assert len(failed) == 1
     assert failed[0].turn_id == bad_event.event_id

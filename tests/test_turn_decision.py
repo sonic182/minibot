@@ -5,9 +5,9 @@ from typing import Any
 
 import pytest
 
-from minibot.app.turn_decision import TURN_QUESTIONS
 from minibot.config.schema import DecisionConfig
 from minibot.core.decisions import DecisionHTTPError
+from minibot.extensions.integrations.decision import TURN_QUESTIONS
 from minibot.llm.providers.decisions import DecisionsProvider
 
 MERCURY_RESPONSE = {

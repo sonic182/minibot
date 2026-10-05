@@ -56,6 +56,8 @@ class TurnStartedEvent(BaseEvent):
     channel: str
     chat_id: int | None = None
     user_id: int | None = None
+    text: str = ""
+    available_tools: list[str] = Field(default_factory=list)
 
 
 class TurnCompletedEvent(BaseEvent):
@@ -74,6 +76,8 @@ class TurnCompletedEvent(BaseEvent):
     llm_model: str | None = None
     token_trace: dict[str, Any] = Field(default_factory=dict)
     compaction_performed: bool | None = None
+    tools_used: list[str] = Field(default_factory=list)
+    task_handoff: bool = False
 
 
 class TurnFailedEvent(BaseEvent):

@@ -78,6 +78,8 @@ Payload:
 
 - ``turn_id`` — the originating ``MessageEvent`` id.
 - ``channel``, ``chat_id``, ``user_id``.
+- ``text`` — the inbound message text.
+- ``available_tools`` — names of the tools the main agent can use for this turn.
 
 TurnCompletedEvent
 ~~~~~~~~~~~~~~~~~~
@@ -93,6 +95,8 @@ Payload:
 - ``llm_provider``, ``llm_model`` — what produced the response.
 - ``token_trace`` — token accounting dict (e.g. ``turn_total_tokens``).
 - ``compaction_performed`` — whether history compaction ran this turn.
+- ``tools_used`` — names of the tools the agent actually called this turn.
+- ``task_handoff`` — whether the turn ended by handing the work to a background task.
 
 Typical use: per-turn metrics, token budget tracking. See
 `examples/minibot_ext_demo.py <https://github.com/sonic182/minibot/blob/main/examples/minibot_ext_demo.py>`_.

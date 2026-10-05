@@ -32,6 +32,7 @@ type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 
 def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
     common = (
+        "minibot.extensions.integrations.decision",
         "minibot.extensions.integrations.rag",
         "minibot.extensions.integrations.mcp",
         "minibot.extensions.integrations.rabbitmq",
