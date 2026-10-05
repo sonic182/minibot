@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import signal
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
@@ -96,8 +97,16 @@ async def _run_worker(pipe: Any) -> None:
     loop = asyncio.get_running_loop()
     main_task = asyncio.current_task()
     assert main_task is not None
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, main_task.cancel)
+    if os.name == "nt":
+
+        def cancel_worker(signum: int, signal_frame: object) -> None:
+            loop.call_soon_threadsafe(main_task.cancel)
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, cancel_worker)
+    else:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, main_task.cancel)
     await _worker_async(pipe)
 
 

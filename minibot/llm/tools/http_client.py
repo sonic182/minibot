@@ -10,8 +10,7 @@ from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
-import aiosonic
-from aiosonic.timeout import Timeouts
+import aiohttp
 from llm_async.models import Tool
 
 from minibot.config.schema import HTTPClientToolConfig
@@ -23,6 +22,7 @@ from minibot.shared.html_compact import html_to_compact
 
 _SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 _TOTAL_TIMEOUT_FACTOR = 3
+_READ_CHUNK_BYTES = 65536
 
 
 def _loggable_url(url: str) -> str:
@@ -63,7 +63,7 @@ class HTTPClientTool:
         self._config = config
         self._storage = storage
         self._logger = logging.getLogger("minibot.http_tool")
-        self._client = aiosonic.HTTPClient()
+        self._client: aiohttp.ClientSession | None = None
 
     def bindings(self) -> list[ToolBinding]:
         return [ToolBinding(tool=_http_tool_schema(), handler=self._handle_request)]
@@ -73,14 +73,15 @@ class HTTPClientTool:
         url = self._coerce_url(payload.get("url"))
         headers = self._coerce_headers(payload.get("headers"))
         body, json_payload = self._coerce_body(payload)
-        timeouts = Timeouts(
+        timeout = aiohttp.ClientTimeout(
+            total=self._config.timeout_seconds * _TOTAL_TIMEOUT_FACTOR,
+            connect=self._config.timeout_seconds,
             sock_connect=self._config.timeout_seconds,
             sock_read=self._config.timeout_seconds,
         )
 
         request_kwargs: dict[str, Any] = {
             "headers": headers,
-            "timeouts": timeouts,
         }
         if json_payload is not None:
             request_kwargs["json"] = json_payload
@@ -93,10 +94,19 @@ class HTTPClientTool:
                 extra={"method": method, "url": _loggable_url(url), "owner_id": context.owner_id},
             )
             async with asyncio.timeout(self._config.timeout_seconds * _TOTAL_TIMEOUT_FACTOR):
-                response = await self._client.request(url, method=method, **request_kwargs)
-                content = await self._read_body(response, self._read_limit())
+                if self._client is None:
+                    async with aiohttp.ClientSession(timeout=timeout) as client:
+                        async with client.request(url, method=method, **request_kwargs) as response:
+                            content = await self._read_body(response, self._read_limit())
+                            status_code = response.status
+                            response_headers = response.headers
+                else:
+                    response = await self._client.request(url, method=method, **request_kwargs)
+                    content = await self._read_body(response, self._read_limit())
+                    status_code = response.status
+                    response_headers = response.headers
             truncated = len(content) > self._config.max_bytes
-            content_type = _extract_content_type(response.headers)
+            content_type = _extract_content_type(response_headers)
             processed_body, processor_used = _process_response_text(
                 text=_decode_preview(content[: self._decode_budget(content_type)]),
                 content_type=content_type,
@@ -145,9 +155,9 @@ class HTTPClientTool:
                             f"{self._config.spill_after_chars} characters but could not be saved to managed "
                             "storage. The body field contains the bounded inline preview."
                         )
-            headers_subset = dict(list(response.headers.items())[:10])
+            headers_subset = dict(list(response_headers.items())[:10])
             return {
-                "status": response.status_code,
+                "status": status_code,
                 "headers": headers_subset,
                 "body": final_body,
                 "body_storage": body_storage,
@@ -257,17 +267,15 @@ class HTTPClientTool:
         return max(self._config.max_bytes, self._config.max_parse_bytes, spill_bytes) + 1
 
     @staticmethod
-    async def _read_body(response: Any, limit: int) -> bytes:
-        if not getattr(response, "chunked", False):
-            return await response.content()
+    async def _read_body(response: aiohttp.ClientResponse, limit: int) -> bytes:
         body = bytearray()
-        async for chunk in response.read_chunks():
-            body.extend(chunk[: limit - len(body)])
-            if len(body) >= limit:
-                connection = getattr(response, "_connection", None)
-                if connection is not None:
-                    connection.keep = False
+        while len(body) < limit:
+            chunk = await response.content.read(min(_READ_CHUNK_BYTES, limit - len(body)))
+            if not chunk:
                 break
+            body.extend(chunk)
+        if len(body) >= limit:
+            response.close()
         return bytes(body)
 
     def _decode_budget(self, content_type: str) -> int:
