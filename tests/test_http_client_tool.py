@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any, cast
@@ -575,3 +576,43 @@ async def test_http_tool_follows_redirects_only_when_configured(
 
     assert result["status"] == status
     assert result["body"] == body
+
+
+@pytest.mark.asyncio
+async def test_http_tool_decompresses_a_chunked_gzip_body(unused_tcp_port: int) -> None:
+    payload = gzip.compress(b"hello gzip " * 50)
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.read(65536)
+        writer.write(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\n"
+            b"Transfer-Encoding: chunked\r\n\r\n"
+        )
+        for start in range(0, len(payload), 64):
+            piece = payload[start : start + 64]
+            writer.write(f"{len(piece):x}\r\n".encode() + piece + b"\r\n")
+        writer.write(b"0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", unused_tcp_port)
+    try:
+        config = HTTPClientToolConfig(enabled=True, timeout_seconds=5, max_bytes=4096)
+        result = (
+            await HTTPClientTool(config)
+            .bindings()[0]
+            .handler(
+                {
+                    "method": "GET",
+                    "url": f"http://127.0.0.1:{unused_tcp_port}/",
+                    "headers": {"Accept-Encoding": "gzip"},
+                },
+                ToolContext(owner_id="tester"),
+            )
+        )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert result["status"] == 200
+    assert result["body"].startswith("hello gzip hello gzip")

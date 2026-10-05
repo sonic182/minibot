@@ -324,7 +324,7 @@ Tool Configuration
      - ``enabled``, ``sqlite_url``, ``default_limit``, ``max_limit``
    * - ``[tools.http_client]``
      - ``HTTPClientToolConfig``
-     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings, ``follow_redirects`` (default ``false``: a redirect response is returned as-is) and ``max_redirects`` (default ``5``). Any response body, chunked or with a ``Content-Length``, is read only up to the largest of ``max_bytes``, ``max_parse_bytes`` and the spill ceiling; the whole request, body included, is bounded to three times ``timeout_seconds``
+     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings, ``follow_redirects`` (default ``false``: a redirect response is returned as-is) and ``max_redirects`` (default ``5``). A chunked response is read only up to the largest of ``max_bytes``, ``max_parse_bytes`` and the spill ceiling; the whole request, body included, is bounded to three times ``timeout_seconds``. A response with a ``Content-Length`` is still read in full by the HTTP client before the cap applies
    * - ``[tools.time]``
      - ``TimeToolConfig``
      - ``enabled``, ``default_format``
