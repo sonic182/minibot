@@ -183,6 +183,38 @@ ceiling, so their permissions stay exactly as the owner wrote them.
 .. autoclass:: minibot.adapters.config.schema.AgentManagementConfig
    :no-members:
 
+Decision
+--------
+
+``[decision]`` is opt-in and off by default. When enabled, every main-agent turn also asks a
+decision model (OpenRouter's ``/api/alpha/decisions`` endpoint, not ``/chat/completions``) four fixed
+questions about the user's message: ``route`` (answer directly, use tools, or delegate a task),
+``needs_memory``, ``needs_web`` and ``complexity``. The request runs in parallel with the real
+generation and is logged as a ``turn decision`` line next to the tools the agent actually used and
+whether the turn was handed off to a task, so the model's choices can be compared with reality before
+anything acts on them. It never changes a reply, adds no latency, and a timeout or any failure is
+logged and ignored.
+
+Every turn sends the user's message text and the names of the main agent's tools to OpenRouter and the
+model provider behind it, so enable it only where that is acceptable and check the provider's data
+policy for the chosen model.
+
+Keep the key in the vault:
+
+.. code-block:: toml
+
+   [decision]
+   enabled = true
+   model = "~typesafe/jev-latest"
+   base_url = "https://openrouter.ai/api/alpha/decisions"
+   api_key = "${secret:openrouter_api_key}"
+
+The default ``~typesafe/jev-latest`` bills a small per-request fee. ``inception/mercury-decide:free`` is a
+drop-in alternative at no cost; free model variants may follow a different data policy.
+
+.. autoclass:: minibot.adapters.config.schema.DecisionConfig
+   :no-members:
+
 Scheduler
 ---------
 
@@ -286,13 +318,13 @@ Tool Configuration
      - Key options
    * - ``[tools.approval]``
      - ``ToolApprovalConfig``
-     - ``require_approval`` (fnmatch tool-name patterns, default empty), ``timeout_seconds``; Telegram approve/deny buttons before a matching call runs, denied on timeout or outside Telegram
+     - ``require_approval`` (fnmatch tool-name patterns, default empty), ``timeout_seconds``; Telegram approve/deny buttons before a matching call runs, denied on timeout or outside Telegram. The buttons answer only for an authorized user, and only for the user whose request triggered the call when it is known (a scheduled job has no requester, so any authorized user may answer)
    * - ``[tools.kv_memory]``
      - ``KeyValueMemoryConfig``
      - ``enabled``, ``sqlite_url``, ``default_limit``, ``max_limit``
    * - ``[tools.http_client]``
      - ``HTTPClientToolConfig``
-     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings
+     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings, ``follow_redirects`` (default ``false``: a redirect response is returned as-is) and ``max_redirects`` (default ``5``). A chunked response is read only up to the largest of ``max_bytes``, ``max_parse_bytes`` and the spill ceiling; the whole request, body included, is bounded to three times ``timeout_seconds``. A response with a ``Content-Length`` is still read in full by the HTTP client before the cap applies
    * - ``[tools.time]``
      - ``TimeToolConfig``
      - ``enabled``, ``default_format``
@@ -316,7 +348,7 @@ Tool Configuration
      - ``enabled``, ``command_prefix``
    * - ``[tools.bash]``
      - ``BashToolConfig``
-     - ``enabled``, timeout/output limits, parent environment and allowlist policy
+     - ``enabled``, timeout/output limits, parent environment and allowlist policy. ``max_output_bytes`` is enforced while the command runs: output beyond it is read and discarded, never buffered, and a spilled file holds at most that many bytes
    * - ``[vault]``
      - ``VaultConfig``
      - ``enabled``, ``path``, ``password_file``; see `Vault`_ above

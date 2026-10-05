@@ -23,9 +23,11 @@ from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_capabilities import MainAgentToolView, main_agent_tool_view
 from minibot.app.tool_factory import build_enabled_tools
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
+from minibot.app.turn_decision import NoopTurnDecision, ShadowTurnDecision
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentDefinitionReader
 from minibot.core.channels import ChannelCapabilities, ChannelResponse, RenderableResponse, session_identifier
+from minibot.core.decisions import DecisionClient
 from minibot.core.events import (
     BaseEvent,
     MessageEvent,
@@ -40,6 +42,8 @@ from minibot.core.memory import MemoryBackend, PendingTurnRepository
 from minibot.llm.provider_factory import LLMClient
 from minibot.llm.tools.base import ToolBinding
 from minibot.shared.utils import humanize_token_count, summarize_items
+
+_INTERNAL_ERROR_REPLY = "Sorry, I couldn't answer right now."
 
 
 def _token_trace_log_fields(token_trace: object) -> dict[str, object]:
@@ -73,6 +77,7 @@ class Dispatcher:
         extensions: ExtensionRegistry,
         managed_storage: FileStorage | None,
         channel_capabilities: Mapping[str, ChannelCapabilities] | None = None,
+        decision_client: DecisionClient | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._channel_capabilities = dict(channel_capabilities or {})
@@ -99,6 +104,13 @@ class Dispatcher:
             )
         else:
             tool_use_guardrail = NoopToolUseGuardrail()
+        turn_decision: NoopTurnDecision | ShadowTurnDecision = NoopTurnDecision()
+        if decision_client is not None:
+            turn_decision = ShadowTurnDecision(
+                client=decision_client,
+                tools=main_agent_tools_view.tools,
+                timeout_seconds=settings.decision.timeout_seconds,
+            )
         audio_transcription_cfg = getattr(settings.tools, "audio_transcription", None)
         auto_transcribe_enabled = bool(getattr(audio_transcription_cfg, "auto_transcribe_short_incoming", False))
         auto_transcribe_max_duration_seconds = int(
@@ -131,6 +143,7 @@ class Dispatcher:
             event_bus=event_bus,
             task_handoff_callback=task_handoff_callback,
             extension_prompt_fragments=extensions.prompt_fragments_for(main_agent_tools_view.tools),
+            turn_decision=turn_decision,
         )
         self._handler = LLMMessageHandler(turn_service)
         self._turn_service = turn_service
@@ -279,6 +292,7 @@ class Dispatcher:
     async def _handle_message(self, event: MessageEvent) -> None:
         event = self._with_channel_capabilities(event)
         await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
+        reply_settled = False
         try:
             message = event.message
             await self._publish_lifecycle(
@@ -338,6 +352,7 @@ class Dispatcher:
                     )
             if should_reply:
                 await self._event_bus.publish(OutboundEvent(response=response))
+                reply_settled = True
                 compaction_updates = response.metadata.get("compaction_updates")
                 if isinstance(compaction_updates, list):
                     for update in compaction_updates:
@@ -355,6 +370,7 @@ class Dispatcher:
                             )
                         )
             else:
+                reply_settled = True
                 self._logger.info("skipping user reply as instructed", extra={"event_id": event.event_id})
             await self._publish_lifecycle(
                 TurnCompletedEvent(
@@ -380,8 +396,27 @@ class Dispatcher:
                     error=str(exc),
                 )
             )
+            if not reply_settled:
+                await self._publish_failure_reply(event)
         finally:
             await self._pending_turns.clear_pending(event.event_id)
+
+    async def _publish_failure_reply(self, event: MessageEvent) -> None:
+        message = event.message
+        try:
+            await self._event_bus.publish(
+                OutboundEvent(
+                    response=ChannelResponse(
+                        channel=message.channel,
+                        chat_id=message.chat_id or message.user_id or 0,
+                        text=_INTERNAL_ERROR_REPLY,
+                        render=RenderableResponse(kind="text", text=_INTERNAL_ERROR_REPLY),
+                        metadata={"should_reply": True},
+                    )
+                )
+            )
+        except Exception:
+            self._logger.exception("failed to publish the failure reply", extra={"event_id": event.event_id})
 
     async def _handle_format_repair(self, event: OutboundFormatRepairEvent) -> None:
         try:

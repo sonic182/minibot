@@ -535,6 +535,7 @@ class HostPythonExecTool:
                 process,
                 timeout_seconds,
                 input=input_bytes,
+                max_bytes=self._config.max_output_bytes,
             )
             if timed_out:
                 self._logger.warning(

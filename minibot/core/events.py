@@ -132,6 +132,7 @@ class ToolApprovalRequestedEvent(BaseEvent):
     channel: str
     chat_id: int
     detail: str = ""
+    requester_user_id: int | None = None
 
 
 class ToolApprovalResolvedEvent(BaseEvent):

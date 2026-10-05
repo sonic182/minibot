@@ -7,7 +7,7 @@ import tomlkit
 
 from minibot.adapters.config.configurator import _set_value
 from minibot.adapters.config.loader import load_settings
-from minibot.adapters.config.schema import MemoryConfig, RagToolConfig, Settings, SkillsToolConfig
+from minibot.adapters.config.schema import DecisionConfig, MemoryConfig, RagToolConfig, Settings, SkillsToolConfig
 from minibot.adapters.container.app_container import AppContainer
 
 
@@ -515,3 +515,10 @@ def test_load_settings_rejects_directory_for_explicit_path(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="config path must be a file"):
         load_settings(config_dir)
+
+
+def test_decision_config_is_off_by_default_and_requires_a_key_when_enabled() -> None:
+    assert Settings().decision.enabled is False
+    with pytest.raises(ValueError, match="api_key is required"):
+        DecisionConfig(enabled=True)
+    assert DecisionConfig(enabled=True, api_key="${secret:openrouter_api_key}").enabled is True

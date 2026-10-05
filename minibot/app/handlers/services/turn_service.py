@@ -19,6 +19,7 @@ from minibot.app.response_parser import extract_answer, plain_render, resolve_re
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
+from minibot.app.turn_decision import NoopTurnDecision, TurnDecision, executed_tool_names
 from minibot.core.channels import (
     ChannelCapabilities,
     ChannelMessage,
@@ -60,7 +61,9 @@ class LLMTurnService:
         logger: logging.Logger,
         runtime: AgentRuntime | None = None,
         task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
+        turn_decision: TurnDecision | None = None,
     ) -> None:
+        self._turn_decision: TurnDecision = turn_decision or NoopTurnDecision()
         self._memory = memory
         self._llm_client = llm_client
         self._tools = list(tools)
@@ -98,6 +101,7 @@ class LLMTurnService:
         self._tools = list(tools)
         self._prompt_service.replace_tools(tools, extension_prompt_fragments=extension_prompt_fragments)
         self._tool_use_guardrail.replace_tools(tools)
+        self._turn_decision.replace_tools(tools)
         if self._runtime is not None:
             self._runtime.replace_tools(tools)
 
@@ -223,6 +227,8 @@ class LLMTurnService:
         )
         prompt_cache_key = _prompt_cache_key(message) if self._profile.prompt_cache_enabled else None
         runtime_result = None
+        generation_failed = False
+        pending_decision = self._turn_decision.start(model_text)
         try:
             if self._runtime_service is None:
                 generation = await self._llm_client.generate(
@@ -303,20 +309,28 @@ class LLMTurnService:
             self._logger.exception("LLM call failed", exc_info=exc)
             render = plain_render(self._format_runtime_error_message(exc))
             should_reply = True
+            generation_failed = True
+        await self._turn_decision.finish(
+            pending_decision,
+            turn_id=event.event_id,
+            session_id=session_id,
+            tools_used=executed_tool_names(runtime_result.runtime_state if runtime_result is not None else None),
+            handed_off=handed_off_to_task,
+        )
         reasoning_text = _extract_reasoning_text(runtime_result.runtime_state) if runtime_result is not None else None
-        visible_messages: list[str] = []
+        stored_messages: list[str] = []
         response_updates_payload: list[dict[str, Any]] = []
         if runtime_result is not None and runtime_result.response_updates:
             for update in runtime_result.response_updates:
-                visible_messages.append(update.text)
+                stored_messages.append(update.text)
                 response_updates_payload.append(_render_to_metadata(update))
         answer = render.text
-        if should_reply and answer.strip():
-            visible_messages.append(answer)
-        for index, message_text in enumerate(visible_messages):
-            reasoning = reasoning_text if index == len(visible_messages) - 1 else None
+        if should_reply and answer.strip() and not generation_failed:
+            stored_messages.append(answer)
+        for index, message_text in enumerate(stored_messages):
+            reasoning = reasoning_text if index == len(stored_messages) - 1 else None
             await self._memory.append_history(session_id, "assistant", message_text, reasoning=reasoning)
-        if visible_messages:
+        if stored_messages:
             await self._enforce_history_limit(session_id)
         compact_prompt_cache_key = prompt_cache_key or f"{session_id}:runtime"
         compaction_result = await self._compaction_service.compact_history_if_needed(
@@ -574,6 +588,7 @@ def build_llm_turn_service(
     event_bus: EventBus | None = None,
     task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
     extension_prompt_fragments: Sequence[str] = (),
+    turn_decision: TurnDecision | None = None,
 ) -> LLMTurnService:
     service_logger = logger or logging.getLogger("minibot.handler")
     tool_bindings = list(tools or [])
@@ -637,4 +652,5 @@ def build_llm_turn_service(
         logger=service_logger,
         runtime=runtime,
         task_handoff_callback=task_handoff_callback,
+        turn_decision=turn_decision,
     )

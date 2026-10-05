@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class BashTool:
-    """Execute shell commands via ``/bin/bash -lc``.
+    """Execute shell commands via ``/bin/bash -c`` (``-lc`` when ``pass_parent_env`` is on).
 
     Enabled by ``[tools.bash]`` in ``config.toml``.
 
@@ -51,7 +51,7 @@ class BashTool:
             description=load_tool_description("bash"),
             parameters=strict_object(
                 properties={
-                    "command": {"type": "string", "description": "Bash command to execute with /bin/bash -lc."},
+                    "command": {"type": "string", "description": "Bash command to execute with /bin/bash."},
                     "timeout_seconds": nullable_integer(minimum=1, description="Optional timeout override."),
                     "cwd": nullable_string("Optional working directory."),
                     "env": {
@@ -74,7 +74,7 @@ class BashTool:
         try:
             process = await asyncio.create_subprocess_exec(
                 "/bin/bash",
-                "-lc",
+                "-lc" if self._config.pass_parent_env else "-c",
                 command,
                 cwd=cwd,
                 env=env,
@@ -96,7 +96,9 @@ class BashTool:
                 "command": command,
             }
 
-        stdout_data, stderr_data, timed_out = await communicate_with_timeout(process, timeout_seconds)
+        stdout_data, stderr_data, timed_out = await communicate_with_timeout(
+            process, timeout_seconds, max_bytes=self._config.max_output_bytes
+        )
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         ok = process.returncode == 0 and not timed_out

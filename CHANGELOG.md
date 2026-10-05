@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`[decision]` shadow-mode decision model.** Opt-in and off by default. Each main-agent turn also asks an
+  OpenRouter decisions model (default `~typesafe/jev-latest`) four fixed questions (`route`, `needs_memory`,
+  `needs_web`, `complexity`) and logs a `turn decision` line with `turn_id` next to the tools the agent actually used.
+  It never changes a reply, and a timeout or failure is only logged. Each turn sends the user's message text and the
+  main agent's tool names to OpenRouter.
+- **`[tools.http_client] follow_redirects` and `max_redirects`.** Redirects are still returned as-is by default;
+  `follow_redirects = true` follows up to `max_redirects` (default `5`).
+
+### Changed
+
+- **`bash` runs `/bin/bash -c`.** A login shell (`-lc`) that re-reads profile files is used only when
+  `pass_parent_env = true`.
+- **Background task status messages are in English.**
+
+### Fixed
+
+- **Cancelling a task stops its worker cleanly.** The worker closes its MCP clients and subprocess groups on
+  cancellation, and a worker that ignores termination is killed after five seconds.
+- **Tool output stays bounded while it is read.** `bash` and `python_exec` keep at most `max_output_bytes` per stream,
+  and `http_request` reads a chunked body only up to its configured cap.
+- **MCP over HTTP follows the protocol more closely.** The client sends the `initialized` notification and the
+  protocol version header, checks HTTP status codes, re-initializes once after an expired session, and picks the SSE
+  reply that matches the request ID.
+- **Telegram approval buttons answer only for the user who triggered the call**, when that user is known.
+- **A failed turn gets a short reply**, and the error text is no longer stored in the conversation history.
+- **A retried task tracks its new worker process**, so cancelling it stops the right process.
+- **Smaller fixes:** the truncated tool-call counter resets after a valid call, `http_request` logs URLs without
+  their query string, and the scheduler docs state that cron expressions run in UTC.
+
 ## [0.28.0] - 2026-10-04
 
 ### Added

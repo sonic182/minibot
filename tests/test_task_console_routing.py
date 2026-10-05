@@ -35,7 +35,13 @@ class _FakeProc:
     def start(self) -> None:
         return None
 
-    def join(self) -> None:
+    def join(self, timeout: float | None = None) -> None:
+        return None
+
+    def is_alive(self) -> bool:
+        return False
+
+    def kill(self) -> None:
         return None
 
     def terminate(self) -> None:

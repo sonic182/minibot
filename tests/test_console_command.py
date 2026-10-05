@@ -21,6 +21,10 @@ def _install_console_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
             return ExtensionRegistry([], logging.getLogger("test.extensions"))
 
         @classmethod
+        def get_decision_client(cls) -> None:
+            return None
+
+        @classmethod
         def bind_agent_roster_refresh(cls, refresh) -> None:
             del refresh
 

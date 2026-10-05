@@ -88,6 +88,7 @@ def _service(config: TelegramChannelConfig) -> tuple[TelegramService, _BotStub, 
     service._event_bus = event_bus
     service._incoming_media_collector = collector
     service._outbound_sender = None
+    service._approval_requesters = {}
     service._logger = logging.getLogger("test.telegram.service")
     return service, bot, event_bus, collector
 
@@ -205,6 +206,18 @@ async def test_approval_callback_from_unauthorized_user_is_ignored() -> None:
 
     assert not event_bus.events
     assert "a1" in service._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_approval_callback_from_another_chat_member_is_ignored() -> None:
+    service, event_bus, callback = _approval_service(allowed_chat_ids=[1])
+    service._approval_requesters = {"a1": 5}
+
+    await service._handle_approval_callback(callback)  # type: ignore[arg-type]
+
+    assert not event_bus.events
+    assert "a1" in service._pending_approvals
+    callback.answer.assert_awaited_once_with("Only the requester can answer this.")
 
 
 @pytest.mark.asyncio

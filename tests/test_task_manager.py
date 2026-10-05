@@ -12,7 +12,7 @@ import pytest
 from minibot.adapters.config.schema import Settings
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
-from minibot.app.tasks.manager import DelegationBudget, TaskManager, resolve_delegation_budget
+from minibot.app.tasks.manager import DelegationBudget, TaskManager, _join_worker, resolve_delegation_budget
 from minibot.app.token_limits_autoconfig import prime_model_limits
 from minibot.core.agents import AgentSpec
 from minibot.core.channels import ChannelCapabilities
@@ -99,19 +99,27 @@ class _PipeWorkerError:
 
 
 class _FakeProc:
-    def __init__(self) -> None:
+    def __init__(self, *, ignores_terminate: bool = False) -> None:
         self.start_calls = 0
         self.join_calls = 0
         self.terminate_calls = 0
+        self.kill_calls = 0
+        self._ignores_terminate = ignores_terminate
 
     def start(self) -> None:
         self.start_calls += 1
 
-    def join(self) -> None:
+    def join(self, timeout: float | None = None) -> None:
         self.join_calls += 1
+
+    def is_alive(self) -> bool:
+        return self._ignores_terminate and self.kill_calls == 0
 
     def terminate(self) -> None:
         self.terminate_calls += 1
+
+    def kill(self) -> None:
+        self.kill_calls += 1
 
 
 # ---------------------------------------------------------------------------
@@ -511,6 +519,16 @@ async def test_reader_worker_error_nacks_without_publishing_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_join_worker_kills_a_process_that_ignores_terminate() -> None:
+    proc = _FakeProc(ignores_terminate=True)
+
+    await _join_worker(proc, grace_seconds=0.01)
+
+    assert proc.kill_calls == 1
+    assert proc.join_calls == 2
+
+
+@pytest.mark.asyncio
 async def test_cancel_nacks_and_terminates_process() -> None:
     bus = EventBus()
     manager = _make_manager(bus, timeout=10.0)
@@ -608,13 +626,14 @@ async def test_reader_retryable_worker_error_retries_then_succeeds(monkeypatch: 
             semaphore=sem,
         )
 
-        reader_task = manager._tasks["t-retry"].reader_task
-        await asyncio.wait_for(reader_task, timeout=1.0)
+        registered_task = manager._tasks["t-retry"]
+        await asyncio.wait_for(registered_task.reader_task, timeout=1.0)
 
+        assert registered_task.proc is fake_proc_2
         first_event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
         second_event = await asyncio.wait_for(sub._queue.get(), timeout=1.0)
         assert isinstance(first_event, OutboundEvent)
-        assert "Reintentando en 1s" in first_event.response.text
+        assert "Retrying in 1s" in first_event.response.text
         assert isinstance(second_event, OutboundEvent)
         assert second_event.response.text == "done"
     ack_cb.assert_called_once()

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import re
+import zlib
+from contextlib import aclosing
 from html.parser import HTMLParser
 from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse, urlunparse
 
 import aiosonic
 from aiosonic.timeout import Timeouts
@@ -21,6 +24,25 @@ from minibot.llm.tools.schema_utils import nullable_string, strict_object
 from minibot.shared.html_compact import html_to_compact
 
 _SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+_TOTAL_TIMEOUT_FACTOR = 3
+_DECOMPRESS_WBITS = {"gzip": zlib.MAX_WBITS | 16, "deflate": zlib.MAX_WBITS}
+
+
+def _with_default_port(parsed: ParseResult) -> ParseResult:
+    if parsed.port is not None or not parsed.hostname:
+        return parsed
+    return parsed._replace(netloc=f"{parsed.netloc}:{443 if parsed.scheme == 'https' else 80}")
+
+
+class _SchemeKeyedHTTPClient(aiosonic.HTTPClient):
+    def _handle_redirect(self, **kwargs: Any) -> tuple[Any, ...]:
+        urlparsed, *rest = super()._handle_redirect(**kwargs)
+        return (_with_default_port(urlparsed), *rest)
+
+
+def _loggable_url(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
 
 class HTTPClientTool:
@@ -47,6 +69,7 @@ class HTTPClientTool:
     Key config options:
 
     - ``timeout_seconds``, ``max_bytes`` — request limits.
+    - ``follow_redirects``, ``max_redirects`` — redirects are returned as-is unless ``follow_redirects`` is on.
     - ``max_parse_bytes`` — how much HTML is decoded before compacting.
     - ``max_chars`` — inline body character cap (falls back to ``max_bytes``).
     - ``spill_to_managed_file``, ``spill_after_chars``, ``spill_preview_chars``, ``max_spill_bytes``.
@@ -56,7 +79,7 @@ class HTTPClientTool:
         self._config = config
         self._storage = storage
         self._logger = logging.getLogger("minibot.http_tool")
-        self._client = aiosonic.HTTPClient()
+        self._client = _SchemeKeyedHTTPClient()
 
     def bindings(self) -> list[ToolBinding]:
         return [ToolBinding(tool=_http_tool_schema(), handler=self._handle_request)]
@@ -74,6 +97,8 @@ class HTTPClientTool:
         request_kwargs: dict[str, Any] = {
             "headers": headers,
             "timeouts": timeouts,
+            "follow": self._config.follow_redirects,
+            "max_redirects": self._config.max_redirects,
         }
         if json_payload is not None:
             request_kwargs["json"] = json_payload
@@ -83,10 +108,13 @@ class HTTPClientTool:
         try:
             self._logger.info(
                 "http tool request",
-                extra={"method": method, "url": url, "owner_id": context.owner_id},
+                extra={"method": method, "url": _loggable_url(url), "owner_id": context.owner_id},
             )
-            response = await self._client.request(url, method=method, **request_kwargs)
-            content = await response.content()
+            async with asyncio.timeout(self._config.timeout_seconds * _TOTAL_TIMEOUT_FACTOR):
+                response = await self._client.request(
+                    urlunparse(_with_default_port(urlparse(url))), method=method, **request_kwargs
+                )
+                content = await self._read_body(response, self._read_limit())
             truncated = len(content) > self._config.max_bytes
             content_type = _extract_content_type(response.headers)
             processed_body, processor_used = _process_response_text(
@@ -243,6 +271,28 @@ class HTTPClientTool:
                 extra={"url": url, "subdir": self._config.spill_subdir},
             )
             return None
+
+    def _read_limit(self) -> int:
+        spill_bytes = self._config.max_spill_bytes if self._can_spill() else 0
+        return max(self._config.max_bytes, self._config.max_parse_bytes, spill_bytes) + 1
+
+    @staticmethod
+    async def _read_body(response: Any, limit: int) -> bytes:
+        if not getattr(response, "chunked", False):
+            return await response.content()
+        wbits = _DECOMPRESS_WBITS.get(getattr(response, "compressed", ""))
+        decompressor = zlib.decompressobj(wbits) if wbits is not None else None
+        body = bytearray()
+        async with aclosing(response.read_chunks()) as chunks:
+            async for chunk in chunks:
+                room = limit - len(body)
+                body.extend(decompressor.decompress(chunk, room) if decompressor is not None else chunk[:room])
+                if len(body) >= limit:
+                    connection = getattr(response, "_connection", None)
+                    if connection is not None:
+                        connection.keep = False
+                    break
+        return bytes(body)
 
     def _decode_budget(self, content_type: str) -> int:
         """Bytes to decode before processing.

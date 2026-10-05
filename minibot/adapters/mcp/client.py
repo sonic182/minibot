@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
 from contextlib import suppress
@@ -11,7 +12,10 @@ from typing import Any, Literal
 
 import aiosonic
 
+from minibot import __version__
 from minibot.core.mcp import MCPServerMetadata, MCPToolCallResult, MCPToolDefinition
+
+_PROTOCOL_VERSION = "2024-11-05"
 
 
 class MCPClient:
@@ -46,7 +50,11 @@ class MCPClient:
         self._initialized = False
         self._server_metadata: MCPServerMetadata | None = None
         self._http_session_id: str | None = None
+        self._http_protocol_version: str | None = None
         self._http_client_class = aiosonic.HTTPClient
+        self._http_client: Any = None
+        self._http_init_lock: asyncio.Lock | None = None
+        self._http_loop: asyncio.AbstractEventLoop | None = None
         self._stdio_process: asyncio.subprocess.Process | None = None
         self._stdio_loop: asyncio.AbstractEventLoop | None = None
         self._stdio_lock: asyncio.Lock | None = None
@@ -108,16 +116,35 @@ class MCPClient:
             await self._ensure_stdio_process()
             self._initialized = True
             return
-        response = await self._request(
-            "initialize",
-            params={
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "minibot", "version": "0.0.3"},
-            },
-        )
-        self._store_server_metadata(response)
-        self._initialized = True
+        async with self._ensure_http_init_lock():
+            if self._initialized:
+                return
+            response = await self._request(
+                "initialize",
+                params={
+                    "protocolVersion": _PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "minibot", "version": __version__},
+                },
+            )
+            self._store_server_metadata(response)
+            negotiated = response.get("result", {}).get("protocolVersion")
+            self._http_protocol_version = (
+                negotiated if isinstance(negotiated, str) and negotiated else _PROTOCOL_VERSION
+            )
+            await self._notify_http("notifications/initialized", {})
+            self._initialized = True
+
+    def _ensure_http_runtime(self) -> tuple[Any, asyncio.Lock]:
+        loop = asyncio.get_running_loop()
+        if self._http_client is None or self._http_init_lock is None or self._http_loop is not loop:
+            self._http_client = self._http_client_class()
+            self._http_init_lock = asyncio.Lock()
+            self._http_loop = loop
+        return self._http_client, self._http_init_lock
+
+    def _ensure_http_init_lock(self) -> asyncio.Lock:
+        return self._ensure_http_runtime()[1]
 
     async def _request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self._request_id += 1
@@ -170,9 +197,9 @@ class MCPClient:
                         "id": 0,
                         "method": "initialize",
                         "params": {
-                            "protocolVersion": "2024-11-05",
+                            "protocolVersion": _PROTOCOL_VERSION,
                             "capabilities": {},
-                            "clientInfo": {"name": "minibot", "version": "0.0.3"},
+                            "clientInfo": {"name": "minibot", "version": __version__},
                         },
                     }
                 )
@@ -302,11 +329,34 @@ class MCPClient:
                 await asyncio.wait_for(asyncio.shield(drain_task), timeout=self._STDERR_SETTLE_SECONDS)
         return self._stderr_tail.decode("utf-8", errors="ignore")
 
-    async def _request_http(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _request_http(self, payload: dict[str, Any], *, allow_session_reset: bool = True) -> dict[str, Any]:
+        sent_session_id = self._http_session_id
+        status, body = await self._post_http(payload)
+        if status == 404 and allow_session_reset and sent_session_id and payload.get("method") != "initialize":
+            if self._http_session_id == sent_session_id:
+                self._http_session_id = None
+                self._http_protocol_version = None
+                self._initialized = False
+            await self._initialize()
+            return await self._request_http(payload, allow_session_reset=False)
+        if not 200 <= status < 300:
+            raise RuntimeError(f"mcp http error: status {status}: {body[:200].decode('utf-8', errors='replace')}")
+        parsed = _parse_jsonrpc_payload(body.decode("utf-8"), request_id=payload.get("id"))
+        if "error" in parsed:
+            raise RuntimeError(f"mcp server error: {parsed['error']}")
+        return parsed
+
+    async def _notify_http(self, method: str, params: dict[str, Any]) -> None:
+        status, body = await self._post_http({"jsonrpc": "2.0", "method": method, "params": params})
+        if not 200 <= status < 300:
+            raise RuntimeError(f"mcp http error: status {status}: {body[:200].decode('utf-8', errors='replace')}")
+
+    async def _post_http(self, payload: dict[str, Any]) -> tuple[int, bytes]:
         if not self._url:
             raise ValueError("mcp http url is required")
+        client, _ = self._ensure_http_runtime()
         response = await asyncio.wait_for(
-            self._http_client_class().post(
+            client.post(
                 self._url,
                 headers=self._build_http_headers(),
                 data=json.dumps(payload).encode("utf-8"),
@@ -316,11 +366,8 @@ class MCPClient:
         session_id = _extract_header_value(response, "mcp-session-id")
         if session_id:
             self._http_session_id = session_id
-        body = await response.content()
-        parsed = _parse_jsonrpc_payload(body.decode("utf-8"))
-        if "error" in parsed:
-            raise RuntimeError(f"mcp server error: {parsed['error']}")
-        return parsed
+        body = await asyncio.wait_for(response.content(), timeout=self._timeout_seconds)
+        return int(response.status_code), body
 
     def _build_http_headers(self) -> dict[str, str]:
         headers = {
@@ -330,6 +377,8 @@ class MCPClient:
         }
         if self._http_session_id:
             headers["mcp-session-id"] = self._http_session_id
+        if self._http_protocol_version:
+            headers["MCP-Protocol-Version"] = self._http_protocol_version
         return headers
 
     def list_tools_blocking(self) -> list[MCPToolDefinition]:
@@ -347,6 +396,7 @@ class MCPClient:
         self._stdio_process = None
         self._stderr_task = None
         self._stdio_read_buffer.clear()
+        await self._close_http_client()
         if process is None:
             return
         if process.returncode is None:
@@ -359,8 +409,24 @@ class MCPClient:
             with suppress(Exception):
                 await drain_task
 
+    async def _close_http_client(self) -> None:
+        client = self._http_client
+        loop = self._http_loop
+        self._http_client = None
+        self._http_init_lock = None
+        self._http_loop = None
+        self._http_session_id = None
+        self._http_protocol_version = None
+        if self._transport == "http":
+            self._initialized = False
+        connector = getattr(client, "connector", None)
+        if connector is None or loop is not asyncio.get_running_loop():
+            return
+        with suppress(Exception):
+            await connector.cleanup()
+
     def close_blocking(self) -> None:
-        if self._stdio_process is None:
+        if self._stdio_process is None and self._http_client is None:
             return
         self._blocking_runner.run(self.aclose)
 
@@ -420,13 +486,32 @@ class _BlockingLoopRunner:
         return self._loop
 
 
-def _parse_jsonrpc_payload(raw_payload: str) -> dict[str, Any]:
+def _parse_jsonrpc_payload(raw_payload: str, request_id: Any = None) -> dict[str, Any]:
     payload = raw_payload.strip()
-    if payload.startswith("event:") or "\ndata:" in payload:
-        data_lines = [line[5:].strip() for line in payload.splitlines() if line.startswith("data:")]
-        if data_lines:
-            payload = "\n".join(data_lines).strip()
+    if payload.startswith(("event:", "data:")) or "\ndata:" in payload:
+        return _select_sse_message(payload, request_id)
     return json.loads(payload)
+
+
+def _select_sse_message(payload: str, request_id: Any) -> dict[str, Any]:
+    messages: list[dict[str, Any]] = []
+    for event in re.split(r"\r?\n\r?\n", payload):
+        data = "\n".join(line[5:].strip() for line in event.splitlines() if line.startswith("data:")).strip()
+        if not data:
+            continue
+        with suppress(json.JSONDecodeError):
+            decoded = json.loads(data)
+            if isinstance(decoded, dict):
+                messages.append(decoded)
+    if request_id is not None:
+        for message in messages:
+            if message.get("id") == request_id:
+                return message
+        raise RuntimeError(f"mcp response for request {request_id} not found in event stream")
+    for message in reversed(messages):
+        if "result" in message or "error" in message:
+            return message
+    raise RuntimeError("mcp event stream carried no response")
 
 
 def _extract_header_value(response: Any, header_name: str) -> str | None:

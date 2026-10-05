@@ -1,4 +1,4 @@
-Run arbitrary shell commands on the host using /bin/bash -lc.
+Run arbitrary shell commands on the host using /bin/bash.
 
 Use this only when shell/CLI execution is actually required and dedicated tools are insufficient.
 

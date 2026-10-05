@@ -1,23 +1,49 @@
 # Roadmap
 
-Possible roadmap to follow now...
+MiniBot has moved from "personal assistant with tools" towards a **personal agent runtime**: a
+supervisor that owns Telegram, memory, scheduling, approvals and MCP, and delegates work to
+specialists, background tasks and, next, external agents.
+
+```text
+                         ┌─ specialist
+                         ├─ background task
+User → MiniBot → agent ──┼─ scheduled task
+                         ├─ MCP server
+                         └─ external agent (ACP)
+```
+
+What made this possible is the combination of `spawn_task`, `continue_turn` (a worker's result can
+feed the main agent's next step instead of ending in a dead-end message), specialists with their own
+tools and providers, runtime agent reload, the approval gate and `get_settings` / `minibot-docs`.
+The work ahead therefore favours making delegation, interruption and cancellation dependable over
+adding more capability.
 
 ## Status at a glance
 
-| phase | topic | status |
-|---|---|---|
-| 0 | bash env default | done |
-| 1 | credential vault | done |
-| 2 | skills for specialist agents | done |
-| 3 | native skills, runtime self-knowledge, agent management | **done** — `get_settings`, `minibot-docs`, optional `reload_agents`, and optional model-authored agents with an owner ceiling |
-| 3b | mid-turn user messages and `/stop` | pending, after `reload_agents` and the agent management skill |
-| 4 | MCP OAuth (#65) | pending |
-| 5 | guardrail enhancements | pending |
-| 6 | bash tool hardening | pending, priority depends on the Trust model |
-| 7 | share tool construction with task workers | done |
+Pending work, in priority order. Phase numbers are stable identifiers (other sections refer to them),
+so the order here is the order to work in, not the numeric order.
+
+| priority | phase | topic | status |
+|---|---|---|---|
+| 1 | 8 | runtime reliability: task lifecycle, bounded output, MCP HTTP, approvals | mostly landed in #112; smoke test and scheduler timezone left |
+| 2 | 3b | mid-turn user messages and `/stop` | pending, the main product feature |
+| 3 | 9 | delegation semantics: `delegate` versus `spawn_task` | pending, investigate first |
+| 4 | 10 | external agents (ACP) as an agent runtime backend | pending, experimental through `acpx` first |
+| 5 | 11 | task observability | pending |
+| 6 | 4 | MCP OAuth (#65) | demand-driven: only when an MCP server in use requires it |
+| 7 | 5, 6 | security defence in depth: guardrail heuristics, bash hardening | pending, lower priority than the deterministic controls already shipped |
+
+Shipped (details kept at the end as reference): 0 bash env default, 1 credential vault, 2 skills for
+specialist agents, 3 native skills, runtime self-knowledge and agent management, 7 shared tool
+construction with task workers.
 
 Dropped: a native SMTP tool. Mail is covered by an MCP server (`docs/mcp_servers.rst`) behind the
 `[tools.approval]` gate, so there is nothing left for MiniBot to own.
+
+Parked on purpose: more self-modification (agent auto-evolution, automatic skill or tool creation,
+self-tuning prompts, autonomous agent spawning). `create_agent` / `update_agent` / `delete_agent` /
+`reload_agents` are enough metaprogramming; the effort goes into delegate, interrupt, resume, cancel
+and observe.
 
 ## Trust model
 
@@ -55,6 +81,339 @@ Worth stating this plainly in the README/docs, roughly:
 > It is not intended to be a security boundary by itself. For untrusted
 > workloads or deployments with sensitive host data, run MiniBot inside an
 > appropriately isolated environment.
+
+## [ ] Phase 8 — Runtime reliability (priority 1)
+
+`spawn_task` sits closer to the centre of the system with every release, so cancel, timeout, SIGTERM,
+process-tree cleanup and resource limits have to be boring and dependable before more intelligence is
+added on top. Most of the 2026-09-30 code analysis landed in #112:
+
+- [x] Task lifecycle: the worker turns SIGTERM/SIGINT into cancellation of its main task, so MCP clients
+  are closed and `bash` / `python_exec` process groups are killed; the manager escalates to `kill()` after
+  a 5 s grace so a worker that ignores `terminate()` cannot hold the reader or its semaphore slot.
+- [x] Bounded output: `bash` and `python_exec` cap output while reading; `http_request` cuts chunked
+  bodies at its limit and bounds the whole request to three times `timeout_seconds`.
+- [x] MCP HTTP transport: `notifications/initialized`, `MCP-Protocol-Version`, status checks, session
+  re-initialisation on 404, SSE responses matched by id, one reused client, real package version.
+- [x] Approvals bound to the requester (`ToolApprovalRequestedEvent.requester_user_id`).
+- [x] Failed turns are not stored as replies; the dispatcher answers an internal error with a generic
+  message; task status texts are English; `Task.proc` follows retries; the truncated-tool-call counter
+  resets; query strings are not logged; `bash` is a login shell only with `pass_parent_env`.
+
+Still open:
+
+- [ ] Smoke test in the container: cancel a task running `bash sleep 300` and confirm nothing is left
+  behind (the code path is covered by unit tests, not exercised against a real container yet).
+- [ ] Scheduler timezone. Cron expressions run in UTC (documented in `docs/scheduler.rst`); decide whether
+  a `[scheduler]` timezone setting is worth it. Scheduled-prompt retries only cover a failing event-bus
+  publish, not a failing turn.
+- [ ] Release #112 and re-check the CI `tests` job.
+
+Known gaps, deliberately left:
+
+- Stdio MCP clients are bound to one event loop: `MCPClient._ensure_stdio_runtime` kills and respawns the
+  server process whenever a different loop calls in (startup `asyncio.run` versus the daemon loop).
+- `Retry-After` from the provider cannot be honoured: `llm_async` raises a bare `Exception("HTTP 429: ...")`
+  without headers, so `_build_error_metadata` (`app/tasks/worker.py`) keeps a fixed 30 s backoff.
+- A lazy MCP `call_tool` is recognised by tool name suffix in `app/tool_approval.py`; an eager remote tool
+  literally named `call_tool` that also takes a `tool_name` argument would be misread. Fixing it needs an
+  explicit marker carried through every `ToolBinding` wrapper.
+- `http_request`: aiosonic reads a `Content-Length` body in full before any cap can apply; only chunked
+  bodies are cut at the limit.
+- `bash` spill files hold at most `max_output_bytes`, since the cap is now applied while reading.
+
+## [ ] Phase 3b — Mid-turn user messages (steering) and `/stop` (priority 2)
+
+Lands after Phase 3 (`reload_agents` and the agent management skill). Today a message sent while the
+agent is working either waits for the turn to end or starts a competing turn. On Telegram the owner
+wants to say "also consider this", "use the other account" or "stop, I solved it" while the agent is
+still researching or running tools.
+
+Shape, KISS: **one pending-message inbox per conversation**, consulted by the runtime before each
+model call. No second agent, no classifier, no cancel-and-rebuild of the turn.
+
+1. The user writes while the agent is working.
+2. The message is stored in history and marked pending.
+3. The current tool call finishes.
+4. The runtime appends the pending messages as user messages before continuing, so the model sees
+   the tool result and the correction together and decides how to proceed.
+
+| action | behaviour |
+|---|---|
+| "Also add Barcelona" | folded in at the next continuation point |
+| "Better search only Madrid" | the agent reorients after the current tool |
+| `/stop` | explicit cancellation, handled without waiting for another model response |
+
+Injecting a message between tools steers; it does **not** guarantee an immediate stop. A tool call
+that takes two minutes delays the correction until it returns. So `/stop` stays an independent path
+that cancels execution where possible. An external action that already happened (a sent email)
+cannot be undone by cancelling.
+
+Details to get right from the start:
+
+- **One consumer per conversation.** The new message enters the active turn: no parallel second turn,
+  no duplicate in history.
+- **Check pending before closing the turn too.** A correction that arrives while the final answer is
+  being generated must be processed before the work is declared done.
+- **Several tool calls in one model response.** Check pending between executions; if there is a
+  correction, hand control back to the model before running the remaining calls. Calls skipped this
+  way must still be recorded correctly (call + result pairing) per each provider's protocol.
+
+Scope of v1: main agent and `/stop` only. Steering a specific worker or specialist is deferred: with
+several active tasks, "change this" needs an unambiguous addressee.
+
+Trust model: pending messages are owner input like any other, no new surface. `/stop` must remain
+owner-only.
+
+## [ ] Phase 9 — Delegation semantics (priority 3)
+
+`spawn_task` now covers two different intents: *do this independently in the background* and *do this and
+bring me the result, because I need it for my next step* (`continue_turn`). `continue_turn_mode = "always"`
+(0.28) is a configuration patch over what is really a semantic distinction the model should not have to
+decide per call.
+
+Investigate before adding anything:
+
+- Offer `delegate(agent, task)` as the "I need the result" operation, implemented as `spawn_task` with
+  `continue_turn` forced on. Keep `spawn_task` for fire-and-forget background work. Same mechanism
+  underneath, one decision fewer for the model.
+- Converge the flags (`continue_turn`, `continue_turn_default`, `continue_turn_mode`, continuation depth
+  and limit) towards one concept, roughly `mode = "background" | "delegate"`: background means direct
+  delivery, delegate means the result becomes a continuation. Depth and limit stay as implementation
+  detail.
+- Decide whether this replaces the existing flags or only adds a friendlier entry point. No code until
+  that is settled.
+
+## [ ] Phase 10 — External agents through ACP (priority 4)
+
+The goal is for MiniBot to be the control plane in front of other agents (Claude, Codex, OpenCode, Pi),
+keeping Telegram, memory, scheduling, approvals and MCP as the stable interface. ACP is **not** another LLM
+provider; it is another way to *run an agent*.
+
+Model it as an agent execution backend, not as per-vendor tools. Do not add `ask_claude()`, `ask_codex()`
+or `ask_pi()`; the model should only ever see agent names:
+
+```text
+Agent
+├── prompt
+├── tools
+├── provider / model
+└── runtime
+     ├── minibot   (today, implicit)
+     └── acp
+```
+
+```yaml
+---
+name: architect
+runtime: acp
+command: ["claude-agent-acp"]
+model: opus
+---
+You are the architecture specialist.
+```
+
+`spawn_task(agent="architect", ...)` (or `delegate`, Phase 9) then runs it like any other specialist. The
+pieces that already exist are the reason this fits: task id, timeouts, cancel, result, continuation, tool
+approvals, agent definitions and provider overrides. ACP is one more way to execute a worker.
+
+Staging, validating before absorbing:
+
+1. Experimental backend through `acpx` (MiniBot → `acpx` → ACP → Claude). Claude Opus first, with
+   persistent sessions, cancellation and a working directory.
+2. Then Codex, OpenCode and Pi.
+3. Only after weeks of use, when the needed subset of ACP is known, consider a native ACP client.
+
+Depends on Phase 8 (cancel and process-tree cleanup must be dependable for a long-lived external process)
+and benefits from Phase 9. Trust model: an external agent has its own tools and filesystem access, so it is
+subject to the same deployment-isolation reasoning as `bash` (see Phase 6) and should sit behind the
+approval gate.
+
+## [ ] Phase 11 — Task observability (priority 5)
+
+As delegation grows (specialists, continuations, external agents), the owner needs to see what happened:
+
+- Better `list_tasks` / `get_task`.
+- Parent / child task relationships across continuations.
+- Duration, tokens and cost per task.
+- Which agent and model actually resolved each piece of work.
+
+Small and incremental; builds on the task records that already exist, no new subsystem.
+
+## [ ] Phase 4 — MCP OAuth (issue #65) — demand-driven (priority 6)
+
+Scope: alternative 1 only (auth-code + PKCE + manual callback paste). No HTTP
+callback endpoint, no device flow.
+
+Target the MCP authorization spec `2026-07-28` (confirmed via
+`blog.modelcontextprotocol.io/posts/2026-07-28/`), not a generic OAuth
+implementation that happens to work against two test servers:
+
+- Validate the `iss` parameter (RFC 9207) before redeeming an authorization
+  code — closes the authorization-server mix-up hole the spec calls out.
+- Credentials are bound to the issuing authorization server and must not be
+  reused across issuers — this is a hard constraint from the spec, not just
+  good hygiene, so token storage should key by issuer, not just server name.
+- Dynamic Client Registration is deprecated in favor of Client ID Metadata
+  Documents (CIMD) but still functional for backward compatibility — prefer
+  CIMD where a server advertises support, fall back to DCR otherwise.
+
+- `MCPClient` (`minibot/adapters/mcp/client.py`) catches `401` on HTTP
+  transport, runs MCP OAuth discovery, holds PKCE state.
+- Resulting tokens stored in the Phase 1 vault, keyed by
+  `(server_name, issuer)` — issuer is the binding that actually matters per
+  the spec constraint above; `server_name` is bookkeeping on top of it.
+- `_build_http_headers` resolves the vault reference into the `Authorization`
+  header at request time.
+- Owner-only admin surface (not an LLM tool) to present the auth URL and
+  accept the pasted callback, via Telegram authorization.
+
+- Output-side redaction is the one place this matters most: nothing stops a
+  resolved secret coming *back* in a tool result (an API that echoes the
+  `Authorization` header in an error message, an SMTP server's debug reply)
+  and landing in `ToolResult.content` — which flows into LLM context, then
+  conversation memory (SQLite), then compaction summaries, permanently. This
+  is the redaction check from Phase 1's tool-executor bullet, applied here
+  concretely.
+- MCP token refresh will need a lock once the OAuth client exists (there is none yet).
+  `MCPClient` is per-server with no mutex
+  around refresh — two tool calls near token expiry could both refresh
+  concurrently; some providers invalidate the old refresh token when issuing
+  a new one, so the loser of that race gets locked out. Needs a lock keyed by
+  `(server_name, issuer)`.
+- Vault file needs `.gitignore` treatment, same as `data/kv_memory.db` — keep
+  it out of git and out of the docker build context by default.
+- No rotation/recovery, no hot-reload, stated as explicit non-goals for v1
+  (same limits ansible-vault has): forgotten password means starting over;
+  editing the vault file while the daemon is running requires a restart to
+  pick up the change.
+
+## [ ] Phase 5 — Guardrail enhancements (priority 7, defence in depth)
+
+Not a duplicate of Phase 1. Under the destination-bound model, the LLM never
+has a `secret://` reference to put in an argument at all, so there's nothing
+in Phase 1 checking argument *content* for known vault values — its
+redaction check only runs on tool *results*. This phase covers the input
+side: a secret that entered the conversation another way entirely (the user
+pastes a raw API key into chat instead of storing it, or the LLM produces
+something secret-shaped) and could otherwise get echoed into a later tool
+call's arguments:
+
+- `ToolGuardrailValidator` gains a check for secret-*shaped* values in
+  arguments — entropy/prefix heuristics (`sk-`, `ghp_`, long high-entropy
+  tokens), independent of whether the value matches a known vault entry.
+- `GuardrailDecision` gains a `credential_exposure` field (structured, not
+  regex/text classification, per project convention).
+
+## [ ] Phase 6 — bash tool hardening (mixed priority — see Trust model) (priority 7)
+
+Two different things live in this phase, deliberately split by who owns
+them:
+
+- **The AST pre-filter below**: MiniBot's job, worth doing on a similar
+  timeline to the other security phases. It's cheap, deterministic, and
+  catches accidental destructive commands too, not just adversarial ones —
+  useful even inside a fully-isolated deployment.
+- **The OS-level containment options at the end (1-3)**: per the Trust
+  model above, this is the deployment's job, not something MiniBot's
+  roadmap should try to fully solve by building a sandbox platform into the
+  agent. Kept here as documented options for an owner who wants MiniBot
+  itself to add a layer, not as a committed deliverable.
+
+Everything below assumes secrets are safe from `bash` as long as they never
+appear as plaintext arguments or in a file it can read. That assumption
+doesn't hold today:
+
+- ~~`BashToolConfig.pass_parent_env` defaults to `True`, so the LLM's `bash`
+  tool inherits the daemon's *entire* process environment~~ — fixed in Phase 0;
+  the default is now `False` with an `env_allowlist`. An owner who sets
+  `pass_parent_env = true` back (as `config.yolo.toml` does) still exposes every
+  `${ENV_VAR}` config secret to `bash` → `env`.
+- `bash`'s `cwd` (`_coerce_cwd`, `bash.py:176-185`) accepts any existing
+  directory on the filesystem — there's no root jail at all, unlike
+  `LocalFileStorage` (`adapters/files/local_storage.py:339-348`), which
+  refuses to resolve a path outside its managed root by default.
+- `python_exec` already has a `sandbox_mode` field (none/basic/rlimit/cgroup/
+  jail) and a working `jail` implementation that just prepends a configurable
+  `command_prefix` (e.g. `bwrap`, `firejail`, `nsjail`) to the command
+  (`python_exec.py:679-684`, `PythonExecJailConfig.command_prefix`). `bash`
+  has none of this — no `sandbox_mode`, no rlimits, no jail wrapper.
+
+Prior art check: some coding-agent tools embed a Rust shell interpreter
+(a bash-compatible engine) plus Rust reimplementations of common utilities
+for their bash tool. Worth naming clearly: **that buys performance and
+cross-platform parity, not containment.** Their own docs say so directly —
+"Pattern approval is not containment. Once approved, a process keeps the
+shell's ambient filesystem, network, and subprocess access." Their actual
+safety layer is policy (curated non-interactive env defaults, allow/deny
+command patterns, an interceptor that reroutes risky raw commands to
+dedicated tools) on top of an unsandboxed subprocess — same ceiling `bash`
+already has here. Not a shortcut past this phase's real question.
+
+### Pre-execution static analysis (a filter, not a replacement for sandboxing)
+
+Parse the proposed command into a real shell AST before running it — not
+regex on raw text, which has known blind spots (heredocs, substitutions, and
+malformed quoting can bypass a regex-based fragment splitter). Candidates,
+not decided: `bashlex` (pure Python, no native extension) or `tree-sitter` +
+`tree-sitter-bash` (heavier, more complete grammar). Walking the AST gives
+deterministic structural signals — command names, redirect targets,
+`eval`/`source`/process-substitution/decode-and-exec shapes — which is
+protocol/format parsing, not semantic classification, so it fits the
+project's existing rule against text-matching for intent.
+
+Deliberately **not** a small ML classifier (a "mini BERT" or similar) for
+this: a security gate needs to be auditable ("blocked: calls `eval` with a
+command substitution", not "scored 0.73"), and this is an adversarial
+setting — a learned classifier is exactly the weakest thing to put in front
+of a malicious/injected command, whereas an AST node either is an `eval`
+call or it isn't.
+
+Ceiling: static analysis of arbitrary shell is fundamentally incomplete —
+dynamic reconstruction (`eval "$(echo ...)"`, `${!VAR}` indirection,
+base64-decode-then-exec) can slip past any static analyzer, parser-based or
+ML-based. This is a fast pre-filter for the common dangerous shapes, run in
+front of whatever containment option below is chosen — not a substitute for
+one.
+
+Options for an owner who wants MiniBot to add its own containment layer on
+top of deployment-level isolation (not decided, not a committed
+deliverable — see Trust model):
+
+1. Port `python_exec`'s existing `sandbox_mode`/jail-wrapper pattern onto
+   `BashToolConfig` — smallest diff, reuses infrastructure already in the
+   codebase, relies on an external jail tool (bubblewrap/firejail/nsjail)
+   the owner installs. Note: `python_exec`'s own jail mode ships with an
+   empty `command_prefix` today (`config.example.toml:434-436`, comment
+   mentions Firejail but no working example) — porting this to `bash`
+   should ship a real example for both, not just plumbing.
+2. A custom Rust supervisor binary wrapping the shell exec, giving tighter
+   control (seccomp filters, mount namespaces, capability dropping) than a
+   generic jail wrapper — but net-new development, plus a build/distribution
+   burden (a compiled binary per platform) for a self-hosted, pip/poetry-
+   installed project.
+3. Containerize tool execution itself (run `bash`/`python_exec` inside a
+   throwaway container per call) — strongest isolation, biggest change to
+   the deployment model (today MiniBot assumes a plain host process).
+
+(The env-inheritance half of this is already fixed in Phase 0 — what's left
+here is the harder, undecided part: filesystem/process isolation.)
+
+## Explicitly deferred
+
+- MCP OAuth HTTP callback endpoint (issue #65 alternative 2).
+- MCP OAuth device flow (issue #65 alternative 3).
+- A native SMTP tool: sending mail goes through an MCP server, gated by `[tools.approval]`.
+- A sandbox platform inside MiniBot (a Rust supervisor, per-call containers): isolation stays the
+  deployment's job; MiniBot offers the jail wrapper and documentation (Phase 6).
+
+Add any of these only if something actually in use requires it.
+
+---
+
+# Shipped (kept as reference)
+
+The phases below are done. Their detail stays here because other documents and code comments point at it.
 
 ## [x] Phase 0 — fix bash's env default now (no dependency on anything else)
 
@@ -205,7 +564,7 @@ way the main agent is"), and why adding `list_skills` / `activate_skill` to an a
 Ahead of everything below because it is a regression in shipped behaviour, not new capability,
 and the fix is small.
 
-## [ ] Phase 3 — Native skills & runtime self-knowledge
+## [x] Phase 3 — Native skills & runtime self-knowledge
 
 **Done** — version single-sourcing (#82), the native tier + `create-skill` (#83),
 `install-skill` + `install_skill` (#84, released in 0.18.0), `get_settings`, the
@@ -517,207 +876,6 @@ Open question: do bundled native skills need to be visible to task workers?
 Workers build their own `SkillRegistry` in `_build_worker_tools`; confirm the
 native tier is included there before relying on it in `create-agent`.
 
-## [ ] Phase 3b — Mid-turn user messages (steering) and `/stop`
-
-Lands after Phase 3 (`reload_agents` and the agent management skill). Today a message sent while the
-agent is working either waits for the turn to end or starts a competing turn. On Telegram the owner
-wants to say "also consider this", "use the other account" or "stop, I solved it" while the agent is
-still researching or running tools.
-
-Shape, KISS: **one pending-message inbox per conversation**, consulted by the runtime before each
-model call. No second agent, no classifier, no cancel-and-rebuild of the turn.
-
-1. The user writes while the agent is working.
-2. The message is stored in history and marked pending.
-3. The current tool call finishes.
-4. The runtime appends the pending messages as user messages before continuing, so the model sees
-   the tool result and the correction together and decides how to proceed.
-
-| action | behaviour |
-|---|---|
-| "Also add Barcelona" | folded in at the next continuation point |
-| "Better search only Madrid" | the agent reorients after the current tool |
-| `/stop` | explicit cancellation, handled without waiting for another model response |
-
-Injecting a message between tools steers; it does **not** guarantee an immediate stop. A tool call
-that takes two minutes delays the correction until it returns. So `/stop` stays an independent path
-that cancels execution where possible. An external action that already happened (a sent email)
-cannot be undone by cancelling.
-
-Details to get right from the start:
-
-- **One consumer per conversation.** The new message enters the active turn: no parallel second turn,
-  no duplicate in history.
-- **Check pending before closing the turn too.** A correction that arrives while the final answer is
-  being generated must be processed before the work is declared done.
-- **Several tool calls in one model response.** Check pending between executions; if there is a
-  correction, hand control back to the model before running the remaining calls. Calls skipped this
-  way must still be recorded correctly (call + result pairing) per each provider's protocol.
-
-Scope of v1: main agent and `/stop` only. Steering a specific worker or specialist is deferred: with
-several active tasks, "change this" needs an unambiguous addressee.
-
-Trust model: pending messages are owner input like any other, no new surface. `/stop` must remain
-owner-only.
-
-## [ ] Phase 4 — MCP OAuth (issue #65)
-
-Scope: alternative 1 only (auth-code + PKCE + manual callback paste). No HTTP
-callback endpoint, no device flow.
-
-Target the MCP authorization spec `2026-07-28` (confirmed via
-`blog.modelcontextprotocol.io/posts/2026-07-28/`), not a generic OAuth
-implementation that happens to work against two test servers:
-
-- Validate the `iss` parameter (RFC 9207) before redeeming an authorization
-  code — closes the authorization-server mix-up hole the spec calls out.
-- Credentials are bound to the issuing authorization server and must not be
-  reused across issuers — this is a hard constraint from the spec, not just
-  good hygiene, so token storage should key by issuer, not just server name.
-- Dynamic Client Registration is deprecated in favor of Client ID Metadata
-  Documents (CIMD) but still functional for backward compatibility — prefer
-  CIMD where a server advertises support, fall back to DCR otherwise.
-
-- `MCPClient` (`minibot/adapters/mcp/client.py`) catches `401` on HTTP
-  transport, runs MCP OAuth discovery, holds PKCE state.
-- Resulting tokens stored in the Phase 1 vault, keyed by
-  `(server_name, issuer)` — issuer is the binding that actually matters per
-  the spec constraint above; `server_name` is bookkeeping on top of it.
-- `_build_http_headers` resolves the vault reference into the `Authorization`
-  header at request time.
-- Owner-only admin surface (not an LLM tool) to present the auth URL and
-  accept the pasted callback, via Telegram authorization.
-
-- Output-side redaction is the one place this matters most: nothing stops a
-  resolved secret coming *back* in a tool result (an API that echoes the
-  `Authorization` header in an error message, an SMTP server's debug reply)
-  and landing in `ToolResult.content` — which flows into LLM context, then
-  conversation memory (SQLite), then compaction summaries, permanently. This
-  is the redaction check from Phase 1's tool-executor bullet, applied here
-  concretely.
-- MCP token refresh has no lock. `MCPClient` is per-server with no mutex
-  around refresh — two tool calls near token expiry could both refresh
-  concurrently; some providers invalidate the old refresh token when issuing
-  a new one, so the loser of that race gets locked out. Needs a lock keyed by
-  `(server_name, issuer)`.
-- Vault file needs `.gitignore` treatment, same as `data/kv_memory.db` — keep
-  it out of git and out of the docker build context by default.
-- No rotation/recovery, no hot-reload, stated as explicit non-goals for v1
-  (same limits ansible-vault has): forgotten password means starting over;
-  editing the vault file while the daemon is running requires a restart to
-  pick up the change.
-
-## [ ] Phase 5 — Guardrail enhancements
-
-Not a duplicate of Phase 1. Under the destination-bound model, the LLM never
-has a `secret://` reference to put in an argument at all, so there's nothing
-in Phase 1 checking argument *content* for known vault values — its
-redaction check only runs on tool *results*. This phase covers the input
-side: a secret that entered the conversation another way entirely (the user
-pastes a raw API key into chat instead of storing it, or the LLM produces
-something secret-shaped) and could otherwise get echoed into a later tool
-call's arguments:
-
-- `ToolGuardrailValidator` gains a check for secret-*shaped* values in
-  arguments — entropy/prefix heuristics (`sk-`, `ghp_`, long high-entropy
-  tokens), independent of whether the value matches a known vault entry.
-- `GuardrailDecision` gains a `credential_exposure` field (structured, not
-  regex/text classification, per project convention).
-
-## [ ] Phase 6 — bash tool hardening (mixed priority — see Trust model)
-
-Two different things live in this phase, deliberately split by who owns
-them:
-
-- **The AST pre-filter below**: MiniBot's job, worth doing on a similar
-  timeline to the other security phases. It's cheap, deterministic, and
-  catches accidental destructive commands too, not just adversarial ones —
-  useful even inside a fully-isolated deployment.
-- **The OS-level containment options at the end (1-3)**: per the Trust
-  model above, this is the deployment's job, not something MiniBot's
-  roadmap should try to fully solve by building a sandbox platform into the
-  agent. Kept here as documented options for an owner who wants MiniBot
-  itself to add a layer, not as a committed deliverable.
-
-Everything below assumes secrets are safe from `bash` as long as they never
-appear as plaintext arguments or in a file it can read. That assumption
-doesn't hold today:
-
-- ~~`BashToolConfig.pass_parent_env` defaults to `True`, so the LLM's `bash`
-  tool inherits the daemon's *entire* process environment~~ — fixed in Phase 0;
-  the default is now `False` with an `env_allowlist`. An owner who sets
-  `pass_parent_env = true` back (as `config.yolo.toml` does) still exposes every
-  `${ENV_VAR}` config secret to `bash` → `env`.
-- `bash`'s `cwd` (`_coerce_cwd`, `bash.py:176-185`) accepts any existing
-  directory on the filesystem — there's no root jail at all, unlike
-  `LocalFileStorage` (`adapters/files/local_storage.py:339-348`), which
-  refuses to resolve a path outside its managed root by default.
-- `python_exec` already has a `sandbox_mode` field (none/basic/rlimit/cgroup/
-  jail) and a working `jail` implementation that just prepends a configurable
-  `command_prefix` (e.g. `bwrap`, `firejail`, `nsjail`) to the command
-  (`python_exec.py:679-684`, `PythonExecJailConfig.command_prefix`). `bash`
-  has none of this — no `sandbox_mode`, no rlimits, no jail wrapper.
-
-Prior art check: some coding-agent tools embed a Rust shell interpreter
-(a bash-compatible engine) plus Rust reimplementations of common utilities
-for their bash tool. Worth naming clearly: **that buys performance and
-cross-platform parity, not containment.** Their own docs say so directly —
-"Pattern approval is not containment. Once approved, a process keeps the
-shell's ambient filesystem, network, and subprocess access." Their actual
-safety layer is policy (curated non-interactive env defaults, allow/deny
-command patterns, an interceptor that reroutes risky raw commands to
-dedicated tools) on top of an unsandboxed subprocess — same ceiling `bash`
-already has here. Not a shortcut past this phase's real question.
-
-### Pre-execution static analysis (a filter, not a replacement for sandboxing)
-
-Parse the proposed command into a real shell AST before running it — not
-regex on raw text, which has known blind spots (heredocs, substitutions, and
-malformed quoting can bypass a regex-based fragment splitter). Candidates,
-not decided: `bashlex` (pure Python, no native extension) or `tree-sitter` +
-`tree-sitter-bash` (heavier, more complete grammar). Walking the AST gives
-deterministic structural signals — command names, redirect targets,
-`eval`/`source`/process-substitution/decode-and-exec shapes — which is
-protocol/format parsing, not semantic classification, so it fits the
-project's existing rule against text-matching for intent.
-
-Deliberately **not** a small ML classifier (a "mini BERT" or similar) for
-this: a security gate needs to be auditable ("blocked: calls `eval` with a
-command substitution", not "scored 0.73"), and this is an adversarial
-setting — a learned classifier is exactly the weakest thing to put in front
-of a malicious/injected command, whereas an AST node either is an `eval`
-call or it isn't.
-
-Ceiling: static analysis of arbitrary shell is fundamentally incomplete —
-dynamic reconstruction (`eval "$(echo ...)"`, `${!VAR}` indirection,
-base64-decode-then-exec) can slip past any static analyzer, parser-based or
-ML-based. This is a fast pre-filter for the common dangerous shapes, run in
-front of whatever containment option below is chosen — not a substitute for
-one.
-
-Options for an owner who wants MiniBot to add its own containment layer on
-top of deployment-level isolation (not decided, not a committed
-deliverable — see Trust model):
-
-1. Port `python_exec`'s existing `sandbox_mode`/jail-wrapper pattern onto
-   `BashToolConfig` — smallest diff, reuses infrastructure already in the
-   codebase, relies on an external jail tool (bubblewrap/firejail/nsjail)
-   the owner installs. Note: `python_exec`'s own jail mode ships with an
-   empty `command_prefix` today (`config.example.toml:434-436`, comment
-   mentions Firejail but no working example) — porting this to `bash`
-   should ship a real example for both, not just plumbing.
-2. A custom Rust supervisor binary wrapping the shell exec, giving tighter
-   control (seccomp filters, mount namespaces, capability dropping) than a
-   generic jail wrapper — but net-new development, plus a build/distribution
-   burden (a compiled binary per platform) for a self-hosted, pip/poetry-
-   installed project.
-3. Containerize tool execution itself (run `bash`/`python_exec` inside a
-   throwaway container per call) — strongest isolation, biggest change to
-   the deployment model (today MiniBot assumes a plain host process).
-
-(The env-inheritance half of this is already fixed in Phase 0 — what's left
-here is the harder, undecided part: filesystem/process isolation.)
-
 ## [x] Phase 7 — Share tool construction with task workers
 
 `_build_worker_tools` (`minibot/app/tasks/worker.py`) keeps a narrower tool set
@@ -725,10 +883,3 @@ than the main agent and does not load extensions. Shared calculator and skill
 loader constructors live in `minibot/app/tool_constructors.py`; each caller
 retains its own enablement and visibility rules.
 
-## Explicitly deferred
-
-- MCP OAuth HTTP callback endpoint (issue #65 alternative 2).
-- MCP OAuth device flow (issue #65 alternative 3).
-- A native SMTP tool: sending mail goes through an MCP server, gated by `[tools.approval]`.
-
-Add either only if a remote MCP server actually in use requires it.

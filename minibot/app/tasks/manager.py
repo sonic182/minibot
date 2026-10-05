@@ -38,6 +38,16 @@ _SUPERVISOR_GRACE_SECONDS = 10
 _CONTINUATION_MAX_CHARS = 12_000
 _CONTINUATION_MAX_ATTACHMENTS = 50
 _TASK_OUTPUT_MARKER = re.compile(r"<(/?task_output)", re.IGNORECASE)
+_WORKER_JOIN_GRACE_SECONDS = 5.0
+_TIMED_OUT_TEXT = "The background task exceeded its time limit and was cancelled."
+
+
+async def _join_worker(proc: Process, grace_seconds: float = _WORKER_JOIN_GRACE_SECONDS) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, proc.join, grace_seconds)
+    if proc.is_alive():
+        proc.kill()
+        await loop.run_in_executor(None, proc.join)
 
 
 @dataclass(frozen=True)
@@ -292,7 +302,6 @@ class TaskManager:
         lease_token: str | None,
         lease_timeout_seconds: int,
     ) -> None:
-        loop = asyncio.get_running_loop()
         attempt = 1
         try:
             while True:
@@ -305,7 +314,7 @@ class TaskManager:
                 )
                 if result.get("terminate_worker"):
                     proc.terminate()
-                await loop.run_in_executor(None, proc.join)
+                await _join_worker(proc)
                 metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
                 if result.get("status") == TaskStatus.DONE.value:
                     attachments = validate_attachments(result.get("attachments"))
@@ -345,7 +354,7 @@ class TaskManager:
                             raise _LeaseLostError
                     await self._publish_status(
                         payload=payload,
-                        text=f"La tarea asíncrona alcanzó un rate limit. Reintentando en {retry_after_seconds}s.",
+                        text=f"The background task hit a rate limit. Retrying in {retry_after_seconds}s.",
                         metadata={
                             "task_id": task_id,
                             "source": "task_worker",
@@ -362,6 +371,9 @@ class TaskManager:
                         if not renewed:
                             raise _LeaseLostError
                     mainpipe, proc = self._start_worker_process()
+                    registered = self._tasks.get(task_id)
+                    if registered is not None:
+                        registered.proc = proc
                     continue
 
                 status = _status_from_result(result)
@@ -406,7 +418,7 @@ class TaskManager:
         except TimeoutError:
             self._logger.warning("task supervisor timed out", extra={"task_id": task_id})
             proc.terminate()
-            await loop.run_in_executor(None, proc.join)
+            await _join_worker(proc)
             persisted = True
             if self._task_repository is not None and lease_token is not None:
                 persisted = await self._task_repository.mark_failed(
@@ -428,7 +440,7 @@ class TaskManager:
             else:
                 await self._publish_status(
                     payload=payload,
-                    text="La tarea asíncrona excedió el tiempo límite y fue cancelada.",
+                    text=_TIMED_OUT_TEXT,
                     metadata={
                         "task_id": task_id,
                         "source": "task_worker",
@@ -439,12 +451,12 @@ class TaskManager:
         except _LeaseLostError:
             self._logger.warning("task execution lease lost", extra={"task_id": task_id})
             proc.terminate()
-            await loop.run_in_executor(None, proc.join)
+            await _join_worker(proc)
             await ack_cb()
         except asyncio.CancelledError:
             self._logger.info("task cancelled", extra={"task_id": task_id})
             proc.terminate()
-            await loop.run_in_executor(None, proc.join)
+            await _join_worker(proc)
             if self._task_repository is not None:
                 await self._task_repository.mark_cancelled(task_id)
             await ack_cb()
@@ -507,6 +519,9 @@ class TaskManager:
                             detail=event.get("detail") if isinstance(event.get("detail"), str) else None,
                             timeout_seconds=min(self._approval_timeout_seconds, max(deadline - loop.time(), 0)),
                             supports_tool_approval=self._capabilities_for(event.get("channel")).supports_tool_approval,
+                            requester_user_id=payload.get("user_id")
+                            if isinstance(payload.get("user_id"), int)
+                            else None,
                         )
                     except Exception:
                         self._logger.exception("tool approval request failed", extra={"task_id": payload["task_id"]})
@@ -520,10 +535,9 @@ class TaskManager:
                 return _protocol_failure("worker returned an invalid message")
 
     async def _cancel_task(self, task_id: str, task: Task) -> None:
-        loop = asyncio.get_running_loop()
         self._logger.info("task cancelled before reader cleanup", extra={"task_id": task_id})
         task.proc.terminate()
-        await loop.run_in_executor(None, task.proc.join)
+        await _join_worker(task.proc)
         if self._task_repository is not None:
             await self._task_repository.mark_cancelled(task_id)
         await task.ack_cb()
@@ -701,10 +715,10 @@ def _legacy_result_event(event: dict[str, Any]) -> dict[str, Any]:
 
 def _failure_text(status: TaskStatus, stop_reason: TaskStopReason) -> str:
     if status is TaskStatus.TIMED_OUT or stop_reason is TaskStopReason.TIMEOUT:
-        return "La tarea asíncrona excedió el tiempo límite y fue cancelada."
+        return _TIMED_OUT_TEXT
     if stop_reason in {TaskStopReason.MAX_STEPS, TaskStopReason.MAX_TOOL_CALLS}:
-        return "La tarea asíncrona alcanzó un límite configurado antes de terminar."
-    return "La tarea asíncrona falló y fue cancelada."
+        return "The background task reached a configured limit before finishing."
+    return "The background task failed and was cancelled."
 
 
 def _resolve_managed_attachment_path(base_dir: Path, relative_path: str, logger: logging.Logger) -> Path | None:

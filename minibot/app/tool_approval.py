@@ -90,6 +90,7 @@ async def request_tool_approval(
     timeout_seconds: float,
     supports_tool_approval: bool = False,
     detail: str | None = None,
+    requester_user_id: int | None = None,
 ) -> bool:
     """Ask the user on Telegram and wait for the answer; anything but an explicit approval denies."""
     if not supports_tool_approval or chat_id is None:
@@ -106,6 +107,7 @@ async def request_tool_approval(
                 channel=channel,
                 chat_id=chat_id,
                 detail=_cap_detail(detail) if detail is not None else format_approval_detail(arguments),
+                requester_user_id=requester_user_id,
             )
         )
         async with asyncio.timeout(timeout_seconds):
