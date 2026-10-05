@@ -32,6 +32,7 @@ so the order here is the order to work in, not the numeric order.
 | 5 | 11 | task observability | pending |
 | 6 | 4 | MCP OAuth (#65) | demand-driven: only when an MCP server in use requires it |
 | 7 | 5, 6 | security defence in depth: guardrail heuristics, bash hardening | pending, lower priority than the deterministic controls already shipped |
+| 8 | 12 | decision model as an extension instead of core wiring | rough analysis only; decide together with any routing plans |
 
 Shipped (details kept at the end as reference): 0 bash env default, 1 credential vault, 2 skills for
 specialist agents, 3 native skills, runtime self-knowledge and agent management, 7 shared tool
@@ -239,6 +240,44 @@ As delegation grows (specialists, continuations, external agents), the owner nee
 - Which agent and model actually resolved each piece of work.
 
 Small and incremental; builds on the task records that already exist, no new subsystem.
+
+## [ ] Phase 12 — Decision model as an extension (priority 8, investigate)
+
+`[decision]` (#112) is wired into the core today: `DecisionConfig` / `Settings.decision`
+(`config/schema.py`), the port in `core/decisions.py`, the adapter in `adapters/decisions/openrouter.py`,
+`ShadowTurnDecision` in `app/turn_decision.py`, `AppContainer.get_decision_client()`,
+`Dispatcher(decision_client=...)` from `daemon.py` and `console.py`, and the `start` / `finish` hooks in
+`LLMTurnService.handle`. In shadow mode it only observes a turn, so a bundled extension (for example
+`extensions/integrations/decision.py`, loaded for the daemon and console entrypoints, not the worker) looks
+feasible with the existing extension points:
+
+- `MessageEvent` → start the request in a background task keyed by `event_id`, which is also the turn's
+  `turn_id`. Handlers of one subscription run one after another (`ExtensionRegistry._drive`), so the
+  handler must not await the request.
+- `ToolCallEvent` (`phase="completed"`, same `turn_id`) → collect the tool names used.
+- `TurnCompletedEvent` / `TurnFailedEvent` → log the `turn decision` line and drop the pending entry.
+- Config moves to `[extensions.config."<module>"]`, validated by a pydantic model in `register()`; the key
+  comes from `${secret:NAME}` or `mb.vault`. The port and the OpenRouter client can live in the extension.
+
+Gaps the core would have to fill, or accept:
+
+- Text: `MessageEvent` carries the raw `message.text`; the core hook sends `model_text`, the prepared
+  input (transcriptions and similar). Either accept the difference or expose the prepared text.
+- Hand-off: `TurnCompletedEvent` has no task hand-off field. Infer it from a `spawn_task` tool call or add
+  the field to the event.
+- Available tools: `ExtensionContext` does not expose the main agent's tool list, which the request sends as
+  `state.available_tools`. Add read access or drop the field.
+- Tool scope: the core hook counts only the main runtime's tool messages. Verify whether delegated
+  specialists publish `ToolCallEvent`s with the same `turn_id`; if they do, the extension would count them too.
+- Delivery: extension subscriptions are `lossy=True`, so under load some turns may go unlogged, and pending
+  entries need a TTL so a lost `TurnCompletedEvent` does not leak them. Acceptable for shadow telemetry.
+
+What it removes from the core: `Settings.decision`, `AppContainer._decision_client`, the `Dispatcher` and
+`LLMTurnService` parameters, and the daemon / console wiring.
+
+Limit: this only fits shadow mode. Acting on the decision (skip tools, pick a cheaper model, delegate up
+front) needs a hook that runs before the turn and can change it, which events cannot do. If routing is the
+goal, either keep the core port or first add such a pre-turn extension point; decide that before moving it.
 
 ## [ ] Phase 4 — MCP OAuth (issue #65) — demand-driven (priority 6)
 
