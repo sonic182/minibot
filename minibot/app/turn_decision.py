@@ -43,6 +43,7 @@ class TurnDecision(Protocol):
         self,
         pending: PendingDecision | None,
         *,
+        turn_id: str,
         session_id: str,
         tools_used: Sequence[str],
         handed_off: bool,
@@ -59,6 +60,7 @@ class NoopTurnDecision:
         self,
         pending: PendingDecision | None,
         *,
+        turn_id: str,
         session_id: str,
         tools_used: Sequence[str],
         handed_off: bool,
@@ -94,6 +96,7 @@ class ShadowTurnDecision:
         self,
         pending: PendingDecision | None,
         *,
+        turn_id: str,
         session_id: str,
         tools_used: Sequence[str],
         handed_off: bool,
@@ -101,7 +104,13 @@ class ShadowTurnDecision:
         if pending is None:
             return
         logger_task = asyncio.create_task(
-            self._log_result(pending, session_id=session_id, tools_used=list(tools_used), handed_off=handed_off)
+            self._log_result(
+                pending,
+                turn_id=turn_id,
+                session_id=session_id,
+                tools_used=list(tools_used),
+                handed_off=handed_off,
+            )
         )
         self._background.add(logger_task)
         logger_task.add_done_callback(self._background.discard)
@@ -110,6 +119,7 @@ class ShadowTurnDecision:
         self,
         pending: PendingDecision,
         *,
+        turn_id: str,
         session_id: str,
         tools_used: list[str],
         handed_off: bool,
@@ -124,6 +134,7 @@ class ShadowTurnDecision:
         self._logger.info(
             "turn decision",
             extra={
+                "turn_id": turn_id,
                 "session_id": session_id,
                 "model": result.model,
                 "latency_seconds": round(result.latency_seconds, 3),

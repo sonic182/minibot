@@ -330,11 +330,13 @@ class MCPClient:
         return self._stderr_tail.decode("utf-8", errors="ignore")
 
     async def _request_http(self, payload: dict[str, Any], *, allow_session_reset: bool = True) -> dict[str, Any]:
+        sent_session_id = self._http_session_id
         status, body = await self._post_http(payload)
-        if status == 404 and allow_session_reset and self._http_session_id and payload.get("method") != "initialize":
-            self._http_session_id = None
-            self._http_protocol_version = None
-            self._initialized = False
+        if status == 404 and allow_session_reset and sent_session_id and payload.get("method") != "initialize":
+            if self._http_session_id == sent_session_id:
+                self._http_session_id = None
+                self._http_protocol_version = None
+                self._initialized = False
             await self._initialize()
             return await self._request_http(payload, allow_session_reset=False)
         if not 200 <= status < 300:

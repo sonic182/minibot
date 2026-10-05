@@ -553,8 +553,9 @@ class DecisionConfig(BaseModel):
     - ``enabled`` — consult the decision model on every turn (default: ``false``). Today this only
       records what the model would have chosen next to what the agent actually did; it never changes
       a reply.
-    - ``model`` — an OpenRouter decisions model (default: ``"inception/mercury-decide:free"``;
-      ``"~typesafe/jev-latest"`` also works).
+    - ``model`` — an OpenRouter decisions model (default: ``"~typesafe/jev-latest"``, billed per request;
+      ``"inception/mercury-decide:free"`` also works). Each turn sends the user's message text and the
+      main agent's tool names to OpenRouter.
     - ``base_url`` — the decisions endpoint (default: ``"https://openrouter.ai/api/alpha/decisions"``).
     - ``api_key`` — OpenRouter API key, required when enabled. Accepts ``${secret:NAME}``.
     - ``timeout_seconds`` — per-request timeout; a timeout or any failure is logged and the turn goes on
@@ -564,7 +565,7 @@ class DecisionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    model: str = Field(default="inception/mercury-decide:free", min_length=1)
+    model: str = Field(default="~typesafe/jev-latest", min_length=1)
     base_url: HttpUrlValue = "https://openrouter.ai/api/alpha/decisions"
     api_key: str = ""
     timeout_seconds: float = Field(default=3.0, gt=0)
@@ -636,6 +637,8 @@ class KeyValueMemoryConfig(BaseModel):
 class HTTPClientToolConfig(BaseModel):
     enabled: bool = False
     timeout_seconds: PositiveInt = 10
+    follow_redirects: bool = False
+    max_redirects: PositiveInt = 5
     max_bytes: ByteSizeValue = 16384
     max_parse_bytes: ByteSizeValue = 2000000
     response_processing_mode: Literal["none", "auto", "text", "compact"] = "auto"

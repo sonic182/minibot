@@ -69,7 +69,7 @@ async def test_openrouter_decision_client_sends_typed_questions_and_parses_answe
     sent = json.loads(http.calls[0]["data"])
     assert http.calls[0]["url"] == "https://openrouter.ai/api/alpha/decisions"
     assert http.calls[0]["headers"]["Authorization"] == "Bearer test-key"
-    assert sent["model"] == "inception/mercury-decide:free"
+    assert sent["model"] == "~typesafe/jev-latest"
     assert sent["questions"]["needs_web"] == {"type": "noul", "instructions": TURN_QUESTIONS["needs_web"].instructions}
     assert isinstance(sent["questions"]["complexity"]["criteria"], list)
     assert result.answers["route"].choice == "use_tools"

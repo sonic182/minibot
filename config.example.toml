@@ -183,7 +183,8 @@ main_tool_use_guardrail = "disabled"
 # be handled and logs "turn decision" next to what the agent actually did. It never changes a reply.
 # [decision]
 # enabled = true
-# model = "inception/mercury-decide:free"  # or "~typesafe/jev-latest"
+# Each turn sends the user's message and tool names to OpenRouter.
+# model = "~typesafe/jev-latest"  # paid per request; or "inception/mercury-decide:free"
 # base_url = "https://openrouter.ai/api/alpha/decisions"
 # api_key = "${secret:openrouter_api_key}"
 # timeout_seconds = 3.0
@@ -348,6 +349,9 @@ enabled = false
 # Compact HTML rendering uses selectolax, a core dependency. Without it, HTML responses fall
 # back to plain-text extraction.
 timeout_seconds = 30
+# Redirects come back as-is (status 3xx) unless follow_redirects is on.
+follow_redirects = false
+max_redirects = 5
 max_bytes = "16KB"
 # HTML-only parse budget: how much markup is decoded before it is compacted.
 max_parse_bytes = "2MB"

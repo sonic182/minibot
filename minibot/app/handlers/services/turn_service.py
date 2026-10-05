@@ -217,7 +217,6 @@ class LLMTurnService:
                 metadata=metadata,
             )
 
-        pending_decision = self._turn_decision.start(model_text)
         history = list(await self._memory.get_history(session_id))
         system_prompt = self._prompt_service.compose_system_prompt(message.channel)
         use_previous_response_id = self._use_previous_response_id()
@@ -229,6 +228,7 @@ class LLMTurnService:
         prompt_cache_key = _prompt_cache_key(message) if self._profile.prompt_cache_enabled else None
         runtime_result = None
         generation_failed = False
+        pending_decision = self._turn_decision.start(model_text)
         try:
             if self._runtime_service is None:
                 generation = await self._llm_client.generate(
@@ -312,21 +312,21 @@ class LLMTurnService:
             generation_failed = True
         await self._turn_decision.finish(
             pending_decision,
+            turn_id=event.event_id,
             session_id=session_id,
             tools_used=executed_tool_names(runtime_result.runtime_state if runtime_result is not None else None),
             handed_off=handed_off_to_task,
         )
         reasoning_text = _extract_reasoning_text(runtime_result.runtime_state) if runtime_result is not None else None
-        visible_messages: list[str] = []
+        stored_messages: list[str] = []
         response_updates_payload: list[dict[str, Any]] = []
         if runtime_result is not None and runtime_result.response_updates:
             for update in runtime_result.response_updates:
-                visible_messages.append(update.text)
+                stored_messages.append(update.text)
                 response_updates_payload.append(_render_to_metadata(update))
         answer = render.text
-        if should_reply and answer.strip():
-            visible_messages.append(answer)
-        stored_messages = visible_messages[:-1] if generation_failed and visible_messages else visible_messages
+        if should_reply and answer.strip() and not generation_failed:
+            stored_messages.append(answer)
         for index, message_text in enumerate(stored_messages):
             reasoning = reasoning_text if index == len(stored_messages) - 1 else None
             await self._memory.append_history(session_id, "assistant", message_text, reasoning=reasoning)

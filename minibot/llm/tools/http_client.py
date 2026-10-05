@@ -54,6 +54,7 @@ class HTTPClientTool:
     Key config options:
 
     - ``timeout_seconds``, ``max_bytes`` — request limits.
+    - ``follow_redirects``, ``max_redirects`` — redirects are returned as-is unless ``follow_redirects`` is on.
     - ``max_parse_bytes`` — how much HTML is decoded before compacting.
     - ``max_chars`` — inline body character cap (falls back to ``max_bytes``).
     - ``spill_to_managed_file``, ``spill_after_chars``, ``spill_preview_chars``, ``max_spill_bytes``.
@@ -63,7 +64,6 @@ class HTTPClientTool:
         self._config = config
         self._storage = storage
         self._logger = logging.getLogger("minibot.http_tool")
-        self._client: aiohttp.ClientSession | None = None
 
     def bindings(self) -> list[ToolBinding]:
         return [ToolBinding(tool=_http_tool_schema(), handler=self._handle_request)]
@@ -94,17 +94,17 @@ class HTTPClientTool:
                 extra={"method": method, "url": _loggable_url(url), "owner_id": context.owner_id},
             )
             async with asyncio.timeout(self._config.timeout_seconds * _TOTAL_TIMEOUT_FACTOR):
-                if self._client is None:
-                    async with aiohttp.ClientSession(timeout=timeout) as client:
-                        async with client.request(url, method=method, **request_kwargs) as response:
-                            content = await self._read_body(response, self._read_limit())
-                            status_code = response.status
-                            response_headers = response.headers
-                else:
-                    response = await self._client.request(url, method=method, **request_kwargs)
-                    content = await self._read_body(response, self._read_limit())
-                    status_code = response.status
-                    response_headers = response.headers
+                async with aiohttp.ClientSession(timeout=timeout) as client:
+                    async with client.request(
+                        method,
+                        url,
+                        allow_redirects=self._config.follow_redirects,
+                        max_redirects=self._config.max_redirects,
+                        **request_kwargs,
+                    ) as response:
+                        content = await self._read_body(response, self._read_limit())
+                        status_code = response.status
+                        response_headers = response.headers
             truncated = len(content) > self._config.max_bytes
             content_type = _extract_content_type(response_headers)
             processed_body, processor_used = _process_response_text(
@@ -172,8 +172,8 @@ class HTTPClientTool:
             }
         except Exception as exc:  # noqa: BLE001
             self._logger.exception("http tool request failed", exc_info=exc)
-            # aiosonic raises a bare AssertionError on an unparseable status line, and str() of it is
-            # empty; without the class name the model receives no reason at all for the failure.
+            # Some failures, such as a bare TimeoutError from the total bound, have an empty str();
+            # without the class name the model receives no reason at all for the failure.
             detail = str(exc).strip() or exc.__class__.__name__
             error = f"{method} {url} failed: {detail}"
             error_code = "http_request_failed"

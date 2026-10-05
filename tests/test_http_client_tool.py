@@ -482,25 +482,25 @@ async def test_http_tool_parses_html_beyond_max_bytes(http_server: dict[str, Any
 
 
 @pytest.mark.asyncio
-async def test_request_failure_reports_a_reason_the_model_can_act_on(tmp_path: Any) -> None:
-    """aiosonic raises a bare AssertionError whose str() is empty; the model must still learn why."""
+async def test_request_failure_reports_a_reason_the_model_can_act_on(unused_tcp_port: int) -> None:
+    async def hang_up(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.read(65536)
+        writer.close()
 
-    class _BrokenClient:
-        async def request(self, *_: Any, **__: Any) -> Any:
-            raise AssertionError
+    server = await asyncio.start_server(hang_up, "127.0.0.1", unused_tcp_port)
+    url = f"http://127.0.0.1:{unused_tcp_port}/nope"
+    try:
+        tool = HTTPClientTool(config=HTTPClientToolConfig(enabled=True, timeout_seconds=2))
+        result = await tool._handle_request({"url": url, "method": "GET"}, ToolContext(owner_id="primary"))
+    finally:
+        server.close()
+        await server.wait_closed()
 
-    tool = HTTPClientTool(config=HTTPClientToolConfig(enabled=True))
-    tool._client = cast(Any, _BrokenClient())
-
-    result = await tool._handle_request(
-        {"url": "https://example.com/nope", "method": "GET"},
-        ToolContext(owner_id="primary"),
-    )
-
+    prefix = f"GET {url} failed: "
     assert result["ok"] is False
     assert result["error_code"] == "http_request_failed"
-    assert "AssertionError" in cast(str, result["error"])
-    assert "https://example.com/nope" in cast(str, result["error"])
+    assert cast(str, result["error"]).startswith(prefix)
+    assert len(cast(str, result["error"])) > len(prefix)
     # marks the call so agent_runtime's repeated-failure guardrail can stop an endless retry loop
     assert result["is_repeated_failure_candidate"] is True
     assert result["failure_signature"]
@@ -542,3 +542,36 @@ async def test_http_tool_stops_reading_a_chunked_body_at_the_limit(unused_tcp_po
     assert result["status"] == 200
     assert result["truncated"] is True
     assert len(result["body"]) <= 1024
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("follow_redirects", "status", "body"), [(False, 302, ""), (True, 200, "landed")])
+async def test_http_tool_follows_redirects_only_when_configured(
+    unused_tcp_port: int, follow_redirects: bool, status: int, body: str
+) -> None:
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        request_line = (await reader.read(65536)).split(b"\r\n", 1)[0]
+        if b" /final " in request_line:
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 6\r\n\r\nlanded")
+        else:
+            writer.write(b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", unused_tcp_port)
+    try:
+        config = HTTPClientToolConfig(enabled=True, timeout_seconds=5, follow_redirects=follow_redirects)
+        result = (
+            await HTTPClientTool(config)
+            .bindings()[0]
+            .handler(
+                {"method": "GET", "url": f"http://127.0.0.1:{unused_tcp_port}/"},
+                ToolContext(owner_id="tester"),
+            )
+        )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert result["status"] == status
+    assert result["body"] == body

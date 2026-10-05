@@ -195,17 +195,22 @@ whether the turn was handed off to a task, so the model's choices can be compare
 anything acts on them. It never changes a reply, adds no latency, and a timeout or any failure is
 logged and ignored.
 
+Every turn sends the user's message text and the names of the main agent's tools to OpenRouter and the
+model provider behind it, so enable it only where that is acceptable and check the provider's data
+policy for the chosen model.
+
 Keep the key in the vault:
 
 .. code-block:: toml
 
    [decision]
    enabled = true
-   model = "inception/mercury-decide:free"
+   model = "~typesafe/jev-latest"
    base_url = "https://openrouter.ai/api/alpha/decisions"
    api_key = "${secret:openrouter_api_key}"
 
-``~typesafe/jev-latest`` is a drop-in alternative for ``model``; it bills a small per-request fee.
+The default ``~typesafe/jev-latest`` bills a small per-request fee. ``inception/mercury-decide:free`` is a
+drop-in alternative at no cost; free model variants may follow a different data policy.
 
 .. autoclass:: minibot.adapters.config.schema.DecisionConfig
    :no-members:
@@ -319,7 +324,7 @@ Tool Configuration
      - ``enabled``, ``sqlite_url``, ``default_limit``, ``max_limit``
    * - ``[tools.http_client]``
      - ``HTTPClientToolConfig``
-     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings. A chunked response is read only up to the largest of ``max_bytes``, ``max_parse_bytes`` and the spill ceiling; the whole request, body included, is bounded to three times ``timeout_seconds``. A response with a ``Content-Length`` is still read in full by the HTTP client before the cap applies
+     - ``enabled``, ``timeout_seconds``, ``max_bytes``, ``max_parse_bytes``, ``response_processing_mode`` (``auto``/``compact``/``text``/``none``), ``max_chars``, spillover settings, ``follow_redirects`` (default ``false``: a redirect response is returned as-is) and ``max_redirects`` (default ``5``). Any response body, chunked or with a ``Content-Length``, is read only up to the largest of ``max_bytes``, ``max_parse_bytes`` and the spill ceiling; the whole request, body included, is bounded to three times ``timeout_seconds``
    * - ``[tools.time]``
      - ``TimeToolConfig``
      - ``enabled``, ``default_format``

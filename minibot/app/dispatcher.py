@@ -292,6 +292,7 @@ class Dispatcher:
     async def _handle_message(self, event: MessageEvent) -> None:
         event = self._with_channel_capabilities(event)
         await self._pending_turns.mark_pending(event.event_id, event.message.model_dump_json())
+        reply_settled = False
         try:
             message = event.message
             await self._publish_lifecycle(
@@ -351,6 +352,7 @@ class Dispatcher:
                     )
             if should_reply:
                 await self._event_bus.publish(OutboundEvent(response=response))
+                reply_settled = True
                 compaction_updates = response.metadata.get("compaction_updates")
                 if isinstance(compaction_updates, list):
                     for update in compaction_updates:
@@ -368,6 +370,7 @@ class Dispatcher:
                             )
                         )
             else:
+                reply_settled = True
                 self._logger.info("skipping user reply as instructed", extra={"event_id": event.event_id})
             await self._publish_lifecycle(
                 TurnCompletedEvent(
@@ -393,7 +396,8 @@ class Dispatcher:
                     error=str(exc),
                 )
             )
-            await self._publish_failure_reply(event)
+            if not reply_settled:
+                await self._publish_failure_reply(event)
         finally:
             await self._pending_turns.clear_pending(event.event_id)
 
