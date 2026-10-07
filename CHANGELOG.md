@@ -41,8 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A turn that already replied is no longer replayed on the next boot** when the process stopped while it was
   clearing its pending-turn row, as `minibot console --once` could.
-- **An MCP tool whose schema uses `minProperties` or `maxProperties` no longer makes every OpenAI request fail**
-  (for example Athena's `update_lead`). The MCP bridge drops both keywords, as it already did `propertyNames`.
+- **An MCP tool whose schema uses `minProperties` or `maxProperties` no longer makes every OpenAI request fail.**
+  The MCP bridge drops both keywords, as it already did `propertyNames`.
 - **MCP servers started by a task worker now send their `auth_secret`.** Specialist agents connected without the
   `Authorization: Bearer` header the main agent sends, so servers that require it rejected their calls.
 

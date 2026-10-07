@@ -293,14 +293,14 @@ async def test_worker_mcp_client_sends_the_vault_secret_named_by_auth_secret() -
     settings = Settings()
     settings.tools.mcp.enabled = True
     settings.tools.mcp.servers = [
-        MCPServerConfig(name="athena", transport="http", url="http://athena.test/mcp", auth_secret="athena_token")
+        MCPServerConfig(name="crm", transport="http", url="http://crm.test/mcp", auth_secret="crm_token")
     ]
     spec = AgentSpec(
-        name="athena_crm_agent",
+        name="crm_agent",
         description="crm specialist",
         system_prompt="You are the CRM specialist.",
         source_path=worker.Path("/tmp/agent.md"),
-        mcp_servers=["athena"],
+        mcp_servers=["crm"],
     )
     captured: list[dict[str, object]] = []
 
@@ -314,7 +314,7 @@ async def test_worker_mcp_client_sends_the_vault_secret_named_by_auth_secret() -
             spec=spec,
             clients=[],
             build_client=_fake_client,
-            secrets={"athena_token": "s3cret"},
+            secrets={"crm_token": "s3cret"},
         )
 
     assert captured[0]["headers"] == {"Authorization": "Bearer s3cret"}

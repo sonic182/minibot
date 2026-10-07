@@ -66,7 +66,7 @@ async def test_kv_memory_search_and_list_apply_structured_filters(kv_memory: SQL
     )
     await kv_memory.create_entry(
         owner_id="tenant",
-        title="Athena CRM",
+        title="Project CRM",
         data="API REST pending",
         metadata={"category": "proyectos"},
         source="user-provided",
