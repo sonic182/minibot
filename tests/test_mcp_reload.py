@@ -100,6 +100,23 @@ async def test_a_server_that_fails_to_reload_keeps_its_previous_tools(monkeypatc
     assert _tool_names(context) == {"mcp_alpha__one", "mcp_beta__two", "reload_mcp"}
 
 
+@pytest.mark.asyncio
+async def test_reload_is_rolled_back_when_the_dispatcher_refresh_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    _boot_with(monkeypatch, {"alpha": ["mcp_alpha__one"], "beta": ["mcp_beta__one"]})
+    context = _context()
+    register(context)
+    context.refresh_tools.side_effect = RuntimeError("boom")
+
+    _reload_with(monkeypatch, {"alpha": ["mcp_alpha__two"], "beta": ["mcp_beta__one"]})
+    result = await _call_reload(context)
+
+    assert result["ok"] is False
+    assert result["error"] == "the reloaded tools could not be applied: boom"
+    assert result["added"] == []
+    assert result["removed"] == []
+    assert _tool_names(context) == {"mcp_alpha__one", "mcp_beta__one", "reload_mcp"}
+
+
 def test_reload_tool_is_absent_unless_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     _boot_with(monkeypatch, {"alpha": ["mcp_alpha__one"], "beta": []})
     context = _context(reload=False)

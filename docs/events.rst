@@ -95,6 +95,7 @@ Payload:
 - ``text`` — the message text followed by the automatic transcriptions of its own audio, separated
   by blank lines. Audio transcribed later by the ``transcribe_audio`` tool, audio too long to be
   transcribed automatically, and recently touched files are not included.
+- ``available_tools`` — names of the tools the main agent can use for this turn.
 
 TurnCompletedEvent
 ~~~~~~~~~~~~~~~~~~

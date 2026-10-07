@@ -11,7 +11,7 @@ from minibot.adapters.config.schema import Settings
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext, ExtensionRegistry
 from minibot.core.decisions import DecisionAnswer, DecisionResult
-from minibot.core.events import TurnCompletedEvent, TurnFailedEvent, TurnInputPreparedEvent, TurnStartedEvent
+from minibot.core.events import TurnCompletedEvent, TurnFailedEvent, TurnInputPreparedEvent
 from minibot.extensions.integrations import decision
 
 
@@ -61,9 +61,10 @@ async def _run_turn(
     registry = ExtensionRegistry([context], logging.getLogger("test.extensions.decision"))
     await registry.start()
     try:
-        await bus.publish(TurnStartedEvent(turn_id="turn-1", channel="console", chat_id=1, available_tools=["b", "a"]))
         if prepared_text is not None:
-            prepared = TurnInputPreparedEvent(turn_id="turn-1", channel="console", chat_id=1, text=prepared_text)
+            prepared = TurnInputPreparedEvent(
+                turn_id="turn-1", channel="console", chat_id=1, text=prepared_text, available_tools=["b", "a"]
+            )
             await bus.publish(prepared)
         await bus.publish(finish)
         for _ in range(20):
@@ -138,7 +139,7 @@ async def test_decision_extension_skips_turns_that_never_prepared_their_input(
 
 @pytest.mark.parametrize(
     ("entrypoint", "enabled", "expected_subscriptions"),
-    [("console", True, 4), ("daemon", True, 4), ("worker", True, 0), ("console", False, 0)],
+    [("console", True, 3), ("daemon", True, 3), ("worker", True, 0), ("console", False, 0)],
 )
 def test_decision_extension_subscribes_only_when_enabled_outside_workers(
     entrypoint: str, enabled: bool, expected_subscriptions: int

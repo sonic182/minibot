@@ -159,6 +159,7 @@ async def _reload(
     if mb.refresh_tools is None:
         return {"ok": False, "error": "tool reloading is not available in this process"}
     before = {name for state in states.values() for name in state.tool_names}
+    previous = dict(states)
     replaced: list[MCPClient] = []
     for name, state in list(states.items()):
         headers: dict[str, str] = {}
@@ -182,6 +183,11 @@ async def _reload(
     except Exception as exc:  # noqa: BLE001
         mb.logger.warning("failed to apply reloaded mcp tools", exc_info=True)
         refresh_error = str(exc) or type(exc).__name__
+        discarded = [state.client for name, state in states.items() if state is not previous[name]]
+        states.clear()
+        states.update(previous)
+        _publish(mb, states, status_rows, [reload_binding])
+        replaced = discarded
     for old in replaced:
         await _close(mb, old)
     after = {name for state in states.values() for name in state.tool_names}

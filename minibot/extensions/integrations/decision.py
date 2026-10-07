@@ -8,7 +8,7 @@ from typing import Any
 from minibot.app.extensions import ExtensionContext
 from minibot.core.channels import session_identifier
 from minibot.core.decisions import DecisionClient, DecisionHTTPError, DecisionQuestion, DecisionResult
-from minibot.core.events import TurnCompletedEvent, TurnFailedEvent, TurnInputPreparedEvent, TurnStartedEvent
+from minibot.core.events import TurnCompletedEvent, TurnFailedEvent, TurnInputPreparedEvent
 from minibot.llm.providers.decisions import DecisionsProvider
 
 MAX_PENDING_TURNS = 32
@@ -43,28 +43,18 @@ class _ShadowDecision:
     def __init__(self, client: DecisionClient, timeout_seconds: float) -> None:
         self._client = client
         self._timeout_seconds = timeout_seconds
-        self._tools: OrderedDict[str, list[str]] = OrderedDict()
         self._pending: OrderedDict[str, asyncio.Task[DecisionResult | None]] = OrderedDict()
         self._background: set[asyncio.Task[None]] = set()
         self._logger = logging.getLogger("minibot.turn_decision")
 
-    async def on_started(self, event: TurnStartedEvent) -> None:
-        self._tools[event.turn_id] = sorted(event.available_tools)
-        while len(self._tools) > MAX_PENDING_TURNS:
-            self._tools.popitem(last=False)
-
     async def on_input_prepared(self, event: TurnInputPreparedEvent) -> None:
-        tools = self._tools.pop(event.turn_id, None)
-        if tools is None:
-            return
-        state = {"user_message": event.text, "available_tools": tools}
+        state = {"user_message": event.text, "available_tools": sorted(event.available_tools)}
         self._pending[event.turn_id] = asyncio.create_task(self._ask(state))
         while len(self._pending) > MAX_PENDING_TURNS:
             _, stale = self._pending.popitem(last=False)
             stale.cancel()
 
     async def on_completed(self, event: TurnCompletedEvent) -> None:
-        self._tools.pop(event.turn_id, None)
         pending = self._pending.pop(event.turn_id, None)
         if pending is None:
             return
@@ -73,7 +63,6 @@ class _ShadowDecision:
         logger_task.add_done_callback(self._background.discard)
 
     async def on_failed(self, event: TurnFailedEvent) -> None:
-        self._tools.pop(event.turn_id, None)
         pending = self._pending.pop(event.turn_id, None)
         if pending is not None:
             pending.cancel()
@@ -144,7 +133,6 @@ def register(mb: ExtensionContext) -> None:
         timeout_seconds=config.timeout_seconds,
     )
     shadow = _ShadowDecision(client, config.timeout_seconds)
-    mb.on(TurnStartedEvent, shadow.on_started)
     mb.on(TurnInputPreparedEvent, shadow.on_input_prepared)
     mb.on(TurnCompletedEvent, shadow.on_completed)
     mb.on(TurnFailedEvent, shadow.on_failed)

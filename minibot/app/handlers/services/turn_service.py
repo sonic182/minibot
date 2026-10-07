@@ -400,6 +400,7 @@ class LLMTurnService:
             channel=message.channel,
             chat_id=message.chat_id,
             text=text,
+            available_tools=sorted(binding.tool.name for binding in self._tools),
         )
         with contextlib.suppress(Exception):
             await self._event_bus.publish(prepared)

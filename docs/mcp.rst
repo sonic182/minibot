@@ -103,6 +103,8 @@ and removed.
 
 - A server that does not respond keeps the tools it had before and is reported with its error, so a failed
   reload never removes working tools.
+- If the reloaded tools cannot be applied to the main agent, the whole reload is rolled back and the previous
+  tools and connections stay in place.
 - Only the servers already in the configuration are queried: adding or removing a server, or changing its
   command, URL, headers or tool filters, still needs a restart.
 - Calls already running against a server when it is reloaded can fail, because its previous connection is

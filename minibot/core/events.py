@@ -64,6 +64,7 @@ class TurnInputPreparedEvent(BaseEvent):
 
     ``text`` is the message text followed by the automatic transcriptions of its own audio. Messages
     folded into the running turn and audio transcribed later by a tool are not included.
+    ``available_tools`` names the tools the main agent can use for this turn.
     """
 
     event_type: str = "turn_input_prepared"
@@ -71,6 +72,7 @@ class TurnInputPreparedEvent(BaseEvent):
     channel: str
     chat_id: int | None = None
     text: str = ""
+    available_tools: list[str] = Field(default_factory=list)
 
 
 class TurnCompletedEvent(BaseEvent):
