@@ -32,11 +32,11 @@ def _state(user_text: str) -> AgentState:
 async def test_guardrail_requires_retry_when_tools_needed() -> None:
     client = _StubClassifierClient(
         payloads=[
-            {"requires_tools": True, "suggested_tool": "filesystem", "path": "tmp/a.txt", "reason": "needs file io"}
+            {"requires_tools": True, "suggested_tool": "delete_file", "path": "tmp/a.txt", "reason": "needs file io"}
         ],
         tokens=[11],
     )
-    guardrail = LLMClassifierToolUseGuardrail(llm_client=client, tools=[_filesystem_binding()])
+    guardrail = LLMClassifierToolUseGuardrail(llm_client=client, tools=[_delete_binding()])
 
     decision = await guardrail.apply(
         session_id="s1",
@@ -48,7 +48,7 @@ async def test_guardrail_requires_retry_when_tools_needed() -> None:
     )
 
     assert decision.requires_retry is True
-    assert decision.suggested_tool == "filesystem"
+    assert decision.suggested_tool == "delete_file"
     assert decision.suggested_path == "tmp/a.txt"
     assert decision.reason == "needs file io"
     assert decision.attempts == 1
@@ -65,7 +65,7 @@ async def test_guardrail_retries_with_prompt_patch_when_classifier_payload_inval
         ],
         tokens=[3, 4],
     )
-    guardrail = LLMClassifierToolUseGuardrail(llm_client=client, tools=[_filesystem_binding()])
+    guardrail = LLMClassifierToolUseGuardrail(llm_client=client, tools=[_delete_binding()])
 
     decision = await guardrail.apply(
         session_id="s1",
@@ -88,7 +88,7 @@ async def test_guardrail_classifier_history_is_text_only() -> None:
     client = _StubClassifierClient(
         payloads=[{"requires_tools": False, "suggested_tool": None, "path": None, "reason": None}],
     )
-    guardrail = LLMClassifierToolUseGuardrail(llm_client=client, tools=[_filesystem_binding()])
+    guardrail = LLMClassifierToolUseGuardrail(llm_client=client, tools=[_delete_binding()])
     state = AgentState(
         messages=[
             AgentMessage(role="system", content=[MessagePart(type="text", text="system")]),
@@ -120,7 +120,7 @@ async def test_guardrail_fail_open_when_validation_exhausted() -> None:
     client = _StubClassifierClient(payloads=["bad", "bad"], tokens=[2, 2])
     guardrail = LLMClassifierToolUseGuardrail(
         llm_client=client,
-        tools=[_filesystem_binding()],
+        tools=[_delete_binding()],
         validation_max_attempts=1,
         fail_open=True,
     )
@@ -145,7 +145,7 @@ async def test_guardrail_fail_closed_when_validation_exhausted() -> None:
     client = _StubClassifierClient(payloads=["bad", "bad"], tokens=[1, 1])
     guardrail = LLMClassifierToolUseGuardrail(
         llm_client=client,
-        tools=[_filesystem_binding()],
+        tools=[_delete_binding()],
         validation_max_attempts=1,
         fail_open=False,
     )
@@ -170,21 +170,21 @@ async def test_guardrail_fail_closed_when_validation_exhausted() -> None:
 async def test_guardrail_never_executes_delete_side_effects_directly() -> None:
     deleted: list[dict[str, Any]] = []
 
-    async def _filesystem_handler(payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
+    async def _delete_handler(payload: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         deleted.append(payload)
         return {"deleted_count": 1, "message": "deleted ok"}
 
-    filesystem_binding = ToolBinding(
-        tool=Tool(name="filesystem", description="filesystem tool", parameters={"type": "object"}),
-        handler=_filesystem_handler,
+    delete_binding = ToolBinding(
+        tool=Tool(name="delete_file", description="delete tool", parameters={"type": "object"}),
+        handler=_delete_handler,
     )
     client = _StubClassifierClient(
         payloads=[
-            {"requires_tools": True, "suggested_tool": "filesystem", "path": "tmp/a.txt", "reason": "delete request"}
+            {"requires_tools": True, "suggested_tool": "delete_file", "path": "tmp/a.txt", "reason": "delete request"}
         ],
         tokens=[5],
     )
-    guardrail = LLMClassifierToolUseGuardrail(llm_client=client, tools=[filesystem_binding])
+    guardrail = LLMClassifierToolUseGuardrail(llm_client=client, tools=[delete_binding])
 
     decision = await guardrail.apply(
         session_id="s1",
@@ -206,7 +206,7 @@ async def test_guardrail_does_not_rewrite_tool_routing_with_text_heuristics() ->
         payloads=[
             {
                 "requires_tools": True,
-                "suggested_tool": "filesystem",
+                "suggested_tool": "delete_file",
                 "path": "count_words.py",
                 "reason": "edit file",
             }
@@ -214,7 +214,7 @@ async def test_guardrail_does_not_rewrite_tool_routing_with_text_heuristics() ->
     )
     guardrail = LLMClassifierToolUseGuardrail(
         llm_client=client,
-        tools=[_filesystem_binding()],
+        tools=[_delete_binding()],
     )
 
     decision = await guardrail.apply(
@@ -227,15 +227,15 @@ async def test_guardrail_does_not_rewrite_tool_routing_with_text_heuristics() ->
     )
 
     assert decision.requires_retry is True
-    assert decision.suggested_tool == "filesystem"
+    assert decision.suggested_tool == "delete_file"
     assert decision.suggested_path == "count_words.py"
 
 
-def _filesystem_binding() -> ToolBinding:
+def _delete_binding() -> ToolBinding:
     async def _handler(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
         return {"deleted_count": 0}
 
     return ToolBinding(
-        tool=Tool(name="filesystem", description="filesystem tool", parameters={"type": "object"}),
+        tool=Tool(name="delete_file", description="delete tool", parameters={"type": "object"}),
         handler=_handler,
     )

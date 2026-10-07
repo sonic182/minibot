@@ -94,6 +94,7 @@ class ExtensionContext:
     agent_registry: AgentRegistry | None = None
     # Present only when [orchestration.agent_management] turns on reload and/or writes.
     agent_management: AgentManagementService | None = None
+    refresh_tools: Callable[[], Awaitable[None]] | None = None
     tools: list[ToolBinding] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
@@ -307,6 +308,7 @@ def load_extensions(
     vault: SecretVault | None = None,
     agent_registry: AgentRegistry | None = None,
     agent_management: AgentManagementService | None = None,
+    refresh_tools: Callable[[], Awaitable[None]] | None = None,
 ) -> ExtensionRegistry:
     """Import and register the bundled extensions, then every ``[extensions] modules`` entry.
 
@@ -333,6 +335,7 @@ def load_extensions(
             vault=vault,
             agent_registry=agent_registry,
             agent_management=agent_management,
+            refresh_tools=refresh_tools,
         )
         try:
             register(context)

@@ -80,7 +80,7 @@ prompt (or the compaction pass):
      two things is an edge and belongs in the graph. Note this fragment ships even when the
      ``graph`` tool is disabled; it relies on the model no-opping when the tool is absent.
    - ``tool_usage.md`` — route the model to the right tool: ``memory`` vs ``history``,
-     ``apply_patch`` for existing-file edits vs ``filesystem`` for file management, reuse
+     ``apply_patch`` for existing-file edits vs ``write_file``/``move_file``/``delete_file`` for file management, reuse
      canonical path fields from tool output, absolute paths in yolo mode.
 
 ``prompts/channels/<channel>.md``
@@ -88,10 +88,10 @@ prompt (or the compaction pass):
 
    - ``telegram.md`` — enforce Telegram Bot API formatting: plain text, Telegram-compatible
      inline HTML, or Markdown (no web HTML, no JSON wrappers like ``{"answer": ...}``); when
-     delegation results contain ``attachments``, send each with ``filesystem(action="send")``
+     delegation results contain ``attachments``, send each with ``send_file``
      and confirm briefly.
    - ``console.md`` — text-only interface: always use ``kind="text"``, report file paths in
-     the reply instead of sending files, and never call ``filesystem(action="send")``.
+     the reply instead of sending files, and never call ``send_file``.
 
 ``prompts/compact.md``
    Instructions for the memory-compaction pass: produce an information-dense summary with

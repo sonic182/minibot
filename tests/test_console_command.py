@@ -25,6 +25,10 @@ def _install_console_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
             del refresh
 
         @classmethod
+        def bind_tools_refresh(cls, refresh) -> None:
+            del refresh
+
+        @classmethod
         def configure(cls, config_path=None, *, entrypoint="daemon") -> None:
             calls["config_path"] = config_path
             calls["entrypoint"] = entrypoint
@@ -95,6 +99,9 @@ def _install_console_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
             calls["dispatcher_stopped"] = True
 
         def refresh_agent_roster(self) -> object:
+            return object()
+
+        def refresh_tools(self) -> object:
             return object()
 
     class _FakeConsoleService:

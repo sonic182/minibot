@@ -152,7 +152,12 @@ def _write_workspace_agent(agents_dir: Path) -> None:
             "model_provider: openrouter\n"
             "model: openai/gpt-4o-mini\n"
             "tools_allow:\n"
-            "  - filesystem\n"
+            "  - list_files\n"
+            "  - file_info\n"
+            "  - write_file\n"
+            "  - move_file\n"
+            "  - delete_file\n"
+            "  - send_file\n"
             "  - glob_files\n"
             "---\n\n"
             "You are the workspace file specialist. "
@@ -269,7 +274,8 @@ def _write_browser_agent(agents_dir: Path, *, profile: str = "cheap_openai") -> 
         "  - mcp_playwright-cli__browser_close\n"
         "  - mcp_playwright-cli__browser_run_code\n"
         "  - mcp_playwright-cli__browser_take_screenshot\n"
-        "  - filesystem\n"
+        "  - list_files\n"
+        "  - read_file\n"
     )
     if "  - mcp_playwright-cli__*\n" in content:
         content = content.replace("  - mcp_playwright-cli__*\n", fast_tools_block)
@@ -277,7 +283,8 @@ def _write_browser_agent(agents_dir: Path, *, profile: str = "cheap_openai") -> 
         content = content.replace("  - mcp_playwright-cli__browser_run_code\n", fast_tools_block)
     elif "tools_allow:\n" in content and "mcp_playwright-cli__browser_navigate" not in content:
         content = content.replace("tools_allow:\n", f"tools_allow:\n{fast_tools_block}")
-    content = content.replace("  - filesystem\n  - filesystem\n", "  - filesystem\n")
+    content = content.replace("  - list_files\n  - list_files\n", "  - list_files\n")
+    content = content.replace("  - read_file\n  - read_file\n", "  - read_file\n")
     content = (
         content
         + "\n"
@@ -518,7 +525,15 @@ async def test_e2e_console_normal_tool_call_workspace_file_workflow(tmp_path: Pa
     config_path = _write_e2e_config(
         tmp_path=tmp_path,
         agents_dir=agents_dir,
-        main_agent_tools_allow=["filesystem", "glob_files", "current_*", "calculate_*", "http_*"],
+        main_agent_tools_allow=[
+            "list_files",
+            "write_file",
+            "file_info",
+            "glob_files",
+            "current_*",
+            "calculate_*",
+            "http_*",
+        ],
         tool_ownership_mode="shared",
     )
 
@@ -642,7 +657,7 @@ async def test_e2e_console_main_agent_delegates_example_screenshot_and_reports_w
             "Use spawn_task exactly once with agent_name=playwright_mcp_agent. "
             "Task: use browser_run_code once to open https://www.example.com/, take one screenshot, "
             "and return screenshot path plus workspace folder. "
-            "Do not call filesystem. "
+            "Do not call file tools. "
             "If any browser tool fails, stop immediately and return exactly: browser unavailable. "
             "Do not call spawn_task again."
         ),
@@ -694,7 +709,7 @@ async def test_e2e_console_screenshot_delegation_with_attachments_reports_path(
             "Use spawn_task exactly once with agent_name=playwright_mcp_agent. "
             "Task: take a screenshot of https://www.example.com/ and report the screenshot file path "
             "in a user-friendly console message format like 'Screenshot saved at: <path>'. "
-            "Do NOT use filesystem action=send since console cannot send files to users."
+            "Do NOT use send_file since console cannot send files to users."
         ),
         attempts=2,
         wait_timeout_seconds=25.0,

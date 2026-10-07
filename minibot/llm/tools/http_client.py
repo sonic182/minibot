@@ -10,7 +10,7 @@ from contextlib import aclosing
 from html.parser import HTMLParser
 from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import ParseResult, urlparse, urlunparse
+from urllib.parse import urlparse
 
 import aiosonic
 from aiosonic.timeout import Timeouts
@@ -26,18 +26,6 @@ from minibot.shared.html_compact import html_to_compact
 _SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 _TOTAL_TIMEOUT_FACTOR = 3
 _DECOMPRESS_WBITS = {"gzip": zlib.MAX_WBITS | 16, "deflate": zlib.MAX_WBITS}
-
-
-def _with_default_port(parsed: ParseResult) -> ParseResult:
-    if parsed.port is not None or not parsed.hostname:
-        return parsed
-    return parsed._replace(netloc=f"{parsed.netloc}:{443 if parsed.scheme == 'https' else 80}")
-
-
-class _SchemeKeyedHTTPClient(aiosonic.HTTPClient):
-    def _handle_redirect(self, **kwargs: Any) -> tuple[Any, ...]:
-        urlparsed, *rest = super()._handle_redirect(**kwargs)
-        return (_with_default_port(urlparsed), *rest)
 
 
 def _loggable_url(url: str) -> str:
@@ -79,7 +67,7 @@ class HTTPClientTool:
         self._config = config
         self._storage = storage
         self._logger = logging.getLogger("minibot.http_tool")
-        self._client = _SchemeKeyedHTTPClient()
+        self._client = aiosonic.HTTPClient()
 
     def bindings(self) -> list[ToolBinding]:
         return [ToolBinding(tool=_http_tool_schema(), handler=self._handle_request)]
@@ -111,9 +99,7 @@ class HTTPClientTool:
                 extra={"method": method, "url": _loggable_url(url), "owner_id": context.owner_id},
             )
             async with asyncio.timeout(self._config.timeout_seconds * _TOTAL_TIMEOUT_FACTOR):
-                response = await self._client.request(
-                    urlunparse(_with_default_port(urlparse(url))), method=method, **request_kwargs
-                )
+                response = await self._client.request(url, method=method, **request_kwargs)
                 content = await self._read_body(response, self._read_limit())
             truncated = len(content) > self._config.max_bytes
             content_type = _extract_content_type(response.headers)

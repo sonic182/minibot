@@ -12,7 +12,7 @@ def test_load_known_description_returns_text() -> None:
 
 
 def test_load_description_is_stripped() -> None:
-    text = load_tool_description("filesystem")
+    text = load_tool_description("list_files")
     assert text == text.strip()
 
 
@@ -41,7 +41,12 @@ def test_all_builtin_descriptions_load() -> None:
     names = [
         "chat_history_info",
         "chat_history_trim",
-        "filesystem",
+        "list_files",
+        "file_info",
+        "write_file",
+        "move_file",
+        "delete_file",
+        "send_file",
         "glob_files",
         "grep",
         "read_file",

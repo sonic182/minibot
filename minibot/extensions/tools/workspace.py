@@ -7,7 +7,18 @@ from minibot.llm.tools.grep import GrepTool
 
 from ._storage import managed_storage
 
-_WORKER_TOOL_NAMES = {"filesystem", "glob_files", "read_file", "code_read", "grep"}
+_WORKER_TOOL_NAMES = {
+    "list_files",
+    "glob_files",
+    "file_info",
+    "write_file",
+    "read_file",
+    "move_file",
+    "delete_file",
+    "send_file",
+    "code_read",
+    "grep",
+}
 
 
 def register(mb: ExtensionContext) -> None:

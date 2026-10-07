@@ -89,7 +89,7 @@ class PromptService:
                 "When you need to inspect a local workspace file (image/document), call self_insert_artifact first "
                 "to inject it into conversation context before answering file contents. "
                 "For file-management requests (save, move, delete, send, list), do not call self_insert_artifact; "
-                "use the filesystem tool with the appropriate action instead. "
+                "use the appropriate file tool instead. "
                 "If the user only uploaded files and gave no clear instruction, ask a clarifying question."
             )
         return "\n\n".join(fragments)

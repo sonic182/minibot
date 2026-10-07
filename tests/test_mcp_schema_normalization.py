@@ -26,6 +26,34 @@ def test_drops_property_names_but_keeps_a_property_called_that() -> None:
     assert normalized["$defs"]["Headers"] == {"type": "object"}
 
 
+def test_drops_property_count_limits_but_keeps_a_property_called_that() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "attributes": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                    "name": {"type": "string"},
+                    "tags": {"type": "object", "maxProperties": 5, "additionalProperties": {"type": "string"}},
+                },
+            },
+            "minProperties": {"type": "integer"},
+        },
+    }
+
+    normalized = _normalize_schema(schema)
+
+    assert normalized["properties"]["attributes"] == {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "tags": {"type": "object", "additionalProperties": {"type": "string"}},
+        },
+    }
+    assert normalized["properties"]["minProperties"] == {"type": "integer"}
+
+
 def test_drops_string_formats_openai_rejects_and_keeps_the_supported_ones() -> None:
     schema = {
         "type": "object",
@@ -79,7 +107,6 @@ def test_merges_ref_and_sibling_keywords_instead_of_allof() -> None:
         "type": "object",
         "properties": {"name": {"type": "string"}},
         "description": "Entity the relation points from.",
-        "minProperties": 1,
     }
     assert normalized["properties"]["relation"] == schema["properties"]["relation"]
     assert normalized["$defs"] == schema["$defs"]

@@ -10,4 +10,4 @@ Formatting:
 Attachment handling for delegations:
 - The web channel cannot send files directly.
 - Report each generated file path in clear text, with a short description of its purpose.
-- Do NOT call filesystem(action="send") for web.
+- Do NOT call send_file for web.

@@ -305,13 +305,13 @@ class LocalFileStorage:
         candidate = self.resolve_file(path)
         if not candidate.exists():
             raise ToolInputError(
-                f"file does not exist: {path!r}. Locate it first (filesystem action='list' or 'glob', "
+                f"file does not exist: {path!r}. Locate it first (list_files or glob_files, "
                 "or bash `ls`) or create it; repeating this same path will fail again.",
                 error_code="file_not_found",
             )
         if not candidate.is_file():
             raise ToolInputError(
-                f"path is not a file but a directory: {path!r}. Use filesystem action='list' to inspect it.",
+                f"path is not a file but a directory: {path!r}. Use list_files to inspect it.",
                 error_code="path_is_not_a_file",
             )
         return candidate

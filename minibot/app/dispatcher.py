@@ -248,6 +248,11 @@ class Dispatcher:
         is rebuilt rather than filtered so a reload from zero agents adds ``fetch_agent_info``.
         """
         change = await reload_agent_roster(settings=self._settings, registry=self._agent_registry, reader=reader)
+        await self.refresh_tools()
+        return change
+
+    async def refresh_tools(self) -> None:
+        """Rebuild the tool list from the current settings, registry and extension contributions."""
         tools = self._build_tools()
         view = self._main_agent_view(tools)
         self._all_tools = tools
@@ -261,7 +266,6 @@ class Dispatcher:
                 "main agent tools hidden due to exclusive ownership",
                 extra={"hidden_tools": view.hidden_tool_names},
             )
-        return change
 
     @property
     def main_agent_tool_names(self) -> list[str]:
@@ -460,7 +464,6 @@ class Dispatcher:
                     channel=message.channel,
                     chat_id=message.chat_id,
                     user_id=message.user_id,
-                    text=message.text,
                     available_tools=list(self._main_agent_tool_names),
                 )
             )
@@ -563,9 +566,16 @@ class Dispatcher:
             if not reply_settled:
                 await self._publish_failure_reply(event)
         finally:
-            await self._pending_turns.clear_pending(event.event_id)
-            for event_id in inbox.consumed:
+            await self._clear_pending_rows([event.event_id, *inbox.consumed])
+
+    async def _clear_pending_rows(self, event_ids: list[str]) -> None:
+        try:
+            for event_id in event_ids:
                 await self._pending_turns.clear_pending(event_id)
+        except asyncio.CancelledError:
+            for event_id in event_ids:
+                await self._pending_turns.clear_pending(event_id)
+            raise
 
     async def _publish_failure_reply(self, event: MessageEvent) -> None:
         message = event.message

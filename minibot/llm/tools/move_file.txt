@@ -1,0 +1,3 @@
+Move or rename a file within the managed workspace. Requires source_path and destination_path. Set overwrite=true to replace an existing destination file.
+
+To save an uploaded file, move it from its uploads path to the destination the user wants.

@@ -14,7 +14,7 @@ from minibot.app.agent_management import AgentManagementService
 from minibot.config.schema import Settings
 
 
-def _definition(*, name: str = "helper_agent", tools: str = "  - filesystem\n", enabled: str = "true") -> str:
+def _definition(*, name: str = "helper_agent", tools: str = "  - write_file\n", enabled: str = "true") -> str:
     return (
         "---\n"
         f"name: {name}\n"
@@ -35,7 +35,7 @@ def _service(tmp_path: Path, *, ceiling: list[str] | None = None, refresh=None) 
                 "agent_management": {
                     "write": True,
                     "directory": str(tmp_path / "managed"),
-                    "tools_allow": ceiling if ceiling is not None else ["filesystem"],
+                    "tools_allow": ceiling if ceiling is not None else ["write_file"],
                 }
             }
         }
@@ -61,9 +61,7 @@ async def test_create_writes_and_lists(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_management_keeps_filesystem_io_off_the_event_loop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_management_keeps_file_io_off_the_event_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     loop_thread = threading.get_ident()
     store = LocalManagedAgentStore(tmp_path / "managed")
     reader = LocalAgentDefinitionReader()
@@ -82,7 +80,7 @@ async def test_management_keeps_filesystem_io_off_the_event_loop(
         {
             "orchestration": {
                 "directory": str(tmp_path / "owner"),
-                "agent_management": {"write": True, "tools_allow": ["filesystem"]},
+                "agent_management": {"write": True, "tools_allow": ["write_file"]},
             }
         }
     )
@@ -123,7 +121,7 @@ async def test_create_rejects_an_owner_name_without_poisoning_the_roster(tmp_pat
                 "agent_management": {
                     "write": True,
                     "directory": str(managed_dir),
-                    "tools_allow": ["filesystem"],
+                    "tools_allow": ["write_file"],
                 },
             }
         }
@@ -205,7 +203,7 @@ class _FailingStore:
 @pytest.mark.asyncio
 async def test_a_store_oserror_is_reported_as_a_failure() -> None:
     settings = Settings.from_dict(
-        {"orchestration": {"agent_management": {"write": True, "tools_allow": ["filesystem"]}}}
+        {"orchestration": {"agent_management": {"write": True, "tools_allow": ["write_file"]}}}
     )
     service = AgentManagementService(settings=settings, store=_FailingStore(), reader=LocalAgentDefinitionReader())
 
@@ -217,7 +215,7 @@ async def test_a_store_oserror_is_reported_as_a_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_an_unauthorized_tool_is_rejected_and_not_written(tmp_path: Path) -> None:
-    service = _service(tmp_path, ceiling=["filesystem"])
+    service = _service(tmp_path, ceiling=["write_file"])
 
     outcome = await service.create(name="helper_agent", content=_definition(tools="  - bash\n"))
 
@@ -302,7 +300,7 @@ async def test_cancelled_create_finishes_io_before_releasing_the_operation(
 
     monkeypatch.setattr(store, "write", write)
     settings = Settings.from_dict(
-        {"orchestration": {"directory": str(tmp_path / "owner"), "agent_management": {"tools_allow": ["filesystem"]}}}
+        {"orchestration": {"directory": str(tmp_path / "owner"), "agent_management": {"tools_allow": ["write_file"]}}}
     )
     service = AgentManagementService(settings=settings, store=store, reader=LocalAgentDefinitionReader())
     operation = asyncio.create_task(service.create(name="helper_agent", content=_definition()))

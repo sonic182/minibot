@@ -43,6 +43,7 @@ async def run() -> None:
     )
     # The dispatcher owns the live tool list, so it is the thing a roster reload has to update.
     AppContainer.bind_agent_roster_refresh(dispatcher.refresh_agent_roster)
+    AppContainer.bind_tools_refresh(dispatcher.refresh_tools)
     strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     enabled_tools = dispatcher.main_agent_tool_names or ["none"]
     tool_summary = summarize_items(enabled_tools)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
@@ -28,7 +29,7 @@ from minibot.core.channels import (
     session_id_for,
     session_identifier,
 )
-from minibot.core.events import MessageEvent
+from minibot.core.events import MessageEvent, TurnInputPreparedEvent
 from minibot.core.memory import MemoryBackend
 from minibot.core.tasks import MAX_TASK_CONTINUATIONS
 from minibot.core.tools import ToolContext
@@ -62,6 +63,7 @@ class LLMTurnService:
         logger: logging.Logger,
         runtime: AgentRuntime | None = None,
         task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._memory = memory
         self._llm_client = llm_client
@@ -79,6 +81,7 @@ class LLMTurnService:
         self._recent_file_tracking_service = recent_file_tracking_service
         self._logger = logger
         self._task_handoff_callback = task_handoff_callback
+        self._event_bus = event_bus
         self._profile = LLMExecutionProfile.from_client(llm_client)
         self._runtime: AgentRuntime | None = None
         self._runtime_service: RuntimeOrchestrationService | None = None
@@ -160,7 +163,8 @@ class LLMTurnService:
             claim_task_continuation=_claim_task_continuation,
             release_task_continuation=_release_task_continuation,
         )
-        model_text, model_user_content = await self._model_input(message, tool_context)
+        model_text, model_user_content, transcripts = await self._model_input(message, tool_context)
+        await self._publish_input_prepared(event, transcripts)
         if message.attachments:
             self._logger.debug(
                 "prepared multimodal message",
@@ -371,20 +375,37 @@ class LLMTurnService:
 
     async def _model_input(
         self, message: ChannelMessage, tool_context: ToolContext
-    ) -> tuple[str, str | list[dict[str, Any]] | None]:
+    ) -> tuple[str, str | list[dict[str, Any]] | None, list[str]]:
         input_message = message
+        transcripts: list[str] = []
         if self._audio_auto_transcription_service is not None:
             auto_result = await self._audio_auto_transcription_service.transcribe_incoming_audio(
                 message=message,
                 context=tool_context,
             )
+            transcripts = [entry.text for entry in auto_result.successes]
             transcribed_text = self._audio_auto_transcription_service.apply_to_model_text(message.text, auto_result)
             if transcribed_text != message.text:
                 input_message = message.model_copy(update={"text": transcribed_text})
-        return self._input_service.build_model_user_input(input_message)
+        model_text, model_user_content = self._input_service.build_model_user_input(input_message)
+        return model_text, model_user_content, transcripts
+
+    async def _publish_input_prepared(self, event: MessageEvent, transcripts: list[str]) -> None:
+        if self._event_bus is None:
+            return
+        message = event.message
+        text = "\n\n".join(part for part in (message.text, *transcripts) if part)
+        prepared = TurnInputPreparedEvent(
+            turn_id=event.event_id,
+            channel=message.channel,
+            chat_id=message.chat_id,
+            text=text,
+        )
+        with contextlib.suppress(Exception):
+            await self._event_bus.publish(prepared)
 
     async def steering_message(self, event: MessageEvent, session_id: str, tool_context: ToolContext) -> AgentMessage:
-        model_text, model_user_content = await self._model_input(event.message, tool_context)
+        model_text, model_user_content, _ = await self._model_input(event.message, tool_context)
         await self._memory.append_history(session_id, "user", build_history_user_entry(event.message, model_text))
         model_text = self._recent_file_tracking_service.augment_model_text_with_recent_files(session_id, model_text)
         return user_message(model_text, model_user_content, {STEERING_METADATA_KEY: True})
@@ -702,4 +723,5 @@ def build_llm_turn_service(
         logger=service_logger,
         runtime=runtime,
         task_handoff_callback=task_handoff_callback,
+        event_bus=event_bus,
     )

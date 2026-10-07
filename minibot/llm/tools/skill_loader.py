@@ -34,9 +34,9 @@ class SkillLoaderTool:
     paths; the registry refreshes automatically when files change.
 
     ``managed_storage`` and ``bash_enabled`` describe which writer can actually reach the
-    skill write directory, reported as ``write_dir_access``. Both are needed: ``filesystem``
+    skill write directory, reported as ``write_dir_access``. Both are needed: ``write_file``
     is confined to its root unless ``allow_outside_root`` is set, and ``bash`` is absent
-    unless ``[tools.bash]`` is enabled — so "not reachable by filesystem" does not imply
+    unless ``[tools.bash]`` is enabled — so "not reachable by write_file" does not imply
     "reachable by bash".
     """
 
@@ -117,8 +117,8 @@ class SkillLoaderTool:
         storage = self._managed_storage
         if storage is not None and (storage.allow_outside_root or write_dir.is_relative_to(storage.root_dir)):
             # display_path yields a root-relative path inside the root and an absolute one
-            # outside it, which is exactly what the filesystem tool accepts in each mode.
-            return "filesystem", storage.display_path(write_dir)
+            # outside it, which is exactly what the write_file tool accepts in each mode.
+            return "write_file", storage.display_path(write_dir)
         if self._bash_enabled:
             return "bash", None
         return "unavailable", None

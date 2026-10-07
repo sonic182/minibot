@@ -71,6 +71,10 @@ def _make_container(extensions: object) -> type:
             del refresh
 
         @classmethod
+        def bind_tools_refresh(cls, refresh) -> None:
+            del refresh
+
+        @classmethod
         def get_pending_turn_store(cls) -> _EmptyPendingTurnStore:
             return _EmptyPendingTurnStore()
 
@@ -121,6 +125,9 @@ def _make_dispatcher(*, on_start=None, on_stop=None) -> type:
                 await on_stop()
 
         def refresh_agent_roster(self) -> object:
+            return object()
+
+        def refresh_tools(self) -> object:
             return object()
 
     return _FakeDispatcher

@@ -105,7 +105,7 @@ async def test_an_unauthorized_managed_definition_leaves_the_previous_roster(tmp
         {
             "orchestration": {
                 "directory": str(owner_dir),
-                "agent_management": {"write": True, "directory": str(managed_dir), "tools_allow": ["filesystem"]},
+                "agent_management": {"write": True, "directory": str(managed_dir), "tools_allow": ["write_file"]},
             }
         }
     )

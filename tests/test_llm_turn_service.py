@@ -18,7 +18,7 @@ from minibot.app.handlers.services import (
 from minibot.app.tool_use_guardrail import NoopToolUseGuardrail
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse, session_id_for
-from minibot.core.events import MessageEvent
+from minibot.core.events import MessageEvent, TurnInputPreparedEvent
 from minibot.llm.errors import ProviderHTTPError
 from minibot.llm.provider_factory import LLMClient, LLMGeneration
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -168,6 +168,17 @@ class StubRuntime:
 class FailingRuntime:
     async def run(self, **_: Any) -> RuntimeResult:
         raise RuntimeError("runtime exploded")
+
+
+class _RecordingBus:
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    async def publish(self, event: Any) -> None:
+        self.events.append(event)
+
+    def prepared(self) -> list[TurnInputPreparedEvent]:
+        return [event for event in self.events if isinstance(event, TurnInputPreparedEvent)]
 
 
 def _service(
@@ -426,16 +437,18 @@ async def test_turn_service_auto_transcribes_short_incoming_audio_before_generat
         executor=ToolBindingAudioTranscriptionExecutor(transcribe_binding),
         policy=AudioAutoTranscribePolicy(enabled=True, max_duration_seconds=45),
     )
+    bus = _RecordingBus()
     service = build_llm_turn_service(
         memory=cast(Any, memory),
         llm_client=cast(LLMClient, client),
         tools=[transcribe_binding],
         audio_auto_transcription_service=auto_service,
         tool_use_guardrail=NoopToolUseGuardrail(),
+        event_bus=cast(Any, bus),
     )
     event = MessageEvent(
         message=_message(
-            text="",
+            text="ojo",
             metadata={
                 "incoming_files": [
                     {
@@ -458,6 +471,7 @@ async def test_turn_service_auto_transcribes_short_incoming_audio_before_generat
     assert len(tool_calls) == 1
     model_text = client.calls[-1]["args"][1]
     assert "Automatic audio transcriptions from incoming files:" in model_text
+    assert [(item.turn_id, item.text) for item in bus.prepared()] == [(event.event_id, "ojo\n\nabre el garage")]
 
 
 @pytest.mark.asyncio
@@ -559,7 +573,7 @@ async def test_turn_service_guardrail_retry_with_runtime() -> None:
 
 
 @pytest.mark.asyncio
-async def test_turn_service_injects_recent_filesystem_paths_in_current_turn_only() -> None:
+async def test_turn_service_injects_recent_file_paths_in_current_turn_only() -> None:
     memory = StubMemory()
     client = StubLLMClient(payload="unused", provider="openrouter")
     service = build_llm_turn_service(
@@ -578,12 +592,11 @@ async def test_turn_service_injects_recent_filesystem_paths_in_current_turn_only
                         AgentMessage(role="assistant", content=[MessagePart(type="text", text="x")]),
                         AgentMessage(
                             role="tool",
-                            name="filesystem",
+                            name="write_file",
                             content=[
                                 MessagePart(
                                     type="json",
                                     value={
-                                        "action": "write",
                                         "path": "data/files/count_words.py",
                                         "path_relative": "data/files/count_words.py",
                                         "path_absolute": "/home/johanderson/sandbox/minibot/data/files/count_words.py",
@@ -611,7 +624,7 @@ async def test_turn_service_injects_recent_filesystem_paths_in_current_turn_only
 
     second_state: AgentState = runtime.calls[1]["state"]
     second_user = second_state.messages[-1].content[0].text or ""
-    assert "Recent filesystem paths from this session" in second_user
+    assert "Recent file paths from this session" in second_user
     assert "count_words.py" in second_user
     session_id = session_id_for(_message_event("patch it").message)
     assert service.session_state.recent_files(session_id)
@@ -724,12 +737,14 @@ async def test_turn_service_records_and_forwards_messages_sent_during_the_turn()
             drained.extend(await turn_input.drain())
             return await super().run(**kwargs)
 
-    service, _, memory = _service("unused", provider="openrouter")
+    bus = _RecordingBus()
+    service, _, memory = _service("unused", provider="openrouter", event_bus=cast(Any, bus))
     result = RuntimeResult(payload="Madrid and Barcelona", response_id=None, state=AgentState())
     service.set_runtime(cast(Any, _SteeredRuntime([result])))
 
     response = await service.handle(_message_event("search Madrid"), turn_input=inbox)
 
+    assert [item.text for item in bus.prepared()] == ["search Madrid"]
     assert response.text == "Madrid and Barcelona"
     assert [(message.role, message.content[0].text, message.metadata) for message in drained] == [
         ("user", "also Barcelona", {"steering": True})

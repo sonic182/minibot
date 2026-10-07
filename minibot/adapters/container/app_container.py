@@ -47,6 +47,7 @@ class AppContainer:
     _vault: Vault | None = None
     _agent_management: AgentManagementService | None = None
     _agent_roster_refresh: Callable[[AgentDefinitionReader], Awaitable[AgentRosterChange]] | None = None
+    _tools_refresh: Callable[[], Awaitable[None]] | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -83,6 +84,7 @@ class AppContainer:
             extra_native_disabled=native_skills_hidden_by_management(cls._settings),
         )
         cls._agent_roster_refresh = None
+        cls._tools_refresh = None
         cls._agent_management = cls._build_agent_management()
         cls._token_autoconfig_applied = False
         # Last, so an extension's register() sees a fully built container even though the
@@ -95,6 +97,7 @@ class AppContainer:
             vault=cls._vault,
             agent_registry=cls._agent_registry,
             agent_management=cls._agent_management,
+            refresh_tools=cls._refresh_tools,
         )
 
     @classmethod
@@ -224,6 +227,18 @@ class AppContainer:
         from the composition root that builds both.
         """
         cls._agent_roster_refresh = refresh
+
+    @classmethod
+    def bind_tools_refresh(cls, refresh: Callable[[], Awaitable[None]]) -> None:
+        """Point extensions at the dispatcher that owns the live tool list, once it exists."""
+        cls._tools_refresh = refresh
+
+    @classmethod
+    async def _refresh_tools(cls) -> None:
+        callback = cls._tools_refresh
+        if callback is None:
+            raise RuntimeError("the tool refresh is not bound yet")
+        await callback()
 
     @classmethod
     def _build_agent_management(cls) -> AgentManagementService | None:

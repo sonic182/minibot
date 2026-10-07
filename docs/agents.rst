@@ -94,7 +94,7 @@ thread. Cancelling a managed write waits for its filesystem operation to finish 
 the management lock; cancellation does not roll back a completed write.
 
 That ceiling bounds what an agent may be *told* to do; it is not a sandbox. A managed agent granted
-``bash`` or ``filesystem`` can reach anything the daemon's OS user can, exactly as an owner-authored
+``bash`` or the managed-file tools can reach anything the daemon's OS user can, exactly as an owner-authored
 one can. See :doc:`security`.
 
 Main-agent visibility is a separate thing from the managed ceiling. ``[orchestration.main_agent]``
@@ -116,7 +116,12 @@ Minimal example:
    model: gpt-5.6-luna
    temperature: 0.1
    tools_allow:
-     - filesystem
+     - list_files
+     - file_info
+     - write_file
+     - move_file
+     - delete_file
+     - send_file
      - glob_files
      - read_file
      - self_insert_artifact
@@ -194,7 +199,7 @@ Browser Automation
 Browser automation is not MCP-based: the specialist drives the ``playwright-cli``
 binary directly through the ``bash`` tool, guided by a skill rather than a remote
 MCP server. See ``agents/browser_agent.md`` for the canonical setup — its
-``tools_allow`` lists ``bash``, ``filesystem``, ``grep``, ``http_request``,
+``tools_allow`` lists ``bash``, ``list_files``, ``read_file``, ``grep``, ``http_request``,
 ``pre_response``, and ``wait`` (no ``mcp_servers`` entry).
 
 Agent Skills

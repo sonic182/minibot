@@ -94,7 +94,7 @@ async def test_agent_management_reports_the_ceiling_and_switches() -> None:
                 "agent_management": {
                     "write": True,
                     "directory": "./data/agents",
-                    "tools_allow": ["filesystem"],
+                    "tools_allow": ["write_file"],
                     "mcp_servers": ["playwright"],
                     "providers": ["anthropic"],
                 },
@@ -108,7 +108,7 @@ async def test_agent_management_reports_the_ceiling_and_switches() -> None:
         "reload": False,
         "write": True,
         "directory": "./data/agents",
-        "tools_allow": ["filesystem"],
+        "tools_allow": ["write_file"],
         "mcp_servers": ["playwright"],
         "providers": ["anthropic"],
     }

@@ -11,7 +11,7 @@ from minibot.adapters.config.schema import Settings
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext, ExtensionRegistry
 from minibot.core.decisions import DecisionAnswer, DecisionResult
-from minibot.core.events import TurnCompletedEvent, TurnFailedEvent, TurnStartedEvent
+from minibot.core.events import TurnCompletedEvent, TurnFailedEvent, TurnInputPreparedEvent, TurnStartedEvent
 from minibot.extensions.integrations import decision
 
 
@@ -48,7 +48,11 @@ def _context(settings: Settings, bus: EventBus, entrypoint: str = "console") -> 
 
 
 async def _run_turn(
-    monkeypatch: pytest.MonkeyPatch, client: AsyncMock, *, finish: TurnCompletedEvent | TurnFailedEvent
+    monkeypatch: pytest.MonkeyPatch,
+    client: AsyncMock,
+    *,
+    finish: TurnCompletedEvent | TurnFailedEvent,
+    prepared_text: str | None = "ping",
 ) -> None:
     monkeypatch.setattr(decision, "DecisionsProvider", lambda *args, **kwargs: client)
     bus = EventBus()
@@ -57,9 +61,10 @@ async def _run_turn(
     registry = ExtensionRegistry([context], logging.getLogger("test.extensions.decision"))
     await registry.start()
     try:
-        await bus.publish(
-            TurnStartedEvent(turn_id="turn-1", channel="console", chat_id=1, text="ping", available_tools=["b", "a"])
-        )
+        await bus.publish(TurnStartedEvent(turn_id="turn-1", channel="console", chat_id=1, available_tools=["b", "a"]))
+        if prepared_text is not None:
+            prepared = TurnInputPreparedEvent(turn_id="turn-1", channel="console", chat_id=1, text=prepared_text)
+            await bus.publish(prepared)
         await bus.publish(finish)
         for _ in range(20):
             await asyncio.sleep(0.01)
@@ -113,9 +118,27 @@ async def test_decision_extension_failure_is_only_logged(
     assert [item.getMessage() for item in decision_records] == ["turn decision failed"]
 
 
+@pytest.mark.timeout(10)
+@pytest.mark.asyncio
+async def test_decision_extension_skips_turns_that_never_prepared_their_input(
+    monkeypatch: pytest.MonkeyPatch, decision_records: list[logging.LogRecord]
+) -> None:
+    client = AsyncMock()
+
+    await _run_turn(
+        monkeypatch,
+        client,
+        finish=TurnFailedEvent(turn_id="turn-1", channel="console", chat_id=1, error="boom"),
+        prepared_text=None,
+    )
+
+    client.ask.assert_not_awaited()
+    assert decision_records == []
+
+
 @pytest.mark.parametrize(
     ("entrypoint", "enabled", "expected_subscriptions"),
-    [("console", True, 3), ("daemon", True, 3), ("worker", True, 0), ("console", False, 0)],
+    [("console", True, 4), ("daemon", True, 4), ("worker", True, 0), ("console", False, 0)],
 )
 def test_decision_extension_subscribes_only_when_enabled_outside_workers(
     entrypoint: str, enabled: bool, expected_subscriptions: int

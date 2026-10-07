@@ -786,6 +786,7 @@ class MCPToolConfig(BaseModel):
     enabled: bool = False
     name_prefix: str = "mcp"
     timeout_seconds: PositiveInt = 10
+    reload: bool = False
     servers: list[MCPServerConfig] = Field(default_factory=list)
 
 

@@ -85,13 +85,13 @@ async def test_tool_failure_reaches_the_model_with_the_typed_error_code(tmp_path
             ToolCall(
                 id="call_1",
                 type="function",
-                name="filesystem",
-                function={"name": "filesystem", "arguments": '{"path": "data/files/crm_leads.db"}'},
+                name="file_info",
+                function={"name": "file_info", "arguments": '{"path": "data/files/crm_leads.db"}'},
             )
         ],
         [
             ToolBinding(
-                tool=Tool(name="filesystem", description="fs", parameters={"type": "object"}),
+                tool=Tool(name="file_info", description="fs", parameters={"type": "object"}),
                 handler=handler,
             )
         ],

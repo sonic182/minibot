@@ -24,6 +24,7 @@ from minibot.app.managed_agent_policy import (
     ManagedAgentPolicy,
     native_skills_hidden_by_management,
 )
+from minibot.app.mcp_auth import build_mcp_headers, secret_lookup
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
@@ -61,9 +62,14 @@ _WORKER_TOOL_ALLOWLIST = [
     "calculate_expression",
     "wait",
     "http_request",
-    "filesystem",
+    "list_files",
     "glob_files",
+    "file_info",
+    "write_file",
     "read_file",
+    "move_file",
+    "delete_file",
+    "send_file",
     "code_read",
     "grep",
     "bash",
@@ -222,7 +228,11 @@ async def run_agent_loop(
         )
         llm_client = llm_factory.create_for_agent(spec)
         mcp_bindings = await _build_worker_mcp_bindings(
-            settings=settings, spec=spec, clients=mcp_clients, build_client=backends.build_mcp_client
+            settings=settings,
+            spec=spec,
+            clients=mcp_clients,
+            build_client=backends.build_mcp_client,
+            secrets=secrets,
         )
         tools = apply_tool_approval(
             _build_worker_tools(
@@ -416,7 +426,12 @@ def _build_worker_tools(
 
 
 async def _build_worker_mcp_bindings(
-    *, settings: Settings, spec: AgentSpec, clients: list[MCPClient], build_client: Callable[..., MCPClient]
+    *,
+    settings: Settings,
+    spec: AgentSpec,
+    clients: list[MCPClient],
+    build_client: Callable[..., MCPClient],
+    secrets: Mapping[str, str] | None = None,
 ) -> list[ToolBinding]:
     bindings: list[ToolBinding] = []
     if not settings.tools.mcp.enabled or not spec.mcp_servers:
@@ -433,7 +448,7 @@ async def _build_worker_mcp_bindings(
             env=server.env or None,
             cwd=server.cwd,
             url=server.url,
-            headers=server.headers,
+            headers=build_mcp_headers(server, secret_lookup(secrets)),
         )
         clients.append(client)
         bindings.extend(

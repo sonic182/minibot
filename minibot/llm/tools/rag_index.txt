@@ -5,7 +5,7 @@ embed each chunk, and upsert all chunks into the vector store under `document_id
 
 `file_path` resolves against the managed filesystem root, not the process working directory:
 use a path relative to that root, or an absolute path for a file outside it. If the file is not
-found, locate it first (filesystem action='list' or 'glob') instead of retrying the same path.
+found, locate it first (list_files or glob_files) instead of retrying the same path.
 
 Use this tool when:
 - An HTTP response was too large and was saved to a temp file — index it so you can search it later.

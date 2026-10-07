@@ -6,7 +6,10 @@ mode: agent
 tools_allow:
   - python_execute
   - python_environment_info
-  - filesystem
+  - list_files
+  - file_info
+  - write_file
+  - move_file
   - glob_files
   - read_file
   - code_read
@@ -22,8 +25,8 @@ Handle data processing, analysis, and computation tasks using Python and availab
 
 Rules:
 - Prefer Python for data work: use pandas, csv, json, statistics, or math as appropriate.
-- Read input files from managed workspace using filesystem or read_file before processing.
-- Save output files (charts, CSVs, reports) to managed workspace via python_execute artifacts or filesystem.
+- Read input files from managed workspace using list_files/file_info or read_file before processing.
+- Save output files (charts, CSVs, reports) to managed workspace via python_execute artifacts or write_file.
 - If the user asks for a chart or plot, generate it with matplotlib and export as PNG artifact.
 - Use calculate_expression for quick arithmetic when full Python is unnecessary.
 - Return concise summaries with key findings; avoid dumping raw data unless asked.
