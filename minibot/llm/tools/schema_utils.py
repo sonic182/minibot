@@ -2,6 +2,33 @@ from __future__ import annotations
 
 from typing import Any
 
+NAME_MAP_KEYWORDS = frozenset({"properties", "$defs", "definitions", "patternProperties"})
+LITERAL_VALUE_KEYWORDS = frozenset({"default", "const", "enum", "examples"})
+
+
+def with_object_properties(value: Any) -> Any:
+    """Give every object schema a ``properties`` map, which OpenAI's function validation requires
+    even for a free-form object such as ``{"type": "object", "additionalProperties": {...}}``."""
+    if isinstance(value, list):
+        return [with_object_properties(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {
+        key: (
+            child
+            if key in LITERAL_VALUE_KEYWORDS
+            else {name: with_object_properties(item) for name, item in child.items()}
+            if key in NAME_MAP_KEYWORDS and isinstance(child, dict)
+            else with_object_properties(child)
+        )
+        for key, child in value.items()
+    }
+    schema_type = result.get("type")
+    is_object = schema_type == "object" or (isinstance(schema_type, list) and "object" in schema_type)
+    if is_object and "properties" not in result:
+        result["properties"] = {}
+    return result
+
 
 def strict_object(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
     return {

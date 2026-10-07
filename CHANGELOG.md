@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Codex no longer fails turns with `invalid_function_parameters`.** Its backend started requiring every object
+  schema to define `properties`, which `schedule_prompt`'s `metadata`, `http_request`'s `headers`, `bash`'s `env`
+  and free-form MCP objects did not. The OpenAI Responses provider now adds an empty `properties` map to any object
+  schema that lacks one, which accepts the same values as before.
+- **Stream `error` events keep the provider's detail.** The error object nested under `error` is read as well as
+  the flat form, and its `message`, `param` and the stream's `response_id` reach the `provider response failed;
+  retrying` warning and the task's `last_error`. The raw event is logged as `provider stream error event`.
+
+### Changed
+
+- **Every log line a task worker writes carries its `task_id`**, so tool and MCP calls of concurrent tasks can be
+  told apart.
+
 ## [0.30.0] - 2026-10-07
 
 ### Added

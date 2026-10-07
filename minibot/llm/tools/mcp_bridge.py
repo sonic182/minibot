@@ -12,7 +12,12 @@ from llm_async.models import Tool
 from minibot.core.agent_runtime import ToolResult
 from minibot.core.mcp import MCPClient, MCPServerMetadata, MCPToolDefinition
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.llm.tools.schema_utils import empty_object_schema, strict_object
+from minibot.llm.tools.schema_utils import (
+    LITERAL_VALUE_KEYWORDS,
+    NAME_MAP_KEYWORDS,
+    empty_object_schema,
+    strict_object,
+)
 
 
 @dataclass(frozen=True)
@@ -422,8 +427,6 @@ def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
-_NAME_MAP_KEYWORDS = frozenset({"properties", "$defs", "definitions", "patternProperties"})
-_LITERAL_VALUE_KEYWORDS = frozenset({"default", "const", "enum", "examples"})
 _DROPPED_KEYWORDS = frozenset({"propertyNames", "minProperties", "maxProperties"})
 _OPENAI_STRING_FORMATS = frozenset(
     {"date-time", "time", "date", "duration", "email", "hostname", "ipv4", "ipv6", "uuid"}
@@ -447,9 +450,9 @@ def _drop_unsupported_keywords(value: Any) -> Any:
     return {
         key: (
             child
-            if key in _LITERAL_VALUE_KEYWORDS
+            if key in LITERAL_VALUE_KEYWORDS
             else {name: _drop_unsupported_keywords(item) for name, item in child.items()}
-            if key in _NAME_MAP_KEYWORDS and isinstance(child, dict)
+            if key in NAME_MAP_KEYWORDS and isinstance(child, dict)
             else _drop_unsupported_keywords(child)
         )
         for key, child in value.items()
