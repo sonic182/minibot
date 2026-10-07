@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-07
+
 ### Added
 
 - **Turn events carry what a turn saw and did.** `TurnStartedEvent` has `available_tools`;
@@ -1379,7 +1381,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.29.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.30.0...HEAD
+[0.30.0]: https://github.com/sonic182/minibot/compare/0.29.0..0.30.0
 [0.29.0]: https://github.com/sonic182/minibot/compare/0.28.0..0.29.0
 [0.28.0]: https://github.com/sonic182/minibot/compare/0.27.0..0.28.0
 [0.27.0]: https://github.com/sonic182/minibot/compare/0.26.0..0.27.0
