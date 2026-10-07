@@ -36,6 +36,33 @@ class PatchedOpenAIResponsesProvider(OpenAIResponsesProvider):
                 tool["parameters"] = with_object_properties(tool["parameters"])
         return [*formatted, *native_tools]
 
+    def _messages_to_input(self, messages: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+        system_indexes = [index for index, message in enumerate(messages) if message.get("role") == "system"]
+        if len(system_indexes) < 2:
+            return super()._messages_to_input(messages)
+        items: list[dict[str, Any]] = []
+        chunk: list[dict[str, Any]] = []
+        for index, message in enumerate(messages):
+            if message.get("role") != "system":
+                chunk.append(message)
+                continue
+            items.extend(self._convert_chunk(chunk))
+            chunk = []
+            if index != system_indexes[0]:
+                developer_item = _developer_item(message.get("content"))
+                if developer_item is not None:
+                    items.append(developer_item)
+        items.extend(self._convert_chunk(chunk))
+        return items
+
+    def _convert_chunk(self, chunk: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not chunk:
+            return []
+        converted = super()._messages_to_input(chunk)
+        if isinstance(converted, str):
+            return [{"role": "user", "content": converted}]
+        return converted
+
     def _stream_responses_request(self, url: str, payload: dict[str, Any], headers: HeadersType) -> Response:
         response = Response({}, self.__class__.name(), stream=True, stream_generator=None)
 
@@ -77,3 +104,13 @@ class PatchedOpenAIResponsesProvider(OpenAIResponsesProvider):
 
         response.stream_generator = _gen()
         return response
+
+
+def _developer_item(content: Any) -> dict[str, Any] | None:
+    if isinstance(content, str):
+        if not content.strip():
+            return None
+        return {"role": "developer", "content": [{"type": "input_text", "text": content}]}
+    if isinstance(content, list) and content:
+        return {"role": "developer", "content": content}
+    return None

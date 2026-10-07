@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import replace
 from logging import Logger
 from typing import Any
@@ -315,19 +314,15 @@ async def _fetch_models_catalog(logger: Logger) -> dict[str, Any] | None:
 
 
 async def _fetch_models_catalog_async() -> object:
-    client = aiosonic.HTTPClient()
-    response = await asyncio.wait_for(
-        client.get(
+    async with asyncio.timeout(_REQUEST_TIMEOUT_SECONDS), aiosonic.HTTPClient() as client:
+        response = await client.get(
             _MODELS_API_URL,
             headers={
                 "User-Agent": "minibot-startup-token-autoconfig/1.0",
                 "Accept": "application/json",
             },
-        ),
-        timeout=_REQUEST_TIMEOUT_SECONDS,
-    )
-    body = await asyncio.wait_for(response.content(), timeout=_REQUEST_TIMEOUT_SECONDS)
-    return json.loads(body.decode("utf-8"))
+        )
+        return await response.json()
 
 
 async def _resolve_limits(

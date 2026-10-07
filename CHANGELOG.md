@@ -16,9 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Stream `error` events keep the provider's detail.** The error object nested under `error` is read as well as
   the flat form, and its `message`, `param` and the stream's `response_id` reach the `provider response failed;
   retrying` warning and the task's `last_error`. The raw event is logged as `provider stream error event`.
+- **System messages after the first reach OpenAI Responses and Codex models.** The provider used to drop every
+  `system` message from the request input; any after the first now go out as `developer` items at their place in
+  the conversation. A system prompt whose content is a list of parts is now sent as `instructions` too, with its
+  text parts joined.
 
 ### Changed
 
+- **aiosonic 1.1.0.** `http_request` now streams every response through aiosonic's `iter_bytes()`, so the read cap
+  also applies to `Content-Length` bodies instead of only chunked ones, and its own gzip/deflate handling is gone.
+  The Qdrant client sends its payloads with `json=`, the models catalog fetch closes its client, and
+  provider and MCP clients are closed with `HTTPClient.aclose()`.
 - **Every log line a task worker writes carries its `task_id`**, so tool and MCP calls of concurrent tasks can be
   told apart.
 

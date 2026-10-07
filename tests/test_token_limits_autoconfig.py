@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -14,13 +15,19 @@ class _FakeResponse:
     def __init__(self, payload: str) -> None:
         self._payload = payload
 
-    async def content(self) -> bytes:
-        return self._payload.encode("utf-8")
+    async def json(self) -> object:
+        return json.loads(self._payload)
 
 
 class _FakeHTTPClient:
     def __init__(self, payload: str) -> None:
         self._payload = payload
+
+    async def __aenter__(self) -> _FakeHTTPClient:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
 
     async def get(self, _url: str, headers: dict[str, str]) -> _FakeResponse:
         assert headers["Accept"] == "application/json"

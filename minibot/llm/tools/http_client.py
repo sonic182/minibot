@@ -5,7 +5,6 @@ import hashlib
 import json
 import logging
 import re
-import zlib
 from contextlib import aclosing
 from html.parser import HTMLParser
 from pathlib import PurePosixPath
@@ -25,7 +24,6 @@ from minibot.shared.html_compact import html_to_compact
 
 _SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 _TOTAL_TIMEOUT_FACTOR = 3
-_DECOMPRESS_WBITS = {"gzip": zlib.MAX_WBITS | 16, "deflate": zlib.MAX_WBITS}
 
 
 def _loggable_url(url: str) -> str:
@@ -99,8 +97,8 @@ class HTTPClientTool:
                 extra={"method": method, "url": _loggable_url(url), "owner_id": context.owner_id},
             )
             async with asyncio.timeout(self._config.timeout_seconds * _TOTAL_TIMEOUT_FACTOR):
-                response = await self._client.request(url, method=method, **request_kwargs)
-                content = await self._read_body(response, self._read_limit())
+                async with self._client.stream(method, url, **request_kwargs) as response:
+                    content = await self._read_body(response, self._read_limit())
             truncated = len(content) > self._config.max_bytes
             content_type = _extract_content_type(response.headers)
             processed_body, processor_used = _process_response_text(
@@ -264,19 +262,11 @@ class HTTPClientTool:
 
     @staticmethod
     async def _read_body(response: Any, limit: int) -> bytes:
-        if not getattr(response, "chunked", False):
-            return await response.content()
-        wbits = _DECOMPRESS_WBITS.get(getattr(response, "compressed", ""))
-        decompressor = zlib.decompressobj(wbits) if wbits is not None else None
         body = bytearray()
-        async with aclosing(response.read_chunks()) as chunks:
+        async with aclosing(response.iter_bytes()) as chunks:
             async for chunk in chunks:
-                room = limit - len(body)
-                body.extend(decompressor.decompress(chunk, room) if decompressor is not None else chunk[:room])
+                body.extend(chunk[: limit - len(body)])
                 if len(body) >= limit:
-                    connection = getattr(response, "_connection", None)
-                    if connection is not None:
-                        connection.keep = False
                     break
         return bytes(body)
 

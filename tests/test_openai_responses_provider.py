@@ -251,3 +251,20 @@ def test_formatted_tools_give_every_object_schema_properties() -> None:
     properties = formatted[0]["parameters"]["properties"]
     assert properties["metadata"] == {"type": ["object", "null"], "additionalProperties": False, "properties": {}}
     assert properties["properties"] == {"type": "string", "enum": [{"type": "object"}]}
+
+
+def test_codex_messages_to_input_keeps_later_system_messages_as_developer_items() -> None:
+    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"))
+    messages = [
+        {"role": "system", "content": "main prompt"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "system", "content": "end every answer with MANGO"},
+        {"role": "user", "content": "pick a color"},
+    ]
+
+    result = provider._messages_to_input(messages)
+
+    assert [item["role"] for item in result] == ["user", "assistant", "developer", "user"]
+    assert result[2]["content"] == [{"type": "input_text", "text": "end every answer with MANGO"}]
+    assert result[3]["content"] == [{"type": "input_text", "text": "pick a color"}]

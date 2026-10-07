@@ -419,11 +419,10 @@ class MCPClient:
         self._http_protocol_version = None
         if self._transport == "http":
             self._initialized = False
-        connector = getattr(client, "connector", None)
-        if connector is None or loop is not asyncio.get_running_loop():
+        if client is None or loop is not asyncio.get_running_loop():
             return
         with suppress(Exception):
-            await connector.cleanup()
+            await client.aclose()
 
     def close_blocking(self) -> None:
         if self._stdio_process is None and self._http_client is None:
