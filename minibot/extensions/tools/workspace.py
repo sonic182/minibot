@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.code_read import CodeReadTool
-from minibot.llm.tools.file_storage import FileStorageTool
+from minibot.llm.tools.file_storage import FILE_TOOL_NAMES, FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 
 from ._storage import managed_storage
 
-_WORKER_TOOL_NAMES = {"filesystem", "glob_files", "read_file", "code_read", "grep"}
+_WORKER_TOOL_NAMES = {
+    *FILE_TOOL_NAMES,
+    "code_read",
+    "grep",
+}
 
 
 def register(mb: ExtensionContext) -> None:

@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
-from typing import Any, Protocol
+from collections import OrderedDict
+from typing import Any
 
+from minibot.app.extensions import ExtensionContext
+from minibot.core.channels import session_identifier
 from minibot.core.decisions import DecisionClient, DecisionHTTPError, DecisionQuestion, DecisionResult
-from minibot.llm.tools.base import ToolBinding
+from minibot.core.events import TurnCompletedEvent, TurnFailedEvent, TurnInputPreparedEvent
+from minibot.llm.providers.decisions import DecisionsProvider
 
-PendingDecision = asyncio.Task[DecisionResult | None]
+MAX_PENDING_TURNS = 32
 
 TURN_QUESTIONS: dict[str, DecisionQuestion] = {
     "route": DecisionQuestion(
@@ -36,94 +39,35 @@ TURN_QUESTIONS: dict[str, DecisionQuestion] = {
 }
 
 
-class TurnDecision(Protocol):
-    def start(self, user_text: str) -> PendingDecision | None: ...
-
-    async def finish(
-        self,
-        pending: PendingDecision | None,
-        *,
-        turn_id: str,
-        session_id: str,
-        tools_used: Sequence[str],
-        handed_off: bool,
-    ) -> None: ...
-
-    def replace_tools(self, tools: Sequence[ToolBinding]) -> None: ...
-
-
-class NoopTurnDecision:
-    def start(self, user_text: str) -> PendingDecision | None:
-        return None
-
-    async def finish(
-        self,
-        pending: PendingDecision | None,
-        *,
-        turn_id: str,
-        session_id: str,
-        tools_used: Sequence[str],
-        handed_off: bool,
-    ) -> None:
-        return None
-
-    def replace_tools(self, tools: Sequence[ToolBinding]) -> None:
-        return None
-
-
-class ShadowTurnDecision:
-    def __init__(
-        self,
-        *,
-        client: DecisionClient,
-        tools: Sequence[ToolBinding],
-        timeout_seconds: float,
-    ) -> None:
+class _ShadowDecision:
+    def __init__(self, client: DecisionClient, timeout_seconds: float) -> None:
         self._client = client
-        self._tool_names = _tool_names(tools)
         self._timeout_seconds = timeout_seconds
+        self._pending: OrderedDict[str, asyncio.Task[DecisionResult | None]] = OrderedDict()
         self._background: set[asyncio.Task[None]] = set()
         self._logger = logging.getLogger("minibot.turn_decision")
 
-    def replace_tools(self, tools: Sequence[ToolBinding]) -> None:
-        self._tool_names = _tool_names(tools)
+    async def on_input_prepared(self, event: TurnInputPreparedEvent) -> None:
+        state = {"user_message": event.text, "available_tools": sorted(event.available_tools)}
+        self._pending[event.turn_id] = asyncio.create_task(self._ask(state))
+        while len(self._pending) > MAX_PENDING_TURNS:
+            _, stale = self._pending.popitem(last=False)
+            stale.cancel()
 
-    def start(self, user_text: str) -> PendingDecision | None:
-        state = {"user_message": user_text, "available_tools": self._tool_names}
-        return asyncio.create_task(self._ask(state))
-
-    async def finish(
-        self,
-        pending: PendingDecision | None,
-        *,
-        turn_id: str,
-        session_id: str,
-        tools_used: Sequence[str],
-        handed_off: bool,
-    ) -> None:
+    async def on_completed(self, event: TurnCompletedEvent) -> None:
+        pending = self._pending.pop(event.turn_id, None)
         if pending is None:
             return
-        logger_task = asyncio.create_task(
-            self._log_result(
-                pending,
-                turn_id=turn_id,
-                session_id=session_id,
-                tools_used=list(tools_used),
-                handed_off=handed_off,
-            )
-        )
+        logger_task = asyncio.create_task(self._log_result(pending, event))
         self._background.add(logger_task)
         logger_task.add_done_callback(self._background.discard)
 
-    async def _log_result(
-        self,
-        pending: PendingDecision,
-        *,
-        turn_id: str,
-        session_id: str,
-        tools_used: list[str],
-        handed_off: bool,
-    ) -> None:
+    async def on_failed(self, event: TurnFailedEvent) -> None:
+        pending = self._pending.pop(event.turn_id, None)
+        if pending is not None:
+            pending.cancel()
+
+    async def _log_result(self, pending: asyncio.Task[DecisionResult | None], event: TurnCompletedEvent) -> None:
         try:
             result = await pending
         except Exception:
@@ -134,13 +78,13 @@ class ShadowTurnDecision:
         self._logger.info(
             "turn decision",
             extra={
-                "turn_id": turn_id,
-                "session_id": session_id,
+                "turn_id": event.turn_id,
+                "session_id": session_identifier(event.channel, event.chat_id),
                 "model": result.model,
                 "latency_seconds": round(result.latency_seconds, 3),
                 "cost": result.cost,
-                "tools_used": tools_used,
-                "handed_off": handed_off,
+                "tools_used": list(event.tools_used),
+                "handed_off": event.task_handoff,
                 **_answer_fields(result),
             },
         )
@@ -155,22 +99,6 @@ class ShadowTurnDecision:
         except Exception as exc:
             self._logger.warning("turn decision failed", extra={"error_type": type(exc).__name__})
         return None
-
-
-def executed_tool_names(state: Any) -> list[str]:
-    if state is None:
-        return []
-    return sorted(
-        {
-            message.name
-            for message in state.messages
-            if message.role == "tool" and message.name not in (None, "pre_response")
-        }
-    )
-
-
-def _tool_names(tools: Sequence[ToolBinding]) -> list[str]:
-    return sorted(binding.tool.name for binding in tools)
 
 
 def _answer_fields(result: DecisionResult) -> dict[str, Any]:
@@ -192,3 +120,19 @@ def _answer_fields(result: DecisionResult) -> dict[str, Any]:
 
 def _rounded(value: float | None) -> float | None:
     return None if value is None else round(value, 4)
+
+
+def register(mb: ExtensionContext) -> None:
+    config = mb.settings.decision
+    if mb.entrypoint == "worker" or not config.enabled:
+        return
+    client = DecisionsProvider(
+        config.api_key,
+        config.base_url,
+        model=config.model,
+        timeout_seconds=config.timeout_seconds,
+    )
+    shadow = _ShadowDecision(client, config.timeout_seconds)
+    mb.on(TurnInputPreparedEvent, shadow.on_input_prepared)
+    mb.on(TurnCompletedEvent, shadow.on_completed)
+    mb.on(TurnFailedEvent, shadow.on_failed)

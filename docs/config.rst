@@ -196,9 +196,21 @@ whether the turn was handed off to a task, so the model's choices can be compare
 anything acts on them. It never changes a reply, adds no latency, and a timeout or any failure is
 logged and ignored.
 
-Every turn sends the user's message text and the names of the main agent's tools to OpenRouter and the
-model provider behind it, so enable it only where that is acceptable and check the provider's data
-policy for the chosen model.
+It runs as the bundled ``minibot.extensions.integrations.decision`` extension, listening to the turn
+events (see :doc:`events`), so it is active in the daemon and console but not in the task worker. It is
+also asked for turns that end before the model is called, such as unsupported media. It is a lossy
+observer: an event dropped by the event bus means no ``turn decision`` line for that turn, and at most 32
+turns wait for an answer at once.
+
+The question is asked once the opening message is ready for the model, so a voice note counts by what
+it says: its automatic transcription is appended to the message text. Only the audio of that message
+counts; messages sent while the turn runs, audio transcribed later by the ``transcribe_audio`` tool, and
+audio longer than the automatic-transcription limit are left out, and nothing is transcribed just for
+the decision.
+
+Every turn sends the user's message text, the automatic transcriptions of its audio, and the names of
+the main agent's tools to OpenRouter and the model provider behind it, so enable it only where that is
+acceptable and check the provider's data policy for the chosen model.
 
 Keep the key in the vault:
 
@@ -401,7 +413,7 @@ Tool Configuration
      - ``enabled``, ``model``, ``device``, ``compute_type``, ``beam_size``, VAD and auto-transcription settings, ``server_url`` (remote whisper.cpp server)
    * - ``[tools.mcp]``
      - ``MCPToolConfig``
-     - ``enabled``, ``name_prefix``, ``timeout_seconds``, ``servers``
+     - ``enabled``, ``name_prefix``, ``timeout_seconds``, ``reload``, ``servers``
    * - ``[[tools.mcp.servers]]``
      - ``MCPServerConfig``
      - ``name``, ``transport``, stdio command fields, HTTP fields, tool allow/deny filters

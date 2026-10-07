@@ -34,21 +34,21 @@ def test_an_empty_ceiling_grants_nothing() -> None:
 
 
 def test_a_listed_tool_is_allowed() -> None:
-    _policy(tools_allow=["filesystem", "read_file"]).authorize(_spec(tools_allow=["filesystem"]))
+    _policy(tools_allow=["file_info", "read_file"]).authorize(_spec(tools_allow=["file_info"]))
 
 
 def test_the_ceiling_may_use_a_wildcard() -> None:
-    _policy(tools_allow=["file*"]).authorize(_spec(tools_allow=["filesystem"]))
+    _policy(tools_allow=["file*"]).authorize(_spec(tools_allow=["file_info"]))
 
 
 def test_a_pattern_in_the_managed_grant_is_rejected() -> None:
     with pytest.raises(ValueError, match="is a pattern"):
-        _policy(tools_allow=["filesystem"]).authorize(_spec(tools_allow=["file*"]))
+        _policy(tools_allow=["file_info"]).authorize(_spec(tools_allow=["file*"]))
 
 
 def test_deny_only_is_rejected() -> None:
     with pytest.raises(ValueError, match="must use tools_allow, not tools_deny"):
-        _policy(tools_allow=["filesystem"]).authorize(_spec(tools_deny=["bash"]))
+        _policy(tools_allow=["file_info"]).authorize(_spec(tools_deny=["bash"]))
 
 
 def test_an_mcp_tool_name_belongs_in_mcp_servers() -> None:

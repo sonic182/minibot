@@ -11,12 +11,22 @@ from minibot.core.agent_runtime import AgentMessage, AppendMessageDirective, Mes
 from minibot.core.channels import ChannelFileResponse
 from minibot.core.events import EventPublisher, OutboundFileEvent
 from minibot.core.files import FileStorage
-from minibot.llm.tools.action_dispatcher import dispatch_action
 from minibot.llm.tools.arg_utils import optional_int, optional_str, require_non_empty_str
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_boolean, nullable_integer, nullable_string, strict_object
 from minibot.shared.path_utils import to_posix_relative
+
+FILE_TOOL_NAMES = (
+    "list_files",
+    "glob_files",
+    "file_info",
+    "write_file",
+    "read_file",
+    "move_file",
+    "delete_file",
+    "send_file",
+)
 
 
 class FileStorageTool:
@@ -24,12 +34,16 @@ class FileStorageTool:
 
     Enabled by ``[tools.file_storage]`` in ``config.toml``.
 
-    Exposes four LLM tools:
+    Exposes nine LLM tools:
 
-    - ``filesystem`` — unified facade: ``list``, ``glob``, ``info``, ``write``,
-      ``move``, ``delete``, ``send``.
+    - ``list_files`` — list files and folders under a folder path.
     - ``glob_files`` — list files matching a glob pattern.
+    - ``file_info`` — metadata for one path.
+    - ``write_file`` — create or overwrite a text file.
     - ``read_file`` — read a full text file.
+    - ``move_file`` — move or rename a file.
+    - ``delete_file`` — delete a file or folder.
+    - ``send_file`` — deliver a file to the active conversation channel.
     - ``self_insert_artifact`` — inject a managed file or image into the active
       conversation context.
 
@@ -54,64 +68,99 @@ class FileStorageTool:
         self._storage = storage
         self._event_bus = event_bus
         self._logger = logging.getLogger("minibot.tools.file_storage")
-        self._filesystem_handlers = {
-            "list": self._filesystem_list,
-            "glob": self._filesystem_glob,
-            "info": self._filesystem_info,
-            "write": self._filesystem_write,
-            "move": self._filesystem_move,
-            "delete": self._filesystem_delete,
-            "send": self._filesystem_send,
-        }
 
     def bindings(self) -> list[ToolBinding]:
         return [
-            ToolBinding(tool=self._filesystem_schema(), handler=self._filesystem),
+            ToolBinding(tool=self._list_files_schema(), handler=self._list_files),
             ToolBinding(tool=self._glob_files_schema(), handler=self._glob_files),
+            ToolBinding(tool=self._file_info_schema(), handler=self._file_info),
+            ToolBinding(tool=self._write_file_schema(), handler=self._create_file),
             ToolBinding(tool=self._read_file_schema(), handler=self._read_file),
+            ToolBinding(tool=self._move_file_schema(), handler=self._move_file),
+            ToolBinding(tool=self._delete_file_schema(), handler=self._delete_file),
+            ToolBinding(tool=self._send_file_schema(), handler=self._send_file),
             ToolBinding(tool=self._self_insert_artifact_schema(), handler=self._self_insert_artifact),
         ]
 
-    def _filesystem_schema(self) -> Tool:
+    def _list_files_schema(self) -> Tool:
         return Tool(
-            name="filesystem",
-            description=load_tool_description("filesystem"),
+            name="list_files",
+            description=load_tool_description("list_files"),
             parameters=strict_object(
                 properties={
-                    "action": {
-                        "type": "string",
-                        "enum": ["list", "glob", "info", "write", "move", "delete", "send"],
-                        "description": "Filesystem operation to perform.",
-                    },
-                    "folder": nullable_string("Optional folder path for list/glob."),
-                    "pattern": nullable_string("Glob pattern for action=glob."),
-                    "limit": nullable_integer(minimum=1, description="Optional result limit for action=glob."),
-                    "path": nullable_string("Path for info/write/delete/send."),
-                    "content": nullable_string("Content for action=write."),
-                    "overwrite": nullable_boolean("Overwrite flag for action=write/move."),
-                    "source_path": nullable_string("Source path for action=move."),
-                    "destination_path": nullable_string("Destination path for action=move."),
+                    "folder": nullable_string("Optional folder relative to the managed root. Defaults to root."),
+                },
+                required=["folder"],
+            ),
+        )
+
+    def _file_info_schema(self) -> Tool:
+        return Tool(
+            name="file_info",
+            description=load_tool_description("file_info"),
+            parameters=strict_object(
+                properties={
+                    "path": {"type": "string", "description": "Relative file path under the managed root."},
+                },
+                required=["path"],
+            ),
+        )
+
+    def _write_file_schema(self) -> Tool:
+        return Tool(
+            name="write_file",
+            description=load_tool_description("write_file"),
+            parameters=strict_object(
+                properties={
+                    "path": {"type": "string", "description": "Relative file path, for example notes/today.md."},
+                    "content": {"type": "string", "description": "Full text content to write."},
+                    "overwrite": nullable_boolean("Set true to replace an existing file. Defaults to false."),
+                },
+                required=["path", "content", "overwrite"],
+            ),
+        )
+
+    def _move_file_schema(self) -> Tool:
+        return Tool(
+            name="move_file",
+            description=load_tool_description("move_file"),
+            parameters=strict_object(
+                properties={
+                    "source_path": {"type": "string", "description": "Relative path of the file to move."},
+                    "destination_path": {"type": "string", "description": "Relative destination path."},
+                    "overwrite": nullable_boolean("Set true to replace an existing destination file."),
+                },
+                required=["source_path", "destination_path", "overwrite"],
+            ),
+        )
+
+    def _delete_file_schema(self) -> Tool:
+        return Tool(
+            name="delete_file",
+            description=load_tool_description("delete_file"),
+            parameters=strict_object(
+                properties={
+                    "path": {"type": "string", "description": "Relative path of the file or folder to delete."},
                     "target": {
-                        **nullable_string("Target kind filter for action=delete."),
+                        **nullable_string("Restrict what may be deleted."),
                         "enum": ["any", "file", "folder", None],
                     },
-                    "recursive": nullable_boolean("Recursive delete for action=delete."),
-                    "caption": nullable_string("Optional caption for action=send."),
+                    "recursive": nullable_boolean("Set true to delete a non-empty folder."),
                 },
-                required=[
-                    "action",
-                    "folder",
-                    "pattern",
-                    "limit",
-                    "path",
-                    "content",
-                    "overwrite",
-                    "source_path",
-                    "destination_path",
-                    "target",
-                    "recursive",
-                    "caption",
-                ],
+                required=["path", "target", "recursive"],
+            ),
+        )
+
+    def _send_file_schema(self) -> Tool:
+        return Tool(
+            name="send_file",
+            description=load_tool_description("send_file"),
+            parameters=strict_object(
+                properties={
+                    "path": {"type": "string", "description": "Relative path of the file to deliver."},
+                    "caption": nullable_string("Optional caption sent with the file."),
+                },
+                required=["path", "caption"],
             ),
         )
 
@@ -416,71 +465,6 @@ class FileStorageTool:
                 "size": file_size,
             },
             directives=directives,
-        )
-
-    async def _filesystem_list(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await self._list_files({"folder": payload.get("folder")}, context)
-
-    async def _filesystem_glob(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await self._glob_files(
-            {
-                "pattern": payload.get("pattern"),
-                "folder": payload.get("folder"),
-                "limit": payload.get("limit"),
-            },
-            context,
-        )
-
-    async def _filesystem_info(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await self._file_info({"path": payload.get("path")}, context)
-
-    async def _filesystem_write(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await self._create_file(
-            {
-                "path": payload.get("path"),
-                "content": payload.get("content"),
-                "overwrite": payload.get("overwrite"),
-            },
-            context,
-        )
-
-    async def _filesystem_move(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await self._move_file(
-            {
-                "source_path": payload.get("source_path"),
-                "destination_path": payload.get("destination_path"),
-                "overwrite": payload.get("overwrite"),
-            },
-            context,
-        )
-
-    async def _filesystem_delete(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await self._delete_file(
-            {
-                "path": payload.get("path"),
-                "target": payload.get("target"),
-                "recursive": payload.get("recursive"),
-            },
-            context,
-        )
-
-    async def _filesystem_send(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await self._send_file(
-            {
-                "path": payload.get("path"),
-                "caption": payload.get("caption"),
-            },
-            context,
-        )
-
-    async def _filesystem(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any] | ToolResult:
-        action = (optional_str(payload.get("action")) or "").lower()
-        return await dispatch_action(
-            action=action,
-            payload=payload,
-            context=context,
-            handlers=self._filesystem_handlers,
-            error_message="action must be one of: list, glob, info, write, move, delete, send",
         )
 
     @staticmethod

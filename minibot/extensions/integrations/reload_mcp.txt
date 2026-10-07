@@ -1,0 +1,5 @@
+Re-discover the configured MCP servers and apply what changed, without restarting MiniBot.
+
+Use this when an MCP server gained, lost or changed tools, or was down when MiniBot started and is back now. Each server is queried again and its tools replace the ones you had; the result lists, per server, the tools it now offers or the error it returned, plus which tool names were added or removed.
+
+A server that fails to respond keeps the tools it had before and is reported with its error, so a failed reload does not remove working tools. Only servers already present in the configuration are re-queried: adding or removing a server, or changing its filters, still needs a restart.

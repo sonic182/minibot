@@ -6,7 +6,7 @@ Use this ONLY when the user explicitly asks you to look at, describe, caption, a
 - "Summarise the document I uploaded"
 - "Caption this screenshot"
 
-Do NOT use this for sending a file to the user — use filesystem action=send for that.
+Do NOT use this for sending a file to the user — use send_file for that.
 Do NOT use this speculatively or pre-emptively without the user asking you to read/describe a file.
 
 Parameters:

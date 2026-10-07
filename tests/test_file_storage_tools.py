@@ -20,6 +20,10 @@ class _EventBusStub:
         self.events.append(event)
 
 
+def _binding(tool: FileStorageTool, name: str):
+    return next(binding for binding in tool.bindings() if binding.tool.name == name)
+
+
 def test_local_storage_creates_and_lists_files(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
 
@@ -126,10 +130,10 @@ async def test_send_file_publishes_outbound_file_event(tmp_path: Path) -> None:
     storage.create_text_file(path="docs/report.txt", content="ok", overwrite=False)
     event_bus = _EventBusStub()
     tool = FileStorageTool(storage=storage, event_bus=cast(Any, event_bus))
-    fs_binding = next(binding for binding in tool.bindings() if binding.tool.name == "filesystem")
+    send_binding = _binding(tool, "send_file")
 
-    result = await fs_binding.handler(
-        {"action": "send", "path": "docs/report.txt", "caption": "latest"},
+    result = await send_binding.handler(
+        {"path": "docs/report.txt", "caption": "latest"},
         ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
     )
 
@@ -148,15 +152,16 @@ async def test_move_and_delete_tools_manage_files(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     storage.create_text_file(path="temp/report.txt", content="ok", overwrite=False)
     tool = FileStorageTool(storage=storage)
-    fs_binding = next(binding for binding in tool.bindings() if binding.tool.name == "filesystem")
+    move_binding = _binding(tool, "move_file")
+    delete_binding = _binding(tool, "delete_file")
     ctx = ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1)
 
-    moved = await fs_binding.handler(
-        {"action": "move", "source_path": "temp/report.txt", "destination_path": "archive/report.txt"},
+    moved = await move_binding.handler(
+        {"source_path": "temp/report.txt", "destination_path": "archive/report.txt"},
         ctx,
     )
-    deleted = await fs_binding.handler(
-        {"action": "delete", "path": "archive/report.txt"},
+    deleted = await delete_binding.handler(
+        {"path": "archive/report.txt"},
         ctx,
     )
 
@@ -171,13 +176,13 @@ async def test_move_and_delete_tools_manage_files(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_filesystem_write_returns_canonical_path_fields(tmp_path: Path) -> None:
+async def test_write_file_returns_canonical_path_fields(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     tool = FileStorageTool(storage=storage)
-    fs_binding = next(binding for binding in tool.bindings() if binding.tool.name == "filesystem")
+    write_binding = _binding(tool, "write_file")
 
-    result = await fs_binding.handler(
-        {"action": "write", "path": "docs/example.txt", "content": "hello", "overwrite": True},
+    result = await write_binding.handler(
+        {"path": "docs/example.txt", "content": "hello", "overwrite": True},
         ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
     )
 
@@ -189,16 +194,16 @@ async def test_filesystem_write_returns_canonical_path_fields(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_filesystem_write_outside_root_marks_scope_when_yolo_enabled(tmp_path: Path) -> None:
+async def test_write_file_outside_root_marks_scope_when_yolo_enabled(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir(parents=True, exist_ok=True)
     outside = tmp_path / "outside.txt"
     storage = LocalFileStorage(root_dir=str(root), max_write_bytes=1000, allow_outside_root=True)
     tool = FileStorageTool(storage=storage)
-    fs_binding = next(binding for binding in tool.bindings() if binding.tool.name == "filesystem")
+    write_binding = _binding(tool, "write_file")
 
-    result = await fs_binding.handler(
-        {"action": "write", "path": str(outside.resolve()), "content": "hello", "overwrite": True},
+    result = await write_binding.handler(
+        {"path": str(outside.resolve()), "content": "hello", "overwrite": True},
         ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
     )
 
@@ -213,10 +218,10 @@ async def test_filesystem_write_outside_root_marks_scope_when_yolo_enabled(tmp_p
 async def test_delete_file_tool_reports_not_found(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     tool = FileStorageTool(storage=storage)
-    fs_binding = next(binding for binding in tool.bindings() if binding.tool.name == "filesystem")
+    delete_binding = _binding(tool, "delete_file")
 
-    deleted = await fs_binding.handler(
-        {"action": "delete", "path": "missing.txt"},
+    deleted = await delete_binding.handler(
+        {"path": "missing.txt"},
         ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
     )
 
@@ -232,10 +237,10 @@ async def test_delete_file_tool_deletes_folder_recursively(tmp_path: Path) -> No
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     storage.create_text_file(path="folder/sub/a.txt", content="A", overwrite=False)
     tool = FileStorageTool(storage=storage)
-    fs_binding = next(binding for binding in tool.bindings() if binding.tool.name == "filesystem")
+    delete_binding = _binding(tool, "delete_file")
 
-    deleted = await fs_binding.handler(
-        {"action": "delete", "path": "folder", "target": "folder", "recursive": True},
+    deleted = await delete_binding.handler(
+        {"path": "folder", "target": "folder", "recursive": True},
         ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
     )
 
@@ -252,10 +257,10 @@ async def test_file_info_tool_returns_metadata(tmp_path: Path) -> None:
     storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
     storage.create_text_file(path="docs/a.txt", content="abc", overwrite=False)
     tool = FileStorageTool(storage=storage)
-    fs_binding = next(binding for binding in tool.bindings() if binding.tool.name == "filesystem")
+    info_binding = _binding(tool, "file_info")
 
-    result = await fs_binding.handler(
-        {"action": "info", "path": "docs/a.txt"},
+    result = await info_binding.handler(
+        {"path": "docs/a.txt"},
         ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
     )
 
@@ -264,6 +269,23 @@ async def test_file_info_tool_returns_metadata(tmp_path: Path) -> None:
     assert result["path"] == "docs/a.txt"
     assert result["extension"] == ".txt"
     assert result["size_bytes"] == 3
+
+
+@pytest.mark.asyncio
+async def test_list_files_tool_lists_entries(tmp_path: Path) -> None:
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=1000)
+    storage.create_text_file(path="notes/today.md", content="# today", overwrite=False)
+    tool = FileStorageTool(storage=storage)
+    list_binding = _binding(tool, "list_files")
+
+    result = await list_binding.handler(
+        {"folder": "notes"},
+        ToolContext(owner_id="1", channel="telegram", chat_id=99, user_id=1),
+    )
+
+    assert isinstance(result, dict)
+    assert result["count"] == 1
+    assert result["entries"][0]["path"] == "notes/today.md"
 
 
 @pytest.mark.asyncio

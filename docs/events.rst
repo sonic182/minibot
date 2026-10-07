@@ -28,7 +28,8 @@ A normal turn flows through these events in order:
 
    flowchart LR
        A["MessageEvent (inbound)"] --> B["TurnStartedEvent"]
-       B --> C["ToolCallEvent (started / completed / failed) ×N"]
+       B --> I["TurnInputPreparedEvent"]
+       I --> C["ToolCallEvent (started / completed / failed) ×N"]
        C --> D["OutboundEvent(s)"]
        D --> E["TurnCompletedEvent"]
        B --> F["TurnFailedEvent (turn raised before a response)"]
@@ -78,6 +79,23 @@ Payload:
 
 - ``turn_id`` — the originating ``MessageEvent`` id.
 - ``channel``, ``chat_id``, ``user_id``.
+- ``available_tools`` — names of the tools the main agent can use for this turn.
+
+TurnInputPreparedEvent
+~~~~~~~~~~~~~~~~~~~~~~
+
+**Fires when**: the turn's opening message has been prepared for the model, after its audio was
+automatically transcribed and before the model is called. It fires once per turn, also for turns
+that end without calling the model (such as unsupported media), and not for messages folded into
+a running turn.
+
+Payload:
+
+- ``turn_id``, ``channel``, ``chat_id``.
+- ``text`` — the message text followed by the automatic transcriptions of its own audio, separated
+  by blank lines. Audio transcribed later by the ``transcribe_audio`` tool, audio too long to be
+  transcribed automatically, and recently touched files are not included.
+- ``available_tools`` — names of the tools the main agent can use for this turn.
 
 TurnCompletedEvent
 ~~~~~~~~~~~~~~~~~~
@@ -93,6 +111,8 @@ Payload:
 - ``llm_provider``, ``llm_model`` — what produced the response.
 - ``token_trace`` — token accounting dict (e.g. ``turn_total_tokens``).
 - ``compaction_performed`` — whether history compaction ran this turn.
+- ``tools_used`` — names of the tools the agent actually called this turn.
+- ``task_handoff`` — whether the turn ended by handing the work to a background task.
 
 Typical use: per-turn metrics, token budget tracking. See
 `examples/minibot_ext_demo.py <https://github.com/sonic182/minibot/blob/main/examples/minibot_ext_demo.py>`_.

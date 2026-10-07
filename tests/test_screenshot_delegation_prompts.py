@@ -19,7 +19,7 @@ def test_telegram_channel_prompt_contains_attachment_handling():
 
     critical_phrases = [
         "attachments",
-        'filesystem(action="send")',
+        "send_file",
         "NEVER return base64 data",
     ]
 
@@ -37,7 +37,7 @@ def test_console_channel_prompt_contains_attachment_handling():
     critical_phrases = [
         "console cannot send files",
         "report file paths in your text response",
-        'Do NOT call filesystem(action="send")',
+        "Do NOT call send_file",
         "attachments",
     ]
 
@@ -68,6 +68,6 @@ def test_browser_agent_tool_access():
     assert "playwright-cli" in content
     assert "bash" in content
 
-    # Should have filesystem for path confirmation
+    # Should have list_files for path confirmation
     assert "tools_allow:" in content
-    assert "filesystem" in content
+    assert "list_files" in content

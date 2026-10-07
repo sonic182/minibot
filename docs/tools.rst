@@ -88,9 +88,29 @@ Tool Surface
      - ``[tools.apply_patch]``
      - Apply structured add/update/delete/move patches under the configured workspace.
    * - Managed files
-     - ``filesystem``
+     - ``list_files``
      - ``[tools.file_storage]``
-     - Unified managed-file facade for list, glob, info, write, move, delete, and send.
+     - List managed files and folders under a folder path.
+   * - Managed files
+     - ``file_info``
+     - ``[tools.file_storage]``
+     - Return size, MIME type, and timestamps for a managed path.
+   * - Managed files
+     - ``write_file``
+     - ``[tools.file_storage]``
+     - Create or overwrite a managed text file.
+   * - Managed files
+     - ``move_file``
+     - ``[tools.file_storage]``
+     - Move or rename a managed file.
+   * - Managed files
+     - ``delete_file``
+     - ``[tools.file_storage]``
+     - Delete a managed file or folder permanently.
+   * - Managed files
+     - ``send_file``
+     - ``[tools.file_storage]``
+     - Deliver a managed file to the active conversation channel.
    * - Managed files
      - ``glob_files``
      - ``[tools.file_storage]``

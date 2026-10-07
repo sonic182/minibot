@@ -83,13 +83,13 @@ def build_incoming_files_text(prompt_text: str, incoming_files: Sequence[Incomin
     first_path = incoming_files[0].path if incoming_files else ""
     suggested_destination = suggest_persist_destination(first_path)
     lines.append(
-        "For file-management requests, use the filesystem tool "
-        "(action=move, action=delete, action=send, action=list). "
+        "For file-management requests, use the file tools "
+        "(move_file, delete_file, send_file, list_files). "
         "Do NOT call self_insert_artifact unless user explicitly asks to inspect content."
     )
     if suggested_destination:
         lines.append(
-            "If user asks to save the uploaded file, use filesystem action=move "
+            "If user asks to save the uploaded file, use move_file "
             f"source_path={first_path} destination_path={suggested_destination}."
         )
     only_audio_files = _are_audio_incoming_files(incoming_files)

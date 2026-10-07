@@ -424,6 +424,7 @@ def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
 _NAME_MAP_KEYWORDS = frozenset({"properties", "$defs", "definitions", "patternProperties"})
 _LITERAL_VALUE_KEYWORDS = frozenset({"default", "const", "enum", "examples"})
+_DROPPED_KEYWORDS = frozenset({"propertyNames", "minProperties", "maxProperties"})
 _OPENAI_STRING_FORMATS = frozenset(
     {"date-time", "time", "date", "duration", "email", "hostname", "ipv4", "ipv6", "uuid"}
 )
@@ -432,11 +433,12 @@ _OPENAI_STRING_FORMATS = frozenset(
 def _drop_unsupported_keywords(value: Any) -> Any:
     """Remove schema keywords that OpenAI's function-calling validation rejects outright, since one such
     tool makes every request fail: ``propertyNames`` ("'propertyNames' is not permitted", emitted by Zod 4
-    for each ``z.record(z.string(), ...)``) and a string ``format`` outside OpenAI's list, such as ``uri``.
-    Both only constrain values the MCP server validates again on the call, so dropping them loosens nothing
-    the model could rely on. Keys inside a ``properties`` or ``$defs`` map are names the schema defines, so
-    a property literally called ``propertyNames`` or ``format`` survives. Values under ``default``, ``const``,
-    ``enum`` and ``examples`` are data, not schema, so they are left untouched.
+    for each ``z.record(z.string(), ...)``), ``minProperties``/``maxProperties`` (such as an "at least one
+    field" attributes object) and a string ``format`` outside OpenAI's list, such as ``uri``. All of them
+    only constrain values the MCP server validates again on the call, so dropping them loosens nothing the
+    model could rely on. Keys inside a ``properties`` or ``$defs`` map are names the schema defines, so a
+    property literally called ``propertyNames``, ``minProperties`` or ``format`` survives. Values under
+    ``default``, ``const``, ``enum`` and ``examples`` are data, not schema, so they are left untouched.
     """
     if isinstance(value, list):
         return [_drop_unsupported_keywords(item) for item in value]
@@ -451,7 +453,7 @@ def _drop_unsupported_keywords(value: Any) -> Any:
             else _drop_unsupported_keywords(child)
         )
         for key, child in value.items()
-        if key != "propertyNames"
+        if key not in _DROPPED_KEYWORDS
         and not (key == "format" and isinstance(child, str) and child not in _OPENAI_STRING_FORMATS)
     }
 

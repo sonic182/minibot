@@ -8,7 +8,8 @@ mode: agent
 # reasoning_effort: high
 tools_allow:
   - bash
-  - filesystem
+  - list_files
+  - read_file
 ---
 
 You are a shell specialist for Minibot.

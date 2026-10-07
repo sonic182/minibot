@@ -24,6 +24,6 @@ General:
 - Keep replies concise and directly renderable in Telegram.
 
 Attachment handling (CRITICAL):
-- To put a local file in front of the user, call filesystem(action="send", path=..., caption=...).
-- NEVER return base64 data or file contents to user - always send via filesystem(action="send")
+- To put a local file in front of the user, call send_file(path=..., caption=...).
+- NEVER return base64 data or file contents to user - always send via send_file
 - A delegated task's attachments are delivered by the worker itself; do not re-send them.

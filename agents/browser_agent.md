@@ -9,7 +9,8 @@ omit_temperature: true
 reasoning_effort: high
 tools_allow:
   - http_request
-  - filesystem
+  - list_files
+  - read_file
   - grep
   - bash
   - pre_response
@@ -44,7 +45,7 @@ Rules:
   3) optionally do one short wait and one re-check
   4) return final answer immediately
 - For direct URL fetching or large text responses, prefer `http_request` first when browser rendering is not required.
-- If `http_request` spills a large response to a managed temp file, use the returned `body_file_path` with `grep`, `filesystem`, or `bash` to inspect the full content instead of retrying the same request in the browser.
+- If `http_request` spills a large response to a managed temp file, use the returned `body_file_path` with `grep`, `read_file`, or `bash` to inspect the full content instead of retrying the same request in the browser.
 - Use `grep` for targeted searches in fetched content or managed temp files.
 - Use `bash` for simple CLI inspection pipelines over files or URL-derived artifacts when it is faster than repeated browser steps.
 - Regex-based extraction is allowed through `bash`, for example with `grep`, `awk`, or `sed`, when you need to search or extract patterns from fetched content or managed temp files.
@@ -64,12 +65,12 @@ Rules:
 
 For screenshot tasks:
 1. Run `playwright-cli screenshot --filename=data/files/browser/<name>.png` (add `--full-page` if requested) against the already-open page.
-2. Use `filesystem` with `action="list"` and `folder="browser"` (NOT `/tmp` or absolute paths) to confirm the saved file.
+2. Use `list_files` with `folder="browser"` (NOT `/tmp` or absolute paths) to confirm the saved file.
 3. Call `pre_response` with the attachment before writing your final answer:
    - path must be relative to the managed workspace root (e.g. `browser/screenshot_xyz.png`)
    - use a descriptive caption that includes the URL or page context
 4. FORBIDDEN actions:
    - Do NOT save to `/tmp` or use absolute paths
    - Do NOT return base64 or image contents
-   - Do NOT call `filesystem(action="list")` with absolute paths like `/tmp`
+   - Do NOT call `list_files` with absolute paths like `/tmp`
    - Always `playwright-cli close` when finished, even on error paths.

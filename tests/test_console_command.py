@@ -21,11 +21,11 @@ def _install_console_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
             return ExtensionRegistry([], logging.getLogger("test.extensions"))
 
         @classmethod
-        def get_decision_client(cls) -> None:
-            return None
+        def bind_agent_roster_refresh(cls, refresh) -> None:
+            del refresh
 
         @classmethod
-        def bind_agent_roster_refresh(cls, refresh) -> None:
+        def bind_tools_refresh(cls, refresh) -> None:
             del refresh
 
         @classmethod
@@ -99,6 +99,9 @@ def _install_console_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
             calls["dispatcher_stopped"] = True
 
         def refresh_agent_roster(self) -> object:
+            return object()
+
+        def refresh_tools(self) -> object:
             return object()
 
     class _FakeConsoleService:

@@ -220,7 +220,7 @@ async def test_run_agent_loop_resolves_specialist_agent() -> None:
         system_prompt="You are browser specialist.",
         source_path=worker.Path("/tmp/agent.md"),
         mcp_servers=["playwright-cli"],
-        tools_allow=["mcp_playwright-cli__*", "filesystem"],
+        tools_allow=["mcp_playwright-cli__*", "list_files"],
     )
 
     with (
@@ -288,6 +288,38 @@ async def test_run_agent_loop_closes_the_mcp_clients_it_started() -> None:
     clients[0].aclose.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_worker_mcp_client_sends_the_vault_secret_named_by_auth_secret() -> None:
+    settings = Settings()
+    settings.tools.mcp.enabled = True
+    settings.tools.mcp.servers = [
+        MCPServerConfig(name="athena", transport="http", url="http://athena.test/mcp", auth_secret="athena_token")
+    ]
+    spec = AgentSpec(
+        name="athena_crm_agent",
+        description="crm specialist",
+        system_prompt="You are the CRM specialist.",
+        source_path=worker.Path("/tmp/agent.md"),
+        mcp_servers=["athena"],
+    )
+    captured: list[dict[str, object]] = []
+
+    def _fake_client(**kwargs: object) -> SimpleNamespace:
+        captured.append(kwargs)
+        return SimpleNamespace(aclose=AsyncMock())
+
+    with patch("minibot.app.tasks.worker.build_mcp_bindings_async", AsyncMock(return_value=[])):
+        await worker._build_worker_mcp_bindings(
+            settings=settings,
+            spec=spec,
+            clients=[],
+            build_client=_fake_client,
+            secrets={"athena_token": "s3cret"},
+        )
+
+    assert captured[0]["headers"] == {"Authorization": "Bearer s3cret"}
+
+
 def test_build_worker_tools_excludes_orchestration_tools() -> None:
     settings = Settings()
     settings.tools.http_client.enabled = True
@@ -307,7 +339,8 @@ def test_build_worker_tools_excludes_orchestration_tools() -> None:
     assert "calculate_expression" in tool_names
     assert "python_execute" in tool_names
     assert "http_request" in tool_names
-    assert "filesystem" in tool_names
+    assert "list_files" in tool_names
+    assert "write_file" in tool_names
     assert "grep" in tool_names
     assert "fetch_agent_info" not in tool_names
     assert "memory" not in tool_names

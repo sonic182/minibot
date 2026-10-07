@@ -18,4 +18,4 @@ Preferred usage:
 - Use `grep` first when you need to find the relevant file or region.
 - Use `apply_patch` after you have enough context to edit.
 
-Do NOT use this for binary files or for sending files to the user. Use `filesystem action=send` for delivery and `self_insert_artifact` for image/document inspection in conversation context.
+Do NOT use this for binary files or for sending files to the user. Use `send_file` for delivery and `self_insert_artifact` for image/document inspection in conversation context.

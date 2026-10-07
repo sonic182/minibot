@@ -5,6 +5,9 @@ from typing import Any
 
 from minibot.app.handlers.services.session_state_service import RecentFileRef, SessionStateService
 from minibot.core.agent_runtime import AgentState
+from minibot.llm.tools.file_storage import FILE_TOOL_NAMES
+
+_FILE_TOOL_NAMES = frozenset(FILE_TOOL_NAMES)
 
 
 class RecentFileTrackingService:
@@ -21,7 +24,7 @@ class RecentFileTrackingService:
         recent = self._session_state.recent_files(session_id, limit=5)
         if not recent:
             return model_text
-        lines = ["Recent filesystem paths from this session (use exact paths for filesystem/apply_patch/bash):"]
+        lines = ["Recent file paths from this session (use exact paths for the file tools/apply_patch/bash):"]
         for item in recent:
             relative = item.path_relative or "-"
             lines.append(
@@ -36,13 +39,13 @@ class RecentFileTrackingService:
         if runtime_state is None:
             return
         for message in runtime_state.messages:
-            if message.role != "tool" or message.name != "filesystem":
+            if message.role != "tool" or message.name not in _FILE_TOOL_NAMES:
                 continue
             for part in message.content:
                 if part.type != "json" or not isinstance(part.value, dict):
                     continue
                 payload = part.value
-                operation = str(payload.get("action") or "filesystem")
+                operation = message.name
                 for ref in self._extract_recent_file_refs(payload, operation=operation):
                     self._session_state.track_recent_file(session_id, ref)
 

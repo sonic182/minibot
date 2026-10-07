@@ -522,3 +522,15 @@ def test_decision_config_is_off_by_default_and_requires_a_key_when_enabled() -> 
     with pytest.raises(ValueError, match="api_key is required"):
         DecisionConfig(enabled=True)
     assert DecisionConfig(enabled=True, api_key="${secret:openrouter_api_key}").enabled is True
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"tools": {"approval": {"require_approval": ["filesystem"]}}},
+        {"orchestration": {"main_agent": {"tools_deny": [" filesystem "]}}},
+    ],
+)
+def test_removed_filesystem_tool_name_is_rejected(data: dict) -> None:
+    with pytest.raises(ValueError, match="'filesystem' tool was removed"):
+        Settings.from_dict(data)

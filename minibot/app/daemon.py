@@ -40,10 +40,10 @@ async def run() -> None:
         extensions=AppContainer.get_extensions(),
         managed_storage=AppContainer.get_file_storage(),
         channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
-        decision_client=AppContainer.get_decision_client(),
     )
     # The dispatcher owns the live tool list, so it is the thing a roster reload has to update.
     AppContainer.bind_agent_roster_refresh(dispatcher.refresh_agent_roster)
+    AppContainer.bind_tools_refresh(dispatcher.refresh_tools)
     strip_logs = bool(getattr(getattr(settings, "llm", None), "strip_logs", False))
     enabled_tools = dispatcher.main_agent_tool_names or ["none"]
     tool_summary = summarize_items(enabled_tools)

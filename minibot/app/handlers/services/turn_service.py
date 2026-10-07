@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
@@ -20,7 +20,6 @@ from minibot.app.response_parser import extract_answer, plain_render, resolve_re
 from minibot.app.runtime_limits import build_runtime_limits
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_use_guardrail import ToolUseGuardrail
-from minibot.app.turn_decision import NoopTurnDecision, TurnDecision, executed_tool_names
 from minibot.app.turn_inbox import TurnInbox
 from minibot.core.agent_runtime import STEERING_METADATA_KEY, AgentMessage
 from minibot.core.channels import (
@@ -30,7 +29,7 @@ from minibot.core.channels import (
     session_id_for,
     session_identifier,
 )
-from minibot.core.events import MessageEvent
+from minibot.core.events import MessageEvent, TurnInputPreparedEvent
 from minibot.core.memory import MemoryBackend
 from minibot.core.tasks import MAX_TASK_CONTINUATIONS
 from minibot.core.tools import ToolContext
@@ -64,9 +63,8 @@ class LLMTurnService:
         logger: logging.Logger,
         runtime: AgentRuntime | None = None,
         task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
-        turn_decision: TurnDecision | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
-        self._turn_decision: TurnDecision = turn_decision or NoopTurnDecision()
         self._memory = memory
         self._llm_client = llm_client
         self._tools = list(tools)
@@ -83,6 +81,7 @@ class LLMTurnService:
         self._recent_file_tracking_service = recent_file_tracking_service
         self._logger = logger
         self._task_handoff_callback = task_handoff_callback
+        self._event_bus = event_bus
         self._profile = LLMExecutionProfile.from_client(llm_client)
         self._runtime: AgentRuntime | None = None
         self._runtime_service: RuntimeOrchestrationService | None = None
@@ -104,7 +103,6 @@ class LLMTurnService:
         self._tools = list(tools)
         self._prompt_service.replace_tools(tools, extension_prompt_fragments=extension_prompt_fragments)
         self._tool_use_guardrail.replace_tools(tools)
-        self._turn_decision.replace_tools(tools)
         if self._runtime is not None:
             self._runtime.replace_tools(tools)
 
@@ -165,7 +163,8 @@ class LLMTurnService:
             claim_task_continuation=_claim_task_continuation,
             release_task_continuation=_release_task_continuation,
         )
-        model_text, model_user_content = await self._model_input(message, tool_context)
+        model_text, model_user_content, transcripts = await self._model_input(message, tool_context)
+        await self._publish_input_prepared(event, transcripts)
         if message.attachments:
             self._logger.debug(
                 "prepared multimodal message",
@@ -224,7 +223,6 @@ class LLMTurnService:
         prompt_cache_key = _prompt_cache_key(message) if self._profile.prompt_cache_enabled else None
         runtime_result = None
         generation_failed = False
-        pending_decision = self._turn_decision.start(model_text)
         try:
             if self._runtime_service is None:
                 generation = await self._llm_client.generate(
@@ -304,10 +302,6 @@ class LLMTurnService:
                 "response parsed",
                 extra={"kind": render.kind, "content_length": len(render.text), "should_reply": should_reply},
             )
-        except asyncio.CancelledError:
-            if pending_decision is not None:
-                pending_decision.cancel()
-            raise
         except Exception as exc:
             self._logger.exception("LLM call failed", exc_info=exc)
             render = plain_render(self._format_runtime_error_message(exc))
@@ -315,13 +309,6 @@ class LLMTurnService:
             generation_failed = True
         if turn_input is not None:
             turn_input.answer_ready = True
-        await self._turn_decision.finish(
-            pending_decision,
-            turn_id=event.event_id,
-            session_id=session_id,
-            tools_used=executed_tool_names(runtime_result.runtime_state if runtime_result is not None else None),
-            handed_off=handed_off_to_task,
-        )
         reasoning_text = _extract_reasoning_text(runtime_result.runtime_state) if runtime_result is not None else None
         stored_messages: list[str] = []
         response_updates_payload: list[dict[str, Any]] = []
@@ -355,6 +342,9 @@ class LLMTurnService:
             message_id=message.message_id,
         )
         metadata["primary_agent"] = "minibot"
+        metadata["tools_used"] = _executed_tool_names(
+            runtime_result.runtime_state if runtime_result is not None else None
+        )
         if handed_off_to_task:
             metadata["task_handoff"] = True
         if _is_task_result(message):
@@ -385,20 +375,38 @@ class LLMTurnService:
 
     async def _model_input(
         self, message: ChannelMessage, tool_context: ToolContext
-    ) -> tuple[str, str | list[dict[str, Any]] | None]:
+    ) -> tuple[str, str | list[dict[str, Any]] | None, list[str]]:
         input_message = message
+        transcripts: list[str] = []
         if self._audio_auto_transcription_service is not None:
             auto_result = await self._audio_auto_transcription_service.transcribe_incoming_audio(
                 message=message,
                 context=tool_context,
             )
+            transcripts = [entry.text for entry in auto_result.successes]
             transcribed_text = self._audio_auto_transcription_service.apply_to_model_text(message.text, auto_result)
             if transcribed_text != message.text:
                 input_message = message.model_copy(update={"text": transcribed_text})
-        return self._input_service.build_model_user_input(input_message)
+        model_text, model_user_content = self._input_service.build_model_user_input(input_message)
+        return model_text, model_user_content, transcripts
+
+    async def _publish_input_prepared(self, event: MessageEvent, transcripts: list[str]) -> None:
+        if self._event_bus is None:
+            return
+        message = event.message
+        text = "\n\n".join(part for part in (message.text, *transcripts) if part)
+        prepared = TurnInputPreparedEvent(
+            turn_id=event.event_id,
+            channel=message.channel,
+            chat_id=message.chat_id,
+            text=text,
+            available_tools=sorted(binding.tool.name for binding in self._tools),
+        )
+        with contextlib.suppress(Exception):
+            await self._event_bus.publish(prepared)
 
     async def steering_message(self, event: MessageEvent, session_id: str, tool_context: ToolContext) -> AgentMessage:
-        model_text, model_user_content = await self._model_input(event.message, tool_context)
+        model_text, model_user_content, _ = await self._model_input(event.message, tool_context)
         await self._memory.append_history(session_id, "user", build_history_user_entry(event.message, model_text))
         model_text = self._recent_file_tracking_service.augment_model_text_with_recent_files(session_id, model_text)
         return user_message(model_text, model_user_content, {STEERING_METADATA_KEY: True})
@@ -578,6 +586,18 @@ def _render_to_metadata(render: Any) -> dict[str, Any]:
     }
 
 
+def _executed_tool_names(state: Any) -> list[str]:
+    if state is None:
+        return []
+    return sorted(
+        {
+            message.name
+            for message in state.messages
+            if message.role == "tool" and message.name not in (None, "pre_response")
+        }
+    )
+
+
 def _extract_reasoning_text(state: Any) -> str | None:
     """Collect model reasoning/thinking text from an agent runtime state.
 
@@ -641,7 +661,6 @@ def build_llm_turn_service(
     event_bus: EventBus | None = None,
     task_handoff_callback: Callable[[str], Awaitable[None]] | None = None,
     extension_prompt_fragments: Sequence[str] = (),
-    turn_decision: TurnDecision | None = None,
 ) -> LLMTurnService:
     service_logger = logger or logging.getLogger("minibot.handler")
     tool_bindings = list(tools or [])
@@ -705,5 +724,5 @@ def build_llm_turn_service(
         logger=service_logger,
         runtime=runtime,
         task_handoff_callback=task_handoff_callback,
-        turn_decision=turn_decision,
+        event_bus=event_bus,
     )

@@ -28,7 +28,7 @@ def test_load_agent_specs_accepts_tools_allow(tmp_path: Path) -> None:
             "description: files\n"
             "mode: agent\n"
             "tools_allow:\n"
-            "  - filesystem\n"
+            "  - write_file\n"
             "  - glob_files\n"
             "---\n\n"
             "You are files agent."
@@ -39,7 +39,7 @@ def test_load_agent_specs_accepts_tools_allow(tmp_path: Path) -> None:
     specs = load_agent_specs(str(agents_dir), reader=LocalAgentDefinitionReader())
 
     assert len(specs) == 1
-    assert specs[0].tools_allow == ["filesystem", "glob_files"]
+    assert specs[0].tools_allow == ["write_file", "glob_files"]
 
 
 def test_load_agent_specs_rejects_allow_and_deny_together(tmp_path: Path) -> None:
@@ -75,7 +75,7 @@ def test_load_agent_specs_rejects_unknown_frontmatter_keys(tmp_path: Path) -> No
             "description: invalid\n"
             "mode: agent\n"
             "tool_allow:\n"
-            "  - filesystem\n"
+            "  - write_file\n"
             "---\n\n"
             "You are invalid agent."
         ),
@@ -194,7 +194,7 @@ def test_load_active_agent_specs_rejects_an_unauthorized_managed_definition(tmp_
                 "agent_management": {
                     "write": True,
                     "directory": str(managed_dir),
-                    "tools_allow": ["filesystem"],
+                    "tools_allow": ["write_file"],
                 }
             }
         }

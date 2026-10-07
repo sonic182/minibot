@@ -272,14 +272,14 @@ async def test_write_dir_access_reflects_the_writers_actually_available(
     yolo = await _list_skills(outside_root, _storage(managed_root, allow_outside_root=True), False)
     no_storage = await _list_skills(outside_root, None, False)
 
-    assert confined["write_dir_access"] == "filesystem"
+    assert confined["write_dir_access"] == "write_file"
     assert confined["write_dir_filesystem_path"] == "skills"
-    # Out of the filesystem tool's reach and bash is off: say so rather than name a missing tool.
+    # Out of the write_file tool's reach and bash is off: say so rather than name a missing tool.
     assert escaped_confined["write_dir_access"] == "unavailable"
     assert escaped_confined["write_dir_filesystem_path"] is None
     assert escaped_with_bash["write_dir_access"] == "bash"
-    # allow_outside_root lets the filesystem tool take an absolute path anywhere.
-    assert yolo["write_dir_access"] == "filesystem"
+    # allow_outside_root lets the write_file tool take an absolute path anywhere.
+    assert yolo["write_dir_access"] == "write_file"
     assert yolo["write_dir_filesystem_path"] == (tmp_path / "elsewhere").resolve().as_posix()
     assert no_storage["write_dir_access"] == "unavailable"
 

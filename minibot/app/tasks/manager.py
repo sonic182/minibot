@@ -168,7 +168,7 @@ class TaskManager:
         self._budget_for = budget_for
         # Workers reload config themselves, so they need the vault map to resolve ${secret:NAME}.
         # It travels over the in-memory pipe only — never the queue row, never the environment.
-        self._secrets = dict(secrets) if secrets else None
+        self._secrets = dict(secrets) if secrets is not None else None
         self._tasks: dict[str, Task] = {}
         self._logger = logging.getLogger("minibot.tasks")
 
@@ -545,7 +545,7 @@ class TaskManager:
         async with mainpipe.open() as (reader_pipe, writer_pipe):
             # Added here rather than to `payload` so secrets never enter the dict that status and
             # result publishing carry around.
-            wire_payload = {**payload, "secrets": self._secrets} if self._secrets else payload
+            wire_payload = {**payload, "secrets": self._secrets} if self._secrets is not None else payload
             writer_pipe.write(json.dumps(wire_payload).encode() + b"\n")
             while True:
                 remaining = deadline - loop.time()

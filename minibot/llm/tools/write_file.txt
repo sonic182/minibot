@@ -1,0 +1,3 @@
+Create or overwrite a text file in the managed workspace. Requires path (relative, e.g. notes/today.md) and content. Set overwrite=true to replace an existing file; omit or set false to prevent accidental overwrites.
+
+For editing an existing file in place, prefer apply_patch.

@@ -1,0 +1,3 @@
+Delete a file or folder in the managed workspace. Requires path. Use target=file|folder|any to restrict what can be deleted. Set recursive=true to delete non-empty folders.
+
+CAUTION: deletion is permanent.

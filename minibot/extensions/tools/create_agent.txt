@@ -9,7 +9,7 @@ which must not be empty. A minimal definition:
     mode: agent
     tools_allow:
       - http_request
-      - filesystem
+      - write_file
     ---
 
     You research a topic and return a short brief with sources.

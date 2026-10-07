@@ -48,6 +48,18 @@ def _coerce_byte_size(value: Any) -> int:
         raise ValueError("invalid byte size value") from exc
 
 
+_SPLIT_FILESYSTEM_TOOLS = "list_files, file_info, write_file, move_file, delete_file, send_file"
+
+
+def _reject_removed_tool_names(patterns: list[str]) -> list[str]:
+    if any(pattern.strip() == "filesystem" for pattern in patterns):
+        raise ValueError(f"the 'filesystem' tool was removed; name its replacements: {_SPLIT_FILESYSTEM_TOOLS}")
+    return patterns
+
+
+ToolPatterns = Annotated[list[str], AfterValidator(_reject_removed_tool_names)]
+
+
 def _expand_secret_references(data: object, secrets: Mapping[str, str] | None) -> object:
     if secrets is None:
         return data
@@ -411,8 +423,8 @@ class AgentDefinitionConfig(BaseModel):
     reasoning_effort: str | None = None
     max_tool_iterations: PositiveInt | None = None
     timeout_seconds: PositiveInt | None = None
-    tools_allow: list[str] = Field(default_factory=list)
-    tools_deny: list[str] = Field(default_factory=list)
+    tools_allow: ToolPatterns = Field(default_factory=list)
+    tools_deny: ToolPatterns = Field(default_factory=list)
     mcp_servers: list[str] = Field(default_factory=list)
     openrouter_provider_overrides: dict[str, Any] = Field(default_factory=dict)
     openrouter_reasoning_enabled: bool | None = None
@@ -454,8 +466,8 @@ class AgentDefinitionConfig(BaseModel):
 
 class MainAgentConfig(BaseModel):
     name: str = "minibot"
-    tools_allow: list[str] = Field(default_factory=list)
-    tools_deny: list[str] = Field(default_factory=list)
+    tools_allow: ToolPatterns = Field(default_factory=list)
+    tools_deny: ToolPatterns = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_tool_policy(self) -> MainAgentConfig:
@@ -504,7 +516,7 @@ class AgentManagementConfig(BaseModel):
     reload: bool = False
     write: bool = False
     directory: str = "./data/agents"
-    tools_allow: list[str] = Field(default_factory=list)
+    tools_allow: ToolPatterns = Field(default_factory=list)
     mcp_servers: list[str] = Field(default_factory=list)
     providers: list[str] = Field(default_factory=list)
 
@@ -786,6 +798,7 @@ class MCPToolConfig(BaseModel):
     enabled: bool = False
     name_prefix: str = "mcp"
     timeout_seconds: PositiveInt = 10
+    reload: bool = False
     servers: list[MCPServerConfig] = Field(default_factory=list)
 
 
@@ -923,12 +936,13 @@ class ToolApprovalConfig(BaseModel):
     Deny; the model then receives a ``tool_approval:denied`` error. Patterns match the canonical tool
     name (``http_request``, not an alias), and unknown keys inside ``[tools.approval]`` are rejected so a
     misspelled option cannot silently turn the gate off. The section name itself must be spelled exactly
-    ``[tools.approval]``.
+    ``[tools.approval]``. The removed ``filesystem`` tool name is rejected here and in every
+    ``tools_allow``/``tools_deny``; name its replacements, such as ``delete_file``, instead.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    require_approval: list[str] = Field(default_factory=list)
+    require_approval: ToolPatterns = Field(default_factory=list)
     timeout_seconds: PositiveInt = 90
 
 

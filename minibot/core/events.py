@@ -56,6 +56,23 @@ class TurnStartedEvent(BaseEvent):
     channel: str
     chat_id: int | None = None
     user_id: int | None = None
+    available_tools: list[str] = Field(default_factory=list)
+
+
+class TurnInputPreparedEvent(BaseEvent):
+    """Emitted once the turn's opening message is ready for the model.
+
+    ``text`` is the message text followed by the automatic transcriptions of its own audio. Messages
+    folded into the running turn and audio transcribed later by a tool are not included.
+    ``available_tools`` names the tools the main agent can use for this turn.
+    """
+
+    event_type: str = "turn_input_prepared"
+    turn_id: str
+    channel: str
+    chat_id: int | None = None
+    text: str = ""
+    available_tools: list[str] = Field(default_factory=list)
 
 
 class TurnCompletedEvent(BaseEvent):
@@ -74,6 +91,8 @@ class TurnCompletedEvent(BaseEvent):
     llm_model: str | None = None
     token_trace: dict[str, Any] = Field(default_factory=dict)
     compaction_performed: bool | None = None
+    tools_used: list[str] = Field(default_factory=list)
+    task_handoff: bool = False
 
 
 class TurnFailedEvent(BaseEvent):

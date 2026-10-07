@@ -80,8 +80,36 @@ binaries, including under Docker.
    Browser automation no longer goes through an MCP server. It now drives the
    ``playwright-cli`` binary directly through the ``bash`` tool via a dedicated
    agent skill — see ``agents/browser_agent.md`` for the canonical setup
-   (``tools_allow`` includes ``bash``, ``filesystem``, ``grep``, ``http_request``,
+   (``tools_allow`` includes ``bash``, ``list_files``, ``read_file``, ``grep``, ``http_request``,
    ``pre_response``, ``wait``; no ``mcp_servers`` entry needed).
+
+Reloading Servers
+-----------------
+
+Bridge mode builds one tool per remote tool when MiniBot starts, so a tool the server adds later, or a
+server that was down at startup, is invisible until the next restart. Set ``reload = true`` to expose a
+``reload_mcp`` tool to the main agent:
+
+.. code-block:: toml
+
+   [tools.mcp]
+   enabled = true
+   reload = true
+
+``reload`` defaults to ``false``. When it is on, ``reload_mcp`` queries every configured server again and
+swaps the main agent's MCP tools, the server ``instructions`` in its system prompt and the ``/mcp`` page.
+The result lists, per server, the tools it now offers or the error it returned, plus the tool names added
+and removed.
+
+- A server that does not respond keeps the tools it had before and is reported with its error, so a failed
+  reload never removes working tools.
+- If the reloaded tools cannot be applied to the main agent, the whole reload is rolled back and the previous
+  tools and connections stay in place.
+- Only the servers already in the configuration are queried: adding or removing a server, or changing its
+  command, URL, headers or tool filters, still needs a restart.
+- Calls already running against a server when it is reloaded can fail, because its previous connection is
+  closed once the new tools are in place.
+- Specialist agents are not affected: they start their own MCP connections for each task.
 
 Tool Filtering
 --------------

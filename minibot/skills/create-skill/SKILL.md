@@ -30,9 +30,9 @@ runbook, or a past task to work from before writing anything.
 Call `list_skills` first. Its result carries everything you need:
 
 - `write_dir` — the absolute path of the directory new skills belong in.
-- `write_dir_access` — which tool can actually write there: `filesystem`, `bash`, or
+- `write_dir_access` — which tool can actually write there: `write_file`, `bash`, or
   `unavailable`.
-- `write_dir_filesystem_path` — when access is `filesystem`, the path to pass to that tool,
+- `write_dir_filesystem_path` — when access is `write_file`, the path to pass to that tool,
   already in the form it expects. Use it verbatim.
 - `discovery_paths` — every directory skills are read from.
 - each match's `source` — `project`, `user`, or `native` (bundled with MiniBot).
@@ -77,10 +77,10 @@ Read these before writing, not after something silently fails:
 <write_dir>/<skill-name>/SKILL.md
 ```
 
-When `write_dir_access` is `filesystem`, write with the `filesystem` tool, building the path
+When `write_dir_access` is `write_file`, write with the `write_file` tool, building the path
 from `write_dir_filesystem_path` rather than from `write_dir` — the tool is confined to its
 managed root and takes a root-relative path there. When access is `bash`, the directory is out
-of the `filesystem` tool's reach; use `bash` with a heredoc and the absolute `write_dir`.
+of the `write_file` tool's reach; use `bash` with a heredoc and the absolute `write_dir`.
 
 ### Skeleton
 

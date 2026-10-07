@@ -67,11 +67,11 @@ def _make_container(extensions: object) -> type:
             return extensions
 
         @classmethod
-        def get_decision_client(cls) -> None:
-            return None
+        def bind_agent_roster_refresh(cls, refresh) -> None:
+            del refresh
 
         @classmethod
-        def bind_agent_roster_refresh(cls, refresh) -> None:
+        def bind_tools_refresh(cls, refresh) -> None:
             del refresh
 
         @classmethod
@@ -125,6 +125,9 @@ def _make_dispatcher(*, on_start=None, on_stop=None) -> type:
                 await on_stop()
 
         def refresh_agent_roster(self) -> object:
+            return object()
+
+        def refresh_tools(self) -> object:
             return object()
 
     return _FakeDispatcher

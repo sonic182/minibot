@@ -170,11 +170,11 @@ Whether the agent can actually write there depends on which file-writing tools a
 
    * - Value
      - Meaning
-   * - ``filesystem``
+   * - ``write_file``
      - The directory is inside ``[tools.file_storage] root_dir``, or ``allow_outside_root`` is
        on. ``write_dir_filesystem_path`` carries the path in the form that tool expects.
    * - ``bash``
-     - Out of the ``filesystem`` tool's reach, but ``[tools.bash]`` is enabled.
+     - Out of the ``write_file`` tool's reach, but ``[tools.bash]`` is enabled.
    * - ``unavailable``
      - Neither applies. The agent reports this instead of attempting a write that would fail.
 

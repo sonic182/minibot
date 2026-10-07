@@ -1,0 +1,3 @@
+Get metadata for a specific file in the managed workspace: size, MIME type, creation/modification times, and existence status. Use path to identify the file.
+
+Use this for metadata checks. To read contents, use read_file or `code_read`; to inject an image or document into the conversation, use self_insert_artifact.

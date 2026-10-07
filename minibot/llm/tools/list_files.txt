@@ -1,0 +1,5 @@
+List files and folders in the managed workspace. Returns entries with names, types (file/folder), sizes, and modification times.
+
+Use folder to scope the listing; it defaults to the managed root. To match names by pattern, use glob_files instead.
+
+For code/text inspection, prefer `code_read`; for text search, use `grep`; for targeted edits, use `apply_patch`.

@@ -17,7 +17,7 @@ from minibot.core.tools import ToolContext
 from minibot.extensions.tools import agent_management as extension
 
 
-def _definition(*, name: str = "helper_agent", tools: str = "  - filesystem\n") -> str:
+def _definition(*, name: str = "helper_agent", tools: str = "  - write_file\n") -> str:
     return f"---\nname: {name}\ndescription: helper\nmode: agent\ntools_allow:\n{tools}---\n\nYou are a helper."
 
 
@@ -30,7 +30,7 @@ def _context(tmp_path: Path, *, reload: bool, write: bool) -> ExtensionContext:
                     "reload": reload,
                     "write": write,
                     "directory": str(tmp_path / "managed"),
-                    "tools_allow": ["filesystem"],
+                    "tools_allow": ["write_file"],
                 },
             }
         }

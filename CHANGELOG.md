@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Turn events carry what a turn saw and did.** `TurnStartedEvent` has `available_tools`;
+  `TurnCompletedEvent` has `tools_used` and `task_handoff`.
+- **`TurnInputPreparedEvent`** fires once the turn's opening message is ready for the model, with its text
+  followed by the automatic transcriptions of its own audio, and the main agent's `available_tools`.
+- **`reload_mcp` tool** (`[tools.mcp] reload = true`, default `false`) re-discovers the configured MCP servers
+  without a restart, so tools a server gained or lost, or a server that was down at boot, take effect. A server
+  that fails to respond keeps its previous tools, and if the new tools cannot be applied the whole reload is rolled
+  back. Adding or removing servers still needs a restart.
+
+### Changed
+
+- **The `[decision]` shadow-mode model runs as a bundled extension** (`minibot.extensions.integrations.decision`)
+  that listens to the turn events instead of being called from the turn service. The configuration and the
+  `turn decision` log line are unchanged. The question now gets the message text plus the automatic transcription
+  of its audio, so a voice note is judged by what it says, and it is also asked for turns that end before the
+  model is called.
+- **The `filesystem` facade is replaced by per-operation file tools.** `list`, `write`, `move`, `delete`,
+  `info`, and `send` are now `list_files`, `write_file`, `move_file`, `delete_file`, `file_info`, and
+  `send_file` (`glob_files` and `read_file` were already separate). There is no alias: update agent
+  `tools_allow`, prompts, and channel policies. A config or agent definition that still names `filesystem` in
+  `tools_allow`, `tools_deny` or `[tools.approval] require_approval` now fails to load instead of silently losing
+  the rule; list the new names (for example `require_approval = ["delete_file"]`). `list_skills` now reports
+  `write_dir_access` as `write_file`.
+- **aiosonic 1.0.8.** It keys pooled connections by scheme and port, so `http_request` drops its own workaround
+  for following an `http`→`https` redirect to the same host.
+
+### Fixed
+
+- **A turn that already replied is no longer replayed on the next boot** when the process stopped while it was
+  clearing its pending-turn row, as `minibot console --once` could.
+- **An MCP tool whose schema uses `minProperties` or `maxProperties` no longer makes every OpenAI request fail**
+  (for example Athena's `update_lead`). The MCP bridge drops both keywords, as it already did `propertyNames`.
+- **MCP servers started by a task worker now send their `auth_secret`.** Specialist agents connected without the
+  `Authorization: Bearer` header the main agent sends, so servers that require it rejected their calls.
+
 ## [0.29.0] - 2026-10-05
 
 ### Added

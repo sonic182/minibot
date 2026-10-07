@@ -7,13 +7,13 @@ def test_tool_guardrail_validator_accepts_valid_payload() -> None:
     validator = ToolGuardrailValidator(max_attempts=2)
 
     result = validator.receive(
-        {"requires_tools": True, "suggested_tool": "filesystem", "path": "tmp/a.txt", "reason": "delete request"}
+        {"requires_tools": True, "suggested_tool": "delete_file", "path": "tmp/a.txt", "reason": "delete request"}
     )
 
     assert isinstance(result, _ValidResult)
     payload = validator.valid_payload(result)
     assert payload.requires_tools is True
-    assert payload.suggested_tool == "filesystem"
+    assert payload.suggested_tool == "delete_file"
     assert payload.path == "tmp/a.txt"
     assert payload.reason == "delete request"
 

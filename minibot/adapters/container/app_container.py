@@ -26,11 +26,9 @@ from minibot.app.token_limits_autoconfig import apply_runtime_token_autoconfig_a
 from minibot.config.environment import has_secret_references, has_secret_syntax
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentDefinitionReader
-from minibot.core.decisions import DecisionClient
 from minibot.core.files import FileStorage
 from minibot.core.memory import MemoryBackend
 from minibot.llm.provider_factory import LLMClient
-from minibot.llm.providers.decisions import DecisionsProvider
 
 
 class AppContainer:
@@ -43,13 +41,13 @@ class AppContainer:
     _file_storage: FileStorage | None = None
     _llm_client: LLMClient | None = None
     _llm_factory: LLMClientFactory | None = None
-    _decision_client: DecisionClient | None = None
     _agent_registry: AgentRegistry | None = None
     _skill_registry: SkillRegistry | None = None
     _extensions: ExtensionRegistry | None = None
     _vault: Vault | None = None
     _agent_management: AgentManagementService | None = None
     _agent_roster_refresh: Callable[[AgentDefinitionReader], Awaitable[AgentRosterChange]] | None = None
+    _tools_refresh: Callable[[], Awaitable[None]] | None = None
     _token_autoconfig_applied: bool = False
 
     @classmethod
@@ -80,23 +78,13 @@ class AppContainer:
         )
         cls._llm_factory = LLMClientFactory(cls._settings)
         cls._llm_client = cls._llm_factory.create_default()
-        decision = cls._settings.decision
-        cls._decision_client = (
-            DecisionsProvider(
-                decision.api_key,
-                decision.base_url,
-                model=decision.model,
-                timeout_seconds=decision.timeout_seconds,
-            )
-            if decision.enabled
-            else None
-        )
         cls._agent_registry = AgentRegistry(agent_specs)
         cls._skill_registry = SkillRegistry.from_config(
             cls._settings.tools.skills,
             extra_native_disabled=native_skills_hidden_by_management(cls._settings),
         )
         cls._agent_roster_refresh = None
+        cls._tools_refresh = None
         cls._agent_management = cls._build_agent_management()
         cls._token_autoconfig_applied = False
         # Last, so an extension's register() sees a fully built container even though the
@@ -109,6 +97,7 @@ class AppContainer:
             vault=cls._vault,
             agent_registry=cls._agent_registry,
             agent_management=cls._agent_management,
+            refresh_tools=cls._refresh_tools,
         )
 
     @classmethod
@@ -168,10 +157,6 @@ class AppContainer:
         if cls._llm_client is None:
             raise RuntimeError("LLM client not configured")
         return cls._llm_client
-
-    @classmethod
-    def get_decision_client(cls) -> DecisionClient | None:
-        return cls._decision_client
 
     @classmethod
     def get_llm_factory(cls) -> LLMClientFactory:
@@ -242,6 +227,18 @@ class AppContainer:
         from the composition root that builds both.
         """
         cls._agent_roster_refresh = refresh
+
+    @classmethod
+    def bind_tools_refresh(cls, refresh: Callable[[], Awaitable[None]]) -> None:
+        """Point extensions at the dispatcher that owns the live tool list, once it exists."""
+        cls._tools_refresh = refresh
+
+    @classmethod
+    async def _refresh_tools(cls) -> None:
+        callback = cls._tools_refresh
+        if callback is None:
+            raise RuntimeError("the tool refresh is not bound yet")
+        await callback()
 
     @classmethod
     def _build_agent_management(cls) -> AgentManagementService | None:
