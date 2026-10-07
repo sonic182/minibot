@@ -2,20 +2,13 @@ from __future__ import annotations
 
 from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.code_read import CodeReadTool
-from minibot.llm.tools.file_storage import FileStorageTool
+from minibot.llm.tools.file_storage import FILE_TOOL_NAMES, FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 
 from ._storage import managed_storage
 
 _WORKER_TOOL_NAMES = {
-    "list_files",
-    "glob_files",
-    "file_info",
-    "write_file",
-    "read_file",
-    "move_file",
-    "delete_file",
-    "send_file",
+    *FILE_TOOL_NAMES,
     "code_read",
     "grep",
 }

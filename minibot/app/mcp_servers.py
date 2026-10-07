@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from typing import Any
 
 from minibot.config.schema import MCPServerConfig
 
@@ -30,3 +31,29 @@ def secret_lookup(secrets: Mapping[str, str] | None) -> Callable[[str], str] | N
         return secrets[name]
 
     return lookup
+
+
+def mcp_client_kwargs(server: MCPServerConfig, *, timeout_seconds: int, headers: dict[str, str]) -> dict[str, Any]:
+    return {
+        "server_name": server.name,
+        "transport": server.transport,
+        "timeout_seconds": timeout_seconds,
+        "command": server.command,
+        "args": server.args,
+        "env": server.env or None,
+        "cwd": server.cwd,
+        "url": server.url,
+        "headers": headers,
+    }
+
+
+def mcp_discovery_kwargs(server: MCPServerConfig, *, client: Any, name_prefix: str) -> dict[str, Any]:
+    return {
+        "mode": server.mode,
+        "server_name": server.name,
+        "client": client,
+        "name_prefix": name_prefix,
+        "enabled_tools": server.enabled_tools,
+        "disabled_tools": server.disabled_tools,
+        "catalog_cache_ttl_seconds": server.catalog_cache_ttl_seconds,
+    }

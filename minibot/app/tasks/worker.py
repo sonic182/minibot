@@ -24,7 +24,7 @@ from minibot.app.managed_agent_policy import (
     ManagedAgentPolicy,
     native_skills_hidden_by_management,
 )
-from minibot.app.mcp_auth import build_mcp_headers, secret_lookup
+from minibot.app.mcp_servers import build_mcp_headers, mcp_client_kwargs, mcp_discovery_kwargs, secret_lookup
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
@@ -44,7 +44,7 @@ from minibot.llm.tools.audio_transcription import AudioTranscriptionTool
 from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.bash import BashTool
 from minibot.llm.tools.code_read import CodeReadTool
-from minibot.llm.tools.file_storage import FileStorageTool
+from minibot.llm.tools.file_storage import FILE_TOOL_NAMES, FileStorageTool
 from minibot.llm.tools.grep import GrepTool
 from minibot.llm.tools.http_client import HTTPClientTool
 from minibot.llm.tools.mcp_bridge import build_mcp_bindings_async
@@ -62,14 +62,7 @@ _WORKER_TOOL_ALLOWLIST = [
     "calculate_expression",
     "wait",
     "http_request",
-    "list_files",
-    "glob_files",
-    "file_info",
-    "write_file",
-    "read_file",
-    "move_file",
-    "delete_file",
-    "send_file",
+    *FILE_TOOL_NAMES,
     "code_read",
     "grep",
     "bash",
@@ -439,27 +432,14 @@ async def _build_worker_mcp_bindings(
     for server in settings.tools.mcp.servers:
         if server.name not in spec.mcp_servers:
             continue
+        headers = build_mcp_headers(server, secret_lookup(secrets))
         client = build_client(
-            server_name=server.name,
-            transport=server.transport,
-            timeout_seconds=settings.tools.mcp.timeout_seconds,
-            command=server.command,
-            args=server.args,
-            env=server.env or None,
-            cwd=server.cwd,
-            url=server.url,
-            headers=build_mcp_headers(server, secret_lookup(secrets)),
+            **mcp_client_kwargs(server, timeout_seconds=settings.tools.mcp.timeout_seconds, headers=headers)
         )
         clients.append(client)
         bindings.extend(
             await build_mcp_bindings_async(
-                mode=server.mode,
-                server_name=server.name,
-                client=client,
-                name_prefix=settings.tools.mcp.name_prefix,
-                enabled_tools=server.enabled_tools,
-                disabled_tools=server.disabled_tools,
-                catalog_cache_ttl_seconds=server.catalog_cache_ttl_seconds,
+                **mcp_discovery_kwargs(server, client=client, name_prefix=settings.tools.mcp.name_prefix)
             )
         )
     return bindings

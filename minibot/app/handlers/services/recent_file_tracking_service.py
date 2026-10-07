@@ -5,19 +5,9 @@ from typing import Any
 
 from minibot.app.handlers.services.session_state_service import RecentFileRef, SessionStateService
 from minibot.core.agent_runtime import AgentState
+from minibot.llm.tools.file_storage import FILE_TOOL_NAMES
 
-_FILE_TOOL_NAMES = frozenset(
-    {
-        "list_files",
-        "glob_files",
-        "file_info",
-        "write_file",
-        "read_file",
-        "move_file",
-        "delete_file",
-        "send_file",
-    }
-)
+_FILE_TOOL_NAMES = frozenset(FILE_TOOL_NAMES)
 
 
 class RecentFileTrackingService:

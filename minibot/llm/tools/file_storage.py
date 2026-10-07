@@ -17,6 +17,17 @@ from minibot.llm.tools.description_loader import load_tool_description
 from minibot.llm.tools.schema_utils import nullable_boolean, nullable_integer, nullable_string, strict_object
 from minibot.shared.path_utils import to_posix_relative
 
+FILE_TOOL_NAMES = (
+    "list_files",
+    "glob_files",
+    "file_info",
+    "write_file",
+    "read_file",
+    "move_file",
+    "delete_file",
+    "send_file",
+)
+
 
 class FileStorageTool:
     """Managed file operations scoped to a configured root directory.

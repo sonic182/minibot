@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from llm_async.models import Tool
 
 from minibot.app.extensions import ExtensionContext
+from minibot.app.mcp_servers import build_mcp_headers, mcp_client_kwargs, mcp_discovery_kwargs
 from minibot.config.schema import MCPServerConfig
 from minibot.core.tools import ToolContext
 from minibot.llm.tools.base import ToolBinding
@@ -62,37 +63,18 @@ def register(mb: ExtensionContext) -> None:
 
 
 def _resolve_headers(mb: ExtensionContext, server: MCPServerConfig) -> dict[str, str]:
-    from minibot.app.mcp_auth import build_mcp_headers
-
     return build_mcp_headers(server, mb.vault.get if mb.vault is not None else None)
 
 
 def _new_client(mb: ExtensionContext, server: MCPServerConfig, headers: dict[str, str]) -> MCPClient:
     from minibot.adapters.mcp.client import MCPClient
 
-    return MCPClient(
-        server_name=server.name,
-        transport=server.transport,
-        timeout_seconds=mb.settings.tools.mcp.timeout_seconds,
-        command=server.command,
-        args=server.args,
-        env=server.env or None,
-        cwd=server.cwd,
-        url=server.url,
-        headers=headers,
-    )
+    timeout_seconds = mb.settings.tools.mcp.timeout_seconds
+    return MCPClient(**mcp_client_kwargs(server, timeout_seconds=timeout_seconds, headers=headers))
 
 
 def _discovery_args(mb: ExtensionContext, server: MCPServerConfig, client: MCPClient) -> dict[str, Any]:
-    return {
-        "mode": server.mode,
-        "server_name": server.name,
-        "client": client,
-        "name_prefix": mb.settings.tools.mcp.name_prefix,
-        "enabled_tools": server.enabled_tools,
-        "disabled_tools": server.disabled_tools,
-        "catalog_cache_ttl_seconds": server.catalog_cache_ttl_seconds,
-    }
+    return mcp_discovery_kwargs(server, client=client, name_prefix=mb.settings.tools.mcp.name_prefix)
 
 
 def _error_message(exc: Exception, headers: dict[str, str]) -> str:
