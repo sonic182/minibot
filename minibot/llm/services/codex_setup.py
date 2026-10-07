@@ -59,7 +59,7 @@ async def list_model_slugs(credentials: Any, *, client_version: str | None = Non
     try:
         return await provider.list_model_slugs()
     finally:
-        await provider.client.connector.cleanup()
+        await provider.client.aclose()
 
 
 async def get_model_capabilities(auth_path: Path, model_name: str, *, client_version: str | None = None) -> Any:
@@ -68,7 +68,7 @@ async def get_model_capabilities(auth_path: Path, model_name: str, *, client_ver
     try:
         return await provider.get_model_capabilities(model_name)
     finally:
-        await provider.client.connector.cleanup()
+        await provider.client.aclose()
 
 
 def _provider(credentials: Any, client_version: str | None) -> Any:

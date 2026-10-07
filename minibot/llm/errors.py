@@ -8,6 +8,7 @@ from typing import Any
 _HTTP_ERROR_PATTERN = re.compile(r"^HTTP (\d{3}): (.*)$", re.DOTALL)
 _QUOTA_STATUSES = {402, 429}
 _QUOTA_CODES = {"permission-denied", "insufficient_quota"}
+ERROR_MESSAGE_MAX_CHARS = 300
 
 
 class ProviderHTTPError(Exception):
@@ -77,14 +78,19 @@ class ProviderResponseError(Exception):
         code: str | None = None,
         error_type: str | None = None,
         message: str | None = None,
+        param: str | None = None,
         response_id: str | None = None,
     ) -> None:
         self.status = status
         self.code = code
         self.error_type = error_type
         self.message = message
+        self.param = param
         self.response_id = response_id
-        super().__init__(f"provider response {status or 'unknown'}: {code or error_type or message or 'no detail'}")
+        detail = code or error_type or "no detail"
+        if message:
+            detail = f"{detail} ({message[:ERROR_MESSAGE_MAX_CHARS]})"
+        super().__init__(f"provider response {status or 'unknown'}: {detail}")
 
     @property
     def retryable(self) -> bool:
@@ -99,6 +105,7 @@ class ProviderResponseError(Exception):
             code=_opt_str(error.get("code")),
             error_type=_opt_str(error.get("type")),
             message=_opt_str(error.get("message")),
+            param=_opt_str(error.get("param")),
             response_id=_opt_str(original.get("id")),
         )
 

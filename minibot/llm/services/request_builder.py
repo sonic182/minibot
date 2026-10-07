@@ -167,6 +167,10 @@ def extract_system_instructions(messages: Sequence[dict[str, Any]]) -> str | Non
         if message.get("role") != "system":
             continue
         content = message.get("content")
+        if isinstance(content, list):
+            content = "\n\n".join(
+                part["text"] for part in content if isinstance(part, dict) and isinstance(part.get("text"), str)
+            )
         if isinstance(content, str) and content.strip():
             return content
     return None

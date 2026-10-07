@@ -8,7 +8,12 @@ from llm_async.models.tool_call import ToolCall
 
 from minibot.config.schema import LLMMConfig
 from minibot.core.memory import MemoryEntry
-from minibot.llm.errors import EmptyProviderResponseError, ProviderResponseError, wrap_provider_exception
+from minibot.llm.errors import (
+    ERROR_MESSAGE_MAX_CHARS,
+    EmptyProviderResponseError,
+    ProviderResponseError,
+    wrap_provider_exception,
+)
 from minibot.llm.services.client_bootstrap import (
     build_openrouter_provider_payload,
     create_provider,
@@ -335,6 +340,8 @@ class LLMClient:
                 "response_status": getattr(exc, "status", None),
                 "error_code": getattr(exc, "code", None),
                 "error_type": getattr(exc, "error_type", None),
+                "error_message": (getattr(exc, "message", None) or "")[:ERROR_MESSAGE_MAX_CHARS] or None,
+                "error_param": getattr(exc, "param", None),
                 "response_id": getattr(exc, "response_id", None),
             },
         )

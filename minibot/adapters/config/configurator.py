@@ -534,7 +534,7 @@ async def _fetch_models(provider: str, base_url: str, api_key: str) -> list[str]
         _write("Could not fetch the model list; you will be asked to type the model name instead.\n")
         return []
     finally:
-        await provider_client.client.connector.cleanup()
+        await provider_client.client.aclose()
     entries = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(entries, list):
         return []

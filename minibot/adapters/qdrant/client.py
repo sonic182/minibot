@@ -111,21 +111,16 @@ class AsyncQdrantClient:
         payload: dict[str, Any] | None = None,
         allow_not_found: bool = False,
     ) -> dict[str, Any] | None:
-        kwargs: dict[str, Any] = {"headers": {"Accept": "application/json"}}
-        if payload is not None:
-            kwargs["headers"]["Content-Type"] = "application/json"
-            kwargs["data"] = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-
-        response = await self._client.request(f"{self._url}{path}", method=method, **kwargs)
+        response = await self._client.request(
+            f"{self._url}{path}", method=method, headers={"Accept": "application/json"}, json=payload
+        )
         body = await response.content()
         if allow_not_found and response.status_code == 404:
             return None
-        if response.status_code < 200 or response.status_code >= 300:
+        if not 200 <= response.status_code < 300:
             message = body.decode("utf-8", errors="replace")
             raise RuntimeError(f"qdrant request failed: {response.status_code} {message}")
-        if not body:
-            return {}
-        return json.loads(body.decode("utf-8"))
+        return json.loads(body) if body else {}
 
 
 def _encode_path_segment(value: str) -> str:

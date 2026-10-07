@@ -202,5 +202,69 @@ async def test_stream_raises_structured_error_on_failed_response(monkeypatch: py
     assert exc_info.value.response_id == "resp-2"
 
 
+@pytest.mark.asyncio
+async def test_stream_error_event_keeps_message_param_and_response_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    events = [
+        {"type": "response.created", "response": {"id": "resp-3", "status": "in_progress"}},
+        {"type": "error", "code": None, "message": "Upstream overloaded", "param": "input"},
+    ]
+    monkeypatch.setattr(openai_responses_module, "stream_json", _fake_stream(events))
+
+    with pytest.raises(ProviderResponseError) as exc_info:
+        await _drain(_provider())
+
+    assert exc_info.value.response_id == "resp-3"
+    assert exc_info.value.param == "input"
+    assert str(exc_info.value) == "provider response failed: error (Upstream overloaded)"
+
+
 def test_codex_provider_uses_patched_stream() -> None:
     assert PatchedCodexProvider._stream_responses_request is PatchedOpenAIResponsesProvider._stream_responses_request
+
+
+@pytest.mark.asyncio
+async def test_stream_error_event_reads_a_nested_error_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    events = [{"type": "error", "error": {"type": "server_error", "code": "overloaded", "message": "Try again"}}]
+    monkeypatch.setattr(openai_responses_module, "stream_json", _fake_stream(events))
+
+    with pytest.raises(ProviderResponseError) as exc_info:
+        await _drain(_provider())
+
+    assert exc_info.value.code == "overloaded"
+    assert exc_info.value.error_type == "server_error"
+    assert exc_info.value.message == "Try again"
+
+
+def test_formatted_tools_give_every_object_schema_properties() -> None:
+    from llm_async.models import Tool
+
+    parameters = {
+        "type": "object",
+        "properties": {
+            "metadata": {"type": ["object", "null"], "additionalProperties": False},
+            "properties": {"type": "string", "enum": [{"type": "object"}]},
+        },
+    }
+
+    formatted = _provider()._format_tools([Tool(name="t", description="d", parameters=parameters)])
+
+    properties = formatted[0]["parameters"]["properties"]
+    assert properties["metadata"] == {"type": ["object", "null"], "additionalProperties": False, "properties": {}}
+    assert properties["properties"] == {"type": "string", "enum": [{"type": "object"}]}
+
+
+def test_codex_messages_to_input_keeps_later_system_messages_as_developer_items() -> None:
+    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"))
+    messages = [
+        {"role": "system", "content": "main prompt"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "system", "content": "end every answer with MANGO"},
+        {"role": "user", "content": "pick a color"},
+    ]
+
+    result = provider._messages_to_input(messages)
+
+    assert [item["role"] for item in result] == ["user", "assistant", "developer", "user"]
+    assert result[2]["content"] == [{"type": "input_text", "text": "end every answer with MANGO"}]
+    assert result[3]["content"] == [{"type": "input_text", "text": "pick a color"}]

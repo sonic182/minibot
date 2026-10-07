@@ -99,6 +99,23 @@ class WorkerBackends:
     build_storage: Callable[[Settings], FileStorage | None]
 
 
+class _TaskIdLogFilter(logging.Filter):
+    def __init__(self, task_id: str) -> None:
+        super().__init__()
+        self._task_id = task_id
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "task_id"):
+            record.task_id = self._task_id
+        return True
+
+
+def _tag_worker_logs(task_id: str) -> None:
+    log_filter = _TaskIdLogFilter(task_id)
+    for handler in logging.getLogger("minibot").handlers:
+        handler.addFilter(log_filter)
+
+
 def worker_entry(pipe: Any, backends: WorkerBackends) -> None:
     with contextlib.suppress(asyncio.CancelledError):
         asyncio.run(_run_worker(pipe, backends))
@@ -178,6 +195,8 @@ async def _worker_async(pipe: Any, backends: WorkerBackends) -> None:
                 "metadata": {"error_type": "invalid_payload"},
             }
         else:
+            if isinstance(payload, dict) and payload.get("task_id"):
+                _tag_worker_logs(str(payload["task_id"]))
             reader = asyncio.create_task(read_approval_results())
             try:
                 result = await run_agent_loop(

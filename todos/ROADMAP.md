@@ -118,8 +118,6 @@ Known gaps, deliberately left:
 - A lazy MCP `call_tool` is recognised by tool name suffix in `app/tool_approval.py`; an eager remote tool
   literally named `call_tool` that also takes a `tool_name` argument would be misread. Fixing it needs an
   explicit marker carried through every `ToolBinding` wrapper.
-- `http_request`: aiosonic reads a `Content-Length` body in full before any cap can apply; only chunked
-  bodies are cut at the limit.
 - `bash` spill files hold at most `max_output_bytes`, since the cap is now applied while reading.
 
 ## [x] Phase 3b — Mid-turn user messages (steering) and `/stop` (priority 2)
