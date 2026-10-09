@@ -8,7 +8,7 @@ from html import escape
 from typing import Any
 
 from markdown_it import MarkdownIt
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, StrictBool, ValidationError
 from starlette.requests import Request
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -47,6 +47,11 @@ class _UploadComplete(BaseModel):
 
 class _UploadCancel(BaseModel):
     upload_id: str | None = None
+
+
+class _ApprovalAnswer(BaseModel):
+    approval_id: str
+    approved: StrictBool
 
 
 def build_chat_route(socket_token: str, capabilities: ChatCapabilities | None = None) -> RouteSpec:
@@ -160,6 +165,10 @@ async def _receive_messages(
                 await _send_error(websocket, "invalid history request", send_lock)
                 continue
             await _send_history_page(websocket, memory, request.before_id, send_lock)
+        elif kind == "approval":
+            await _receive_approval(websocket, service, payload, send_lock)
+        elif kind == "stop":
+            await service.request_stop()
         elif kind in {None, "message"}:
             await _receive_chat_message(websocket, service, session, payload, send_lock)
         else:
@@ -205,6 +214,18 @@ async def _receive_chat_message(
     )
     if session is not None and message.upload_ids:
         session.release(message.upload_ids)
+
+
+async def _receive_approval(
+    websocket: WebSocket, service: WebChannelService, payload: dict[str, Any], send_lock: asyncio.Lock
+) -> None:
+    try:
+        answer = _ApprovalAnswer.model_validate(payload)
+    except ValidationError:
+        await _send_error(websocket, "invalid approval answer", send_lock)
+        return
+    if not await service.resolve_approval(answer.approval_id, answer.approved):
+        await _send_error(websocket, "this approval is no longer pending", send_lock)
 
 
 async def _message_parts(

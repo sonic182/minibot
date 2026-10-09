@@ -15,7 +15,7 @@ from minibot.core.events import ToolApprovalRequestedEvent, ToolApprovalResolved
 from minibot.core.tools import ToolContext, ToolPayload
 from minibot.llm.services.tool_executor import canonical_tool_name, is_sensitive_argument_key
 from minibot.llm.tools.base import ToolBinding
-from minibot.shared.errors import ToolInputError
+from minibot.shared.errors import TOOL_APPROVAL_DENIED, ToolInputError
 
 Approver = Callable[[str, dict[str, Any], ToolContext], Awaitable[bool]]
 
@@ -73,7 +73,7 @@ def _wrap(binding: ToolBinding, patterns: Sequence[str], approve: Approver) -> T
             if not await approve(name, dict(arguments) if isinstance(arguments, dict) else {}, context):
                 raise ToolInputError(
                     f"The user did not approve {name}. Do not retry it unless the user asks again.",
-                    error_code="tool_approval:denied",
+                    error_code=TOOL_APPROVAL_DENIED,
                 )
         return await binding.handler(payload, context)
 
@@ -92,7 +92,7 @@ async def request_tool_approval(
     detail: str | None = None,
     requester_user_id: int | None = None,
 ) -> bool:
-    """Ask the user on Telegram and wait for the answer; anything but an explicit approval denies."""
+    """Ask the user in the chat that started the call and wait; anything but an explicit approval denies."""
     if not supports_tool_approval or chat_id is None:
         _logger.warning("tool approval unavailable on this channel", extra={"tool": tool_name, "channel": channel})
         return False

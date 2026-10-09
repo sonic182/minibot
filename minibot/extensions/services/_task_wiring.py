@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.messaging.telegram.capabilities import TELEGRAM_CHANNEL_CAPABILITIES
+from minibot.adapters.messaging.web.capabilities import WEB_CHANNEL_CAPABILITIES
 from minibot.adapters.tasks.retention import TaskRetentionService
 from minibot.adapters.tasks.sqlite_store import SQLiteTaskStore
 from minibot.adapters.tasks.worker_process import worker_entry
@@ -14,6 +15,7 @@ from minibot.app.llm_client_factory import available_providers
 from minibot.app.tasks.manager import TaskManager, resolve_delegation_budget
 from minibot.core.memory import MemoryBackend
 from minibot.core.tasks import TaskProducer
+from minibot.extensions.services._task_page import build_task_page
 from minibot.llm.tools.tasks import TaskTools
 
 
@@ -36,7 +38,7 @@ def wire_task_runtime(
         secrets=mb.vault.as_mapping() if mb.vault else None,
         budget_for=lambda name, ov: resolve_delegation_budget(agent_registry, settings, name, ov),
         approval_timeout_seconds=settings.tools.approval.timeout_seconds,
-        channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES},
+        channel_capabilities={"telegram": TELEGRAM_CHANNEL_CAPABILITIES, "web": WEB_CHANNEL_CAPABILITIES},
         history_store=history_store,
         worker_target=worker_entry,
     )
@@ -52,4 +54,7 @@ def wire_task_runtime(
             providers=available_providers(settings),
         ).bindings()
     )
+    if settings.http.enabled:
+        page = build_task_page(store, manager, settings.runtime.owner_id)
+        mb.add_page("/tasks", "Tasks", page, ("GET", "POST"), icon="list-checks")
     return store, manager

@@ -12,7 +12,7 @@ from llm_async.models.tool_call import ToolCall
 from minibot.core.agent_runtime import ToolResult
 from minibot.llm.services.models import ToolExecutionRecord
 from minibot.llm.tools.base import ToolBinding, ToolContext
-from minibot.shared.errors import ToolInputError
+from minibot.shared.errors import TOOL_APPROVAL_DENIED, ToolInputError
 from minibot.shared.parse_utils import parse_json_maybe_python_object
 
 _MAX_LOG_ARGUMENT_STRING_CHARS = 300
@@ -28,6 +28,10 @@ _SENSITIVE_ARGUMENT_KEY_PARTS = (
     "cookie",
 )
 _SKIPPED_FOR_NEW_MESSAGE_REASON = "The user sent a new message before this call ran; it was not executed."
+_SKIPPED_AFTER_DENIAL_REASON = (
+    "The user denied an earlier call in this batch, so this call was not executed. Do not retry it unless the "
+    "user asks again."
+)
 _TOOL_NAME_ALIASES = {
     "http_client": "http_request",
     "calculator": "calculate_expression",
@@ -286,14 +290,21 @@ async def execute_tool_calls_for_runtime(
 ) -> list[ToolExecutionRecord]:
     tool_map = _build_tool_map(tools)
     records: list[ToolExecutionRecord] = []
+    denied = False
     for call in tool_calls:
         prepared = _prepare_tool_call(call, responses_mode=responses_mode)
         call_id = prepared.call_id
         tool_name = prepared.tool_name
         arguments = prepared.arguments
-        if should_interrupt is not None and should_interrupt():
+        skip_reason = None
+        if denied:
+            skip_reason = _SKIPPED_AFTER_DENIAL_REASON
+            logger.info("tool call skipped after an approval denial", extra={"tool": tool_name, "call_id": call_id})
+        elif should_interrupt is not None and should_interrupt():
+            skip_reason = _SKIPPED_FOR_NEW_MESSAGE_REASON
             logger.info("tool call skipped for a new user message", extra={"tool": tool_name, "call_id": call_id})
-            result = ToolResult(content={"ok": False, "skipped": True, "reason": _SKIPPED_FOR_NEW_MESSAGE_REASON})
+        if skip_reason is not None:
+            result = ToolResult(content={"ok": False, "skipped": True, "reason": skip_reason})
             records.append(
                 ToolExecutionRecord(
                     tool_name=tool_name,
@@ -345,6 +356,7 @@ async def execute_tool_calls_for_runtime(
                     "error": str(exc),
                 },
             )
+            denied = exc.error_code == TOOL_APPROVAL_DENIED
             result = _build_failure_result(tool_name=tool_name, arguments=arguments, exc=exc)
         except Exception as exc:
             logger.exception(

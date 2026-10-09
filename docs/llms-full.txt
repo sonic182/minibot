@@ -122,9 +122,9 @@ context. Configure the root with `llm.prompts_dir`.
 ## Web UI
 
 `[http]` (the `http` extra) runs an authenticated web UI on the daemon's event loop: a status
-dashboard at `/`, a browser chat at `/chat` (the `web:1` session, with image and audio uploads),
+dashboard at `/`, a browser chat at `/chat` (the `web:1` session, with image and audio uploads, and a stop button in place of send while a reply runs),
 conversation history at `/history`, and review pages from extensions (`/memory`, `/scheduled`,
-`/graph`, `/mcp`). History, memory and scheduled pages have search, with SQLite FTS5 over message
+`/graph`, `/mcp`, `/tasks`, which also cancels a running task). History, memory and scheduled pages have search, with SQLite FTS5 over message
 text, and load more as you scroll. Credentials are a bearer token or HTTP Basic, and are
 mandatory unless bound to loopback.
 

@@ -9,11 +9,22 @@
   <div class="chat-messages" x-ref="messages" aria-live="polite" @scroll.passive="loadOlder()">
     <p class="muted" x-show="loadingHistory" x-cloak>Loading older messages…</p>
     <template x-for="(message, index) in messages" :key="index">
-      <article class="message" :class="message.kind === 'tools' ? 'tool-activity' : message.role">
+      <article class="message" :class="message.kind === 'tools' ? 'tool-activity' : message.kind === 'approval' ? 'approval' : message.role">
+        <template x-if="message.kind === 'approval'">
+          <div>
+            <div class="message-head"><span class="role">Approval required</span><code class="tool-name" x-text="message.toolName"></code></div>
+            <pre class="approval-detail" x-show="message.detail" x-text="message.detail"></pre>
+            <div class="approval-actions" x-show="!message.outcome">
+              <button type="button" @click="answerApproval(message, true)" :disabled="!connected || message.answering">Approve</button>
+              <button type="button" class="danger" @click="answerApproval(message, false)" :disabled="!connected || message.answering">Deny</button>
+            </div>
+            <p class="approval-outcome" x-show="message.outcome" x-text="approvalOutcome(message.outcome)"></p>
+          </div>
+        </template>
         <template x-if="message.kind === 'tools'">
           <div><div class="message-head"><span class="role">Tools</span></div><ul class="tool-list"><template x-for="tool in message.tools" :key="tool.callId"><li class="tool-row"><code class="tool-name" x-text="tool.name"></code><span class="tool-status" x-text="toolStatus(tool.phase)"></span></li></template></ul></div>
         </template>
-        <template x-if="message.kind !== 'tools'">
+        <template x-if="message.kind !== 'tools' && message.kind !== 'approval'">
           <div>
             <div class="message-head"><span class="role" x-text="message.role"></span></div>
             <div class="message-content" x-html="message.html"></div>
@@ -33,7 +44,8 @@
       <button x-show="capabilities.audio_enabled" x-cloak class="chat-action" :class="recording ? 'recording' : ''" type="button" @click="toggleRecording()" :disabled="!connected || uploading" aria-label="Record audio"><span x-text="recording ? '■' : '●'"></span></button>
       <label class="sr-only" for="chat-message">Message</label>
       <textarea id="chat-message" x-model="draft" :disabled="!connected || uploading" rows="1" placeholder="Write a message…"></textarea>
-      <button class="chat-send" type="submit" :disabled="!canSend()" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" /></svg></button>
+      <button class="chat-send" type="submit" x-show="!canStop()" :disabled="!canSend()" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" /></svg></button>
+      <button class="chat-send" type="button" x-show="canStop()" x-cloak :disabled="!connected || stopping" aria-label="Stop reply" @click="stop()"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg></button>
     </div>
     <p class="muted" x-show="recording" x-cloak>Recording <span x-text="recordingSeconds"></span>s — tap stop when finished.</p>
     <p class="muted" x-show="capabilities.uploads_enabled" x-cloak>Drop or paste images, or attach image/audio files.</p>

@@ -131,7 +131,7 @@ accounts; list them only if you configure such an account. To keep the mailbox r
 
 Email content is untrusted input. A message can carry a prompt injection asking the agent to
 forward mail or contact someone, so we give the server to a dedicated agent and gate the calls that
-send or destroy data behind a Telegram approval:
+send or destroy data behind an approval in the Telegram or web chat:
 
 .. code-block:: markdown
 
@@ -169,7 +169,7 @@ send or destroy data behind a Telegram approval:
 
 Moving messages and creating folders (``imap_move_message``, ``imap_bulk_move``,
 ``imap_search_and_move``, ``imap_create_mailbox``) are left out of ``require_approval`` because they
-are easy to undo; each approval is a separate Telegram prompt, and archiving a batch would otherwise
+are easy to undo; each approval is a separate prompt, and archiving a batch would otherwise
 ask once per message. See
 :doc:`agents` for the agent file format and :doc:`config` for ``[tools.approval]``.
 
