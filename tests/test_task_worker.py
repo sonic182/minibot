@@ -343,7 +343,7 @@ def test_build_worker_tools_excludes_orchestration_tools() -> None:
     assert "write_file" in tool_names
     assert "grep" in tool_names
     assert "fetch_agent_info" not in tool_names
-    assert "memory" not in tool_names
+    assert not any(name.startswith("memory_") for name in tool_names)
     assert "chat_history_info" not in tool_names
     assert "schedule" not in tool_names
     assert "self_insert_artifact" not in tool_names

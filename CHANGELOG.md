@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web UI restyled.** The dashboard stylesheet has a new neutral look: surfaces, a clearer type scale, pill tags,
   a sidebar with a current-page highlight and inverted submit buttons, in light and dark mode. Pages keep their
   layout and behavior, and no new assets are added.
+- **The `memory` tool is split into one tool per operation.** It is now `memory_create`, `memory_update`,
+  `memory_get`, `memory_search`, `memory_delete` and `memory_list_titles`, each with its own schema. Use a pattern
+  such as `memory_*` in `tools_allow`, `tools_deny` or `require_approval`. The old `memory` name is rejected at
+  config load, with the replacement names in the error, the same as `filesystem`.
 
 ### Fixed
 

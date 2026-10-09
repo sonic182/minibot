@@ -79,7 +79,7 @@ prompt (or the compaction pass):
    - ``graph.md`` — decide between the relation ``graph`` and durable ``memory``: a fact naming
      two things is an edge and belongs in the graph. Note this fragment ships even when the
      ``graph`` tool is disabled; it relies on the model no-opping when the tool is absent.
-   - ``tool_usage.md`` — route the model to the right tool: ``memory`` vs ``history``,
+   - ``tool_usage.md`` — route the model to the right tool: ``memory_*`` vs ``history``,
      ``apply_patch`` for existing-file edits vs ``write_file``/``move_file``/``delete_file`` for file management, reuse
      canonical path fields from tool output, absolute paths in yolo mode.
 

@@ -158,7 +158,7 @@ Main-agent tool policy is set under ``[orchestration.main_agent]``:
 .. code-block:: toml
 
    [orchestration.main_agent]
-   tools_allow = ["memory", "schedule", "http_request"]
+   tools_allow = ["memory_*", "schedule", "http_request"]
 
 ``tool_ownership_mode`` under ``[orchestration]`` controls sharing:
 

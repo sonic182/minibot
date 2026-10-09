@@ -10,7 +10,7 @@ questions about connections — for example, who works on a project, which techn
 or what a task depends on — where a normal note or a retrieved document may not contain the
 complete answer in one place.
 
-It is not a replacement for the :doc:`tools` ``memory`` tool. Store notes, dates, amounts, and
+It is not a replacement for the :doc:`tools` ``memory_*`` tools. Store notes, dates, amounts, and
 facts about one entity in memory. Store only relationships with the graph. The model receives
 instructions to keep the same fact out of both stores.
 
