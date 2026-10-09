@@ -1,0 +1,1 @@
+Retrieve one persistent user memory entry by entry_id, including its data, category, metadata and timestamps. Use memory_search or memory_list_titles to find the entry_id when you do not have it.

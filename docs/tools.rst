@@ -42,9 +42,9 @@ Tool Surface
        read one page (config sections are expanded to their field reference). Turn it off with
        ``[tools.skills] native_disabled = ["minibot-docs"]``.
    * - Memory
-     - ``memory``
+     - ``memory_create``, ``memory_update``, ``memory_get``, ``memory_search``, ``memory_delete``, ``memory_list_titles``
      - ``[tools.kv_memory]``
-     - Save, retrieve, search, list, and delete persistent user notes.
+     - Save, update, retrieve, search, list, and delete persistent user notes. One tool per operation, so a pattern such as ``memory_*`` covers all of them. The old ``memory`` name is rejected in ``tools_allow``, ``tools_deny`` and ``require_approval``.
    * - Relation graph
      - ``graph``
      - ``minibot.extensions.tools.graph`` extension; ``graph`` extra

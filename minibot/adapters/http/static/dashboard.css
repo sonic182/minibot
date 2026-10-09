@@ -2,9 +2,11 @@
   color-scheme: light dark;
   --gap: 1rem;
   --gap-sm: 0.5rem;
-  --radius: 0.5rem;
+  --radius: 0.6rem;
   --radius-sm: 0.4rem;
   --border: #8886;
+  --surface: color-mix(in srgb, currentColor 4%, transparent);
+  --surface-strong: color-mix(in srgb, currentColor 9%, transparent);
 }
 
 * {
@@ -13,8 +15,8 @@
 
 body {
   margin: 0;
-  font-family: system-ui, sans-serif;
-  line-height: 1.4;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
 }
 
 /* Hidden until nav.js has drawn the icons, so the page never paints half-built. The animation
@@ -34,24 +36,36 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.6rem var(--gap);
+  padding: 0.6rem var(--gap) 0.6rem 0.5rem;
   border-bottom: 1px solid var(--border);
 }
 
 .brand {
-  font-weight: bold;
-  font-size: 1.1rem;
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
 }
 
 .burger {
-  font-size: 1.2rem;
-  line-height: 1;
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: none;
+}
+
+.burger svg {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .sidebar {
   display: none;
-  padding: var(--gap);
+  padding: var(--gap-sm);
   border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 /* The default is set here, per breakpoint: closed on phones, open on desktop. nav.js only flips
@@ -65,45 +79,61 @@ body {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: var(--gap-sm);
+  gap: 0.15rem;
 }
 
 .sidebar a {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  padding: 0.4rem var(--gap-sm);
+  padding: 0.45rem 0.625rem;
   border-radius: var(--radius-sm);
   text-decoration: none;
   color: inherit;
+  transition: background-color 0.15s;
+}
+
+.sidebar a:hover {
+  background: var(--surface-strong);
 }
 
 .sidebar a svg {
-  width: 1.1rem;
-  height: 1.1rem;
+  width: 1.25rem;
+  height: 1.25rem;
   flex: none;
 }
 
 .sidebar a.current {
-  font-weight: bold;
-  background: var(--border);
+  font-weight: 600;
+  background: var(--surface-strong);
 }
 
 main {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   gap: var(--gap);
   padding: var(--gap);
   min-width: 0;
+  max-width: 68rem;
 }
 
 h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 h2 {
   margin-top: 0;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .panels {
@@ -122,6 +152,7 @@ h2 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--gap);
+  background: var(--surface);
 }
 
 ul {
@@ -154,7 +185,7 @@ ul {
 
 .badge {
   color: #2a2;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .status-grid {
@@ -165,8 +196,10 @@ ul {
 
 .status-card h3 {
   margin: 0 0 0.25rem;
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
   opacity: 0.7;
 }
 
@@ -177,6 +210,8 @@ ul {
 
 .table-wrap {
   overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
 .table-wrap table {
@@ -187,8 +222,25 @@ ul {
 .table-wrap th,
 .table-wrap td {
   text-align: left;
-  padding: 0.25rem var(--gap-sm);
+  padding: 0.5rem var(--gap-sm);
   border-bottom: 1px solid var(--border);
+}
+
+.table-wrap td {
+  overflow-wrap: anywhere;
+}
+
+.table-wrap th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  background: var(--surface);
+}
+
+.table-wrap tbody tr:hover {
+  background: var(--surface);
 }
 
 .muted {
@@ -222,7 +274,8 @@ ul {
   padding: 0.15rem var(--gap-sm);
   font-size: 0.85rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
+  background: var(--surface);
   overflow-wrap: anywhere;
 }
 
@@ -272,14 +325,14 @@ ul {
 }
 
 .message .role {
-  font-weight: bold;
+  font-weight: 600;
   text-transform: uppercase;
-  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+  opacity: 0.7;
 }
 
 .chat {
-  --chat-composer-size: 2.75rem;
-  --chat-composer-inset: 0.25rem;
   --chat-send-size: 2.25rem;
   --chat-bubble-max-width: 90%;
   --chat-action-size: 2.25rem;
@@ -291,12 +344,25 @@ ul {
   gap: var(--gap);
 }
 
+main:has(> .chat) {
+  max-width: none;
+}
+
+.chat-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .chat-messages {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
   gap: var(--gap-sm);
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -307,8 +373,29 @@ ul {
   max-inline-size: var(--chat-bubble-max-width);
 }
 
+.chat-messages > .message.user,
+.chat-messages > .message.assistant {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
 .chat-messages > .message.user {
   align-self: flex-end;
+}
+
+.chat-messages > .message.assistant {
+  inline-size: 100%;
+  max-inline-size: 100%;
+}
+
+.message.user .message-content {
+  inline-size: fit-content;
+  margin-inline-start: auto;
+  padding: 0.6rem 1rem;
+  border-radius: 1.25rem 1.25rem 0.3rem 1.25rem;
+  background: var(--surface-strong);
+  white-space: pre-wrap;
 }
 
 .message-content {
@@ -322,6 +409,124 @@ ul {
 
 .message-content > :last-child {
   margin-bottom: 0;
+}
+
+.message-content pre {
+  position: relative;
+  padding-inline-end: 2.5rem;
+}
+
+.message-actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.message.user .message-actions {
+  justify-content: flex-end;
+}
+
+.message-action,
+.code-copy {
+  display: grid;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+}
+
+.message-action:hover,
+.message-action:focus-visible,
+.code-copy:hover,
+.code-copy:focus-visible {
+  opacity: 1;
+  background: var(--surface-strong);
+}
+
+.code-copy {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  background: var(--surface);
+}
+
+.message-action svg,
+.code-copy svg,
+.chat-jump svg,
+.chat-action svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chat-jump {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 2px 8px #0002;
+}
+
+.typing {
+  display: inline-flex;
+  gap: 0.3rem;
+  padding: 0.5rem 0;
+}
+
+.typing span {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: typing 1.2s infinite ease-in-out;
+}
+
+.typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-0.2rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing span {
+    animation: none;
+  }
 }
 
 .tool-activity {
@@ -382,25 +587,47 @@ ul {
   min-width: 0;
 }
 
-.composer-row {
+.composer-box {
+  display: grid;
+  gap: var(--gap-sm);
+  min-width: 0;
+  padding: var(--gap-sm);
+  padding-inline-start: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  background: var(--surface);
+}
+
+.composer-box:focus-within {
+  border-color: color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.chat-composer textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 1.5rem;
+  max-height: 12rem;
+  padding: 0.25rem 0;
+  resize: none;
+  overflow-y: auto;
+  font: inherit;
+  line-height: 1.5;
+  color: inherit;
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+.composer-toolbar {
   display: flex;
-  align-items: end;
+  align-items: center;
   gap: var(--gap-sm);
   min-width: 0;
 }
 
-.chat-composer textarea {
-  flex: 1;
-  min-width: 0;
-  min-height: var(--chat-composer-size);
-  max-height: 10rem;
-  padding: var(--gap-sm);
-  resize: none;
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--chat-composer-size) / 2);
+.composer-toolbar .chat-send {
+  margin-inline-start: auto;
 }
 
 .chat-send {
@@ -419,12 +646,26 @@ ul {
   height: var(--chat-action-size);
   padding: 0;
   place-items: center;
+  border: 0;
   border-radius: 50%;
-  font-size: 1.1rem;
+  background: none;
+  opacity: 0.75;
+}
+
+.chat-action:hover:not(:disabled),
+.chat-action:focus-visible {
+  opacity: 1;
+  background: var(--surface-strong);
+}
+
+.chat-action svg {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .chat-action.recording {
   color: #c33;
+  opacity: 1;
 }
 
 .composer-attachments,
@@ -491,6 +732,14 @@ ul {
   border: 0;
 }
 
+pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  padding: var(--gap-sm);
+  background: var(--surface-strong);
+  border-radius: var(--radius-sm);
+}
+
 .message pre,
 .entry pre,
 .panel pre {
@@ -507,9 +756,10 @@ pre.error {
 
 .tag {
   font-size: 0.75rem;
-  padding: 0.1rem 0.4rem;
+  padding: 0.1rem 0.5rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
+  background: var(--surface);
 }
 
 /* Alpine removes x-cloak once it initializes; until then x-show elements would flash visible. */
@@ -531,6 +781,15 @@ pre.error {
 .search input[type="search"] {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+input[type="search"] {
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem var(--gap-sm);
 }
 
 .entry-actions {
@@ -574,16 +833,43 @@ pre.error {
 button {
   font: inherit;
   font-size: 0.85rem;
-  padding: 0.2rem var(--gap-sm);
+  font-weight: 500;
+  padding: 0.3rem 0.75rem;
   cursor: pointer;
   color: inherit;
-  background: none;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  transition: background-color 0.15s, opacity 0.15s;
+}
+
+button:hover:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button[type="submit"]:not(.danger) {
+  color: Canvas;
+  background: CanvasText;
+  border-color: CanvasText;
+}
+
+button[type="submit"]:not(.danger):hover:not(:disabled) {
+  opacity: 0.85;
+  background: CanvasText;
 }
 
 button.danger {
   color: #c33;
+}
+
+:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 dialog {
@@ -593,6 +879,7 @@ dialog {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--gap);
+  box-shadow: 0 12px 32px #0004;
 }
 
 dialog::backdrop {
@@ -630,17 +917,28 @@ dialog::backdrop {
   }
 
   .nav-toggled .shell {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 3.5rem minmax(0, 1fr);
   }
 
-  .nav-toggled .sidebar {
-    display: none;
+  .nav-toggled .sidebar a {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .nav-toggled .nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
 
   .sidebar {
     display: block;
     position: sticky;
     top: 0;
+    min-height: 100dvh;
     border-bottom: none;
     border-right: 1px solid var(--border);
   }
@@ -664,12 +962,15 @@ dialog::backdrop {
     border: none;
   }
 
-  .edges td {
-    display: table-cell;
-    padding: 0.25rem var(--gap-sm);
-    border-bottom: 1px solid var(--border);
+  .table-wrap td {
     overflow-wrap: normal;
     white-space: nowrap;
+  }
+
+  .edges td {
+    display: table-cell;
+    padding: 0.5rem var(--gap-sm);
+    border-bottom: 1px solid var(--border);
   }
 
   .table-wrap .edges {

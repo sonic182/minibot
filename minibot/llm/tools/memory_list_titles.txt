@@ -1,0 +1,1 @@
+List persistent user memory entries as lightweight rows: id, title, category, source and update date, without the data. Supports the category, source, updated_after, updated_before, limit and offset filters. Use it to pick an entry_id before memory_get, memory_update or memory_delete.

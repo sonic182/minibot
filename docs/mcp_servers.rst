@@ -191,7 +191,7 @@ lexical search. The first start loads the embedding model, so it takes a while.
 
 It can replace or complement MiniBot's built-in stores:
 
-- **vs. the** ``memory`` **tool** (``[tools.kv_memory]``, see :doc:`tools`): ``memory`` looks entries up
+- **vs. the** ``memory_*`` **tools** (``[tools.kv_memory]``, see :doc:`tools`): ``memory_search`` looks entries up
   by title and suits exact, structured facts. gmem recalls by meaning, which suits longer notes and
   vague questions ("what did we decide about the mail setup?").
 - **vs. the** ``graph`` **tool** (see :doc:`graph`): both store relationships between entities. gmem keeps

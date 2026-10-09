@@ -18,6 +18,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tasks page.** The web UI has a `/tasks` page listing running tasks (`?status=all` adds finished ones) with a
   detail view of each task's prompt, result, error and events, and a Cancel button for a running task.
 
+### Changed
+
+- **Web chat view reworked.** The composer is one box that grows with the text up to about eight lines, then scrolls.
+  Enter sends and Shift+Enter starts a new line; on touch screens Enter starts a new line. Your messages keep their
+  line breaks, and replies are shown without a box. Each message has a copy button, which copies the reply's markdown
+  source, and each code block has its own copy button. The view follows new messages only while you are at the bottom,
+  and a button brings you back when you are not.
+- **Web UI restyled.** The dashboard stylesheet has a new neutral look: surfaces, a clearer type scale, pill tags,
+  a sidebar with a current-page highlight and inverted submit buttons, in light and dark mode. Pages keep their
+  layout and behavior, and no new assets are added.
+- **The `memory` tool is split into one tool per operation.** It is now `memory_create`, `memory_update`,
+  `memory_get`, `memory_search`, `memory_delete` and `memory_list_titles`, each with its own schema. Use a pattern
+  such as `memory_*` in `tools_allow`, `tools_deny` or `require_approval`. The old `memory` name is rejected at
+  config load, with the replacement names in the error, the same as `filesystem`.
+- **aiosonic 1.1.0.** `http_request` now streams every response through aiosonic's `iter_bytes()`, so the read cap
+  also applies to `Content-Length` bodies instead of only chunked ones, and its own gzip/deflate handling is gone.
+  The Qdrant client sends its payloads with `json=`, the models catalog fetch closes its client, and
+  provider and MCP clients are closed with `HTTPClient.aclose()`.
+- **Every log line a task worker writes carries its `task_id`**, so tool and MCP calls of concurrent tasks can be
+  told apart.
+
 ### Fixed
 
 - **Denying a tool approval stops the rest of that model response.** When a model asked for several approved
@@ -36,14 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the conversation. A system prompt whose content is a list of parts is now sent as `instructions` too, with its
   text parts joined.
 
-### Changed
+### Security
 
-- **aiosonic 1.1.0.** `http_request` now streams every response through aiosonic's `iter_bytes()`, so the read cap
-  also applies to `Content-Length` bodies instead of only chunked ones, and its own gzip/deflate handling is gone.
-  The Qdrant client sends its payloads with `json=`, the models catalog fetch closes its client, and
-  provider and MCP clients are closed with `HTTPClient.aclose()`.
-- **Every log line a task worker writes carries its `task_id`**, so tool and MCP calls of concurrent tasks can be
-  told apart.
+- **Patched advisories in four dependencies.** `anyio` 4.13.0 -> 4.15.1, `fsspec` 2026.3.0 -> 2026.9.0,
+  `multidict` 6.7.1 -> 6.9.1 and `pypdf` 6.16.1 -> 6.19.0 are locked to versions that fix open advisories.
+  `pyproject.toml` is unchanged.
 
 ## [0.30.0] - 2026-10-07
 

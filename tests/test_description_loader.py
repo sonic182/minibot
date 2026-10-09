@@ -6,7 +6,7 @@ from minibot.llm.tools.description_loader import load_tool_description
 
 
 def test_load_known_description_returns_text() -> None:
-    text = load_tool_description("memory")
+    text = load_tool_description("bash")
     assert isinstance(text, str)
     assert len(text) > 0
 
@@ -51,7 +51,6 @@ def test_all_builtin_descriptions_load() -> None:
         "grep",
         "read_file",
         "self_insert_artifact",
-        "memory",
         "bash",
         "apply_patch",
         "spawn_task",

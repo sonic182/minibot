@@ -48,12 +48,19 @@ def _coerce_byte_size(value: Any) -> int:
         raise ValueError("invalid byte size value") from exc
 
 
-_SPLIT_FILESYSTEM_TOOLS = "list_files, file_info, write_file, move_file, delete_file, send_file"
+_REMOVED_TOOL_REPLACEMENTS = {
+    "filesystem": "list_files, file_info, write_file, move_file, delete_file, send_file",
+    "memory": "memory_create, memory_update, memory_get, memory_search, memory_delete, memory_list_titles",
+}
 
 
 def _reject_removed_tool_names(patterns: list[str]) -> list[str]:
-    if any(pattern.strip() == "filesystem" for pattern in patterns):
-        raise ValueError(f"the 'filesystem' tool was removed; name its replacements: {_SPLIT_FILESYSTEM_TOOLS}")
+    for pattern in patterns:
+        name = pattern.strip()
+        if name in _REMOVED_TOOL_REPLACEMENTS:
+            raise ValueError(
+                f"the '{name}' tool was removed; name its replacements: {_REMOVED_TOOL_REPLACEMENTS[name]}"
+            )
     return patterns
 
 
@@ -622,7 +629,7 @@ class MemoryConfig(BaseModel):
 class KeyValueMemoryConfig(BaseModel):
     """Key/value memory tool settings. TOML section: ``[tools.kv_memory]``
 
-    - ``enabled`` — expose the ``memory`` tool (default: ``false``).
+    - ``enabled`` — expose the ``memory_*`` tools (default: ``false``).
     - ``sqlite_url`` — SQLite database URL for stored entries.
     - ``pool_size`` / ``echo`` — SQLAlchemy engine settings.
     - ``default_limit`` / ``max_limit`` — page size and hard cap for memory searches.
@@ -938,8 +945,8 @@ class ToolApprovalConfig(BaseModel):
     without running or asking. Patterns match the canonical tool name (``http_request``, not an alias),
     and unknown keys inside ``[tools.approval]`` are rejected so a misspelled option cannot silently
     turn the gate off. The section name itself must be spelled exactly ``[tools.approval]``. The removed
-    ``filesystem`` tool name is rejected here and in every ``tools_allow``/``tools_deny``; name its
-    replacements, such as ``delete_file``, instead.
+    ``filesystem`` and ``memory`` tool names are rejected here and in every ``tools_allow``/``tools_deny``;
+    name their replacements, such as ``delete_file`` or ``memory_delete``, instead.
     """
 
     model_config = ConfigDict(extra="forbid")

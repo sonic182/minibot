@@ -4,10 +4,15 @@ const chatElement = document.querySelector(".chat");
 const socketToken = chatElement?.dataset.socketToken ?? "";
 const capabilities = JSON.parse(chatElement?.dataset.chatCapabilities || "{}");
 const CHUNK_SIZE = 262_144;
+const sendsOnEnter = globalThis.matchMedia?.("(pointer: fine)").matches ?? true;
+const COPY_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
+const CHECK_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
 
 window.webChat = () => ({
+  icons: { copy: COPY_ICON, check: CHECK_ICON },
   messages: [],
   draft: "",
+  atBottom: true,
   busy: false,
   stopping: false,
   error: "",
@@ -28,6 +33,8 @@ window.webChat = () => ({
 
   init() {
     this.connect();
+    this.$watch("draft", () => this.$nextTick(() => this.resizeComposer()));
+    window.addEventListener("resize", () => this.resizeComposer());
   },
 
   connect() {
@@ -58,6 +65,7 @@ window.webChat = () => ({
       this.receiveHistory(event);
       return;
     }
+    const follow = event.role === "user" || this.atBottom;
     if (event.kind === "upload_ready") {
       this.resolveWaiter(`ready:${event.upload_id}`, event);
     }
@@ -107,7 +115,7 @@ window.webChat = () => ({
       this.rejectWaiters(event.error);
     }
     this.$nextTick(() => {
-      this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
+      if (follow) this.scrollToEnd();
     });
   },
 
@@ -130,6 +138,17 @@ window.webChat = () => ({
     if (!this.connected || !this.beforeId || this.loadingHistory || this.$refs.messages.scrollTop > 40) return;
     this.loadingHistory = true;
     this.socket.send(JSON.stringify({ kind: "history_before", before_id: this.beforeId }));
+  },
+
+  onScroll() {
+    this.loadOlder();
+    const list = this.$refs.messages;
+    this.atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+  },
+
+  scrollToEnd() {
+    this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
+    this.atBottom = true;
   },
 
   resolveWaiter(key, value) {
@@ -176,6 +195,67 @@ window.webChat = () => ({
 
   toolStatus(phase) {
     return { started: "Running", completed: "Completed", failed: "Failed" }[phase] ?? "Running";
+  },
+
+  resizeComposer() {
+    const field = this.$refs.composer;
+    field.style.height = "auto";
+    field.style.height = `${field.scrollHeight}px`;
+    if (this.atBottom) this.scrollToEnd();
+  },
+
+  onEnter(event) {
+    if (!sendsOnEnter || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    this.send();
+  },
+
+  async copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (_) {}
+    }
+    const field = document.createElement("textarea");
+    field.value = text;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.append(field);
+    field.select();
+    const copied = document.execCommand("copy");
+    field.remove();
+    return copied;
+  },
+
+  async copyMessage(message, button) {
+    const text = message.text ?? button.closest(".message").querySelector(".message-content").innerText;
+    if (await this.copyText(text)) {
+      message.copied = true;
+      window.setTimeout(() => (message.copied = false), 1500);
+    }
+  },
+
+  async copyCode(pre, button) {
+    if (!(await this.copyText(pre.textContent.trimEnd()))) return;
+    button.innerHTML = CHECK_ICON;
+    window.setTimeout(() => (button.innerHTML = COPY_ICON), 1500);
+  },
+
+  decorateCodeBlocks(root) {
+    this.$nextTick(() => {
+      for (const pre of root.querySelectorAll("pre")) {
+        if (pre.querySelector(".code-copy")) continue;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "code-copy";
+        button.setAttribute("aria-label", "Copy code");
+        button.innerHTML = COPY_ICON;
+        button.addEventListener("click", () => this.copyCode(pre, button));
+        pre.append(button);
+      }
+    });
   },
 
   canSend() {

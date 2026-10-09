@@ -525,12 +525,14 @@ def test_decision_config_is_off_by_default_and_requires_a_key_when_enabled() -> 
 
 
 @pytest.mark.parametrize(
-    "data",
+    ("data", "name"),
     [
-        {"tools": {"approval": {"require_approval": ["filesystem"]}}},
-        {"orchestration": {"main_agent": {"tools_deny": [" filesystem "]}}},
+        ({"tools": {"approval": {"require_approval": ["filesystem"]}}}, "filesystem"),
+        ({"orchestration": {"main_agent": {"tools_deny": [" filesystem "]}}}, "filesystem"),
+        ({"tools": {"approval": {"require_approval": ["memory"]}}}, "memory"),
+        ({"orchestration": {"main_agent": {"tools_deny": [" memory "]}}}, "memory"),
     ],
 )
-def test_removed_filesystem_tool_name_is_rejected(data: dict) -> None:
-    with pytest.raises(ValueError, match="'filesystem' tool was removed"):
+def test_removed_tool_names_are_rejected(data: dict, name: str) -> None:
+    with pytest.raises(ValueError, match=f"'{name}' tool was removed"):
         Settings.from_dict(data)

@@ -76,10 +76,10 @@ prompt (or the compaction pass):
      specialist work; use ``fetch_agent_info`` when the roster description is not enough;
      never claim a delegated result, since it arrives as a later message; continue locally
      when delegation is unavailable or fails.
-   - ``graph.md`` — decide between the relation ``graph`` and durable ``memory``: a fact naming
+   - ``graph.md`` — decide between the relation ``graph`` and the durable ``memory_*`` tools: a fact naming
      two things is an edge and belongs in the graph. Note this fragment ships even when the
      ``graph`` tool is disabled; it relies on the model no-opping when the tool is absent.
-   - ``tool_usage.md`` — route the model to the right tool: ``memory`` vs ``history``,
+   - ``tool_usage.md`` — route the model to the right tool: ``memory_*`` vs ``history``,
      ``apply_patch`` for existing-file edits vs ``write_file``/``move_file``/``delete_file`` for file management, reuse
      canonical path fields from tool output, absolute paths in yolo mode.
 

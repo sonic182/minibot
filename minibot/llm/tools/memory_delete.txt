@@ -1,0 +1,1 @@
+Delete one persistent user memory entry by entry_id. Confirm with the user before deleting unless they clearly asked for it. If they gave no identifier, find the entry_id with memory_search or memory_list_titles first.

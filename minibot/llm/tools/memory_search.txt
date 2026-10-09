@@ -1,0 +1,3 @@
+Search the persistent user memory by text over titles and data. Returns full entries, including their ids, which memory_update and memory_delete need. Optional filters: category, source, updated_after, updated_before, limit and offset.
+
+Interpret "memory" requests as this persistent user memory by default. Use chat-history tools only when the user explicitly asks about the conversation, chat, or message history. Search before creating an entry; see memory_create for the workflow.
