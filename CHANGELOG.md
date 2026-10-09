@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The `graph` tool is split into one tool per operation.** It is now `graph_link`, `graph_unlink`, `graph_merge`,
+  `graph_neighbors`, `graph_path` and `graph_search`, each with its own schema and description. Use a pattern such
+  as `graph_*` in `tools_allow`, `tools_deny` or `require_approval`. The old `graph` name is rejected at config load,
+  with the replacement names in the error, the same as `memory`.
+
+### Removed
+
+- **The `schedule` facade tool.** It duplicated `schedule_prompt`, `list_scheduled_prompts`,
+  `cancel_scheduled_prompt` and `delete_scheduled_prompt`, which stay. The `schedule` name is rejected at config
+  load, with those names in the error.
+
 ## [0.31.0] - 2026-10-09
 
 ### Added

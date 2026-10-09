@@ -5,7 +5,7 @@ Relation graph
    :description: Use Minibot's optional relation graph to store and traverse typed, owner-scoped relationships between entities.
    :keywords: knowledge graph AI assistant, relation graph, memory vs graph, self-hosted AI memory
 
-The optional ``graph`` tool records typed relationships between entities. It is useful for
+The optional ``graph_*`` tools record typed relationships between entities. It is useful for
 questions about connections — for example, who works on a project, which technology it uses,
 or what a task depends on — where a normal note or a retrieved document may not contain the
 complete answer in one place.
@@ -39,7 +39,7 @@ extra, then enable its extension in ``config.toml``:
 ``echo = true`` in the extension configuration only when SQLAlchemy query logging is useful for
 debugging. As with every extension, MiniBot stops at startup if it cannot import or register it.
 
-Configuring it as an extension, rather than bundling it, also makes the tool available to spawned
+Configuring it as an extension, rather than bundling it, also makes the tools available to spawned
 task workers.
 
 Data model and scope
@@ -60,75 +60,75 @@ verb phrases read from source to target, such as ``works_on``, ``uses``, ``depen
 Operations
 ----------
 
-``graph`` is an action-based tool. Its available actions are:
+The graph is exposed as one tool per operation, so a pattern such as ``graph_*`` covers all of
+them in ``tools_allow``, ``tools_deny`` or ``require_approval``. The old ``graph`` name is rejected
+there at config load.
 
-``link``
+``graph_link``
    Create or update a live edge. Requires ``source``, ``rel``, and ``target``. An optional
    ``attrs`` value is a JSON object string with additional edge fields. Repeating the same triple
    updates it instead of creating a duplicate.
 
-``unlink``
+``graph_unlink``
    Close a live edge that is no longer true. Requires ``source``, ``rel``, and ``target``. The
    edge is retained as history rather than deleted.
 
-``merge``
+``graph_merge``
    Merge a duplicate node into its canonical identifier. ``source`` is the incorrect identifier;
    ``target`` is the identifier to retain. All edges mentioning the source are rewritten.
 
-``neighbors``
+``graph_neighbors``
    Expand relationships around ``node``. ``direction`` may be ``out`` (the default), ``in``, or
    ``both``; ``depth`` defaults to 1 and is capped at 5. ``rel`` filters traversal to one relation.
    ``limit`` defaults to 50, ``max_nodes`` defaults to 100, and ``history = true`` adds closed
    edges. A response with ``truncated = true`` reached the node limit.
 
-``path``
+``graph_path``
    Find the shortest connection between ``source`` and ``target``. It follows relationships in
    either direction, so a useful connection can be found even if no edge points directly from the
    source to the target. ``max_depth`` defaults to 4 and is capped at 8.
 
-``search``
+``graph_search``
    Find edges and node identifiers from a text fragment matched against source, relation, and
    target. It requires ``query`` and defaults to 25 results. Use it before adding or traversing an
    entity when its canonical identifier is unknown.
 
-All actions accept the optional ``graph`` namespace. ``neighbors`` and ``search`` can include
+Every tool accepts the optional ``graph`` namespace. ``graph_neighbors`` and ``graph_search`` can include
 closed edges with ``history = true``. Edges with ``valid_to`` are historical: present them as past
 relationships, never current ones.
 
 Examples
 --------
 
-Record that Alex works on a website project:
+Record that Alex works on a website project with ``graph_link``:
 
 .. code-block:: json
 
    {
-     "action": "link",
      "source": "person:alex",
      "rel": "works_on",
      "target": "project:website"
    }
 
-Find everything connected to the website project within two hops:
+Find everything connected to the website project within two hops with ``graph_neighbors``:
 
 .. code-block:: json
 
    {
-     "action": "neighbors",
      "node": "project:website",
      "direction": "both",
      "depth": 2
    }
 
-Explain the connection between a person and a technology:
+Explain the connection between a person and a technology with ``graph_path``:
 
 .. code-block:: json
 
    {
-     "action": "path",
      "source": "person:alex",
      "target": "tech:python"
    }
 
-When a relationship changes, close the old edge and create the replacement in the same turn. This
-preserves when the superseded relationship stopped being current.
+When a relationship changes, close the old edge with ``graph_unlink`` and create the replacement
+with ``graph_link`` in the same turn. This preserves when the superseded relationship stopped
+being current.

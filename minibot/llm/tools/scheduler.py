@@ -6,12 +6,10 @@ from typing import Any
 from llm_async.models import Tool
 
 from minibot.core.jobs import PromptRecurrence, PromptRole, ScheduledPromptService, ScheduledPromptStatus
-from minibot.llm.tools.action_dispatcher import dispatch_action
 from minibot.llm.tools.arg_utils import enum_by_value, optional_bool, optional_int, require_channel, require_owner
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.schema_utils import (
     job_id_property,
-    nullable_boolean,
     nullable_integer,
     nullable_string,
     pagination_properties,
@@ -25,9 +23,8 @@ class SchedulePromptTool:
 
     Enabled by ``[scheduler.prompts]`` in ``config.toml``.
 
-    Exposes five LLM tools:
+    Exposes four LLM tools:
 
-    - ``schedule`` — unified action interface (``create`` / ``list`` / ``cancel`` / ``delete``).
     - ``schedule_prompt`` — create a future prompt job.
     - ``list_scheduled_prompts`` — list jobs for the current owner/chat context.
     - ``cancel_scheduled_prompt`` — mark a job as cancelled.
@@ -53,12 +50,6 @@ class SchedulePromptTool:
     def __init__(self, service: ScheduledPromptService, min_recurrence_interval_seconds: int = 60) -> None:
         self._service = service
         self._min_recurrence_interval_seconds = max(1, min_recurrence_interval_seconds)
-        self._unified_handlers = {
-            "create": self._handle_schedule,
-            "list": self._handle_list,
-            "cancel": self._handle_cancel,
-            "delete": self._handle_delete,
-        }
 
     def bindings(self) -> list[ToolBinding]:
         return [
@@ -66,55 +57,7 @@ class SchedulePromptTool:
             ToolBinding(tool=self._cancel_schema(), handler=self._handle_cancel),
             ToolBinding(tool=self._delete_schema(), handler=self._handle_delete),
             ToolBinding(tool=self._list_schema(), handler=self._handle_list),
-            ToolBinding(tool=self._schedule_unified_schema(), handler=self._handle_schedule_unified),
         ]
-
-    def _schedule_unified_schema(self) -> Tool:
-        return Tool(
-            name="schedule",
-            description=(
-                "Scheduled prompt management (reminders, scheduled messages, recurring jobs). "
-                "Use action=create|list|cancel|delete; list shows their content and run time."
-            ),
-            parameters=strict_object(
-                properties={
-                    "action": {
-                        "type": "string",
-                        "enum": ["create", "list", "cancel", "delete"],
-                        "description": "Schedule operation to perform.",
-                    },
-                    "job_id": job_id_property(),
-                    "content": nullable_string("Message text for action=create."),
-                    "run_at": nullable_string("ISO timestamp for action=create."),
-                    "delay_seconds": nullable_integer(minimum=1, description="Delay for action=create."),
-                    "role": {
-                        **nullable_string("Role for action=create."),
-                        "enum": [role.value for role in PromptRole],
-                    },
-                    "metadata": {
-                        "type": ["object", "null"],
-                        "additionalProperties": False,
-                    },
-                    "recurrence_type": {
-                        **nullable_string("Recurrence mode for action=create."),
-                        "enum": [recurrence.value for recurrence in PromptRecurrence],
-                    },
-                    "recurrence_interval_seconds": nullable_integer(
-                        minimum=self._min_recurrence_interval_seconds,
-                        description="Interval for action=create recurrence.",
-                    ),
-                    "recurrence_cron_expression": nullable_string(
-                        "Standard 5-field cron expression for action=create recurrence "
-                        "(e.g. '0 9 * * 1-5' = weekdays at 9am, '0 0 2 * *' = day 2 of every month). "
-                        "Required when recurrence_type='cron'."
-                    ),
-                    "recurrence_end_at": nullable_string("Recurrence end timestamp for action=create."),
-                    "active_only": nullable_boolean("Filter active jobs for action=list."),
-                    **pagination_properties(),
-                },
-                required=["action", "limit", "offset"],
-            ),
-        )
 
     def _schedule_schema(self) -> Tool:
         return Tool(
@@ -360,16 +303,6 @@ class SchedulePromptTool:
             "stopped_before_delete": bool(result["stopped_before_delete"]),
             "status_before_delete": job.status.value,
         }
-
-    async def _handle_schedule_unified(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        action = _require_string(payload.get("action"), "action").lower()
-        return await dispatch_action(
-            action=action,
-            payload=payload,
-            context=context,
-            handlers=self._unified_handlers,
-            error_message="action must be one of: create, list, cancel, delete",
-        )
 
 
 def _require_string(value: Any, field: str) -> str:

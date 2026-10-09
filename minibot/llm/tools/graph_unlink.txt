@@ -1,0 +1,1 @@
+Close an edge in the relation graph that is no longer true. Requires source, rel, and target. The edge is kept as history, not deleted, so a superseded fact stays recoverable. When the user says a relation changed, unlink the old edge and call graph_link for the new one in the same turn.

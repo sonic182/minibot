@@ -531,6 +531,8 @@ def test_decision_config_is_off_by_default_and_requires_a_key_when_enabled() -> 
         ({"orchestration": {"main_agent": {"tools_deny": [" filesystem "]}}}, "filesystem"),
         ({"tools": {"approval": {"require_approval": ["memory"]}}}, "memory"),
         ({"orchestration": {"main_agent": {"tools_deny": [" memory "]}}}, "memory"),
+        ({"tools": {"approval": {"require_approval": ["graph"]}}}, "graph"),
+        ({"orchestration": {"main_agent": {"tools_allow": ["schedule"]}}}, "schedule"),
     ],
 )
 def test_removed_tool_names_are_rejected(data: dict, name: str) -> None:

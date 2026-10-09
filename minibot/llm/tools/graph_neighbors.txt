@@ -1,0 +1,3 @@
+Expand the relation graph around one node. Requires node. Optional direction ("out", "in", "both"; "in" walks edges backwards to find what points at the node), depth (hops, default 1), rel (only follow this relation), history, limit (edges and history, default 50), max_nodes (default 100). Returns a distance-ordered surrounding subgraph and `truncated=true` when max_nodes cuts it short.
+
+Query the graph before answering any question that depends on how two things connect, even when no memory entry mentions them together. Edges with valid_to are no longer true and must be reported as past, never as current.

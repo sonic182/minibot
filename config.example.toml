@@ -718,7 +718,7 @@ modules = []
 # [extensions.config.minibot_ext_demo]
 # greeting = "hola"
 
-# Relation-graph tool ("graph"): typed edges between entities, queried by traversal.
+# Relation-graph tools (graph_*): typed edges between entities, queried by traversal.
 # Ships with minibot but stays opt-in, so add it to modules above to enable it:
 #   modules = ["minibot.extensions.tools.graph"]
 # Needs the graph extra: poetry install --extras graph
