@@ -9,6 +9,7 @@ const COPY_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="14" 
 const CHECK_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
 
 window.webChat = () => ({
+  icons: { copy: COPY_ICON, check: CHECK_ICON },
   messages: [],
   draft: "",
   atBottom: true,
@@ -200,6 +201,7 @@ window.webChat = () => ({
     const field = this.$refs.composer;
     field.style.height = "auto";
     field.style.height = `${field.scrollHeight}px`;
+    if (this.atBottom) this.scrollToEnd();
   },
 
   onEnter(event) {

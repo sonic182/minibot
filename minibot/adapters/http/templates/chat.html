@@ -31,10 +31,7 @@
               <div class="message-content" x-html="message.html" x-effect="message.html; decorateCodeBlocks($el)"></div>
               <template x-if="message.attachments?.length"><div class="chat-attachments"><template x-for="attachment in message.attachments" :key="attachment.id"><div class="chat-attachment"><img x-show="attachment.kind === 'image'" :src="attachment.url" :alt="attachment.filename"><audio x-show="attachment.kind === 'audio'" :src="attachment.url" controls></audio><span x-text="attachment.filename"></span></div></template></div></template>
               <div class="message-actions">
-                <button type="button" class="message-action" @click="copyMessage(message, $el)" :aria-label="message.copied ? 'Copied' : 'Copy message'" :title="message.copied ? 'Copied' : 'Copy'">
-                  <svg x-show="!message.copied" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                  <svg x-show="message.copied" x-cloak viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
-                </button>
+                <button type="button" class="message-action" @click="copyMessage(message, $el)" :aria-label="message.copied ? 'Copied' : 'Copy message'" :title="message.copied ? 'Copied' : 'Copy'" x-html="message.copied ? icons.check : icons.copy"></button>
               </div>
             </div>
           </template>

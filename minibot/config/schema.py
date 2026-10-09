@@ -629,7 +629,7 @@ class MemoryConfig(BaseModel):
 class KeyValueMemoryConfig(BaseModel):
     """Key/value memory tool settings. TOML section: ``[tools.kv_memory]``
 
-    - ``enabled`` — expose the ``memory`` tool (default: ``false``).
+    - ``enabled`` — expose the ``memory_*`` tools (default: ``false``).
     - ``sqlite_url`` — SQLite database URL for stored entries.
     - ``pool_size`` / ``echo`` — SQLAlchemy engine settings.
     - ``default_limit`` / ``max_limit`` — page size and hard cap for memory searches.

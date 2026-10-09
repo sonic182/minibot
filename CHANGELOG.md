@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `memory_get`, `memory_search`, `memory_delete` and `memory_list_titles`, each with its own schema. Use a pattern
   such as `memory_*` in `tools_allow`, `tools_deny` or `require_approval`. The old `memory` name is rejected at
   config load, with the replacement names in the error, the same as `filesystem`.
+- **aiosonic 1.1.0.** `http_request` now streams every response through aiosonic's `iter_bytes()`, so the read cap
+  also applies to `Content-Length` bodies instead of only chunked ones, and its own gzip/deflate handling is gone.
+  The Qdrant client sends its payloads with `json=`, the models catalog fetch closes its client, and
+  provider and MCP clients are closed with `HTTPClient.aclose()`.
+- **Every log line a task worker writes carries its `task_id`**, so tool and MCP calls of concurrent tasks can be
+  told apart.
 
 ### Fixed
 
@@ -51,14 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the conversation. A system prompt whose content is a list of parts is now sent as `instructions` too, with its
   text parts joined.
 
-### Changed
+### Security
 
-- **aiosonic 1.1.0.** `http_request` now streams every response through aiosonic's `iter_bytes()`, so the read cap
-  also applies to `Content-Length` bodies instead of only chunked ones, and its own gzip/deflate handling is gone.
-  The Qdrant client sends its payloads with `json=`, the models catalog fetch closes its client, and
-  provider and MCP clients are closed with `HTTPClient.aclose()`.
-- **Every log line a task worker writes carries its `task_id`**, so tool and MCP calls of concurrent tasks can be
-  told apart.
+- **Patched advisories in four dependencies.** `anyio` 4.13.0 -> 4.15.1, `fsspec` 2026.3.0 -> 2026.9.0,
+  `multidict` 6.7.1 -> 6.9.1 and `pypdf` 6.16.1 -> 6.19.0 are locked to versions that fix open advisories.
+  `pyproject.toml` is unchanged.
 
 ## [0.30.0] - 2026-10-07
 
