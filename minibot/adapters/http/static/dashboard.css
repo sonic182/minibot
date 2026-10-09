@@ -2,9 +2,11 @@
   color-scheme: light dark;
   --gap: 1rem;
   --gap-sm: 0.5rem;
-  --radius: 0.5rem;
+  --radius: 0.6rem;
   --radius-sm: 0.4rem;
   --border: #8886;
+  --surface: color-mix(in srgb, currentColor 4%, transparent);
+  --surface-strong: color-mix(in srgb, currentColor 9%, transparent);
 }
 
 * {
@@ -13,8 +15,8 @@
 
 body {
   margin: 0;
-  font-family: system-ui, sans-serif;
-  line-height: 1.4;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
 }
 
 /* Hidden until nav.js has drawn the icons, so the page never paints half-built. The animation
@@ -39,19 +41,22 @@ body {
 }
 
 .brand {
-  font-weight: bold;
-  font-size: 1.1rem;
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
 }
 
 .burger {
+  padding: 0.3rem 0.5rem;
   font-size: 1.2rem;
   line-height: 1;
 }
 
 .sidebar {
   display: none;
-  padding: var(--gap);
+  padding: var(--gap-sm);
   border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 /* The default is set here, per breakpoint: closed on phones, open on desktop. nav.js only flips
@@ -65,17 +70,22 @@ body {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: var(--gap-sm);
+  gap: 0.15rem;
 }
 
 .sidebar a {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  padding: 0.4rem var(--gap-sm);
+  padding: 0.45rem var(--gap-sm);
   border-radius: var(--radius-sm);
   text-decoration: none;
   color: inherit;
+  transition: background-color 0.15s;
+}
+
+.sidebar a:hover {
+  background: var(--surface-strong);
 }
 
 .sidebar a svg {
@@ -85,25 +95,36 @@ body {
 }
 
 .sidebar a.current {
-  font-weight: bold;
-  background: var(--border);
+  font-weight: 600;
+  background: var(--surface-strong);
 }
 
 main {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   gap: var(--gap);
   padding: var(--gap);
   min-width: 0;
+  max-width: 68rem;
 }
 
 h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 h2 {
   margin-top: 0;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .panels {
@@ -122,6 +143,7 @@ h2 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--gap);
+  background: var(--surface);
 }
 
 ul {
@@ -154,7 +176,7 @@ ul {
 
 .badge {
   color: #2a2;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .status-grid {
@@ -165,8 +187,10 @@ ul {
 
 .status-card h3 {
   margin: 0 0 0.25rem;
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
   opacity: 0.7;
 }
 
@@ -177,6 +201,8 @@ ul {
 
 .table-wrap {
   overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
 .table-wrap table {
@@ -187,8 +213,25 @@ ul {
 .table-wrap th,
 .table-wrap td {
   text-align: left;
-  padding: 0.25rem var(--gap-sm);
+  padding: 0.5rem var(--gap-sm);
   border-bottom: 1px solid var(--border);
+}
+
+.table-wrap td {
+  overflow-wrap: anywhere;
+}
+
+.table-wrap th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  background: var(--surface);
+}
+
+.table-wrap tbody tr:hover {
+  background: var(--surface);
 }
 
 .muted {
@@ -222,7 +265,8 @@ ul {
   padding: 0.15rem var(--gap-sm);
   font-size: 0.85rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
+  background: var(--surface);
   overflow-wrap: anywhere;
 }
 
@@ -272,9 +316,11 @@ ul {
 }
 
 .message .role {
-  font-weight: bold;
+  font-weight: 600;
   text-transform: uppercase;
-  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+  opacity: 0.7;
 }
 
 .chat {
@@ -309,6 +355,7 @@ ul {
 
 .chat-messages > .message.user {
   align-self: flex-end;
+  background: var(--surface-strong);
 }
 
 .message-content {
@@ -491,6 +538,14 @@ ul {
   border: 0;
 }
 
+pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  padding: var(--gap-sm);
+  background: var(--surface-strong);
+  border-radius: var(--radius-sm);
+}
+
 .message pre,
 .entry pre,
 .panel pre {
@@ -507,9 +562,10 @@ pre.error {
 
 .tag {
   font-size: 0.75rem;
-  padding: 0.1rem 0.4rem;
+  padding: 0.1rem 0.5rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
+  background: var(--surface);
 }
 
 /* Alpine removes x-cloak once it initializes; until then x-show elements would flash visible. */
@@ -531,6 +587,15 @@ pre.error {
 .search input[type="search"] {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+input[type="search"] {
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem var(--gap-sm);
 }
 
 .entry-actions {
@@ -574,16 +639,43 @@ pre.error {
 button {
   font: inherit;
   font-size: 0.85rem;
-  padding: 0.2rem var(--gap-sm);
+  font-weight: 500;
+  padding: 0.3rem 0.75rem;
   cursor: pointer;
   color: inherit;
-  background: none;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  transition: background-color 0.15s, opacity 0.15s;
+}
+
+button:hover:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button[type="submit"]:not(.danger) {
+  color: Canvas;
+  background: CanvasText;
+  border-color: CanvasText;
+}
+
+button[type="submit"]:not(.danger):hover:not(:disabled) {
+  opacity: 0.85;
+  background: CanvasText;
 }
 
 button.danger {
   color: #c33;
+}
+
+:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 dialog {
@@ -593,6 +685,7 @@ dialog {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--gap);
+  box-shadow: 0 12px 32px #0004;
 }
 
 dialog::backdrop {
@@ -641,6 +734,7 @@ dialog::backdrop {
     display: block;
     position: sticky;
     top: 0;
+    min-height: 100dvh;
     border-bottom: none;
     border-right: 1px solid var(--border);
   }
@@ -664,12 +758,15 @@ dialog::backdrop {
     border: none;
   }
 
-  .edges td {
-    display: table-cell;
-    padding: 0.25rem var(--gap-sm);
-    border-bottom: 1px solid var(--border);
+  .table-wrap td {
     overflow-wrap: normal;
     white-space: nowrap;
+  }
+
+  .edges td {
+    display: table-cell;
+    padding: 0.5rem var(--gap-sm);
+    border-bottom: 1px solid var(--border);
   }
 
   .table-wrap .edges {

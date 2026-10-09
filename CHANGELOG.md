@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tasks page.** The web UI has a `/tasks` page listing running tasks (`?status=all` adds finished ones) with a
   detail view of each task's prompt, result, error and events, and a Cancel button for a running task.
 
+### Changed
+
+- **Web UI restyled.** The dashboard stylesheet has a new neutral look: surfaces, a clearer type scale, pill tags,
+  a sidebar with a current-page highlight and inverted submit buttons, in light and dark mode. Pages keep their
+  layout and behavior, and no new assets are added.
+
 ### Fixed
 
 - **Denying a tool approval stops the rest of that model response.** When a model asked for several approved
