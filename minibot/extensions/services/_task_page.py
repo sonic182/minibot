@@ -13,7 +13,6 @@ _PREVIEW_CHARS = 160
 
 
 def build_task_page(store: SQLiteTaskStore, manager: TaskManager, owner_id: str) -> Any:
-    # Imported here so the starlette/jinja extra is only required when the server is switched on.
     from starlette.responses import PlainTextResponse, RedirectResponse
 
     from minibot.adapters.http import page_url, render
@@ -23,8 +22,10 @@ def build_task_page(store: SQLiteTaskStore, manager: TaskManager, owner_id: str)
             form = await request.form()
             task_id = str(form.get("id") or "")
             if form.get("action") == "cancel" and task_id:
-                await _cancel(store, manager, task_id, owner_id)
-            # Redirect so a reload does not resubmit the cancel.
+                try:
+                    await _cancel(store, manager, task_id, owner_id)
+                except AmbiguousTaskIdError:
+                    return PlainTextResponse("ambiguous task id", status_code=400)
             return RedirectResponse(page_url(request), status_code=303)
 
         task_id = request.query_params.get("id", "").strip()

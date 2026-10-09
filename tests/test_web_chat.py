@@ -17,7 +17,14 @@ from minibot.adapters.messaging.web import WebChannelService
 from minibot.app.event_bus import EventBus
 from minibot.app.tool_approval import request_tool_approval
 from minibot.core.channels import ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent, ToolCallEvent, TurnStopRequestedEvent
+from minibot.core.events import (
+    MessageEvent,
+    OutboundEvent,
+    ToolApprovalRequestedEvent,
+    ToolApprovalResolvedEvent,
+    ToolCallEvent,
+    TurnStopRequestedEvent,
+)
 from tests.fixtures.memory import InMemoryMemoryStore
 
 TOKEN = "s3cret"
@@ -261,6 +268,43 @@ async def test_chat_socket_echoes_user_message_and_publishes_it() -> None:
     finally:
         await subscription.close()
         await server.stop()
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_pending_approval_replays_to_a_new_subscriber_until_it_expires() -> None:
+    event_bus = EventBus()
+    service = WebChannelService(event_bus)
+    subscription = service.subscribe()
+    await service.start()
+    try:
+        await asyncio.wait_for(subscription.state.get(), timeout=1)
+        await event_bus.publish(
+            ToolApprovalRequestedEvent(
+                approval_id="approval-1", tool_name="delete_file", channel="web", chat_id=1, detail="path: notes.txt"
+            )
+        )
+        assert await asyncio.wait_for(subscription.events.get(), timeout=1) == {
+            "kind": "approval",
+            "approval_id": "approval-1",
+            "tool_name": "delete_file",
+            "detail": "path: notes.txt",
+        }
+        await event_bus.publish(ToolApprovalResolvedEvent(approval_id="approval-1", approved=False))
+        assert await asyncio.wait_for(subscription.events.get(), timeout=1) == {
+            "kind": "approval_resolved",
+            "approval_id": "approval-1",
+            "outcome": "expired",
+        }
+
+        replay = service.subscribe()
+        try:
+            await asyncio.wait_for(replay.state.get(), timeout=1)
+            assert replay.events.empty()
+        finally:
+            service.unsubscribe(replay)
+    finally:
+        service.unsubscribe(subscription)
         await service.stop()
 
 

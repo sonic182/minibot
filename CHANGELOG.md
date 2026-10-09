@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Tool approvals in the web chat.** A tool in `[tools.approval] require_approval` called from a `/chat` turn, or
   from a task started there, now shows an Approve/Deny card in the chat instead of being denied outright. A pending
-  card comes back after a reload or reconnect, and an answered or expired one shows its outcome.
+  card comes back after a reload or reconnect. An answered or expired card shows its outcome on the open page only.
 - **Stop button in the web chat.** While a reply runs, the chat's send button becomes a stop button until you type or
   attach something. Pressing it cancels the running turn the same way Telegram's `/stop` does. Typed messages keep
   using the send button, which folds them into the running turn.
