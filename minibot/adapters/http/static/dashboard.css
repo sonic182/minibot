@@ -36,7 +36,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.6rem var(--gap);
+  padding: 0.6rem var(--gap) 0.6rem 0.5rem;
   border-bottom: 1px solid var(--border);
 }
 
@@ -47,9 +47,18 @@ body {
 }
 
 .burger {
-  padding: 0.3rem 0.5rem;
-  font-size: 1.2rem;
-  line-height: 1;
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: none;
+}
+
+.burger svg {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .sidebar {
@@ -77,7 +86,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  padding: 0.45rem var(--gap-sm);
+  padding: 0.45rem 0.625rem;
   border-radius: var(--radius-sm);
   text-decoration: none;
   color: inherit;
@@ -89,8 +98,8 @@ body {
 }
 
 .sidebar a svg {
-  width: 1.1rem;
-  height: 1.1rem;
+  width: 1.25rem;
+  height: 1.25rem;
   flex: none;
 }
 
@@ -324,8 +333,6 @@ ul {
 }
 
 .chat {
-  --chat-composer-size: 2.75rem;
-  --chat-composer-inset: 0.25rem;
   --chat-send-size: 2.25rem;
   --chat-bubble-max-width: 90%;
   --chat-action-size: 2.25rem;
@@ -337,12 +344,25 @@ ul {
   gap: var(--gap);
 }
 
+main:has(> .chat) {
+  max-width: none;
+}
+
+.chat-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .chat-messages {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
   gap: var(--gap-sm);
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -353,9 +373,29 @@ ul {
   max-inline-size: var(--chat-bubble-max-width);
 }
 
+.chat-messages > .message.user,
+.chat-messages > .message.assistant {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
 .chat-messages > .message.user {
   align-self: flex-end;
+}
+
+.chat-messages > .message.assistant {
+  inline-size: 100%;
+  max-inline-size: 100%;
+}
+
+.message.user .message-content {
+  inline-size: fit-content;
+  margin-inline-start: auto;
+  padding: 0.6rem 1rem;
+  border-radius: 1.25rem 1.25rem 0.3rem 1.25rem;
   background: var(--surface-strong);
+  white-space: pre-wrap;
 }
 
 .message-content {
@@ -369,6 +409,124 @@ ul {
 
 .message-content > :last-child {
   margin-bottom: 0;
+}
+
+.message-content pre {
+  position: relative;
+  padding-inline-end: 2.5rem;
+}
+
+.message-actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.message.user .message-actions {
+  justify-content: flex-end;
+}
+
+.message-action,
+.code-copy {
+  display: grid;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+}
+
+.message-action:hover,
+.message-action:focus-visible,
+.code-copy:hover,
+.code-copy:focus-visible {
+  opacity: 1;
+  background: var(--surface-strong);
+}
+
+.code-copy {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  background: var(--surface);
+}
+
+.message-action svg,
+.code-copy svg,
+.chat-jump svg,
+.chat-action svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chat-jump {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 2px 8px #0002;
+}
+
+.typing {
+  display: inline-flex;
+  gap: 0.3rem;
+  padding: 0.5rem 0;
+}
+
+.typing span {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: typing 1.2s infinite ease-in-out;
+}
+
+.typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-0.2rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing span {
+    animation: none;
+  }
 }
 
 .tool-activity {
@@ -429,25 +587,47 @@ ul {
   min-width: 0;
 }
 
-.composer-row {
+.composer-box {
+  display: grid;
+  gap: var(--gap-sm);
+  min-width: 0;
+  padding: var(--gap-sm);
+  padding-inline-start: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  background: var(--surface);
+}
+
+.composer-box:focus-within {
+  border-color: color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.chat-composer textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 1.5rem;
+  max-height: 12rem;
+  padding: 0.25rem 0;
+  resize: none;
+  overflow-y: auto;
+  font: inherit;
+  line-height: 1.5;
+  color: inherit;
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+.composer-toolbar {
   display: flex;
-  align-items: end;
+  align-items: center;
   gap: var(--gap-sm);
   min-width: 0;
 }
 
-.chat-composer textarea {
-  flex: 1;
-  min-width: 0;
-  min-height: var(--chat-composer-size);
-  max-height: 10rem;
-  padding: var(--gap-sm);
-  resize: none;
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--chat-composer-size) / 2);
+.composer-toolbar .chat-send {
+  margin-inline-start: auto;
 }
 
 .chat-send {
@@ -466,12 +646,26 @@ ul {
   height: var(--chat-action-size);
   padding: 0;
   place-items: center;
+  border: 0;
   border-radius: 50%;
-  font-size: 1.1rem;
+  background: none;
+  opacity: 0.75;
+}
+
+.chat-action:hover:not(:disabled),
+.chat-action:focus-visible {
+  opacity: 1;
+  background: var(--surface-strong);
+}
+
+.chat-action svg {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .chat-action.recording {
   color: #c33;
+  opacity: 1;
 }
 
 .composer-attachments,
@@ -723,11 +917,21 @@ dialog::backdrop {
   }
 
   .nav-toggled .shell {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 3.5rem minmax(0, 1fr);
   }
 
-  .nav-toggled .sidebar {
-    display: none;
+  .nav-toggled .sidebar a {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .nav-toggled .nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
 
   .sidebar {

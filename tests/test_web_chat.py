@@ -261,6 +261,7 @@ async def test_chat_socket_echoes_user_message_and_publishes_it() -> None:
             await websocket.send(json.dumps({"text": "hello <world>"}))
             assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {
                 "role": "user",
+                "text": "hello <world>",
                 "html": "hello &lt;world&gt;",
             }
             event = await asyncio.wait_for(anext(subscription.__aiter__()), timeout=1)

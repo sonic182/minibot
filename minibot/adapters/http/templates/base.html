@@ -21,7 +21,7 @@
     <aside class="sidebar" data-nav-panel>
       <ul>
         {% for path, label, icon in nav_entries %}
-        <li><a href="{{ path }}"{% if path == request.url.path %} class="current"{% endif %}><i data-lucide="{{ icon }}" aria-hidden="true"></i>{{ label }}</a></li>
+        <li><a href="{{ path }}" title="{{ label }}"{% if path == request.url.path %} class="current"{% endif %}><i data-lucide="{{ icon }}" aria-hidden="true"></i><span class="nav-label">{{ label }}</span></a></li>
         {% endfor %}
       </ul>
     </aside>

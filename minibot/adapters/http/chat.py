@@ -325,7 +325,7 @@ async def _send_json(websocket: WebSocket, payload: dict[str, Any], send_lock: a
 
 def _render_message(role: str, text: str, attachments: object = None) -> dict[str, Any]:
     rendered = _MARKDOWN.render(text) if role == "assistant" else escape(text)
-    response: dict[str, Any] = {"role": role, "html": rendered}
+    response: dict[str, Any] = {"role": role, "text": text, "html": rendered}
     if isinstance(attachments, list):
         response["attachments"] = attachments
     return response

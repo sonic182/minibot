@@ -6,46 +6,67 @@
 <section class="chat" x-data="webChat()" @paste.window="paste($event)"
   data-socket-token="{{ socket_token }}" data-chat-capabilities='{{ chat_capabilities | tojson }}'>
   <h1>Chat</h1>
-  <div class="chat-messages" x-ref="messages" aria-live="polite" @scroll.passive="loadOlder()">
-    <p class="muted" x-show="loadingHistory" x-cloak>Loading older messages…</p>
-    <template x-for="(message, index) in messages" :key="index">
-      <article class="message" :class="message.kind === 'tools' ? 'tool-activity' : message.kind === 'approval' ? 'approval' : message.role">
-        <template x-if="message.kind === 'approval'">
-          <div>
-            <div class="message-head"><span class="role">Approval required</span><code class="tool-name" x-text="message.toolName"></code></div>
-            <pre class="approval-detail" x-show="message.detail" x-text="message.detail"></pre>
-            <div class="approval-actions" x-show="!message.outcome">
-              <button type="button" @click="answerApproval(message, true)" :disabled="!connected || message.answering">Approve</button>
-              <button type="button" class="danger" @click="answerApproval(message, false)" :disabled="!connected || message.answering">Deny</button>
+  <div class="chat-body">
+    <div class="chat-messages" x-ref="messages" aria-live="polite" @scroll.passive="onScroll()">
+      <p class="muted" x-show="loadingHistory" x-cloak>Loading older messages…</p>
+      <template x-for="(message, index) in messages" :key="index">
+        <article class="message" :class="message.kind === 'tools' ? 'tool-activity' : message.kind === 'approval' ? 'approval' : message.role">
+          <template x-if="message.kind === 'approval'">
+            <div>
+              <div class="message-head"><span class="role">Approval required</span><code class="tool-name" x-text="message.toolName"></code></div>
+              <pre class="approval-detail" x-show="message.detail" x-text="message.detail"></pre>
+              <div class="approval-actions" x-show="!message.outcome">
+                <button type="button" @click="answerApproval(message, true)" :disabled="!connected || message.answering">Approve</button>
+                <button type="button" class="danger" @click="answerApproval(message, false)" :disabled="!connected || message.answering">Deny</button>
+              </div>
+              <p class="approval-outcome" x-show="message.outcome" x-text="approvalOutcome(message.outcome)"></p>
             </div>
-            <p class="approval-outcome" x-show="message.outcome" x-text="approvalOutcome(message.outcome)"></p>
-          </div>
-        </template>
-        <template x-if="message.kind === 'tools'">
-          <div><div class="message-head"><span class="role">Tools</span></div><ul class="tool-list"><template x-for="tool in message.tools" :key="tool.callId"><li class="tool-row"><code class="tool-name" x-text="tool.name"></code><span class="tool-status" x-text="toolStatus(tool.phase)"></span></li></template></ul></div>
-        </template>
-        <template x-if="message.kind !== 'tools' && message.kind !== 'approval'">
-          <div>
-            <div class="message-head"><span class="role" x-text="message.role"></span></div>
-            <div class="message-content" x-html="message.html"></div>
-            <template x-if="message.attachments?.length"><div class="chat-attachments"><template x-for="attachment in message.attachments" :key="attachment.id"><div class="chat-attachment"><img x-show="attachment.kind === 'image'" :src="attachment.url" :alt="attachment.filename"><audio x-show="attachment.kind === 'audio'" :src="attachment.url" controls></audio><span x-text="attachment.filename"></span></div></template></div></template>
-          </div>
-        </template>
-      </article>
-    </template>
-    <p class="muted" x-show="busy" x-cloak>Thinking…</p>
-    <p class="muted" x-show="error" x-text="error" x-cloak></p>
+          </template>
+          <template x-if="message.kind === 'tools'">
+            <div><div class="message-head"><span class="role">Tools</span></div><ul class="tool-list"><template x-for="tool in message.tools" :key="tool.callId"><li class="tool-row"><code class="tool-name" x-text="tool.name"></code><span class="tool-status" x-text="toolStatus(tool.phase)"></span></li></template></ul></div>
+          </template>
+          <template x-if="message.kind !== 'tools' && message.kind !== 'approval'">
+            <div>
+              <span class="sr-only" x-text="message.role"></span>
+              <div class="message-content" x-html="message.html" x-effect="message.html; decorateCodeBlocks($el)"></div>
+              <template x-if="message.attachments?.length"><div class="chat-attachments"><template x-for="attachment in message.attachments" :key="attachment.id"><div class="chat-attachment"><img x-show="attachment.kind === 'image'" :src="attachment.url" :alt="attachment.filename"><audio x-show="attachment.kind === 'audio'" :src="attachment.url" controls></audio><span x-text="attachment.filename"></span></div></template></div></template>
+              <div class="message-actions">
+                <button type="button" class="message-action" @click="copyMessage(message, $el)" :aria-label="message.copied ? 'Copied' : 'Copy message'" :title="message.copied ? 'Copied' : 'Copy'">
+                  <svg x-show="!message.copied" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                  <svg x-show="message.copied" x-cloak viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+                </button>
+              </div>
+            </div>
+          </template>
+        </article>
+      </template>
+      <div class="message assistant" x-show="busy" x-cloak>
+        <span class="typing" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="sr-only">Thinking</span>
+      </div>
+      <p class="muted" x-show="error" x-text="error" x-cloak></p>
+    </div>
+    <button type="button" class="chat-jump" x-show="!atBottom" x-cloak @click="scrollToEnd()" aria-label="Scroll to latest message">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
   </div>
   <form class="chat-composer" @submit.prevent="send()" @dragover.prevent @drop.prevent="drop($event)">
     <input x-ref="fileInput" class="sr-only" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,audio/aac,audio/mpeg,audio/mp4,audio/ogg,audio/wav,audio/webm" @change="select($event)">
-    <template x-if="attachments.length"><div class="composer-attachments"><template x-for="attachment in attachments" :key="attachment.id"><div class="composer-attachment"><img x-show="attachment.kind === 'image'" :src="attachment.url" :alt="attachment.filename"><audio x-show="attachment.kind === 'audio'" :src="attachment.url" controls></audio><span x-text="attachment.filename"></span><button type="button" @click="remove(attachment)" aria-label="Remove attachment">×</button></div></template></div></template>
-    <div class="composer-row">
-      <button x-show="capabilities.uploads_enabled" x-cloak class="chat-action" type="button" @click="$refs.fileInput.click()" :disabled="!connected || uploading" aria-label="Attach image or audio">+</button>
-      <button x-show="capabilities.audio_enabled" x-cloak class="chat-action" :class="recording ? 'recording' : ''" type="button" @click="toggleRecording()" :disabled="!connected || uploading" aria-label="Record audio"><span x-text="recording ? '■' : '●'"></span></button>
+    <div class="composer-box">
+      <template x-if="attachments.length"><div class="composer-attachments"><template x-for="attachment in attachments" :key="attachment.id"><div class="composer-attachment"><img x-show="attachment.kind === 'image'" :src="attachment.url" :alt="attachment.filename"><audio x-show="attachment.kind === 'audio'" :src="attachment.url" controls></audio><span x-text="attachment.filename"></span><button type="button" @click="remove(attachment)" aria-label="Remove attachment">×</button></div></template></div></template>
       <label class="sr-only" for="chat-message">Message</label>
-      <textarea id="chat-message" x-model="draft" :disabled="!connected || uploading" rows="1" placeholder="Write a message…"></textarea>
-      <button class="chat-send" type="submit" x-show="!canStop()" :disabled="!canSend()" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" /></svg></button>
-      <button class="chat-send" type="button" x-show="canStop()" x-cloak :disabled="!connected || stopping" aria-label="Stop reply" @click="stop()"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg></button>
+      <textarea id="chat-message" x-ref="composer" x-model="draft" :disabled="!connected || uploading" rows="1" placeholder="Write a message…" @keydown.enter="onEnter($event)"></textarea>
+      <div class="composer-toolbar">
+        <button x-show="capabilities.uploads_enabled" x-cloak class="chat-action" type="button" @click="$refs.fileInput.click()" :disabled="!connected || uploading" aria-label="Attach image or audio">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button x-show="capabilities.audio_enabled" x-cloak class="chat-action" :class="recording ? 'recording' : ''" type="button" @click="toggleRecording()" :disabled="!connected || uploading" :aria-label="recording ? 'Stop recording' : 'Record audio'">
+          <svg x-show="!recording" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
+          <svg x-show="recording" x-cloak viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+        </button>
+        <button class="chat-send" type="submit" x-show="!canStop()" :disabled="!canSend()" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" /></svg></button>
+        <button class="chat-send" type="button" x-show="canStop()" x-cloak :disabled="!connected || stopping" aria-label="Stop reply" @click="stop()"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg></button>
+      </div>
     </div>
     <p class="muted" x-show="recording" x-cloak>Recording <span x-text="recordingSeconds"></span>s — tap stop when finished.</p>
     <p class="muted" x-show="capabilities.uploads_enabled" x-cloak>Drop or paste images, or attach image/audio files.</p>

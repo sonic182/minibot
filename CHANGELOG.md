@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Web chat view reworked.** The composer is one box that grows with the text up to about eight lines, then scrolls.
+  Enter sends and Shift+Enter starts a new line; on touch screens Enter starts a new line. Your messages keep their
+  line breaks, and replies are shown without a box. Each message has a copy button, which copies the reply's markdown
+  source, and each code block has its own copy button. The view follows new messages only while you are at the bottom,
+  and a button brings you back when you are not.
 - **Web UI restyled.** The dashboard stylesheet has a new neutral look: surfaces, a clearer type scale, pill tags,
   a sidebar with a current-page highlight and inverted submit buttons, in light and dark mode. Pages keep their
   layout and behavior, and no new assets are added.
