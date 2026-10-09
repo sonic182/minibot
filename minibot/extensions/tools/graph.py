@@ -1,4 +1,4 @@
-"""Relation-graph tool, opt-in through ``[extensions] modules``.
+"""Relation-graph tools, opt-in through ``[extensions] modules``.
 
 Deliberately not in ``_bundled_modules``: that tuple is empty for ``entrypoint="worker"``, so a
 bundled registration would never reach a spawned task. Arriving via ``settings.extensions.modules``

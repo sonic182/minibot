@@ -194,10 +194,10 @@ It can replace or complement MiniBot's built-in stores:
 - **vs. the** ``memory_*`` **tools** (``[tools.kv_memory]``, see :doc:`tools`): ``memory_search`` looks entries up
   by title and suits exact, structured facts. gmem recalls by meaning, which suits longer notes and
   vague questions ("what did we decide about the mail setup?").
-- **vs. the** ``graph`` **tool** (see :doc:`graph`): both store relationships between entities. gmem keeps
+- **vs. the** ``graph_*`` **tools** (see :doc:`graph`): both store relationships between entities. gmem keeps
   them next to the memories they came from, and the same store can be shared with other MCP
   clients (for example coding agents running ``gmem mcp`` against the same ``GRAPHMEM_HOME``).
-- **As a complement**, keep ``memory``/``graph`` for the bot's own facts and use gmem as long-term,
+- **As a complement**, keep the ``memory_*``/``graph_*`` tools for the bot's own facts and use gmem as long-term,
   shared memory. Tell the agent in its prompt which store is for what, or it will save the same fact
   twice.
 - **As a replacement**, leave ``[tools.kv_memory] enabled = false`` and the graph extension unloaded,

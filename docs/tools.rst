@@ -46,9 +46,9 @@ Tool Surface
      - ``[tools.kv_memory]``
      - Save, update, retrieve, search, list, and delete persistent user notes. One tool per operation, so a pattern such as ``memory_*`` covers all of them. The old ``memory`` name is rejected in ``tools_allow``, ``tools_deny`` and ``require_approval``.
    * - Relation graph
-     - ``graph``
+     - ``graph_link``, ``graph_unlink``, ``graph_merge``, ``graph_neighbors``, ``graph_path``, ``graph_search``
      - ``minibot.extensions.tools.graph`` extension; ``graph`` extra
-     - Store and traverse typed, owner-scoped relationships between entities. See :doc:`graph`.
+     - Store and traverse typed, owner-scoped relationships between entities. One tool per operation, so a pattern such as ``graph_*`` covers all of them. The old ``graph`` name is rejected in ``tools_allow``, ``tools_deny`` and ``require_approval``. See :doc:`graph`.
    * - Utility
      - ``current_datetime``
      - ``[tools.time]``; enabled by default
@@ -136,13 +136,9 @@ Tool Surface
      - ``[tools.audio_transcription]`` and ``[tools.file_storage]``
      - Transcribe or translate managed audio files with faster-whisper.
    * - Scheduled prompts
-     - ``schedule``
-     - ``[scheduler.prompts]``
-     - Unified facade for create, list, cancel, and delete scheduled prompts.
-   * - Scheduled prompts
      - ``schedule_prompt``
      - ``[scheduler.prompts]``
-     - Create a one-time or recurring scheduled prompt.
+     - Create a one-time or recurring scheduled prompt. The old ``schedule`` facade was removed and its name is rejected in ``tools_allow``, ``tools_deny`` and ``require_approval``.
    * - Scheduled prompts
      - ``list_scheduled_prompts``
      - ``[scheduler.prompts]``

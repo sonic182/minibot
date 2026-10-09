@@ -107,7 +107,7 @@ def test_load_extensions_for_worker_exposes_scheduler_tools_without_pages(tmp_pa
 
     registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
 
-    assert {binding.tool.name for binding in registry.tools} >= {"schedule", "schedule_prompt"}
+    assert {binding.tool.name for binding in registry.tools} >= {"schedule_prompt", "list_scheduled_prompts"}
     assert registry.pages() == []
     assert registry.routes == []
 

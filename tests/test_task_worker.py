@@ -178,7 +178,8 @@ async def test_run_agent_loop_gives_workers_the_scheduler_tools(tmp_path: Path) 
         )
 
     names = {binding.tool.name for binding in _ToolCapturingRuntime.tools}
-    assert {"schedule", "schedule_prompt", "list_scheduled_prompts"} <= names
+    assert {"schedule_prompt", "list_scheduled_prompts"} <= names
+    assert "schedule" not in names
 
 
 class _EmptyCompletionRuntime:
@@ -345,7 +346,7 @@ def test_build_worker_tools_excludes_orchestration_tools() -> None:
     assert "fetch_agent_info" not in tool_names
     assert not any(name.startswith("memory_") for name in tool_names)
     assert "chat_history_info" not in tool_names
-    assert "schedule" not in tool_names
+    assert "schedule_prompt" not in tool_names
     assert "self_insert_artifact" not in tool_names
 
 

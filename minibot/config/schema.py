@@ -51,6 +51,8 @@ def _coerce_byte_size(value: Any) -> int:
 _REMOVED_TOOL_REPLACEMENTS = {
     "filesystem": "list_files, file_info, write_file, move_file, delete_file, send_file",
     "memory": "memory_create, memory_update, memory_get, memory_search, memory_delete, memory_list_titles",
+    "graph": "graph_link, graph_unlink, graph_merge, graph_neighbors, graph_path, graph_search",
+    "schedule": "schedule_prompt, list_scheduled_prompts, cancel_scheduled_prompt, delete_scheduled_prompt",
 }
 
 
@@ -945,8 +947,9 @@ class ToolApprovalConfig(BaseModel):
     without running or asking. Patterns match the canonical tool name (``http_request``, not an alias),
     and unknown keys inside ``[tools.approval]`` are rejected so a misspelled option cannot silently
     turn the gate off. The section name itself must be spelled exactly ``[tools.approval]``. The removed
-    ``filesystem`` and ``memory`` tool names are rejected here and in every ``tools_allow``/``tools_deny``;
-    name their replacements, such as ``delete_file`` or ``memory_delete``, instead.
+    ``filesystem``, ``memory``, ``graph`` and ``schedule`` tool names are rejected here and in every
+    ``tools_allow``/``tools_deny``; name their replacements, such as ``delete_file``, ``memory_delete``,
+    ``graph_link`` or ``schedule_prompt``, instead.
     """
 
     model_config = ConfigDict(extra="forbid")

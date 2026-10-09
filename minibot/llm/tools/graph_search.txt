@@ -1,0 +1,3 @@
+Find nodes and edges of the relation graph by text fragment, matched against source, rel, and target. Requires query. Optional limit (default 25) and history. Use it to discover the exact id of an entity before graph_link, graph_neighbors or graph_path, and reuse the id it returns instead of coining a variant. Node ids are typed "type:id" strings such as person:alex or tech:vue; the optional graph parameter selects a namespace and defaults to "memory".
+
+Returns the matching edges as source, rel, target, with valid_from, and valid_to on closed ones. Edges with valid_to are no longer true and must be reported as past, never as current.

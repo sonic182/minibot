@@ -130,8 +130,8 @@ mandatory unless bound to loopback.
 
 ## Relation graph
 
-The optional `graph` tool (the `minibot.extensions.tools.graph` extension plus the `graph`
-extra) stores typed, owner-scoped relationships between entities in SQLite. Use it for
+The optional `graph_*` tools (the `minibot.extensions.tools.graph` extension plus the `graph`
+extra) store typed, owner-scoped relationships between entities in SQLite. Use it for
 connections; keep single-entity facts in the `memory_*` tools.
 
 ## Audio transcription

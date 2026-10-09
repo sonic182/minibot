@@ -25,7 +25,7 @@ Runtime Fragments
 - **Policy fragments**: add files under ``prompts/policies/*.md`` for cross-channel rules
   (loaded in sorted order). Every file in the directory is loaded **unconditionally** — the
   loader globs the directory and never inspects which tools are attached. Prompt text such as
-  "applies when the ``graph`` tool is attached" is guidance addressed to the model, not a
+  "applies when the ``graph_*`` tools are attached" is guidance addressed to the model, not a
   condition the loader evaluates. For a fragment that must appear only when a given tool is
   attached, add a gated ``_<name>_fragment()`` method to
   ``minibot/app/handlers/services/prompt_service.py`` instead (see
@@ -76,9 +76,9 @@ prompt (or the compaction pass):
      specialist work; use ``fetch_agent_info`` when the roster description is not enough;
      never claim a delegated result, since it arrives as a later message; continue locally
      when delegation is unavailable or fails.
-   - ``graph.md`` — decide between the relation ``graph`` and the durable ``memory_*`` tools: a fact naming
+   - ``graph.md`` — decide between the relation ``graph_*`` tools and the durable ``memory_*`` tools: a fact naming
      two things is an edge and belongs in the graph. Note this fragment ships even when the
-     ``graph`` tool is disabled; it relies on the model no-opping when the tool is absent.
+     ``graph_*`` tools are disabled; it relies on the model no-opping when the tools are absent.
    - ``tool_usage.md`` — route the model to the right tool: ``memory_*`` vs ``history``,
      ``apply_patch`` for existing-file edits vs ``write_file``/``move_file``/``delete_file`` for file management, reuse
      canonical path fields from tool output, absolute paths in yolo mode.
