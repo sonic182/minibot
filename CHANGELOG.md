@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-09
+
 ### Added
 
 - **Tool approvals in the web chat.** A tool in `[tools.approval] require_approval` called from a `/chat` turn, or
@@ -1437,7 +1439,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.30.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.31.0...HEAD
+[0.31.0]: https://github.com/sonic182/minibot/compare/0.30.0..0.31.0
 [0.30.0]: https://github.com/sonic182/minibot/compare/0.29.0..0.30.0
 [0.29.0]: https://github.com/sonic182/minibot/compare/0.28.0..0.29.0
 [0.28.0]: https://github.com/sonic182/minibot/compare/0.27.0..0.28.0
