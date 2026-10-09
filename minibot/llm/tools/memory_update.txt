@@ -1,0 +1,3 @@
+Update an existing persistent user memory entry by entry_id. The title is immutable. Provide at least one of data, category, metadata, source or expires_at. Get the entry_id from memory_search or memory_list_titles first; follow the search-first workflow in memory_create before changing anything.
+
+`category` is managed separately. Do not put it inside metadata.
