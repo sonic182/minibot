@@ -359,6 +359,23 @@ ul {
   white-space: nowrap;
 }
 
+.approval-detail {
+  margin-block: var(--gap-sm);
+  font-size: 0.85rem;
+}
+
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+
+.approval-outcome {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
 .chat-composer {
   display: grid;
   gap: var(--gap-sm);

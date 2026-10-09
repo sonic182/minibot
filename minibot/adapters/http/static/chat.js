@@ -9,6 +9,7 @@ window.webChat = () => ({
   messages: [],
   draft: "",
   busy: false,
+  stopping: false,
   error: "",
   connected: false,
   socket: null,
@@ -69,6 +70,20 @@ window.webChat = () => ({
       if (tool) tool.phase = event.phase;
       else turn.tools.push({ callId: event.call_id, name: event.tool_name, phase: event.phase });
     }
+    if (event.kind === "approval" && !this.findApproval(event.approval_id)) {
+      this.messages.push({
+        kind: "approval",
+        approvalId: event.approval_id,
+        toolName: event.tool_name,
+        detail: event.detail,
+        outcome: null,
+        answering: false,
+      });
+    }
+    if (event.kind === "approval_resolved") {
+      const approval = this.findApproval(event.approval_id);
+      if (approval) approval.outcome = event.outcome;
+    }
     if (event.html !== undefined) {
       if (event.attachments) {
         event.attachments = event.attachments.map((attachment) => ({
@@ -81,7 +96,10 @@ window.webChat = () => ({
         this.clearSent(event.attachments);
       }
     }
-    if (event.busy !== undefined) this.busy = event.busy;
+    if (event.busy !== undefined) {
+      this.busy = event.busy;
+      this.stopping = false;
+    }
     if (event.error) {
       this.error = event.error;
       this.loadingHistory = false;
@@ -141,12 +159,36 @@ window.webChat = () => ({
     return turn;
   },
 
+  findApproval(approvalId) {
+    return this.messages.find((message) => message.kind === "approval" && message.approvalId === approvalId);
+  },
+
+  answerApproval(approval, approved) {
+    if (!this.connected || approval.answering) return;
+    approval.answering = true;
+    this.socket.send(JSON.stringify({ kind: "approval", approval_id: approval.approvalId, approved }));
+  },
+
+  approvalOutcome(outcome) {
+    return { approved: "Approved", denied: "Denied", expired: "No answer: denied" }[outcome] ?? "";
+  },
+
   toolStatus(phase) {
     return { started: "Running", completed: "Completed", failed: "Failed" }[phase] ?? "Running";
   },
 
   canSend() {
     return this.connected && !this.uploading && (this.draft.trim() || this.attachments.length);
+  },
+
+  canStop() {
+    return this.busy && !this.draft.trim() && !this.attachments.length;
+  },
+
+  stop() {
+    if (!this.connected || !this.canStop() || this.stopping) return;
+    this.stopping = true;
+    this.socket.send(JSON.stringify({ kind: "stop" }));
   },
 
   select(event) {

@@ -7,8 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tool approvals in the web chat.** A tool in `[tools.approval] require_approval` called from a `/chat` turn, or
+  from a task started there, now shows an Approve/Deny card in the chat instead of being denied outright. A pending
+  card comes back after a reload or reconnect, and an answered or expired one shows its outcome.
+- **Stop button in the web chat.** While a reply runs, the chat's send button becomes a stop button until you type or
+  attach something. Pressing it cancels the running turn the same way Telegram's `/stop` does. Typed messages keep
+  using the send button, which folds them into the running turn.
+- **Tasks page.** The web UI has a `/tasks` page listing running tasks (`?status=all` adds finished ones) with a
+  detail view of each task's prompt, result, error and events, and a Cancel button for a running task.
+
 ### Fixed
 
+- **Denying a tool approval stops the rest of that model response.** When a model asked for several approved
+  tools in one response, denying the first still sent a new approval prompt for the next, before the model could
+  see the denial; a delegated task could then sit on an unanswered prompt until it timed out. The remaining calls
+  of the response are now skipped and returned to the model as `skipped`, so it re-plans with the denial in view.
 - **Codex no longer fails turns with `invalid_function_parameters`.** Its backend started requiring every object
   schema to define `properties`, which `schedule_prompt`'s `metadata`, `http_request`'s `headers`, `bash`'s `env`
   and free-form MCP objects did not. The OpenAI Responses provider now adds an empty `properties` map to any object

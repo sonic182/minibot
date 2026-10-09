@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+TOOL_APPROVAL_DENIED = "tool_approval:denied"
+
 
 class ToolInputError(ValueError):
     """A tool failure the caller can fix by changing its arguments.

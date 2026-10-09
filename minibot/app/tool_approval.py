@@ -15,7 +15,7 @@ from minibot.core.events import ToolApprovalRequestedEvent, ToolApprovalResolved
 from minibot.core.tools import ToolContext, ToolPayload
 from minibot.llm.services.tool_executor import canonical_tool_name, is_sensitive_argument_key
 from minibot.llm.tools.base import ToolBinding
-from minibot.shared.errors import ToolInputError
+from minibot.shared.errors import TOOL_APPROVAL_DENIED, ToolInputError
 
 Approver = Callable[[str, dict[str, Any], ToolContext], Awaitable[bool]]
 
@@ -73,7 +73,7 @@ def _wrap(binding: ToolBinding, patterns: Sequence[str], approve: Approver) -> T
             if not await approve(name, dict(arguments) if isinstance(arguments, dict) else {}, context):
                 raise ToolInputError(
                     f"The user did not approve {name}. Do not retry it unless the user asks again.",
-                    error_code="tool_approval:denied",
+                    error_code=TOOL_APPROVAL_DENIED,
                 )
         return await binding.handler(payload, context)
 

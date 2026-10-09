@@ -315,7 +315,11 @@ also contribute routes through ``mb.add_route``, or ``mb.add_page`` for one with
 ``/health`` require a bearer token or HTTP Basic credentials; one is mandatory unless ``host`` is
 the literal ``127.0.0.1`` or ``::1``. When the key-value memory, scheduled prompts, graph and MCP
 extensions are enabled, their pages are available at ``/memory``, ``/scheduled``, ``/graph`` and
-``/mcp``. TLS is out of scope: run it behind
+``/mcp``. When tasks are enabled, ``/tasks`` lists the running tasks (``?status=all`` adds finished
+ones), shows a task's prompt, result, error and events, and can cancel a running task. While a reply runs,
+the chat's send button becomes a stop button until you type or attach something; stopping works like ``/stop``
+on Telegram. TLS is out of
+scope: run it behind
 a reverse proxy when it is reachable from outside the host. The chat WebSocket authenticates with a
 per-boot token sent through ``Sec-WebSocket-Protocol``, not a URL query parameter. A TLS-terminating
 proxy must forward the original ``X-Forwarded-Proto`` and ``X-Forwarded-Host`` headers so browser
@@ -356,7 +360,7 @@ Tool Configuration
      - Key options
    * - ``[tools.approval]``
      - ``ToolApprovalConfig``
-     - ``require_approval`` (fnmatch tool-name patterns, default empty), ``timeout_seconds``; Telegram approve/deny buttons before a matching call runs, denied on timeout or outside Telegram. The buttons answer only for an authorized user, and only for the user whose request triggered the call when it is known (a scheduled job has no requester, so any authorized user may answer)
+     - ``require_approval`` (fnmatch tool-name patterns, default empty), ``timeout_seconds``; Approve/deny buttons in the Telegram or web chat (``/chat``) that started the call, before a matching call runs, denied on timeout or on channels without buttons, such as the console. In the web chat a pending approval is shown again after a reload or reconnect. A denial skips the remaining tool calls of the same model response, so the model sees it before anything else asks again. The buttons answer only for an authorized user, and only for the user whose request triggered the call when it is known (a scheduled job has no requester, so any authorized user may answer)
    * - ``[tools.kv_memory]``
      - ``KeyValueMemoryConfig``
      - ``enabled``, ``sqlite_url``, ``default_limit``, ``max_limit``

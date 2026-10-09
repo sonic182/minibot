@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from llm_async.models import Tool
+from llm_async.models import Tool, ToolCall
 from pydantic import ValidationError
 
 from minibot.adapters.config.schema import ToolApprovalConfig
@@ -18,6 +19,7 @@ from minibot.app.tool_approval import (
 )
 from minibot.core.channels import ChannelCapabilities
 from minibot.core.events import ToolApprovalRequestedEvent, ToolApprovalResolvedEvent
+from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.shared.errors import ToolInputError
 
@@ -70,6 +72,34 @@ async def test_denied_tool_raises_typed_error_and_does_not_run() -> None:
         await _call("mcp_mail__smtp_send_message", {"to": "a@b.c"}, approved=False)
 
     assert exc_info.value.error_code == "tool_approval:denied"
+
+
+@pytest.mark.asyncio
+async def test_denial_skips_the_rest_of_the_batch_without_asking_again() -> None:
+    handler = AsyncMock(return_value="ran")
+    approve = AsyncMock(return_value=False)
+    tools = apply_tool_approval(
+        [_binding("mcp_mail__smtp_send_message", handler)], patterns=["mcp_mail__smtp_*"], approve=approve
+    )
+    calls = [
+        ToolCall(
+            id=f"call_{index}",
+            type="function",
+            name="mcp_mail__smtp_send_message",
+            function={"name": "mcp_mail__smtp_send_message", "arguments": f'{{"to": "{index}@b.c"}}'},
+        )
+        for index in (1, 2)
+    ]
+
+    records = await execute_tool_calls_for_runtime(
+        calls, tools, _CONTEXT, responses_mode=False, logger=logging.getLogger("test.approval")
+    )
+
+    approve.assert_awaited_once()
+    handler.assert_not_awaited()
+    assert records[0].result.content["error_code"] == "tool_approval:denied"
+    assert records[1].result.content["skipped"] is True
+    assert records[1].message_payload["tool_call_id"] == "call_2"
 
 
 @pytest.mark.asyncio

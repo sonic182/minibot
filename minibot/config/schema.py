@@ -924,20 +924,22 @@ class RagToolConfig(BaseModel):
 class ToolApprovalConfig(BaseModel):
     """Human approval before dangerous tool calls. TOML section: ``[tools.approval]``
 
-    - ``require_approval`` — fnmatch patterns of tool names that need a Telegram approval before
-      running (default: empty, feature off). MCP tools match their exposed name, e.g.
+    - ``require_approval`` — fnmatch patterns of tool names that need an approval in the Telegram or
+      web chat before running (default: empty, feature off). MCP tools match their exposed name, e.g.
       ``mcp_mail__smtp_send_message``, also when the server runs in ``lazy`` mode.
     - ``timeout_seconds`` — how long to wait for an answer before denying (default: ``90``). The
       wait counts against the surrounding deadline, ``runtime.agent_timeout_seconds`` for the main
       agent and the task timeout for a delegated one, so keep this below both. While the main agent
       waits, other chats' turns queue behind it.
 
-    Calls are denied when nobody answers, when the turn has no Telegram chat, or when the user taps
-    Deny; the model then receives a ``tool_approval:denied`` error. Patterns match the canonical tool
-    name (``http_request``, not an alias), and unknown keys inside ``[tools.approval]`` are rejected so a
-    misspelled option cannot silently turn the gate off. The section name itself must be spelled exactly
-    ``[tools.approval]``. The removed ``filesystem`` tool name is rejected here and in every
-    ``tools_allow``/``tools_deny``; name its replacements, such as ``delete_file``, instead.
+    Calls are denied when nobody answers, when the turn came from a channel without approval buttons
+    (the console, for example), or when the user taps Deny; the model then receives a
+    ``tool_approval:denied`` error, and the remaining tool calls of the same model response are skipped
+    without running or asking. Patterns match the canonical tool name (``http_request``, not an alias),
+    and unknown keys inside ``[tools.approval]`` are rejected so a misspelled option cannot silently
+    turn the gate off. The section name itself must be spelled exactly ``[tools.approval]``. The removed
+    ``filesystem`` tool name is rejected here and in every ``tools_allow``/``tools_deny``; name its
+    replacements, such as ``delete_file``, instead.
     """
 
     model_config = ConfigDict(extra="forbid")

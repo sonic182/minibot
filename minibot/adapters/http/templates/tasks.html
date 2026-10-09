@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}minibot tasks{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Tasks</h2>
+  <p class="muted">
+    owner {{ owner_id }} &middot; {{ active_count }} active &middot;
+    {% if show_all %}<a href="/tasks">active only</a>{% else %}<a href="/tasks?status=all">show all</a>{% endif %}
+  </p>
+  {% if tasks %}
+  <ul class="entries">
+    {% for task in tasks %}
+    <li class="entry {{ '' if task.active else 'inactive' }}">
+      <div class="entry-head">
+        <strong><a href="/tasks?id={{ task.id }}">{{ task.agent }}</a></strong>
+        <span class="tag">{{ task.status }}</span>
+        {% if task.stop_reason and task.stop_reason != "completed" %}<span class="tag">{{ task.stop_reason }}</span>{% endif %}
+        {% if task.attempts %}<span class="tag">retry {{ task.attempts }}</span>{% endif %}
+        {% if task.duration %}<span class="tag">{{ task.duration }}</span>{% endif %}
+      </div>
+      <pre>{{ task.prompt_preview }}</pre>
+      <p class="muted">
+        <code>{{ task.short_id }}</code> &middot; {{ task.channel }}
+        {%- if task.created_at %} &middot; {{ task.created_at.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}
+      </p>
+      {% if task.last_error %}<pre class="error">{{ task.last_error }}</pre>{% endif %}
+      {% if task.active %}
+      <div class="entry-actions">
+        <button type="button" class="danger" data-confirm="confirm-cancel" data-confirm-value="{{ task.id }}" data-confirm-label="{{ task.agent }} ({{ task.short_id }})">
+          Cancel
+        </button>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  <dialog id="confirm-cancel">
+    <form method="post" action="/tasks{{ '?status=all' if show_all }}">
+      <input type="hidden" name="action" value="cancel">
+      <input type="hidden" name="id" data-confirm-id>
+      <p>Cancel task <strong data-confirm-title></strong>? Its worker is stopped and it is not resumed.</p>
+      <p class="dialog-actions">
+        <button type="button" data-confirm-cancel>Keep it</button>
+        <button type="submit" class="danger">Cancel it</button>
+      </p>
+    </form>
+  </dialog>
+  {% else %}
+  <p>{{ "no tasks" if show_all else "no task running right now" }}</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -15,8 +15,9 @@ from minibot.adapters.http import HttpServer, build_chat_route, build_chat_socke
 from minibot.adapters.http.chat import _render_message, _socket_is_authorized
 from minibot.adapters.messaging.web import WebChannelService
 from minibot.app.event_bus import EventBus
+from minibot.app.tool_approval import request_tool_approval
 from minibot.core.channels import ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent, ToolCallEvent
+from minibot.core.events import MessageEvent, OutboundEvent, ToolCallEvent, TurnStopRequestedEvent
 from tests.fixtures.memory import InMemoryMemoryStore
 
 TOKEN = "s3cret"
@@ -264,6 +265,30 @@ async def test_chat_socket_echoes_user_message_and_publishes_it() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_socket_stop_request_publishes_a_turn_stop() -> None:
+    event_bus = EventBus()
+    service = WebChannelService(event_bus)
+    subscription = event_bus.subscribe(types=(TurnStopRequestedEvent,))
+    server = HttpServer(
+        HTTPServerConfig(enabled=True, host="127.0.0.1", port=0),
+        websockets=[build_chat_socket(service, InMemoryMemoryStore(), SOCKET_TOKEN)],
+    )
+    await service.start()
+    await server.start()
+    try:
+        async with connect(f"ws://127.0.0.1:{server.port}/chat/ws", subprotocols=[SOCKET_TOKEN]) as websocket:
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == _EMPTY_HISTORY
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {"busy": False}
+            await websocket.send(json.dumps({"kind": "stop"}))
+            event = await asyncio.wait_for(anext(subscription.__aiter__()), timeout=1)
+            assert (event.channel, event.chat_id, event.user_id) == ("web", 1, 1)
+    finally:
+        await subscription.close()
+        await server.stop()
+        await service.stop()
+
+
+@pytest.mark.asyncio
 async def test_chat_socket_pages_older_history_on_request() -> None:
     memory = InMemoryMemoryStore()
     for index in range(55):
@@ -376,5 +401,53 @@ async def test_chat_socket_uploads_media_and_releases_attachments(tmp_path) -> N
             }
     finally:
         await subscription.close()
+        await server.stop()
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_chat_socket_answers_a_tool_approval() -> None:
+    event_bus = EventBus()
+    service = WebChannelService(event_bus)
+    server = HttpServer(
+        HTTPServerConfig(enabled=True, host="127.0.0.1", port=0),
+        websockets=[build_chat_socket(service, InMemoryMemoryStore(), SOCKET_TOKEN)],
+    )
+    await service.start()
+    await server.start()
+    try:
+        async with connect(f"ws://127.0.0.1:{server.port}/chat/ws", subprotocols=[SOCKET_TOKEN]) as websocket:
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == _EMPTY_HISTORY
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {"busy": False}
+            approval = asyncio.create_task(
+                request_tool_approval(
+                    event_bus,
+                    tool_name="mcp_mail__smtp_send_message",
+                    arguments={"to": "a@b.c"},
+                    channel="web",
+                    chat_id=1,
+                    timeout_seconds=5,
+                    supports_tool_approval=True,
+                )
+            )
+            prompt = json.loads(await asyncio.wait_for(websocket.recv(), timeout=1))
+            assert prompt["kind"] == "approval"
+            assert prompt["tool_name"] == "mcp_mail__smtp_send_message"
+            assert "a@b.c" in prompt["detail"]
+
+            answer = {"kind": "approval", "approval_id": prompt["approval_id"], "approved": True}
+            await websocket.send(json.dumps(answer))
+
+            assert await asyncio.wait_for(approval, timeout=1) is True
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {
+                "kind": "approval_resolved",
+                "approval_id": prompt["approval_id"],
+                "outcome": "approved",
+            }
+            await websocket.send(json.dumps(answer))
+            assert json.loads(await asyncio.wait_for(websocket.recv(), timeout=1)) == {
+                "error": "this approval is no longer pending"
+            }
+    finally:
         await server.stop()
         await service.stop()

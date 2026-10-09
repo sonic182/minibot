@@ -11,10 +11,13 @@ from minibot.core.channels import ChannelMessage
 from minibot.core.events import (
     MessageEvent,
     OutboundEvent,
+    ToolApprovalRequestedEvent,
+    ToolApprovalResolvedEvent,
     ToolCallEvent,
     TurnCompletedEvent,
     TurnFailedEvent,
     TurnStartedEvent,
+    TurnStopRequestedEvent,
 )
 
 _LIVE_QUEUE_LIMIT = 256
@@ -39,7 +42,20 @@ class ChatToolEvent(TypedDict):
     phase: Literal["started", "completed", "failed"]
 
 
-type ChatStreamEvent = ChatMessageEvent | ChatToolEvent
+class ChatApprovalEvent(TypedDict):
+    kind: Literal["approval"]
+    approval_id: str
+    tool_name: str
+    detail: str
+
+
+class ChatApprovalResolvedEvent(TypedDict):
+    kind: Literal["approval_resolved"]
+    approval_id: str
+    outcome: Literal["approved", "denied", "expired"]
+
+
+type ChatStreamEvent = ChatMessageEvent | ChatToolEvent | ChatApprovalEvent | ChatApprovalResolvedEvent
 type ChatEvent = ChatStreamEvent | ChatStateEvent
 
 
@@ -77,13 +93,21 @@ class WebChannelService:
         self._logger = logging.getLogger("minibot.web")
         self._message_id = 0
         self._subscription: EventSubscription = event_bus.subscribe(
-            types=(OutboundEvent, TurnStartedEvent, TurnCompletedEvent, TurnFailedEvent)
+            types=(
+                OutboundEvent,
+                TurnStartedEvent,
+                TurnCompletedEvent,
+                TurnFailedEvent,
+                ToolApprovalRequestedEvent,
+                ToolApprovalResolvedEvent,
+            )
         )
         self._tool_call_subscription: EventSubscription = event_bus.subscribe(types=(ToolCallEvent,), lossy=True)
         self._outgoing_task: asyncio.Task[None] | None = None
         self._tool_call_task: asyncio.Task[None] | None = None
         self._busy = False
         self._subscribers: set[WebChatSubscription] = set()
+        self._pending_approvals: dict[str, ChatApprovalEvent] = {}
 
     async def start(self) -> None:
         if self._outgoing_task is None or self._outgoing_task.done():
@@ -102,6 +126,7 @@ class WebChannelService:
         self._outgoing_task = None
         self._tool_call_task = None
         self._subscribers.clear()
+        self._pending_approvals.clear()
 
     async def publish_user_message(
         self,
@@ -127,14 +152,29 @@ class WebChannelService:
         self._broadcast(event)
         await self._event_bus.publish(MessageEvent(message=message))
 
+    async def request_stop(self) -> None:
+        await self._event_bus.publish(
+            TurnStopRequestedEvent(channel="web", chat_id=self._chat_id, user_id=self._user_id)
+        )
+
     def subscribe(self) -> WebChatSubscription:
         subscription = WebChatSubscription(
             events=asyncio.Queue(maxsize=_LIVE_QUEUE_LIMIT),
             state=asyncio.Queue(maxsize=1),
         )
         _replace_state(subscription.state, {"busy": self._busy})
+        for approval in self._pending_approvals.values():
+            _offer(subscription.events, approval)
         self._subscribers.add(subscription)
         return subscription
+
+    async def resolve_approval(self, approval_id: str, approved: bool) -> bool:
+        if approval_id not in self._pending_approvals:
+            return False
+        await self._event_bus.publish(
+            ToolApprovalResolvedEvent(approval_id=approval_id, approved=approved, user_id=self._user_id)
+        )
+        return True
 
     def unsubscribe(self, subscription: WebChatSubscription) -> None:
         self._subscribers.discard(subscription)
@@ -152,6 +192,10 @@ class WebChannelService:
                     self._set_busy(False)
                 elif isinstance(event, TurnFailedEvent) and event.channel == "web":
                     self._set_busy(False, error=event.error)
+                elif isinstance(event, ToolApprovalRequestedEvent) and event.channel == "web":
+                    self._request_approval(event)
+                elif isinstance(event, ToolApprovalResolvedEvent):
+                    self._finish_approval(event)
             except Exception:
                 self._logger.exception("web outbound event failed", extra={"event_type": event.event_type})
 
@@ -171,6 +215,29 @@ class WebChannelService:
                 )
             except Exception:
                 self._logger.exception("web tool call event failed", extra={"event_type": event.event_type})
+
+    def _request_approval(self, event: ToolApprovalRequestedEvent) -> None:
+        approval: ChatApprovalEvent = {
+            "kind": "approval",
+            "approval_id": event.approval_id,
+            "tool_name": event.tool_name,
+            "detail": event.detail,
+        }
+        self._pending_approvals[event.approval_id] = approval
+        self._logger.info(
+            "tool approval prompt sent",
+            extra={"approval_id": event.approval_id, "tool_name": event.tool_name},
+        )
+        self._broadcast(approval)
+
+    def _finish_approval(self, event: ToolApprovalResolvedEvent) -> None:
+        if self._pending_approvals.pop(event.approval_id, None) is None:
+            return
+        if event.user_id is None:
+            outcome: Literal["approved", "denied", "expired"] = "expired"
+        else:
+            outcome = "approved" if event.approved else "denied"
+        self._broadcast({"kind": "approval_resolved", "approval_id": event.approval_id, "outcome": outcome})
 
     def _broadcast(self, event: ChatEvent) -> None:
         if "busy" in event:
