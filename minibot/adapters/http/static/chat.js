@@ -92,6 +92,7 @@ window.webChat = () => ({
         }));
       }
       this.messages.push(event);
+      if (event.role !== "user") this.stopping = false;
       if (event.role === "user" && event.attachments) {
         this.clearSent(event.attachments);
       }

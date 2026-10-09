@@ -316,11 +316,10 @@ also contribute routes through ``mb.add_route``, or ``mb.add_page`` for one with
 the literal ``127.0.0.1`` or ``::1``. When the key-value memory, scheduled prompts, graph and MCP
 extensions are enabled, their pages are available at ``/memory``, ``/scheduled``, ``/graph`` and
 ``/mcp``. When tasks are enabled, ``/tasks`` lists the running tasks (``?status=all`` adds finished
-ones), shows a task's prompt, result, error and events, and can cancel a running task. While a reply runs,
-the chat's send button becomes a stop button until you type or attach something; stopping works like ``/stop``
-on Telegram. TLS is out of
-scope: run it behind
-a reverse proxy when it is reachable from outside the host. The chat WebSocket authenticates with a
+ones), shows a task's prompt, result, error and events, and can cancel a running task. While a reply
+runs, the chat's send button becomes a stop button until you type or attach something; stopping works
+like ``/stop`` on Telegram. TLS is out of scope: run it behind a reverse proxy when it is reachable
+from outside the host. The chat WebSocket authenticates with a
 per-boot token sent through ``Sec-WebSocket-Protocol``, not a URL query parameter. A TLS-terminating
 proxy must forward the original ``X-Forwarded-Proto`` and ``X-Forwarded-Host`` headers so browser
 origin validation compares against the public origin.

@@ -8,7 +8,7 @@ from html import escape
 from typing import Any
 
 from markdown_it import MarkdownIt
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, StrictBool, ValidationError
 from starlette.requests import Request
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -51,7 +51,7 @@ class _UploadCancel(BaseModel):
 
 class _ApprovalAnswer(BaseModel):
     approval_id: str
-    approved: bool
+    approved: StrictBool
 
 
 def build_chat_route(socket_token: str, capabilities: ChatCapabilities | None = None) -> RouteSpec:
