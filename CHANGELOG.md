@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `graph_*` in `tools_allow`, `tools_deny` or `require_approval`. The old `graph` name is rejected at config load,
   with the replacement names in the error, the same as `memory`. Agent definitions that list `graph` in their
   `tools_allow` or `tools_deny` frontmatter are rejected too, so update them before upgrading.
+- **aiosonic 1.2.0.** `async with HTTPClient()` now closes its connections on exit, so the models catalog fetch,
+  remote audio transcription and `install_skill` downloads no longer leave them open. `install_skill` follows
+  redirects with aiosonic's `follow` instead of its own loop, still refusing any non-https URL and more than 5
+  redirects.
 
 ### Removed
 

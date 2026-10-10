@@ -15,9 +15,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 import aiosonic
+from aiosonic.exceptions import MaxRedirects
 from aiosonic.timeout import Timeouts
 from llm_async.models import Tool
 
@@ -36,7 +37,6 @@ _LOCK_FILE = "skills-lock.json"
 _UNSAFE_DIR_CHARS = re.compile(r"[^a-z0-9._-]+")
 _GITHUB_SEGMENT = re.compile(r"(?!\.+$)[A-Za-z0-9._-]+")
 _MAX_REDIRECTS = 5
-_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _PREVIEW_FILES = 50
 _PREVIEW_CHARS = 1500
 _INSTALL_LOCK = threading.Lock()
@@ -185,26 +185,22 @@ def _github(owner: str, repo: str, ref: str | None, subpath: str, skill: str | N
 
 async def download(url: str) -> bytes:
     timeouts = Timeouts(sock_connect=10, sock_read=30)
-    async with aiosonic.HTTPClient() as client:
-        current = url
-        for _ in range(_MAX_REDIRECTS + 1):
-            response = await client.request(current, follow=False, timeouts=timeouts)
-            if response.status_code not in _REDIRECT_STATUSES:
-                break
-            location = response.headers.get("location")
-            if not location:
-                raise ValueError(f"redirect without a Location header from {current}")
-            current = urljoin(current, location)
-            if urlparse(current).scheme != "https":
-                raise ValueError(f"refusing to follow a redirect to a non-https URL: {current}")
-        else:
-            raise ValueError(f"more than {_MAX_REDIRECTS} redirects for {url}")
+    async with aiosonic.HTTPClient(event_hooks={"request": [_require_https]}) as client:
+        try:
+            response = await client.request(url, follow=True, max_redirects=_MAX_REDIRECTS, timeouts=timeouts)
+        except MaxRedirects:
+            raise ValueError(f"more than {_MAX_REDIRECTS} redirects for {url}") from None
         if response.status_code != 200:
             raise ValueError(f"download failed: HTTP {response.status_code} for {url}")
         body = await response.content()
     if len(body) > MAX_DOWNLOAD_BYTES:
         raise ValueError(f"download exceeds {MAX_DOWNLOAD_BYTES} bytes")
     return body
+
+
+def _require_https(_method: str, url: str, _headers: Any) -> None:
+    if urlparse(url).scheme != "https":
+        raise ValueError(f"refusing a non-https URL: {url}")
 
 
 def _process(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import tarfile
@@ -495,3 +496,19 @@ def test_the_bundled_create_agent_skill_is_loadable() -> None:
     assert spec is not None
     assert spec.source is SkillSource.NATIVE
     assert "create_agent" in spec.body
+
+
+@pytest.mark.asyncio
+async def test_download_refuses_non_https_url_before_connecting(unused_tcp_port: int) -> None:
+    connections: list[bool] = []
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        connections.append(True)
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", unused_tcp_port)
+    async with server:
+        with pytest.raises(ValueError, match="non-https"):
+            await skill_installer.download(f"http://127.0.0.1:{unused_tcp_port}/archive.tar.gz")
+
+    assert connections == []

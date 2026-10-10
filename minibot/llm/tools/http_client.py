@@ -166,8 +166,8 @@ class HTTPClientTool:
             }
         except Exception as exc:  # noqa: BLE001
             self._logger.exception("http tool request failed", exc_info=exc)
-            # aiosonic raises a bare AssertionError on an unparseable status line, and str() of it is
-            # empty; without the class name the model receives no reason at all for the failure.
+            # aiosonic raises some errors (RequestTimeout, ConnectionDisconnected) without a message, so
+            # without the class name the model receives no reason at all for the failure.
             detail = str(exc).strip() or exc.__class__.__name__
             error = f"{method} {url} failed: {detail}"
             error_code = "http_request_failed"
