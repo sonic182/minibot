@@ -8,6 +8,10 @@ description: Orientation and change-routing for developing MiniBot itself. Use b
 Start here before adding or changing anything in MiniBot. This skill routes a change to the
 right files; it does not restate the architecture, it points into it.
 
+References in this skill and its `references/` name a file and a symbol, never a line number:
+locate the definition with `find_symbol` (gmem) or `rg`. Keep it that way when editing them —
+line numbers go stale with every change.
+
 ## Orientation
 
 ```
@@ -81,10 +85,11 @@ If it works as an extension, it stays out of the core. Full rule: `docs/architec
 - **Never classify LLM intent or state by regex, substring, or ad-hoc text matching.** Use
   structured schema fields or model-native structured output. Text matching is only for
   deterministic protocol parsing (markdown fences, SSE framing). Live reference implementation:
-  `app/tool_use_guardrail.py:41` + `app/tool_guardrail_validator.py:11`.
+  `LLMClassifierToolUseGuardrail` (`app/tool_use_guardrail.py`) + `ToolGuardrailPayload`
+  (`app/tool_guardrail_validator.py`).
 - **No `print`** — Ruff `T201`; use structured logging.
 - **No 1-2 character identifiers** except `i j x y mb on ok`. This is the only style rule CI
-  enforces (`pyproject.toml:140`), which is why the codebase writes `except … as exc`.
+  enforces (`[tool.pylint.basic]` in `pyproject.toml`), which is why the codebase writes `except … as exc`.
 - **Line length 119**, Python 3.12–3.14, explicit type hints, async-first on I/O paths,
   timezone-aware datetimes.
 - **No comments** unless a constraint is genuinely non-obvious, or the docstring is a public
