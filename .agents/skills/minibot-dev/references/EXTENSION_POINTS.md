@@ -1,7 +1,8 @@
 # Extension Points
 
 Where each kind of change lands, with the wiring chain that explains *why* it lands there.
-Line numbers are anchors, not guarantees — confirm the symbol is still there before editing.
+References name a file and a symbol, never a line number: find the definition with `find_symbol`
+(gmem) or `rg`.
 
 ---
 
@@ -11,15 +12,15 @@ Line numbers are anchors, not guarantees — confirm the symbol is still there b
 
 ```
 daemon.run()                                   app/daemon.py
-  └─ AppContainer.configure()                  adapters/container/app_container.py:54
-      └─ load_extensions(...)                  app/extensions.py:303  (called at app_container.py:92)
-          └─ importlib.import_module(name)     ← bundled list in _bundled_modules, extensions.py:33
+  └─ AppContainer.configure()                  adapters/container/app_container.py
+      └─ load_extensions(...)                  app/extensions.py
+          └─ importlib.import_module(name)     ← bundled list in _bundled_modules (app/extensions.py)
               └─ your_module.register(mb)      ← YOUR CODE
                   └─ mb.tool / mb.add_tool
-  └─ Dispatcher._build_tools                   app/dispatcher.py:222
-      └─ build_enabled_tools(extension_tools=...)   app/tool_factory.py:26
-          ├─ tools.extend(extension_tools)     tool_factory.py:60
-          └─ _ensure_unique_tool_names(tools)  tool_factory.py:68
+  └─ Dispatcher._build_tools                   app/dispatcher.py
+      └─ build_enabled_tools(extension_tools=...)   app/tool_factory.py
+          ├─ tools.extend(extension_tools)
+          └─ _ensure_unique_tool_names(tools)  app/tool_factory.py
       └─ main_agent_tool_view(...)             app/tool_capabilities.py
 ```
 
@@ -31,19 +32,19 @@ A tool that ships with MiniBot takes the same path: a bundled module under
 `minibot/extensions/tools/` added to `_bundled_modules`, reading its `[tools.<key>]` config
 from `mb.settings`. See `minibot/extensions/tools/utility.py`.
 
-`ExtensionContext` (`app/extensions.py:72`) is deliberately narrow — this is the whole surface:
+`ExtensionContext` (`app/extensions.py`) is deliberately narrow — this is the whole surface:
 
-| Member | Anchor | Notes |
-|---|---|---|
-| `mb.name` / `mb.config` / `mb.settings` | `:85-87` | `config` is the `[extensions.config.<module>]` slice; `settings` is full validated `Settings` |
-| `mb.event_bus` / `mb.logger` / `mb.entrypoint` | `:88-90` | entrypoint is `"daemon" \| "console" \| "worker"` |
-| `mb.vault` | `:91` | unlocked vault or `None`; never expose a secret to the LLM |
-| `mb.agent_registry` / `mb.agent_management` / `mb.refresh_tools` | `:94-97` | registry is updated in place after registration; read specs when needed |
-| `mb.on(EventType[, handler])` | `:105` | decorator or direct call; extension subscriptions are **lossy** |
-| `mb.tool(func)` | `:117` | name = `__name__`, description = docstring, schema = first arg's pydantic model |
-| `mb.add_tool(binding)` | `:161` | escape hatch for a custom name, hand-written schema, or file-loaded description |
-| `mb.add_service(service)` | `:167` | anything with async `start()`/`stop()` |
-| `mb.add_route` / `mb.add_prompt_fragment` / `mb.add_page` | `:170-192` | HTTP routes, system-prompt fragments (optionally tied to tool names), web UI pages |
+| Member | Notes |
+|---|---|
+| `mb.name` / `mb.config` / `mb.settings` | `config` is the `[extensions.config.<module>]` slice; `settings` is full validated `Settings` |
+| `mb.event_bus` / `mb.logger` / `mb.entrypoint` | entrypoint is `"daemon" \| "console" \| "worker"` |
+| `mb.vault` | unlocked vault or `None`; never expose a secret to the LLM |
+| `mb.agent_registry` / `mb.agent_management` / `mb.refresh_tools` | registry is updated in place after registration; read specs when needed |
+| `mb.on(EventType[, handler])` | decorator or direct call; extension subscriptions are **lossy** |
+| `mb.tool(func)` | name = `__name__`, description = docstring, schema = first arg's pydantic model |
+| `mb.add_tool(binding)` | escape hatch for a custom name, hand-written schema, or file-loaded description |
+| `mb.add_service(service)` | anything with async `start()`/`stop()` |
+| `mb.add_route` / `mb.add_prompt_fragment` / `mb.add_page` | HTTP routes, system-prompt fragments (optionally tied to tool names), web UI pages |
 
 There is no `mb.container` and no DI accessors. Construct anything else inside `register()`
 from `mb.settings`. `mb.tool` raises at registration (aborting startup) if the first argument
@@ -56,17 +57,17 @@ Lean core (SKILL.md, `docs/architecture.md`): a tool goes here only when it need
 instead.
 
 ```
-Dispatcher._build_tools → build_enabled_tools()       app/tool_factory.py:26
-    ChatMemoryTool      (always)                       tool_factory.py:38   conversation memory backend
-    SettingsInfoTool    (always)                       tool_factory.py:40   config path, skill registry
-    SkillLoaderTool     if tools.skills.enabled        tool_factory.py:48   skill registry, managed storage
-    SkillInstallerTool  if tools.skills.install        tool_factory.py:53   skill registry
-    AgentInfoTool       if the agent registry is non-empty   tool_factory.py:67   LLM client factory
+Dispatcher._build_tools → build_enabled_tools()       app/tool_factory.py
+    ChatMemoryTool      (always)                         needs: conversation memory backend
+    SettingsInfoTool    (always)                         needs: config path, skill registry
+    SkillLoaderTool     if tools.skills.enabled          needs: skill registry, managed storage
+    SkillInstallerTool  if tools.skills.install          needs: skill registry
+    AgentInfoTool       if the agent registry is non-empty   needs: LLM client factory
 ```
 
 Create: `minibot/llm/tools/<module>.py` exposing `.bindings() -> list[ToolBinding]`, and
 `minibot/llm/tools/<tool_name>.txt` for the description.
-Edit: a config model + a field on `ToolsConfig` (`config/schema.py:961`), a branch in
+Edit: a config model + a field on `ToolsConfig` (`config/schema.py`), a branch in
 `tool_factory.py`, and `config.example.toml`.
 
 Use the `minibot-create-tool` skill for the file templates on either path.
@@ -81,8 +82,8 @@ for task workers.
 There is **no channel registry**. A channel is a service class plus an extension that builds it.
 
 ```
-AppContainer.configure(entrypoint="daemon")    adapters/container/app_container.py:37
-  └─ load_extensions(...)                      app/extensions.py:197
+AppContainer.configure(entrypoint="daemon")    adapters/container/app_container.py
+  └─ load_extensions(...)                      app/extensions.py
       └─ extensions/channels/telegram.py::register(mb)
           ├─ guard: if mb.entrypoint != "daemon": return    ← mandatory
           ├─ guard: config.enabled and credentials present
@@ -102,18 +103,18 @@ The service contract, by example (`adapters/messaging/telegram/service.py`,
 - optional: handle `OutboundFormatRepairEvent` if the channel has a fragile markup parser
 
 Create: `minibot/adapters/messaging/<name>/service.py`, `minibot/extensions/channels/<name>.py`.
-Edit: the `daemon` branch of `_bundled_modules` (`app/extensions.py:26`) if bundling it;
+Edit: the `daemon` branch of `_bundled_modules` (`app/extensions.py`) if bundling it;
 otherwise just list the module under `[extensions].modules`.
 
-Config: either a typed model plus a field on `ChannelsConfig` (`schema.py:136`), **or** the
-escape hatch — `ChannelsConfig` is `extra="allow"` (`schema.py:145`) and `.section("<name>")`
-(`schema.py:147`) returns the raw `[channels.<name>]` dict. The escape hatch is the intended
+Config: either a typed model plus a field on `ChannelsConfig` (`config/schema.py`), **or** the
+escape hatch — `ChannelsConfig` is `extra="allow"` and `ChannelsConfig.section("<name>")`
+returns the raw `[channels.<name>]` dict. The escape hatch is the intended
 path for out-of-tree channels.
 
 Optional prompt fragment: `prompts/channels/<name>.md` — see PROMPT_COMPOSITION.md.
 
-Note the console channel is *not* an extension; it is constructed directly at
-`app/console.py:59`.
+Note the console channel is *not* an extension; `app/console.py` constructs `ConsoleService`
+directly.
 
 ---
 
@@ -123,16 +124,16 @@ Pure file drop — **no Python edit**. Create `agents/<name>.md`.
 
 ```
 AppContainer.configure()
-  └─ load_agent_specs(orchestration.directory)   app/agent_definitions_loader.py:18
+  └─ load_agent_specs(orchestration.directory)   app/agent_definitions_loader.py
       ├─ sorted(root.glob("*.md"))
       ├─ split_frontmatter / parse_frontmatter    shared/frontmatter.py
-      ├─ AgentDefinitionConfig.model_validate     adapters/config/schema.py:318
+      ├─ AgentDefinitionConfig.model_validate     config/schema.py
       └─ → AgentSpec                              core/agents.py
   └─ AgentRegistry(agent_specs)                   app/agent_registry.py
 Dispatcher → build_enabled_tools(agent_registry=...) → AgentInfoTool → fetch_agent_info
 Delegation itself is spawn_task, from the tasks extension:
   extensions/services/tasks.py → TaskTools → spawn_task → TaskManager → worker subprocess
-PromptService._specialist_roster_fragment         app/handlers/services/prompt_service.py:125
+PromptService._specialist_roster_fragment         app/handlers/services/prompt_service.py
 ```
 
 Frontmatter is a hand-rolled YAML subset (scalars, 2-space lists, 2-space dicts) — not real
@@ -152,17 +153,17 @@ available to `spawn_task` without extra wiring.
 
 ```
 AppContainer.configure()
-  └─ load_settings(path)                    adapters/config/loader.py:16
-      ├─ resolve_config_path   (arg → $MINIBOT_CONFIG → ./config.toml)   loader.py:11
-      └─ Settings.from_file → from_dict     adapters/config/schema.py
-          ├─ expand_environment(...)        adapters/config/environment.py
-          ├─ _normalize_for_annotation(...) adapters/config/schema.py
+  └─ load_settings(path)                    adapters/config/loader.py
+      ├─ resolve_config_path   (arg → $MINIBOT_CONFIG → ./config.toml)   config/paths.py
+      └─ Settings.from_file → from_dict     config/schema.py
+          ├─ expand_environment(...)        config/environment.py
+          ├─ _normalize_for_annotation(...) config/schema.py
           └─ Settings.model_validate        (extra="forbid")
 ```
 
-Create: nothing. Edit: a `BaseModel` in `adapters/config/schema.py` (keep the docstring
-convention — `"""… TOML section: ``[x]``"""`), a field on `Settings` (`schema.py:818`) or on
-the relevant parent (`ToolsConfig:667`, `ChannelsConfig:136`), then `config.example.toml` and
+Create: nothing. Edit: a `BaseModel` in `config/schema.py` (keep the docstring
+convention — `"""… TOML section: ``[x]``"""`), a field on `Settings` or on the relevant
+parent (`ToolsConfig`, `ChannelsConfig`), then `config.example.toml` and
 `docs/config.rst`. Add to `adapters/config/configurator.py` only if it belongs in
 `minibot configure`.
 
@@ -192,7 +193,7 @@ Event catalog — `core/events.py`: `MessageEvent`, `OutboundEvent`, `OutboundFi
 **(a) Observe an existing event — no core edit.**
 
 ```
-register(mb) → @mb.on(TurnCompletedEvent)      app/extensions.py:76
+register(mb) → @mb.on(TurnCompletedEvent)      app/extensions.py (ExtensionContext.on)
   └─ ExtensionRegistry.start()
       └─ event_bus.subscribe(types=(EventType,), lossy=True)
       └─ asyncio.create_task(...)   ← handler exceptions are logged and swallowed
@@ -207,9 +208,9 @@ automatically by the decorator in `llm/tools/tool_events.py`.
 **(c) Handle a new event type in the Dispatcher** — `app/dispatcher.py`:
 
 ```
-dispatcher.py:51   widen event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
-dispatcher.py:162  _run() — add an isinstance branch
-dispatcher.py:181  _handle_message  /  :287 _handle_format_repair — add a sibling handler
+Dispatcher.__init__        widen event_bus.subscribe(types=(MessageEvent, OutboundFormatRepairEvent))
+Dispatcher._run            add an isinstance branch
+Dispatcher._handle_message / Dispatcher._handle_format_repair — add a sibling handler
 ```
 
 **(d) A new turn-stage collaborator, not an event.** Add it to `app/handlers/services/`,
@@ -229,29 +230,29 @@ spawn_task (LLM tool)
       ├─ SQLiteTaskProducer                adapters/tasks/sqlite_store.py
       └─ RabbitMQTaskProducer              adapters/messaging/rabbitmq/producer.py
   └─ consumer leases the row
-  └─ TaskManager  app/tasks/manager.py:143  → forks worker_entry over a pipe
-      └─ worker_entry(pipe)                adapters/tasks/worker_process.py:29
-          └─ worker_entry(pipe, backends)  app/tasks/worker.py:114
-              └─ run_agent_loop(...)       worker.py:208
+  └─ TaskManager  app/tasks/manager.py  → forks worker_entry over a pipe
+      └─ worker_entry(pipe)                adapters/tasks/worker_process.py
+          └─ worker_entry(pipe, backends)  app/tasks/worker.py
+              └─ run_agent_loop(...)       app/tasks/worker.py
                   ├─ load_settings()
                   ├─ load_extensions(..., entrypoint="worker")   ← bundled modules: scheduler + utility
                   ├─ _resolve_task_spec(...)
-                  ├─ _build_worker_tools(...)  worker.py:370
+                  ├─ _build_worker_tools(...)  app/tasks/worker.py
                   └─ AgentRuntime(...)
 ```
 
 Two traps:
 
 - **Workers load only the scheduler and utility bundles** (`_bundled_modules`,
-  `app/extensions.py:33`). Besides them, only user-configured `[extensions].modules` load there,
+  `app/extensions.py`). Besides them, only user-configured `[extensions].modules` load there,
   and bundled tool modules self-narrow when `mb.entrypoint == "worker"` (e.g. `read_docs`).
   To give workers a bundled extension tool, add its module to the worker branch.
 - **Workers build their core tools independently of `tool_factory.py`.** To make a core tool
-  worker-visible, add it to `_build_worker_tools` (`worker.py:370`) **and**
-  `_WORKER_TOOL_ALLOWLIST` (`worker.py:58`). Extension tools are auto-appended and
+  worker-visible, add it to `_build_worker_tools` **and** `_WORKER_TOOL_ALLOWLIST`
+  (both in `app/tasks/worker.py`). Extension tools are auto-appended and
   auto-allowlisted.
 
-The default worker spec sets `max_tool_iterations=None` (`worker.py:469`); steps and tool calls
+The default worker spec (`_build_worker_spec`) sets `max_tool_iterations=None`; steps and tool calls
 are bounded by `[tasks].worker_max_steps` / `worker_max_tool_calls` instead.
 
 For a new queue backend: implement `TaskProducer` (`core/tasks.py`) plus a consumer service,
@@ -268,21 +269,21 @@ development skill *and* something the bot can `activate_skill` at runtime.
 
 ```
 AppContainer.configure()
-  └─ SkillRegistry(paths=tools.skills.paths or None)   app/skill_registry.py:14
-      ├─ resolve_skill_discovery_paths     app/skill_definitions_loader.py:30
+  └─ SkillRegistry(paths=tools.skills.paths or None)   app/skill_registry.py
+      ├─ resolve_skill_discovery_paths     app/skill_definitions_loader.py
       ├─ fingerprint_skill_paths           (path, mtime_ns, size)
-      └─ load_skill_specs → _parse_skill_file → SkillSpec   core/skills.py
+      └─ load_skill_specs → parse_skill_file → SkillSpec   core/skills.py
 Dispatcher → build_enabled_tools(skill_registry=...)
-  └─ if tools.skills.enabled → SkillLoaderTool  app/tool_factory.py:48
-PromptService._skill_catalog_fragment       handlers/services/prompt_service.py:142
-runtime: every all()/get()/names() → refresh_if_stale()   skill_registry.py:55
+  └─ if tools.skills.enabled → SkillLoaderTool  app/tool_factory.py
+PromptService._skill_catalog_fragment       app/handlers/services/prompt_service.py
+runtime: every all()/get()/names() → SkillRegistry.refresh_if_stale()   app/skill_registry.py
 ```
 
 Create: `<discovery-path>/<skill-name>/SKILL.md`. **No code change** — the registry hot-reloads
 on an mtime/size fingerprint, unlike prompt files which are cached for the process lifetime.
 
-Default discovery order (`skill_definitions_loader.py:36`): `./.agents/skills`,
-`./.claude/skills`, `~/.agents/skills`, `~/.claude/skills`. In this repo `.claude/skills` is a
+Default discovery order (`_default_discovery_paths` in `app/skill_definitions_loader.py`):
+`./.minibot/skills`, `./.agents/skills`, `~/.minibot/skills`, `~/.agents/skills`. In this repo `.claude/skills` is a
 symlink to `.agents/skills`, so write new skills to `.agents/skills/`. Setting
 `[tools.skills].paths` **replaces** the defaults entirely.
 

@@ -25,7 +25,7 @@ without a preceding blank line.
 
 ### The pylint rule is stricter than it looks
 
-`pyproject.toml:140`:
+`[tool.pylint.basic]` in `pyproject.toml`:
 
 ```
 bad-names-rgxs = ["^(?!(?:i|j|x|y|mb|on|ok)$).{1,2}$"]
@@ -53,8 +53,8 @@ matching is acceptable only for deterministic protocol parsing — markdown fenc
 
 Nothing enforces this; it is a design rule. The live reference implementation is the tool-use
 guardrail: an LLM classifier returning an `extra="forbid"` pydantic payload with a bounded retry
-loop and `fail_open=True` — `app/tool_guardrail_validator.py:11` and
-`app/tool_use_guardrail.py:41`. Even the e2e suite grades answers through a schema-constrained
+loop and `fail_open=True` — `ToolGuardrailPayload` in `app/tool_guardrail_validator.py` and
+`LLMClassifierToolUseGuardrail` in `app/tool_use_guardrail.py`. Even the e2e suite grades answers through a schema-constrained
 LLM call rather than string matching.
 
 (`AGENTS.md` cites `should_answer_to_user` as the example field. That field no longer exists
@@ -66,18 +66,19 @@ This is the single most violable invariant in the codebase.
 
 - **Main agent** — `app/tool_capabilities.py` uses `apply_allow_deny` over the whole binding
   list, so patterns apply uniformly to local and MCP names alike.
-- **Specialist agents** — `app/agent_policies.py:19` uses `filter_tools_for_agent`, which
+- **Specialist agents** — `app/agent_policies.py` uses `filter_tools_for_agent`, which
   special-cases MCP:
   - MCP tools are gated by **`mcp_servers` membership plus deny patterns only**.
     `tools_allow` is *never consulted* for an MCP name. An agent with
     `tools_allow: ["mcp_foo__*"]` and no `mcp_servers` gets **zero** MCP tools.
   - With **neither** `tools_allow` nor `tools_deny` set, the agent gets **zero non-MCP tools**
-    (`agent_policies.py:48`) — not "all tools", which is the intuitive reading.
+    (end of `filter_tools_for_agent`) — not "all tools", which is the intuitive reading.
 
 `tools_allow` and `tools_deny` are mutually exclusive; this is enforced in `tool_policy_utils.py`
-and again by pydantic validators in `adapters/config/schema.py`.
+and again by pydantic validators in `config/schema.py`.
 
-Reserved names always stripped from delegated agents (`agent_policies.py:15`): `fetch_agent_info`,
+Reserved names always stripped from delegated agents (`RESERVED_DELEGATION_TOOL_NAMES` in
+`app/agent_policies.py`): `fetch_agent_info`,
 `spawn_task`, `list_tasks`, `get_task`, `cancel_task` — so there is no recursive delegation.
 
 One tool escapes the system entirely: `pre_response` is prepended by `AgentRuntime` to every
@@ -86,8 +87,8 @@ runtime's tool list, bypassing both the factory and allow/deny filtering. Listin
 
 ## Tool names are unique *after* alias canonicalization
 
-`llm/tools/factory.py:95` (`_ensure_unique_tool_names`) keys its dedupe map on the canonical
-name. The alias table lives at `llm/services/tool_executor.py:29`:
+`_ensure_unique_tool_names` (`app/tool_factory.py`) keys its dedupe map on the canonical
+name. The alias table is `_TOOL_NAME_ALIASES` in `llm/services/tool_executor.py`:
 
 ```
 http_client     → http_request
@@ -101,12 +102,14 @@ Naming a new tool `http_client`, `calculator`, `datetime_now` or `artifact_inser
 
 ## The MCP name-prefix trap
 
-`app/mcp_tool_name.py` detects an MCP tool with a hardcoded `name.startswith("mcp_")` plus a
-`"__"` separator, while the prefix that *generates* those names is user-configurable
-(`adapters/config/schema.py:574`, `name_prefix: str = "mcp"`).
+`is_mcp_tool_name` and `extract_mcp_server` (`app/mcp_tool_name.py`) detect an MCP tool by
+`<prefix>_` plus a `"__"` separator. The prefix is user-configurable (`[tools.mcp].name_prefix`,
+default `"mcp"`), and both helpers default to `"mcp"` when no prefix is passed.
 
-Changing `name_prefix` away from `"mcp"` silently reclassifies every remote tool as a local
-tool, which breaks specialist tool scoping and `exclusive_mcp` ownership mode. Corollary: an
+Any caller that classifies a tool name as MCP must pass the configured prefix, as
+`filter_tools_for_agent`, `main_agent_tool_view` and `ManagedAgentPolicy` do. Relying on the
+default silently reclassifies every remote tool as local under a custom `name_prefix`, which
+breaks specialist tool scoping and `exclusive_mcp` ownership mode. Corollary: an
 MCP server name may not contain `__`.
 
 ## Tool descriptions are sidecar files
@@ -120,11 +123,11 @@ Extension tools skip all of this: the function docstring is the description.
 
 ## Bundled extensions are implicit
 
-Eleven modules load automatically and appear nowhere in `config.toml`
-(`app/extensions.py:26`): rag, mcp, rabbitmq, scheduler, tasks, and the tool modules
-execution / media / memory / network / utility / workspace. Telegram is appended for the
-`daemon` entrypoint only. **Workers load none of them except the scheduler** (tools only, no
-service or page).
+Fourteen modules load automatically and appear nowhere in `config.toml` (`_bundled_modules` in
+`app/extensions.py`): decision, rag, mcp, rabbitmq, scheduler, tasks, and the tool modules
+agent_management / execution / media / memory / network / utility / vault / workspace. Telegram
+is appended for the `daemon` entrypoint only. **Workers load only the scheduler and utility
+bundles** (tools only, no service or page).
 
 Reading `[extensions].modules` and concluding "no extensions are active" is wrong.
 
@@ -150,14 +153,14 @@ functional tests over granular unit tests. Use the `minibot-testing` skill.
 
 `Settings.from_dict()` expands `${ENV}` string values after TOML parsing and before
 normalization and validation, including nested lists, tables, and extension configuration.
-The helper lives in `adapters/config/environment.py`. Missing variables fail loading even
+The helper lives in `config/environment.py`. Missing variables fail loading even
 in disabled sections; `$${ENV}` escapes a literal reference. Expansion is single-pass and
 does not load `.env` files. See `docs/config.rst` for the full contract.
 
 The configurator must preserve references on disk while using resolved values at runtime.
 Direct `Settings(...)` and `Settings.model_validate(...)` calls do not expand values.
 Existing `token_env = "GITHUB_TOKEN"` fields still resolve names in their consuming code.
-`MINIBOT_CONFIG` continues to select the config path (`adapters/config/loader.py:12`).
+`MINIBOT_CONFIG` continues to select the config path (`resolve_config_path` in `config/paths.py`).
 
 ## Skill frontmatter (MiniBot's own parser)
 
@@ -166,7 +169,7 @@ MiniBot implements agentskills.io but reads it more strictly than the spec
 
 | | Spec | MiniBot |
 |---|---|---|
-| `description` | ≤1024 chars | warns above **300** (`:14`) |
+| `description` | ≤1024 chars | warns above **300** (`_DESCRIPTION_MAX_CHARS`) |
 | `compatibility` | ≤500 chars, free text | returned by `activate_skill`; the model reports a missing tool instead of improvising |
 | other fields | `license`, `metadata`, `allowed-tools` allowed | parsed out and ignored, never rejected (`parse_skill_frontmatter`) |
 | frontmatter syntax | YAML | flat `key: value` plus block scalars; nested keys and list items skipped |
