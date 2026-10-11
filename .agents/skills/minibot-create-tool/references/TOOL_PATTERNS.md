@@ -159,9 +159,9 @@ class ToolsConfig(BaseModel):
 
 ## Registration (core path)
 
-`ToolFeature` / `_OPTIONAL_FEATURES` no longer exist in `llm/tools/factory.py`. Choose one:
+`ToolFeature` / `_OPTIONAL_FEATURES` no longer exist in `app/tool_factory.py`. Choose one:
 
-### Bundled extension (default for optional tools)
+### Bundled extension (default)
 
 Add to the matching module under `minibot/extensions/tools/` (e.g. `utility.py`), reading
 settings from `mb.settings`:
@@ -176,11 +176,12 @@ def register(mb: ExtensionContext) -> None:
         mb.add_tool(MyTool(config=mb.settings.tools.my_tool).bindings())
 ```
 
-### `build_enabled_tools` (always-on tools only)
+### `build_enabled_tools` (lean-core exception)
 
-Wire directly in `minibot/llm/tools/factory.py` — see `CalculatorTool` or `SkillLoaderTool`
-in `build_enabled_tools` for the pattern. These appear unconditionally (or gated by their
-own config) next to the always-on core set.
+Wire directly in `minibot/app/tool_factory.py` only when the tool needs state `ExtensionContext`
+does not expose (conversation memory backend, skill registry, managed storage, config path) —
+see `SkillLoaderTool` in `build_enabled_tools` for the pattern. Being always-on is not a reason;
+`CalculatorTool` and `DocsReaderTool` sit there for historical reasons and are not a model.
 
 ## Description file (.txt, core path)
 
