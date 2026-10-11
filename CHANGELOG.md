@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-11
+
 ### Changed
 
 - **The `graph` tool is split into one tool per operation.** It is now `graph_link`, `graph_unlink`, `graph_merge`,
@@ -1461,7 +1463,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.31.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.32.0...HEAD
+[0.32.0]: https://github.com/sonic182/minibot/compare/0.31.0..0.32.0
 [0.31.0]: https://github.com/sonic182/minibot/compare/0.30.0..0.31.0
 [0.30.0]: https://github.com/sonic182/minibot/compare/0.29.0..0.30.0
 [0.29.0]: https://github.com/sonic182/minibot/compare/0.28.0..0.29.0
