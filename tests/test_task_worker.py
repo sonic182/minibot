@@ -381,6 +381,25 @@ def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
     assert "fetch_agent_info" not in tool_names
 
 
+def test_a_specialist_claims_a_utility_extension_tool_in_the_worker() -> None:
+    settings = Settings()
+    extensions = load_extensions(settings, EventBus(), entrypoint="worker")
+    spec = AgentSpec(
+        name="specialist",
+        description="desc",
+        system_prompt="prompt",
+        source_path=worker.Path("/tmp/specialist.md"),
+        tools_allow=["calculate_expression"],
+    )
+
+    storage = build_managed_storage(settings)
+    bindings = worker._build_worker_tools(
+        settings=settings, spec=spec, managed_storage=storage, extension_tools=extensions.tools
+    )
+
+    assert [binding.tool.name for binding in bindings] == ["calculate_expression"]
+
+
 @pytest.mark.asyncio
 async def test_build_worker_tools_scopes_skill_tools_to_the_spec(tmp_path: Path) -> None:
     skill_dir = tmp_path / "skills" / "deploy"

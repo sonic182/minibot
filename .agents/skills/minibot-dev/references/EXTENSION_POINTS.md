@@ -229,14 +229,15 @@ spawn_task (LLM tool)
       ├─ SQLiteTaskProducer                adapters/tasks/sqlite_store.py
       └─ RabbitMQTaskProducer              adapters/messaging/rabbitmq/producer.py
   └─ consumer leases the row
-  └─ TaskManager  adapters/tasks/manager.py  → forks worker_entry over a pipe
-      └─ worker_entry(pipe)                adapters/tasks/worker.py:73
-          └─ run_agent_loop(payload)
-              ├─ load_settings()
-              ├─ load_extensions(..., entrypoint="worker")   ← bundled modules: scheduler only
-              ├─ _resolve_task_spec(...)
-              ├─ _build_worker_tools(...)  worker.py:166
-              └─ AgentRuntime(...)
+  └─ TaskManager  app/tasks/manager.py:143  → forks worker_entry over a pipe
+      └─ worker_entry(pipe)                adapters/tasks/worker_process.py:29
+          └─ worker_entry(pipe, backends)  app/tasks/worker.py:114
+              └─ run_agent_loop(...)       worker.py:208
+                  ├─ load_settings()
+                  ├─ load_extensions(..., entrypoint="worker")   ← bundled modules: scheduler + utility
+                  ├─ _resolve_task_spec(...)
+                  ├─ _build_worker_tools(...)  worker.py:370
+                  └─ AgentRuntime(...)
 ```
 
 Two traps:
@@ -250,7 +251,8 @@ Two traps:
   `_WORKER_TOOL_ALLOWLIST` (`worker.py:58`). Extension tools are auto-appended and
   auto-allowlisted.
 
-`_WORKER_MAX_TOOL_ITERATIONS` is hard-coded to 8 (`worker.py:69`).
+The default worker spec sets `max_tool_iterations=None` (`worker.py:469`); steps and tool calls
+are bounded by `[tasks].worker_max_steps` / `worker_max_tool_calls` instead.
 
 For a new queue backend: implement `TaskProducer` (`core/tasks.py`) plus a consumer service,
 add a backend literal to `TasksConfig` (`schema.py`), and add

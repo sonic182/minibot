@@ -1,7 +1,6 @@
 """Relation-graph tools, opt-in through ``[extensions] modules``.
 
-Deliberately not in ``_bundled_modules``: that tuple is empty for ``entrypoint="worker"``, so a
-bundled registration would never reach a spawned task. Arriving via ``settings.extensions.modules``
+Deliberately not in ``_bundled_modules``: it is opt-in, and arriving via ``settings.extensions.modules``
 is what makes the tool available to the daemon, the console and the task workers alike — which also
 means no ``ExtensionService`` can be relied on, since ``ExtensionRegistry.start()`` never runs in a
 worker. The store creates its schema on first use instead.
