@@ -181,7 +181,7 @@ def register(mb: ExtensionContext) -> None:
 Wire directly in `minibot/app/tool_factory.py` only when the tool needs state `ExtensionContext`
 does not expose (conversation memory backend, skill registry, managed storage, config path) —
 see `SkillLoaderTool` in `build_enabled_tools` for the pattern. Being always-on is not a reason;
-`CalculatorTool` and `DocsReaderTool` sit there for historical reasons and are not a model.
+`CalculatorTool` and `DocsReaderTool` are always-on yet live in `extensions/tools/utility.py`.
 
 ## Description file (.txt, core path)
 

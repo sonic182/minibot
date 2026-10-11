@@ -28,7 +28,7 @@ from minibot.app.mcp_servers import build_mcp_headers, mcp_client_kwargs, mcp_di
 from minibot.app.response_parser import extract_answer, resolve_reply_render
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_approval import NAME_MAX_CHARS, Approver, apply_tool_approval, format_approval_detail
-from minibot.app.tool_constructors import build_calculator_tool, build_skill_loader_bindings
+from minibot.app.tool_constructors import build_skill_loader_bindings
 from minibot.config.schema import Settings, task_limit
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart, RuntimeLimits
 from minibot.core.agents import AgentDefinitionReader, AgentSpec
@@ -51,16 +51,11 @@ from minibot.llm.tools.mcp_bridge import build_mcp_bindings_async
 from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.python_exec import HostPythonExecTool
 from minibot.llm.tools.settings_info import SettingsInfoTool
-from minibot.llm.tools.time import CurrentTimeTool
-from minibot.llm.tools.wait import WaitTool
 from minibot.shared.utils import validate_attachments
 
 _LOGGER = logging.getLogger("minibot.task_worker")
 _WORKER_SPEC_PATH = Path("<task_worker>")
 _WORKER_TOOL_ALLOWLIST = [
-    "current_datetime",
-    "calculate_expression",
-    "wait",
     "http_request",
     *FILE_TOOL_NAMES,
     "code_read",
@@ -225,7 +220,7 @@ async def run_agent_loop(
         secrets = task.pop("secrets", None)
         settings = backends.load_settings(secrets)
         # ponytail: no vault object here, so a user extension sees `mb.vault is None` even though
-        # ${secret:} resolved above. Only the scheduler loads in a worker and it needs no vault; build a
+        # ${secret:} resolved above. The bundles a worker loads (scheduler, utility) need no vault; build a
         # Vault from `secrets` if a user extension ever needs one.
         extensions = load_extensions(settings, EventBus(), _LOGGER, entrypoint="worker")
         llm_factory = LLMClientFactory(settings)
@@ -382,18 +377,6 @@ def _build_worker_tools(
 ) -> list[ToolBinding]:
     bindings: list[ToolBinding] = []
 
-    if settings.tools.time.enabled:
-        bindings.extend(CurrentTimeTool(settings.tools.time.default_format).bindings())
-    if settings.tools.calculator.enabled:
-        bindings.extend(
-            build_calculator_tool(
-                default_scale=settings.tools.calculator.default_scale,
-                max_expression_length=settings.tools.calculator.max_expression_length,
-                max_exponent_abs=settings.tools.calculator.max_exponent_abs,
-            ).bindings()
-        )
-    if settings.tools.wait.enabled:
-        bindings.extend(WaitTool(max_milliseconds=settings.tools.wait.max_milliseconds).bindings())
     if settings.tools.http_client.enabled:
         bindings.extend(HTTPClientTool(settings.tools.http_client, storage=managed_storage).bindings())
     if settings.tools.python_exec.enabled:
