@@ -24,6 +24,29 @@ entrypoint is the forked task worker (`minibot.app.tasks.worker`).
 - **Explicit, testable flow** with dependency wiring centralized in the composition roots
   (`minibot.app.daemon` and `minibot.app.console`), which hand concrete adapters to the
   dispatcher instead of letting it resolve them through the container.
+- **Lean core** — if a feature works as an extension, it ships as one. See
+  [Lean core](#lean-core).
+
+## Lean core
+
+The core is the part of MiniBot that cannot be expressed through the extension API. Everything
+else, including the tools and services MiniBot ships with, is a bundled `register(mb)` module
+under `minibot/extensions/`, built on the same {doc}`extension-api` a third-party extension uses.
+The rule follows PostgreSQL's: keep the core small, and make it generic enough that extensions
+are first-class.
+
+- **Extension first.** A tool, service, channel, page or prompt fragment that can be built from
+  `ExtensionContext` belongs in a bundled extension, not in `build_enabled_tools`
+  (`minibot.app.tool_factory`).
+- **What stays in core.** Tools that need state the extension API does not expose (the
+  conversation memory backend, the skill registry, managed file storage, the config path), and
+  the wrappers every tool passes through (approval, output spill, tool-call events).
+- **Generalize instead of special-casing.** When a feature needs something `ExtensionContext`
+  lacks, prefer widening the extension API over adding a core-only branch, so the next extension
+  can use it too.
+- **Extensions are first-class.** Core mechanisms that act on tools — main-agent visibility,
+  approval patterns, output spill, the task worker's allowlist — must treat an extension tool
+  exactly like a core one. A core feature that only works with core tools is incomplete.
 
 ## Repository layout
 

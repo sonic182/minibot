@@ -23,7 +23,7 @@ minibot/
 
 Dependencies point inward: `adapters` and `llm` may import `core`; `core` imports none of them.
 Two entrypoints boot the same spine — `app/daemon.py` (Telegram) and `app/console.py` (CLI) —
-plus a third, deliberately narrower one: the forked task worker (`adapters/tasks/worker.py`).
+plus a third, deliberately narrower one: the forked task worker (`app/tasks/worker.py`).
 
 Architecture overview: `docs/architecture.md`. Build/lint/test commands: `AGENTS.md`.
 
@@ -51,13 +51,30 @@ Project conventions, real CI gates and the traps that are not visible in the fil
    match its shape rather than inventing a new one.
 2. **Read the whole target file before editing it.** Wiring here is order-sensitive.
 3. **Prefer the extension path.** A `register(mb)` module needs no schema, factory or
-   description-file wiring. Reach into `minibot/` core only when the thing belongs in the
-   shipped surface.
+   description-file wiring. Shipping a feature with MiniBot does not make it core: bundled
+   features are `register(mb)` modules under `minibot/extensions/` (see *Lean core* below).
 4. **Check every entrypoint your change touches.** Daemon, console and worker assemble tools
-   and extensions *differently* — a tool wired only into `factory.py` is invisible to workers.
+   and extensions *differently* — a tool wired only into `tool_factory.py` is invisible to
+   workers.
 5. **Lint**: `poetry run ruff check --fix minibot tests` and `poetry run ruff format .`.
    Note ruff is *not* enforced in CI; the pylint name rule is (see CONVENTIONS.md).
 6. **Never run git write commands** — no `add`, `commit`, `push`. The user commits.
+
+## Lean core
+
+If it works as an extension, it stays out of the core. Full rule: `docs/architecture.md`
+(*Lean core*).
+
+- **Extension first.** Anything buildable from `ExtensionContext` (`app/extensions.py`) is a
+  bundled `register(mb)` module, not a branch in `build_enabled_tools` (`app/tool_factory.py`).
+- **Core keeps only** tools that need state `ExtensionContext` does not expose (conversation
+  memory backend, skill registry, managed storage, config path) and the wrappers every tool
+  passes through (approval, output spill, tool-call events).
+- **Generalize, don't special-case.** If a feature needs something `ExtensionContext` lacks,
+  propose widening the extension API before adding a core-only branch.
+- **Extensions are first-class.** A core mechanism acting on tools (visibility policy,
+  approval, output spill, worker allowlist) must handle extension tools exactly like core ones.
+  Reject a design that only works for core tools until it is generalized.
 
 ## Hard rules
 

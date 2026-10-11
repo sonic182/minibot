@@ -11,55 +11,72 @@ Line numbers are anchors, not guarantees — confirm the symbol is still there b
 
 ```
 daemon.run()                                   app/daemon.py
-  └─ AppContainer.configure()                  adapters/container/app_container.py:37
-      └─ load_extensions(...)                  app/extensions.py:197
-          └─ importlib.import_module(name)     ← bundled list at extensions.py:26
+  └─ AppContainer.configure()                  adapters/container/app_container.py:54
+      └─ load_extensions(...)                  app/extensions.py:303  (called at app_container.py:92)
+          └─ importlib.import_module(name)     ← bundled list in _bundled_modules, extensions.py:33
               └─ your_module.register(mb)      ← YOUR CODE
                   └─ mb.tool / mb.add_tool
-  └─ Dispatcher.__init__                       app/dispatcher.py:49
-      └─ build_enabled_tools(extension_tools=...)   llm/tools/factory.py:28
-          ├─ tools.extend(extension_tools)     factory.py:75
-          └─ _ensure_unique_tool_names(tools)  factory.py:76
+  └─ Dispatcher._build_tools                   app/dispatcher.py:222
+      └─ build_enabled_tools(extension_tools=...)   app/tool_factory.py:31
+          ├─ tools.extend(extension_tools)     tool_factory.py:85
+          └─ _ensure_unique_tool_names(tools)  tool_factory.py:93
       └─ main_agent_tool_view(...)             app/tool_capabilities.py
 ```
 
 Create: one module with `def register(mb: ExtensionContext) -> None`.
 Edit: `[extensions].modules` in config, plus `[extensions.config.<module>]` for its settings.
-Do **not** touch `schema.py` or `factory.py` on this path.
+Do **not** touch `schema.py` or `tool_factory.py` on this path.
 
-`ExtensionContext` (`app/extensions.py:56`) is deliberately narrow — this is the whole surface:
+A tool that ships with MiniBot takes the same path: a bundled module under
+`minibot/extensions/tools/` added to `_bundled_modules`, reading its `[tools.<key>]` config
+from `mb.settings`. See `minibot/extensions/tools/utility.py`.
+
+`ExtensionContext` (`app/extensions.py:72`) is deliberately narrow — this is the whole surface:
 
 | Member | Anchor | Notes |
 |---|---|---|
-| `mb.name` / `mb.config` / `mb.settings` | `:66-68` | `config` is the `[extensions.config.<module>]` slice; `settings` is full validated `Settings` |
-| `mb.event_bus` / `mb.logger` / `mb.entrypoint` | `:69-71` | entrypoint is `"daemon" \| "console" \| "worker"` |
-| `mb.on(EventType[, handler])` | `:76` | decorator or direct call; extension subscriptions are **lossy** |
-| `mb.tool(func)` | `:88` | name = `__name__`, description = docstring, schema = first arg's pydantic model |
-| `mb.add_tool(binding)` | `:130` | escape hatch for a custom name, hand-written schema, or file-loaded description |
-| `mb.add_service(service)` | `:136` | anything with async `start()`/`stop()` |
+| `mb.name` / `mb.config` / `mb.settings` | `:85-87` | `config` is the `[extensions.config.<module>]` slice; `settings` is full validated `Settings` |
+| `mb.event_bus` / `mb.logger` / `mb.entrypoint` | `:88-90` | entrypoint is `"daemon" \| "console" \| "worker"` |
+| `mb.vault` | `:91` | unlocked vault or `None`; never expose a secret to the LLM |
+| `mb.agent_registry` / `mb.agent_management` / `mb.refresh_tools` | `:94-97` | registry is updated in place after registration; read specs when needed |
+| `mb.on(EventType[, handler])` | `:105` | decorator or direct call; extension subscriptions are **lossy** |
+| `mb.tool(func)` | `:117` | name = `__name__`, description = docstring, schema = first arg's pydantic model |
+| `mb.add_tool(binding)` | `:161` | escape hatch for a custom name, hand-written schema, or file-loaded description |
+| `mb.add_service(service)` | `:167` | anything with async `start()`/`stop()` |
+| `mb.add_route` / `mb.add_prompt_fragment` / `mb.add_page` | `:170-192` | HTTP routes, system-prompt fragments (optionally tied to tool names), web UI pages |
 
 There is no `mb.container` and no DI accessors. Construct anything else inside `register()`
 from `mb.settings`. `mb.tool` raises at registration (aborting startup) if the first argument
 is not annotated with a **module-level** pydantic model, or if the function has no docstring.
 
-### Core path (only for the shipped surface)
+### Core path (only what an extension cannot build)
+
+Lean core (SKILL.md, `docs/architecture.md`): a tool goes here only when it needs state
+`ExtensionContext` does not expose. If the gap is generic, propose widening `ExtensionContext`
+instead.
 
 ```
-Dispatcher.__init__ → build_enabled_tools()    llm/tools/factory.py:28
-    ChatMemoryTool        (always)             factory.py:47
-    CalculatorTool        if tools.calculator.enabled     factory.py:51
-    SkillLoaderTool       if tools.skills.enabled         factory.py:60
-    AgentInfoTool         if the agent registry is non-empty   factory.py:63
+Dispatcher._build_tools → build_enabled_tools()       app/tool_factory.py:31
+    ChatMemoryTool      (always)                       tool_factory.py:51   conversation memory backend
+    SettingsInfoTool    (always)                       tool_factory.py:53   config path, skill registry
+    DocsReaderTool      if the minibot-docs skill is on    tool_factory.py:62
+    CalculatorTool      if tools.calculator.enabled    tool_factory.py:66
+    SkillLoaderTool     if tools.skills.enabled        tool_factory.py:73   skill registry, managed storage
+    SkillInstallerTool  if tools.skills.install        tool_factory.py:78   skill registry
+    AgentInfoTool       if the agent registry is non-empty   tool_factory.py:92   LLM client factory
 ```
+
+`DocsReaderTool` and `CalculatorTool` need nothing an extension lacks; they are known
+exceptions due to move to bundled extensions. Do not copy them as a pattern.
 
 Create: `minibot/llm/tools/<module>.py` exposing `.bindings() -> list[ToolBinding]`, and
 `minibot/llm/tools/<tool_name>.txt` for the description.
-Edit: a config model + a field on `ToolsConfig` (`adapters/config/schema.py:667`), a branch in
-`factory.py`, and `config.example.toml`.
+Edit: a config model + a field on `ToolsConfig` (`config/schema.py:961`), a branch in
+`tool_factory.py`, and `config.example.toml`.
 
 Use the `minibot-create-tool` skill for the file templates on either path.
 
-**Worker visibility is separate.** See §6 — a tool wired only into `factory.py` does not exist
+**Worker visibility is separate.** See §6 — a tool wired only into `tool_factory.py` does not exist
 for task workers.
 
 ---
@@ -233,7 +250,7 @@ Two traps:
   just `minibot.extensions.services.scheduler`). Besides it, only user-configured
   `[extensions].modules` load there, and several bundled tool modules self-narrow when
   `mb.entrypoint == "worker"`.
-- **Workers build tools independently of `factory.py`.** To make a core tool worker-visible,
+- **Workers build tools independently of `tool_factory.py`.** To make a core tool worker-visible,
   add it to `_build_worker_tools` (`worker.py:166`) **and** `_WORKER_TOOL_ALLOWLIST`
   (`worker.py:45`). Extension tools are auto-appended and auto-allowlisted.
 
@@ -258,7 +275,7 @@ AppContainer.configure()
       ├─ fingerprint_skill_paths           (path, mtime_ns, size)
       └─ load_skill_specs → _parse_skill_file → SkillSpec   core/skills.py
 Dispatcher → build_enabled_tools(skill_registry=...)
-  └─ if tools.skills.enabled → SkillLoaderTool  llm/tools/factory.py:60
+  └─ if tools.skills.enabled → SkillLoaderTool  app/tool_factory.py:73
 PromptService._skill_catalog_fragment       handlers/services/prompt_service.py:142
 runtime: every all()/get()/names() → refresh_if_stale()   skill_registry.py:55
 ```
