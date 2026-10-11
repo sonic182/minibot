@@ -81,7 +81,7 @@ async def test_load_extensions_collects_tools_and_delivers_events(
     assert sys.modules["ext_ok"].seen_turns == ["turn-7"]
 
 
-def test_load_extensions_for_worker_loads_only_the_scheduler_bundle(
+def test_load_extensions_for_worker_loads_only_the_scheduler_and_utility_bundles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_module(tmp_path, monkeypatch, "ext_worker", "def register(mb):\n    pass\n")
@@ -91,8 +91,12 @@ def test_load_extensions_for_worker_loads_only_the_scheduler_bundle(
 
     registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
 
-    assert registry.names() == ["minibot.extensions.services.scheduler", "ext_worker"]
-    assert registry.tools == []
+    assert registry.names() == [
+        "minibot.extensions.services.scheduler",
+        "minibot.extensions.tools.utility",
+        "ext_worker",
+    ]
+    assert {binding.tool.name for binding in registry.tools} == {"current_datetime", "calculate_expression"}
 
 
 def test_load_extensions_for_worker_exposes_scheduler_tools_without_pages(tmp_path: Path) -> None:

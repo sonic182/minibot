@@ -17,9 +17,9 @@ daemon.run()                                   app/daemon.py
               └─ your_module.register(mb)      ← YOUR CODE
                   └─ mb.tool / mb.add_tool
   └─ Dispatcher._build_tools                   app/dispatcher.py:222
-      └─ build_enabled_tools(extension_tools=...)   app/tool_factory.py:31
-          ├─ tools.extend(extension_tools)     tool_factory.py:85
-          └─ _ensure_unique_tool_names(tools)  tool_factory.py:93
+      └─ build_enabled_tools(extension_tools=...)   app/tool_factory.py:26
+          ├─ tools.extend(extension_tools)     tool_factory.py:60
+          └─ _ensure_unique_tool_names(tools)  tool_factory.py:68
       └─ main_agent_tool_view(...)             app/tool_capabilities.py
 ```
 
@@ -56,18 +56,13 @@ Lean core (SKILL.md, `docs/architecture.md`): a tool goes here only when it need
 instead.
 
 ```
-Dispatcher._build_tools → build_enabled_tools()       app/tool_factory.py:31
-    ChatMemoryTool      (always)                       tool_factory.py:51   conversation memory backend
-    SettingsInfoTool    (always)                       tool_factory.py:53   config path, skill registry
-    DocsReaderTool      if the minibot-docs skill is on    tool_factory.py:62
-    CalculatorTool      if tools.calculator.enabled    tool_factory.py:66
-    SkillLoaderTool     if tools.skills.enabled        tool_factory.py:73   skill registry, managed storage
-    SkillInstallerTool  if tools.skills.install        tool_factory.py:78   skill registry
-    AgentInfoTool       if the agent registry is non-empty   tool_factory.py:92   LLM client factory
+Dispatcher._build_tools → build_enabled_tools()       app/tool_factory.py:26
+    ChatMemoryTool      (always)                       tool_factory.py:38   conversation memory backend
+    SettingsInfoTool    (always)                       tool_factory.py:40   config path, skill registry
+    SkillLoaderTool     if tools.skills.enabled        tool_factory.py:48   skill registry, managed storage
+    SkillInstallerTool  if tools.skills.install        tool_factory.py:53   skill registry
+    AgentInfoTool       if the agent registry is non-empty   tool_factory.py:67   LLM client factory
 ```
-
-`DocsReaderTool` and `CalculatorTool` need nothing an extension lacks; they are known
-exceptions due to move to bundled extensions. Do not copy them as a pattern.
 
 Create: `minibot/llm/tools/<module>.py` exposing `.bindings() -> list[ToolBinding]`, and
 `minibot/llm/tools/<tool_name>.txt` for the description.
@@ -234,27 +229,30 @@ spawn_task (LLM tool)
       ├─ SQLiteTaskProducer                adapters/tasks/sqlite_store.py
       └─ RabbitMQTaskProducer              adapters/messaging/rabbitmq/producer.py
   └─ consumer leases the row
-  └─ TaskManager  adapters/tasks/manager.py  → forks worker_entry over a pipe
-      └─ worker_entry(pipe)                adapters/tasks/worker.py:73
-          └─ run_agent_loop(payload)
-              ├─ load_settings()
-              ├─ load_extensions(..., entrypoint="worker")   ← bundled modules: scheduler only
-              ├─ _resolve_task_spec(...)
-              ├─ _build_worker_tools(...)  worker.py:166
-              └─ AgentRuntime(...)
+  └─ TaskManager  app/tasks/manager.py:143  → forks worker_entry over a pipe
+      └─ worker_entry(pipe)                adapters/tasks/worker_process.py:29
+          └─ worker_entry(pipe, backends)  app/tasks/worker.py:114
+              └─ run_agent_loop(...)       worker.py:208
+                  ├─ load_settings()
+                  ├─ load_extensions(..., entrypoint="worker")   ← bundled modules: scheduler + utility
+                  ├─ _resolve_task_spec(...)
+                  ├─ _build_worker_tools(...)  worker.py:370
+                  └─ AgentRuntime(...)
 ```
 
 Two traps:
 
-- **Workers load only the scheduler bundle** (`app/extensions.py:26`, worker branch returns
-  just `minibot.extensions.services.scheduler`). Besides it, only user-configured
-  `[extensions].modules` load there, and several bundled tool modules self-narrow when
-  `mb.entrypoint == "worker"`.
-- **Workers build tools independently of `tool_factory.py`.** To make a core tool worker-visible,
-  add it to `_build_worker_tools` (`worker.py:166`) **and** `_WORKER_TOOL_ALLOWLIST`
-  (`worker.py:45`). Extension tools are auto-appended and auto-allowlisted.
+- **Workers load only the scheduler and utility bundles** (`_bundled_modules`,
+  `app/extensions.py:33`). Besides them, only user-configured `[extensions].modules` load there,
+  and bundled tool modules self-narrow when `mb.entrypoint == "worker"` (e.g. `read_docs`).
+  To give workers a bundled extension tool, add its module to the worker branch.
+- **Workers build their core tools independently of `tool_factory.py`.** To make a core tool
+  worker-visible, add it to `_build_worker_tools` (`worker.py:370`) **and**
+  `_WORKER_TOOL_ALLOWLIST` (`worker.py:58`). Extension tools are auto-appended and
+  auto-allowlisted.
 
-`_WORKER_MAX_TOOL_ITERATIONS` is hard-coded to 8 (`worker.py:69`).
+The default worker spec sets `max_tool_iterations=None` (`worker.py:469`); steps and tool calls
+are bounded by `[tasks].worker_max_steps` / `worker_max_tool_calls` instead.
 
 For a new queue backend: implement `TaskProducer` (`core/tasks.py`) plus a consumer service,
 add a backend literal to `TasksConfig` (`schema.py`), and add
@@ -275,7 +273,7 @@ AppContainer.configure()
       ├─ fingerprint_skill_paths           (path, mtime_ns, size)
       └─ load_skill_specs → _parse_skill_file → SkillSpec   core/skills.py
 Dispatcher → build_enabled_tools(skill_registry=...)
-  └─ if tools.skills.enabled → SkillLoaderTool  app/tool_factory.py:73
+  └─ if tools.skills.enabled → SkillLoaderTool  app/tool_factory.py:48
 PromptService._skill_catalog_fragment       handlers/services/prompt_service.py:142
 runtime: every all()/get()/names() → refresh_if_stale()   skill_registry.py:55
 ```

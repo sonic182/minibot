@@ -13,6 +13,8 @@ from minibot.adapters.agents.definition_reader import LocalAgentDefinitionReader
 from minibot.adapters.config.schema import MCPServerConfig, Settings
 from minibot.adapters.mcp.client import MCPClient
 from minibot.adapters.tasks.worker_process import build_managed_storage
+from minibot.app.event_bus import EventBus
+from minibot.app.extensions import load_extensions
 from minibot.app.response_parser import EMPTY_REPLY_FALLBACK_TEXT
 from minibot.app.tasks import worker
 from minibot.core.agents import AgentSpec
@@ -330,9 +332,16 @@ def test_build_worker_tools_excludes_orchestration_tools() -> None:
     settings.tools.grep.enabled = True
     settings.tools.wait.enabled = True
 
-    spec = worker._build_worker_spec(system_prompt="You are Minibot.", environment_prompt_fragment="")
+    extensions = load_extensions(settings, EventBus(), entrypoint="worker")
+    spec = worker._build_worker_spec(
+        system_prompt="You are Minibot.",
+        environment_prompt_fragment="",
+        extension_tool_names=[binding.tool.name for binding in extensions.tools],
+    )
     storage = build_managed_storage(settings)
-    bindings = worker._build_worker_tools(settings=settings, spec=spec, managed_storage=storage)
+    bindings = worker._build_worker_tools(
+        settings=settings, spec=spec, managed_storage=storage, extension_tools=extensions.tools
+    )
     tool_names = {binding.tool.name for binding in bindings}
 
     assert "current_datetime" in tool_names
@@ -346,8 +355,8 @@ def test_build_worker_tools_excludes_orchestration_tools() -> None:
     assert "fetch_agent_info" not in tool_names
     assert not any(name.startswith("memory_") for name in tool_names)
     assert "chat_history_info" not in tool_names
-    assert "schedule_prompt" not in tool_names
     assert "self_insert_artifact" not in tool_names
+    assert "read_docs" not in tool_names
 
 
 def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
@@ -370,6 +379,25 @@ def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
     assert "cancel_task" not in tool_names
     assert "list_tasks" not in tool_names
     assert "fetch_agent_info" not in tool_names
+
+
+def test_a_specialist_claims_a_utility_extension_tool_in_the_worker() -> None:
+    settings = Settings()
+    extensions = load_extensions(settings, EventBus(), entrypoint="worker")
+    spec = AgentSpec(
+        name="specialist",
+        description="desc",
+        system_prompt="prompt",
+        source_path=worker.Path("/tmp/specialist.md"),
+        tools_allow=["calculate_expression"],
+    )
+
+    storage = build_managed_storage(settings)
+    bindings = worker._build_worker_tools(
+        settings=settings, spec=spec, managed_storage=storage, extension_tools=extensions.tools
+    )
+
+    assert [binding.tool.name for binding in bindings] == ["calculate_expression"]
 
 
 @pytest.mark.asyncio

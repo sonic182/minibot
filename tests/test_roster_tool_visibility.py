@@ -7,6 +7,8 @@ from typing import Any
 
 from minibot.adapters.config.schema import Settings
 from minibot.app.agent_registry import AgentRegistry
+from minibot.app.event_bus import EventBus
+from minibot.app.extensions import load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_factory import build_enabled_tools
@@ -33,6 +35,7 @@ def _rebuild(settings: Settings, registry: AgentRegistry) -> tuple[list[str], li
         _MemoryStub(),
         agent_registry=registry,
         llm_factory=LLMClientFactory(settings),
+        extension_tools=load_extensions(settings, EventBus(), entrypoint="console").tools,
     )
     view = main_agent_tool_view(
         tools=tools,

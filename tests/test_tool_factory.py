@@ -39,15 +39,19 @@ def test_build_enabled_tools_keeps_only_core_tools_without_extensions() -> None:
 
     names = {binding.tool.name for binding in build_enabled_tools(settings, memory=_MemoryStub())}
 
-    assert {"chat_history_info", "chat_history_trim", "calculate_expression", "get_settings"}.issubset(names)
-    assert "current_datetime" not in names
-    assert "read_docs" in names
+    assert {"chat_history_info", "chat_history_trim", "get_settings"}.issubset(names)
+    assert not names & {"current_datetime", "calculate_expression", "read_docs"}
 
 
 def test_read_docs_follows_the_minibot_docs_skill() -> None:
     settings = Settings.from_dict({"tools": {"skills": {"enabled": True, "native_disabled": ["minibot-docs"]}}})
 
-    names = {binding.tool.name for binding in build_enabled_tools(settings, memory=_MemoryStub())}
+    registry = load_extensions(settings, EventBus(), entrypoint="console")
+
+    names = {
+        binding.tool.name
+        for binding in build_enabled_tools(settings, memory=_MemoryStub(), extension_tools=registry.tools)
+    }
 
     assert "read_docs" not in names
 
@@ -61,7 +65,7 @@ def test_build_enabled_tools_merges_bundled_extension_tools() -> None:
         for binding in build_enabled_tools(settings, memory=_MemoryStub(), extension_tools=registry.tools)
     }
 
-    assert {"current_datetime", "wait"}.issubset(names)
+    assert {"current_datetime", "wait", "calculate_expression", "read_docs"}.issubset(names)
 
 
 def test_build_enabled_tools_rejects_extension_tool_name_collisions() -> None:
@@ -72,7 +76,7 @@ def test_build_enabled_tools_rejects_extension_tool_name_collisions() -> None:
         return {"ok": True}
 
     duplicate = ToolBinding(
-        tool=Tool(name="calculate_expression", description="duplicate", parameters={}),
+        tool=Tool(name="get_settings", description="duplicate", parameters={}),
         handler=handler,
     )
     with pytest.raises(ValueError, match="duplicate tool name"):

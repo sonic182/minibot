@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remote audio transcription and `install_skill` downloads no longer leave them open. `install_skill` follows
   redirects with aiosonic's `follow` instead of its own loop, still refusing any non-https URL and more than 5
   redirects.
+- **`calculate_expression` and `read_docs` ship as bundled extension tools.** They move from the core tool factory
+  into `minibot.extensions.tools.utility`, with the same names and config. They are now listed after the core tools,
+  so the first turn after upgrading misses the provider's prompt cache. Task workers load the utility bundle for
+  `current_datetime`, `calculate_expression` and `wait`; `read_docs` stays out of workers.
 
 ### Removed
 
