@@ -106,6 +106,17 @@ Worker limits live on ``[tasks]``:
 - ``continue_turn_mode`` — ``"auto"`` (default) lets the model choose per task through ``continue_turn``;
   ``"always"`` ignores the model's choice and returns every result to the main agent as a new turn, falling
   back to direct delivery past the continuation limit. ``continue_turn_default`` has no effect in that mode.
+- ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
+  (default ``[]``). ``"kv_memory"`` and ``"rag"`` are accepted; each needs its ``[tools.*]`` section enabled.
+  Their storage is prepared on the first call in each worker.
+
+  .. code-block:: toml
+
+     [tasks]
+     worker_extensions = ["rag"]
+
+  A specialist still has to claim the tools, for example ``tools_allow: ["rag_*"]``. MCP servers need no
+  entry here: a specialist claims them through ``mcp_servers``.
 
 .. warning::
 
@@ -116,8 +127,9 @@ Worker limits live on ``[tasks]``:
 Operational notes
 -----------------
 
-- Task workers build their own tool registry: configured extension tools are available, but worker
-  registries do not start extension services or event subscriptions.
+- Task workers build their own tool registry: configured extension tools and the bundles listed in
+  ``worker_extensions`` are available, but worker registries do not start extension services or event
+  subscriptions.
 - ``spawn_task`` requires channel context so the worker knows where to post progress and results.
 - ``spawn_task`` returns a ``task_id`` immediately with ``status = "queued"``; poll it with
   ``get_task`` rather than waiting in the turn.

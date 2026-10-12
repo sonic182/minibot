@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,6 +20,20 @@ async def kv_memory(tmp_path: Path) -> SQLAlchemyKeyValueMemory:
     )
     await backend.initialize()
     return backend
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_initialize_shares_a_fresh_database(tmp_path: Path) -> None:
+    config = KeyValueMemoryConfig(enabled=True, sqlite_url=f"sqlite+aiosqlite:///{tmp_path / 'shared.db'}")
+    backends = [SQLAlchemyKeyValueMemory(config) for _ in range(8)]
+    try:
+        results = await asyncio.gather(*(backend.initialize() for backend in backends), return_exceptions=True)
+        assert results == [None] * len(backends)
+        await backends[0].create_entry(owner_id="tenant", title="Wifi", data="hunter2")
+        found = await backends[-1].search_entries("tenant", query="hunter2")
+        assert [entry.title for entry in found.entries] == ["Wifi"]
+    finally:
+        await asyncio.gather(*(backend._engine.dispose() for backend in backends))
 
 
 @pytest.mark.asyncio

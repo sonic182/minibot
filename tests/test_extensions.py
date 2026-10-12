@@ -157,6 +157,36 @@ async def test_worker_scheduler_tool_initializes_schema_and_keeps_chat_context(t
         assert other_jobs["jobs"] == []
 
 
+@pytest.mark.asyncio
+async def test_worker_opted_in_kv_memory_prepares_a_fresh_database_on_first_call(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {
+            "runtime": {"owner_id": "owner-1"},
+            "scheduler": {"prompts": {"enabled": False}},
+            "tools": {"kv_memory": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'kv.db'}"}},
+            "tasks": {"worker_extensions": ["kv_memory"]},
+        }
+    )
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+    handlers = {binding.tool.name: binding.handler for binding in registry.tools}
+    context = ToolContext(owner_id="owner-1", channel="telegram", chat_id=42, user_id=7)
+
+    created = await asyncio.gather(
+        handlers["memory_create"]({"title": "Wifi", "data": "password is hunter2", "category": "otros"}, context),
+        handlers["memory_create"]({"title": "Bike", "data": "lock code 4521", "category": "otros"}, context),
+    )
+    found = await handlers["memory_search"]({"query": "hunter2"}, context)
+
+    assert registry.names()[-1] == "minibot.extensions.tools.memory"
+    assert all(result["created"] for result in created)
+    assert [entry["title"] for entry in found["entries"]] == ["Wifi"]
+
+
+def test_worker_extensions_require_their_tool_to_be_enabled() -> None:
+    with pytest.raises(ValidationError, match=r'lists "rag" but \[tools.rag\].enabled is false'):
+        Settings.from_dict({"tasks": {"worker_extensions": ["rag"]}})
+
+
 def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bus = EventBus()
 

@@ -220,8 +220,8 @@ async def run_agent_loop(
         secrets = task.pop("secrets", None)
         settings = backends.load_settings(secrets)
         # ponytail: no vault object here, so a user extension sees `mb.vault is None` even though
-        # ${secret:} resolved above. The bundles a worker loads (scheduler, utility) need no vault; build a
-        # Vault from `secrets` if a user extension ever needs one.
+        # ${secret:} resolved above. The bundles a worker loads (scheduler, utility, kv_memory, rag) need no vault;
+        # build a Vault from `secrets` if a user extension ever needs one.
         extensions = load_extensions(settings, EventBus(), _LOGGER, entrypoint="worker")
         llm_factory = LLMClientFactory(settings)
         environment_prompt_fragment = build_environment_prompt_fragment(settings)

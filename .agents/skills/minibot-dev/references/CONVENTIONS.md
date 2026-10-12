@@ -127,7 +127,8 @@ Fourteen modules load automatically and appear nowhere in `config.toml` (`_bundl
 `app/extensions.py`): decision, rag, mcp, rabbitmq, scheduler, tasks, and the tool modules
 agent_management / execution / media / memory / network / utility / vault / workspace. Telegram
 is appended for the `daemon` entrypoint only. **Workers load only the scheduler and utility
-bundles** (tools only, no service or page).
+bundles**, plus kv_memory / rag when listed in `[tasks] worker_extensions` (tools only, no service
+or page).
 
 Reading `[extensions].modules` and concluding "no extensions are active" is wrong.
 

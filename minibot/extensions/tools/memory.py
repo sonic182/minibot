@@ -7,6 +7,8 @@ from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
 from minibot.app.extensions import ExtensionContext
 from minibot.llm.tools.user_memory import build_kv_tools
 
+from .._lazy_start import start_on_first_call
+
 
 class _MemoryService:
     def __init__(self, memory: SQLAlchemyKeyValueMemory) -> None:
@@ -20,9 +22,12 @@ class _MemoryService:
 
 
 def register(mb: ExtensionContext) -> None:
-    if mb.entrypoint == "worker" or not mb.settings.tools.kv_memory.enabled:
+    if not mb.settings.tools.kv_memory.enabled:
         return
     memory = SQLAlchemyKeyValueMemory(mb.settings.tools.kv_memory)
+    if mb.entrypoint == "worker":
+        mb.add_tool(start_on_first_call(build_kv_tools(memory), _MemoryService(memory)))
+        return
     mb.add_tool(build_kv_tools(memory))
     mb.add_service(_MemoryService(memory))
     if mb.settings.http.enabled:

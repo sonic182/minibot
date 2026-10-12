@@ -1075,6 +1075,10 @@ class TasksConfig(BaseModel):
       stored in the ``[memory]`` database, and tasks of one conversation run one at a time, later ones waiting in
       the queue. A large history is summarized before the next task when the model's context limit is known, and
       ``spawn_task`` gains ``fresh`` to clear it first. With ``false`` every worker starts with no history.
+    - ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
+      (default: ``[]``). ``"kv_memory"`` adds the ``[tools.kv_memory]`` tools and ``"rag"`` the ``[tools.rag]``
+      tools, so a specialist can list them in ``tools_allow``. Each needs its ``[tools.*]`` section enabled.
+      Their storage is prepared on the first call in each worker, so a task that never calls them pays nothing.
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
@@ -1087,6 +1091,7 @@ class TasksConfig(BaseModel):
     continue_turn_default: bool = False
     continue_turn_mode: Literal["auto", "always"] = "auto"
     history: bool = False
+    worker_extensions: list[Literal["kv_memory", "rag"]] = Field(default_factory=list)
     sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
 
     @model_validator(mode="after")
@@ -1268,6 +1273,13 @@ class Settings(BaseModel):
             specialists.enabled = False
         if self.orchestration.agent_management.active and not specialists.enabled:
             raise ValueError("[orchestration.agent_management] requires [orchestration.specialists].enabled = true")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_worker_extensions(self) -> Settings:
+        for name in self.tasks.worker_extensions:
+            if not getattr(self.tools, name).enabled:
+                raise ValueError(f'tasks.worker_extensions lists "{name}" but [tools.{name}].enabled is false')
         return self
 
     @classmethod

@@ -646,6 +646,9 @@ continue_turn_mode = "auto"
 # agent in a chat, optionally split by a `session` name from spawn_task; its tasks run one at a time and see earlier
 # prompts and answers, summarized when they grow. spawn_task gains `fresh` to clear that history first.
 history = false
+# Bundled tool extensions a worker loads on top of the scheduler and utility ones: "kv_memory" and/or "rag".
+# Each needs its [tools.*] section enabled; a specialist still claims the tools through tools_allow.
+worker_extensions = []
 
 # Queue storage used when tasks.backend = "sqlite". No external broker required.
 [tasks.sqlite]

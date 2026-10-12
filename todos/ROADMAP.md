@@ -25,19 +25,19 @@ so the order here is the order to work in, not the numeric order.
 
 | priority | phase | topic | status |
 |---|---|---|---|
-| 1 | 12 | opt-in bundled extensions for task workers | in progress |
-| 2 | 8 | runtime reliability leftovers | container smoke test, scheduler timezone decision |
-| 3 | 3b | steering leftovers | steering workers and specialists, `/stop` on the console |
-| 4 | 9 | delegation semantics: `delegate` versus `spawn_task` | pending, investigate first |
-| 5 | 10 | external agents (ACP) as an agent runtime backend | pending, experimental through `acpx` first |
-| 6 | 11 | task observability | pending |
-| 7 | 4 | MCP OAuth (#65) | demand-driven: only when an MCP server in use requires it |
-| 8 | 5, 6 | security defence in depth: guardrail heuristics, bash hardening | pending, lower priority than the deterministic controls already shipped |
+| 1 | 8 | runtime reliability leftovers | container smoke test, scheduler timezone decision |
+| 2 | 3b | steering leftovers | steering workers and specialists, `/stop` on the console |
+| 3 | 9 | delegation semantics: `delegate` versus `spawn_task` | pending, investigate first |
+| 4 | 10 | external agents (ACP) as an agent runtime backend | pending, experimental through `acpx` first |
+| 5 | 11 | task observability | pending |
+| 6 | 4 | MCP OAuth (#65) | demand-driven: only when an MCP server in use requires it |
+| 7 | 5, 6 | security defence in depth: guardrail heuristics, bash hardening | pending, lower priority than the deterministic controls already shipped |
 
 Shipped and removed from this file: 0 bash env default, 1 credential vault, 2 skills for specialist
 agents, 3 native skills, runtime self-knowledge and agent management, 3b main-agent steering and `/stop`
 (Telegram, web), 7 shared tool construction with task workers, 8 task lifecycle, bounded output, MCP HTTP
-and approval binding (#112, 0.29.0). Git history keeps their design notes.
+and approval binding (#112, 0.29.0), 12 opt-in bundled extensions for task workers
+(`[tasks] worker_extensions`). Git history keeps their design notes.
 
 Dropped: a native SMTP tool. Mail is covered by an MCP server (`docs/mcp_servers.rst`) behind the
 `[tools.approval]` gate, so there is nothing left for MiniBot to own.
@@ -84,31 +84,7 @@ Worth stating this plainly in the README/docs, roughly:
 > workloads or deployments with sensitive host data, run MiniBot inside an
 > appropriately isolated environment.
 
-## [ ] Phase 12 — Opt-in bundled extensions for task workers (priority 1)
-
-Workers load only the scheduler and utility bundled extensions (`_bundled_modules` in
-`minibot/app/extensions.py`), so a specialist agent that lists `rag_*` (or kv memory, MCP tools) in
-`tools_allow` gets nothing: those extensions return early for `entrypoint == "worker"`
-(`minibot/extensions/integrations/rag.py`, `tools/memory.py`, `integrations/mcp.py`). Found when a
-model-authored `rag_manager` agent answered that it had no RAG tools.
-
-The scheduler precedent (#110) shows that registering the tools is the small part. The daemon-side
-`start()` work does not run in a worker, so each extension needs lazy initialization and a lock
-against concurrent workers (`SQLAlchemyScheduledPromptStore._session`), plus isolation tests.
-
-Shape: one config mechanism instead of a per-extension flag, e.g. `[tasks.worker] extensions = [...]`
-naming the bundled extensions a worker loads on top of the scheduler and utility ones. Default empty, so
-nothing changes for existing deployments.
-
-- Each extension that can be listed must be safe to register without its service: lazy init, no
-  schema race (SQLite) and no per-worker heavy state at import time. RAG models already load lazily and die
-  with the worker subprocess, but every task that uses RAG pays the load.
-- Document the option in `docs/config.rst`, and update `docs/extensions.rst` and `docs/tasks.rst`, which
-  say workers only get configured extension tools.
-- If RAG ever ships as an MCP server, prefer that for RAG: a long-lived MCP process shares the embedding
-  model across tasks, which this mechanism cannot.
-
-## [ ] Phase 8 — Runtime reliability (priority 2)
+## [ ] Phase 8 — Runtime reliability (priority 1)
 
 `spawn_task` sits closer to the centre of the system with every release, so cancel, timeout, SIGTERM,
 process-tree cleanup and resource limits have to be boring and dependable before more intelligence is
@@ -132,7 +108,7 @@ Known gaps, deliberately left:
   explicit marker carried through every `ToolBinding` wrapper.
 - `bash` spill files hold at most `max_output_bytes`, since the cap is applied while reading.
 
-## [ ] Phase 3b — Steering leftovers (priority 3)
+## [ ] Phase 3b — Steering leftovers (priority 2)
 
 Steering and `/stop` shipped for the main agent: the dispatcher hands same-chat messages to the running turn
 (`app/turn_inbox.py`), and `/stop` exists on Telegram and in the web chat. Still open:
@@ -144,7 +120,7 @@ Steering and `/stop` shipped for the main agent: the dispatcher hands same-chat 
 Trust model: pending messages are owner input like any other, no new surface. `/stop` must remain
 owner-only.
 
-## [ ] Phase 9 — Delegation semantics (priority 4)
+## [ ] Phase 9 — Delegation semantics (priority 3)
 
 `spawn_task` now covers two different intents: *do this independently in the background* and *do this and
 bring me the result, because I need it for my next step* (`continue_turn`). `continue_turn_mode = "always"`
@@ -163,7 +139,7 @@ Investigate before adding anything:
 - Decide whether this replaces the existing flags or only adds a friendlier entry point. No code until
   that is settled.
 
-## [ ] Phase 10 — External agents through ACP (priority 5)
+## [ ] Phase 10 — External agents through ACP (priority 4)
 
 The goal is for MiniBot to be the control plane in front of other agents (Claude, Codex, OpenCode, Pi),
 keeping Telegram, memory, scheduling, approvals and MCP as the stable interface. ACP is **not** another LLM
@@ -208,7 +184,7 @@ and benefits from Phase 9. Trust model: an external agent has its own tools and 
 subject to the same deployment-isolation reasoning as `bash` (see Phase 6) and should sit behind the
 approval gate.
 
-## [ ] Phase 11 — Task observability (priority 6)
+## [ ] Phase 11 — Task observability (priority 5)
 
 As delegation grows (specialists, continuations, external agents), the owner needs to see what happened:
 
@@ -219,7 +195,7 @@ As delegation grows (specialists, continuations, external agents), the owner nee
 
 Small and incremental; builds on the task records that already exist, no new subsystem.
 
-## [ ] Phase 4 — MCP OAuth (issue #65) — demand-driven (priority 7)
+## [ ] Phase 4 — MCP OAuth (issue #65) — demand-driven (priority 6)
 
 Scope: alternative 1 only (auth-code + PKCE + manual callback paste). No HTTP
 callback endpoint, no device flow.
@@ -265,7 +241,7 @@ implementation that happens to work against two test servers:
   a new one, so the loser of that race gets locked out. Needs a lock keyed by
   `(server_name, issuer)`.
 
-## [ ] Phase 5 — Guardrail enhancements (priority 8, defence in depth)
+## [ ] Phase 5 — Guardrail enhancements (priority 7, defence in depth)
 
 Not a duplicate of the credential vault. Under its destination-bound model,
 the LLM never has a secret reference to put in an argument at all, so nothing
@@ -281,7 +257,7 @@ call's arguments:
 - `GuardrailDecision` gains a `credential_exposure` field (structured, not
   regex/text classification, per project convention).
 
-## [ ] Phase 6 — bash tool hardening (mixed priority — see Trust model) (priority 8)
+## [ ] Phase 6 — bash tool hardening (mixed priority — see Trust model) (priority 7)
 
 Two different things live in this phase, deliberately split by who owns
 them:

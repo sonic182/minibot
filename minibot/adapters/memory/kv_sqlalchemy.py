@@ -61,6 +61,8 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
 
     async def initialize(self) -> None:
         async with self._engine.begin() as connection:
+            if connection.dialect.name == "sqlite":
+                await connection.exec_driver_sql("BEGIN IMMEDIATE")
             await connection.run_sync(self._create_schema)
             if self._database_url.drivername.startswith("sqlite"):
                 self._fts_enabled = await self._initialize_fts(connection)

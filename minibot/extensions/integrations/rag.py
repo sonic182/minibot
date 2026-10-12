@@ -6,6 +6,7 @@ from minibot.app.extensions import ExtensionContext
 from minibot.config.schema import RagToolConfig
 from minibot.core.vectors import VectorStore
 
+from .._lazy_start import start_on_first_call
 from ..tools._storage import managed_storage
 
 _logger = logging.getLogger("minibot.rag")
@@ -31,7 +32,7 @@ class _RagService:
 
 
 def register(mb: ExtensionContext) -> None:
-    if mb.entrypoint == "worker" or not mb.settings.tools.rag.enabled:
+    if not mb.settings.tools.rag.enabled:
         return
     config = mb.settings.tools.rag
     if config.chunk_overlap_tokens >= config.chunk_size_tokens:
@@ -55,7 +56,11 @@ def register(mb: ExtensionContext) -> None:
 
         store = SqliteVectorStore(config)
 
-    mb.add_tool(RagTools(config=config, store=store, storage=storage).bindings())
+    bindings = RagTools(config=config, store=store, storage=storage).bindings()
+    if mb.entrypoint == "worker":
+        mb.add_tool(start_on_first_call(bindings, _RagService(config, store)))
+        return
+    mb.add_tool(bindings)
     mb.add_service(_RagService(config, store))
 
 
