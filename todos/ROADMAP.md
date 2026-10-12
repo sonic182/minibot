@@ -30,13 +30,13 @@ so the order here is the order to work in, not the numeric order.
 | 3 | 9 | delegation semantics: `delegate` versus `spawn_task` | pending, investigate first |
 | 4 | 10 | external agents (ACP) as an agent runtime backend | pending, experimental through `acpx` first |
 | 5 | 11 | task observability | pending |
-| 6 | 4 | MCP OAuth (#65) | demand-driven: only when an MCP server in use requires it |
+| 6 | 4 | MCP OAuth (issue #65) | demand-driven: only when an MCP server in use requires it |
 | 7 | 5, 6 | security defence in depth: guardrail heuristics, bash hardening | pending, lower priority than the deterministic controls already shipped |
 
 Shipped and removed from this file: 0 bash env default, 1 credential vault, 2 skills for specialist
 agents, 3 native skills, runtime self-knowledge and agent management, 3b main-agent steering and `/stop`
 (Telegram, web), 7 shared tool construction with task workers, 8 task lifecycle, bounded output, MCP HTTP
-and approval binding (#112, 0.29.0), 12 opt-in bundled extensions for task workers
+and approval binding (PR #112, released in 0.29.0), 12 opt-in bundled extensions for task workers
 (`[tasks] worker_extensions`). Git history keeps their design notes.
 
 Dropped: a native SMTP tool. Mail is covered by an MCP server (`docs/mcp_servers.rst`) behind the
@@ -88,7 +88,7 @@ Worth stating this plainly in the README/docs, roughly:
 
 `spawn_task` sits closer to the centre of the system with every release, so cancel, timeout, SIGTERM,
 process-tree cleanup and resource limits have to be boring and dependable before more intelligence is
-added on top. The bulk of it shipped in #112 (0.29.0). Still open:
+added on top. The bulk of it shipped in PR #112 (released in 0.29.0). Still open:
 
 - [ ] Smoke test in the container: cancel a task running `bash sleep 300` and confirm nothing is left
   behind (the code path is covered by unit tests, not exercised against a real container yet).
