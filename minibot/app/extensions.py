@@ -5,7 +5,7 @@ import contextlib
 import importlib
 import inspect
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, get_type_hints
 
@@ -30,7 +30,7 @@ type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
 type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 
 
-_WORKER_OPT_IN_MODULES = {
+WORKER_OPT_IN_MODULES = {
     "kv_memory": "minibot.extensions.tools.memory",
     "rag": "minibot.extensions.integrations.rag",
 }
@@ -62,7 +62,7 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint, worker_extensions: Sequenc
     return (
         "minibot.extensions.services.scheduler",
         "minibot.extensions.tools.utility",
-        *(_WORKER_OPT_IN_MODULES[name] for name in worker_extensions),
+        *(WORKER_OPT_IN_MODULES[name] for name in worker_extensions),
     )
 
 
@@ -230,6 +230,9 @@ class ExtensionRegistry:
     @property
     def tools(self) -> list[ToolBinding]:
         return [binding for context in self._contexts for binding in context.tools]
+
+    def tools_outside(self, names: Collection[str]) -> list[ToolBinding]:
+        return [binding for context in self._contexts if context.name not in names for binding in context.tools]
 
     @property
     def routes(self) -> list[RouteSpec]:

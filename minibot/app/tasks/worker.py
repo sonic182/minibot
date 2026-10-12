@@ -18,7 +18,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
-from minibot.app.extensions import load_extensions
+from minibot.app.extensions import WORKER_OPT_IN_MODULES, load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.managed_agent_policy import (
     ManagedAgentPolicy,
@@ -231,7 +231,9 @@ async def run_agent_loop(
             llm_factory=llm_factory,
             environment_prompt_fragment=environment_prompt_fragment,
             task=task,
-            extension_tool_names=[binding.tool.name for binding in extensions.tools],
+            extension_tool_names=[
+                binding.tool.name for binding in extensions.tools_outside(WORKER_OPT_IN_MODULES.values())
+            ],
         )
         llm_client = llm_factory.create_for_agent(spec)
         mcp_bindings = await _build_worker_mcp_bindings(

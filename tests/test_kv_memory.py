@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import event
 
 from minibot.adapters.config.schema import KeyValueMemoryConfig
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
@@ -34,6 +35,25 @@ async def test_concurrent_first_initialize_shares_a_fresh_database(tmp_path: Pat
         assert [entry.title for entry in found.entries] == ["Wifi"]
     finally:
         await asyncio.gather(*(backend._engine.dispose() for backend in backends))
+
+
+@pytest.mark.asyncio
+async def test_initialize_rebuilds_the_search_index_only_when_creating_it(tmp_path: Path) -> None:
+    config = KeyValueMemoryConfig(enabled=True, sqlite_url=f"sqlite+aiosqlite:///{tmp_path / 'kv.db'}")
+    rebuilds: list[str] = []
+    for _ in range(2):
+        backend = SQLAlchemyKeyValueMemory(config)
+        event.listen(
+            backend._engine.sync_engine,
+            "before_cursor_execute",
+            lambda _conn, _cursor, statement, *_: rebuilds.append(statement) if "'rebuild'" in statement else None,
+        )
+        try:
+            await backend.initialize()
+        finally:
+            await backend._engine.dispose()
+
+    assert len(rebuilds) == 1
 
 
 @pytest.mark.asyncio

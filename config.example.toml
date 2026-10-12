@@ -647,7 +647,8 @@ continue_turn_mode = "auto"
 # prompts and answers, summarized when they grow. spawn_task gains `fresh` to clear that history first.
 history = false
 # Bundled tool extensions a worker loads on top of the scheduler and utility ones: "kv_memory" and/or "rag".
-# Each needs its [tools.*] section enabled; a specialist still claims the tools through tools_allow.
+# Each needs its [tools.*] section enabled. Only a specialist that claims them (tools_allow, or a tools_deny that
+# leaves them out) gets them; a spawn_task without an agent does not. A RAG task loads the embedding model itself.
 worker_extensions = []
 
 # Queue storage used when tasks.backend = "sqlite". No external broker required.

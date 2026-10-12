@@ -185,6 +185,34 @@ async def test_worker_opted_in_kv_memory_prepares_a_fresh_database_on_first_call
 def test_worker_extensions_require_their_tool_to_be_enabled() -> None:
     with pytest.raises(ValidationError, match=r'lists "rag" but \[tools.rag\].enabled is false'):
         Settings.from_dict({"tasks": {"worker_extensions": ["rag"]}})
+    with pytest.raises(ValidationError, match="must not list an extension twice"):
+        Settings.from_dict(
+            {"tools": {"kv_memory": {"enabled": True}}, "tasks": {"worker_extensions": ["kv_memory"] * 2}}
+        )
+
+    settings = Settings.from_dict({"tasks": {"enabled": False, "worker_extensions": ["rag"]}})
+
+    assert settings.tasks.worker_extensions == ["rag"]
+
+
+@pytest.mark.asyncio
+async def test_worker_opted_in_rag_prepares_a_fresh_store_on_first_call(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {
+            "scheduler": {"prompts": {"enabled": False}},
+            "tools": {
+                "file_storage": {"enabled": True, "root_dir": str(tmp_path / "files")},
+                "rag": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'rag.db'}"},
+            },
+            "tasks": {"worker_extensions": ["rag"]},
+        }
+    )
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+    handlers = {binding.tool.name: binding.handler for binding in registry.tools}
+
+    listed = await handlers["rag_list_metadata"]({}, ToolContext(owner_id="primary"))
+
+    assert listed == {"tags": [], "categories": [], "filenames": []}
 
 
 def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

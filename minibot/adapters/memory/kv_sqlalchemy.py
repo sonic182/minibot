@@ -272,6 +272,9 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
 
     async def _initialize_fts(self, connection: Any) -> bool:
         try:
+            existed = await connection.scalar(
+                text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'kv_memory_fts'")
+            )
             await connection.execute(
                 text(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS kv_memory_fts USING "
@@ -301,7 +304,8 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
                     "END"
                 )
             )
-            await connection.execute(text("INSERT INTO kv_memory_fts(kv_memory_fts) VALUES('rebuild')"))
+            if not existed:
+                await connection.execute(text("INSERT INTO kv_memory_fts(kv_memory_fts) VALUES('rebuild')"))
         except SQLAlchemyError:
             return False
         return True

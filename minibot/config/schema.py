@@ -1077,8 +1077,10 @@ class TasksConfig(BaseModel):
       ``spawn_task`` gains ``fresh`` to clear it first. With ``false`` every worker starts with no history.
     - ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
       (default: ``[]``). ``"kv_memory"`` adds the ``[tools.kv_memory]`` tools and ``"rag"`` the ``[tools.rag]``
-      tools, so a specialist can list them in ``tools_allow``. Each needs its ``[tools.*]`` section enabled.
-      Their storage is prepared on the first call in each worker, so a task that never calls them pays nothing.
+      tools. Only a specialist that names them in ``tools_allow`` gets them (a ``tools_deny``-only specialist gets
+      every tool it does not deny, these included); a ``spawn_task`` without an agent never does. Each listed
+      extension needs its ``[tools.*]`` section enabled, and must appear once. Storage is prepared on the first
+      call in each worker; RAG also loads its embedding model in every worker that calls it.
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
@@ -1105,6 +1107,8 @@ class TasksConfig(BaseModel):
             )
         if self.history and self.backend != "sqlite":
             raise ValueError('tasks.history requires tasks.backend = "sqlite"')
+        if len(set(self.worker_extensions)) != len(self.worker_extensions):
+            raise ValueError("tasks.worker_extensions must not list an extension twice")
         return self
 
 
@@ -1277,6 +1281,8 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _validate_worker_extensions(self) -> Settings:
+        if not self.tasks.enabled:
+            return self
         for name in self.tasks.worker_extensions:
             if not getattr(self.tools, name).enabled:
                 raise ValueError(f'tasks.worker_extensions lists "{name}" but [tools.{name}].enabled is false')

@@ -107,16 +107,21 @@ Worker limits live on ``[tasks]``:
   ``"always"`` ignores the model's choice and returns every result to the main agent as a new turn, falling
   back to direct delivery past the continuation limit. ``continue_turn_default`` has no effect in that mode.
 - ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
-  (default ``[]``). ``"kv_memory"`` and ``"rag"`` are accepted; each needs its ``[tools.*]`` section enabled.
-  Their storage is prepared on the first call in each worker.
+  (default ``[]``). ``"kv_memory"`` and ``"rag"`` are accepted, each at most once, and each needs its
+  ``[tools.*]`` section enabled. Their storage is prepared on the first call in each worker.
 
   .. code-block:: toml
 
      [tasks]
      worker_extensions = ["rag"]
 
-  A specialist still has to claim the tools, for example ``tools_allow: ["rag_*"]``. MCP servers need no
-  entry here: a specialist claims them through ``mcp_servers``.
+  Only a specialist that claims the tools gets them, for example with ``tools_allow: ["rag_*"]``. A
+  specialist that sets only ``tools_deny`` gets every tool it does not deny, these included. A ``spawn_task``
+  without an agent never gets them. MCP servers need no entry here: a specialist claims them through
+  ``mcp_servers``.
+
+  Each worker process is separate, so a task that calls RAG loads the embedding model (and the reranker for
+  a search) itself: expect that latency on its first RAG call and that memory per concurrent worker.
 
 .. warning::
 
