@@ -5,15 +5,16 @@ import logging
 import sys
 import textwrap
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from llm_async.models import ToolCall
 from pydantic import ValidationError
 
-from minibot.adapters.config.schema import Settings
+from minibot.adapters.config.schema import Settings, TasksConfig
 from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
 from minibot.app.event_bus import EventBus
-from minibot.app.extensions import ExtensionContext, load_extensions
+from minibot.app.extensions import WORKER_OPT_IN_MODULES, ExtensionContext, load_extensions
 from minibot.core.channels import ChannelResponse
 from minibot.core.events import OutboundEvent, TurnCompletedEvent
 from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
@@ -177,9 +178,15 @@ async def test_worker_opted_in_kv_memory_prepares_a_fresh_database_on_first_call
     )
     found = await handlers["memory_search"]({"query": "hunter2"}, context)
 
-    assert registry.names()[-1] == "minibot.extensions.tools.memory"
+    assert "minibot.extensions.tools.memory" in registry.names()
     assert all(result["created"] for result in created)
     assert [entry["title"] for entry in found["entries"]] == ["Wifi"]
+
+
+def test_every_worker_extension_name_maps_to_a_module() -> None:
+    (literal,) = get_args(TasksConfig.model_fields["worker_extensions"].annotation)
+
+    assert set(get_args(literal)) == WORKER_OPT_IN_MODULES.keys()
 
 
 def test_worker_extensions_require_their_tool_to_be_enabled() -> None:

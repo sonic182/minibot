@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -411,8 +412,16 @@ async def test_opted_in_worker_tools_reach_only_specialists_that_claim_them(tmp_
     bindings = worker._build_worker_tools(
         settings=settings, spec=spec, managed_storage=None, extension_tools=extensions.tools
     )
+    deny_only = replace(spec, tools_allow=[], tools_deny=["bash"])
+    deny_only_names = {
+        binding.tool.name
+        for binding in worker._build_worker_tools(
+            settings=settings, spec=deny_only, managed_storage=None, extension_tools=extensions.tools
+        )
+    }
 
     assert "current_datetime" in generic_names
+    assert {"memory_create", "memory_delete"} <= deny_only_names
     assert not any(name.startswith("memory_") for name in generic_names)
     assert {binding.tool.name for binding in bindings} == {
         "memory_create",

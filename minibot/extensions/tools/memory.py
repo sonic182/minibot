@@ -11,11 +11,12 @@ from .._lazy_start import start_on_first_call
 
 
 class _MemoryService:
-    def __init__(self, memory: SQLAlchemyKeyValueMemory) -> None:
+    def __init__(self, memory: SQLAlchemyKeyValueMemory, *, rebuild_index: bool = True) -> None:
         self._memory = memory
+        self._rebuild_index = rebuild_index
 
     async def start(self) -> None:
-        await self._memory.initialize()
+        await self._memory.initialize(rebuild_index=self._rebuild_index)
 
     async def stop(self) -> None:
         return None
@@ -26,7 +27,7 @@ def register(mb: ExtensionContext) -> None:
         return
     memory = SQLAlchemyKeyValueMemory(mb.settings.tools.kv_memory)
     if mb.entrypoint == "worker":
-        mb.add_tool(start_on_first_call(build_kv_tools(memory), _MemoryService(memory)))
+        mb.add_tool(start_on_first_call(build_kv_tools(memory), _MemoryService(memory, rebuild_index=False)))
         return
     mb.add_tool(build_kv_tools(memory))
     mb.add_service(_MemoryService(memory))

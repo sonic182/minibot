@@ -38,10 +38,10 @@ async def test_concurrent_first_initialize_shares_a_fresh_database(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_initialize_rebuilds_the_search_index_only_when_creating_it(tmp_path: Path) -> None:
+async def test_initialize_without_rebuild_index_rebuilds_only_a_new_search_index(tmp_path: Path) -> None:
     config = KeyValueMemoryConfig(enabled=True, sqlite_url=f"sqlite+aiosqlite:///{tmp_path / 'kv.db'}")
     rebuilds: list[str] = []
-    for _ in range(2):
+    for rebuild_index in (False, False, True):
         backend = SQLAlchemyKeyValueMemory(config)
         event.listen(
             backend._engine.sync_engine,
@@ -49,11 +49,11 @@ async def test_initialize_rebuilds_the_search_index_only_when_creating_it(tmp_pa
             lambda _conn, _cursor, statement, *_: rebuilds.append(statement) if "'rebuild'" in statement else None,
         )
         try:
-            await backend.initialize()
+            await backend.initialize(rebuild_index=rebuild_index)
         finally:
             await backend._engine.dispose()
 
-    assert len(rebuilds) == 1
+    assert len(rebuilds) == 2
 
 
 @pytest.mark.asyncio
