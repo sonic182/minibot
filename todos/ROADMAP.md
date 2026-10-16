@@ -49,7 +49,8 @@ Dropped: a native SMTP tool. Mail is covered by an MCP server (`docs/mcp_servers
 Self-modification is planned only behind an explicit opt-in (`[evolution]`, Phase 14, see
 `todos/SELF_EVOLUTION.md`). Still out, on purpose: activation without an owner approval, autonomous
 agent spawning, self-tuning prompts, edits to `config.toml` or to the agent ceiling, and edits to
-MiniBot's own source. `create_agent` / `update_agent` / `delete_agent` / `reload_agents` stay the
+MiniBot's own source. Skill authoring by the model is deferred to v2 (`todos/SELF_EVOLUTION.md`,
+section 10, Later (v2)). `create_agent` / `update_agent` / `delete_agent` / `reload_agents` stay the
 model's way to author specialists; the effort goes into delegate, interrupt, resume, cancel and
 observe first.
 
@@ -437,8 +438,8 @@ default, and with it off nothing new is exposed. Full design: `todos/SELF_EVOLUT
   again at activation and at boot.
 - Activation writes a state file, not `config.toml`. A restart is a graceful stop that exits 75 once the daemon is
   idle; Docker and systemd restart it.
-- A boot that does not reach healthy counts as a failure. Failures quarantine the new candidate and roll back to the
-  last promoted set, then to core only.
+- An unclean exit counts as a failure, whether or not the set reached healthy; a clean stop does not.
+  Failures quarantine the new candidate and roll back to the last promoted set, then to core only.
 - Ceilings the code enforces: module and tool name prefixes, workspace-only paths, size and count, no name collisions,
   no vault and redacted settings for evolved code. The AST import list is a review aid, not a boundary.
 - Trust: this makes self-change explicit, reviewed and reversible. It does not isolate activated code, and the
