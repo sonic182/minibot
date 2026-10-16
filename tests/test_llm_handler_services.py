@@ -240,6 +240,7 @@ def test_prompt_service_announces_delegation_when_only_delegate_is_attached() ->
     assert "Delegation is available now via `delegate`," in prompt
     assert "Use `spawn_task` only when" not in prompt
     assert "Use `delegate` whenever a step remains" in prompt
+    assert 'metadata.source == "task_worker"' in prompt
     assert "Does work" in prompt
 
 

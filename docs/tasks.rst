@@ -105,8 +105,9 @@ Worker limits live on ``[tasks]``:
 - ``delegation_mode`` — ``"auto"`` (default) registers both ``delegate`` and ``spawn_task`` and the model picks
   by tool; ``"delegate"`` registers only ``delegate``, so every result returns to the main agent as a new turn,
   falling back to direct delivery past the continuation limit. It replaces ``continue_turn_mode = "always"``;
-  the removed ``continue_turn_mode`` and ``continue_turn_default`` keys are rejected at config load. See
-  :doc:`agents`.
+  the removed ``continue_turn_mode`` and ``continue_turn_default`` keys are rejected at config load. A
+  ``[orchestration.main_agent] tools_allow`` list must name ``delegate`` as well as ``spawn_task``, or the main
+  agent loses the tool that returns results to it. See :doc:`agents`.
 - ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
   (default ``[]``). ``"kv_memory"`` and ``"rag"`` are accepted, each at most once, and each needs its
   ``[tools.*]`` section enabled. Their storage is prepared on the first call in each worker.

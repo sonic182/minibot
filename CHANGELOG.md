@@ -18,7 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error. Migrate `continue_turn_mode = "always"` to `delegation_mode = "delegate"` (only `delegate` is registered, and
   past the limits it delivers directly instead of failing); delete `continue_turn_mode = "auto"` and
   `continue_turn_default`, since the model now picks the tool. The new `delegation_mode` defaults to `"auto"`, which
-  registers both tools. `delegate` is a reserved delegation tool, so specialists never inherit it.
+  registers both tools. A `[orchestration.main_agent] tools_allow` list must add `delegate`. `delegate` is a reserved
+  delegation tool, so specialists never inherit it.
+
+### Fixed
+
+- **`minibot console --config` now reaches task workers.** Workers reload settings from `MINIBOT_CONFIG` or
+  `./config.toml`, so a console started with `--config` ran its tasks on a different file. The console now exports
+  the path as `MINIBOT_CONFIG`.
 
 ## [0.32.0] - 2026-10-11
 

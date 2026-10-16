@@ -12,7 +12,7 @@ User → MiniBot → agent ──┼─ scheduled task
                          └─ external agent (ACP)
 ```
 
-What made this possible is the combination of `spawn_task`, `continue_turn` (a worker's result can
+What made this possible is the combination of `spawn_task`, `delegate` (a worker's result can
 feed the main agent's next step instead of ending in a dead-end message), specialists with their own
 tools and providers, runtime agent reload, the approval gate and `get_settings` / `minibot-docs`.
 The work ahead therefore favours making delegation, interruption and cancellation dependable over

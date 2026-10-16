@@ -208,12 +208,11 @@ class PromptService:
         tool_names = {binding.tool.name for binding in self._tools}
         if not task_tools_available or "list_tasks" not in tool_names:
             return ""
-        lines = ["Task-worker result handling:"]
-        if "spawn_task" in tool_names:
-            lines.append(
-                '- Messages with `metadata.source == "task_worker"` are direct asynchronous worker results '
-                "from earlier `spawn_task` calls; do not re-process them through the main agent."
-            )
+        lines = [
+            "Task-worker result handling:",
+            '- Messages with `metadata.source == "task_worker"` are worker answers or notices already delivered '
+            "to the user; do not re-process them through the main agent.",
+        ]
         if "delegate" in tool_names:
             lines.append(
                 "- Use `delegate` whenever a step remains after the worker's result (indexing or verifying it, a "

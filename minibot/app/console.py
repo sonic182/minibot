@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -45,7 +46,10 @@ async def run(
 ) -> None:
     console = CompatConsole()
     effective_timeout_seconds = max(120.0, float(timeout_seconds))
-    resolved_config_path = Path(config_path).expanduser() if config_path else None
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        # Task workers are separate processes that reload settings from MINIBOT_CONFIG or ./config.toml.
+        os.environ["MINIBOT_CONFIG"] = str(resolved_config_path)
     AppContainer.configure(resolved_config_path, entrypoint="console")
     await AppContainer.initialize_storage()
     logger = AppContainer.get_logger()
