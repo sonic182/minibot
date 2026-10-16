@@ -51,6 +51,19 @@ async def test_large_output_is_spilled_to_managed_file(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_nested_call_from_a_script_is_not_spilled(tmp_path) -> None:
+    payload = {"ok": True, "items": ["x" * 20_000]}
+    wrapped = apply_tool_output_spill(
+        [_binding("python_execute", payload), _readback_binding()],
+        storage=_storage(tmp_path),
+        config=ToolOutputSpillConfig(),
+    )
+    result = cast(ToolResult, await wrapped[0].handler({}, ToolContext(call_id="c2", parent_call_id="c1")))
+
+    assert result.content == payload
+
+
+@pytest.mark.asyncio
 async def test_small_output_is_untouched(tmp_path) -> None:
     wrapped = apply_tool_output_spill(
         [_binding("python_execute", {"ok": True, "stdout": "hi"}), _readback_binding()],

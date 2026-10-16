@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
 from types import ModuleType
 from typing import Any
+from uuid import uuid4
 
 from llm_async.models import Tool
 
@@ -289,7 +290,9 @@ class _ScriptRunner:
         return f"{message}\nScript output before the denial:\n{printed}" if printed else message
 
     def _namespace(self, run: _Run, context: ToolContext) -> object:
-        nested_context = replace(context, parent_call_id=context.call_id, call_id=None)
+        # Workers run tools without the events wrapper, so the script may have no call_id; nested calls still
+        # need a parent id, which is what exempts them from output spill.
+        nested_context = replace(context, parent_call_id=context.call_id or uuid4().hex, call_id=None)
         namespace = _ToolsNamespace()
         for identifier, binding in self._tools.items():
             setattr(

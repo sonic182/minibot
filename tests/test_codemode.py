@@ -11,7 +11,8 @@ from unittest.mock import AsyncMock
 import pytest
 from llm_async.models import Tool
 
-from minibot.adapters.config.schema import MainAgentConfig, OrchestrationConfig, Settings
+from minibot.adapters.config.schema import MainAgentConfig, OrchestrationConfig, Settings, ToolOutputSpillConfig
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.app.agent_policies import RESERVED_DELEGATION_TOOL_NAMES
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import load_extensions
@@ -22,6 +23,7 @@ from minibot.app.tool_factory import derive_extension_tools
 from minibot.core.agents import AgentSpec
 from minibot.core.events import ToolCallEvent
 from minibot.llm.tools.base import ToolBinding, ToolContext
+from minibot.llm.tools.output_spill import apply_tool_output_spill
 from minibot.llm.tools.tool_events import apply_tool_call_events
 from minibot.shared.errors import TOOL_APPROVAL_DENIED, ToolInputError
 
@@ -127,6 +129,35 @@ except ValueError as exc:
     nested = [event for event in events if event.tool_name != "run_tools_script" and event.phase == "started"]
     assert sorted(event.tool_name for event in nested) == ["flaky-tool.v2", "slow_lookup", "slow_lookup"]
     assert {event.parent_call_id for event in nested} == {top_level[0].call_id}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("in_worker", [False, True], ids=["daemon", "worker"])
+async def test_nested_results_reach_the_script_in_full_despite_output_spill(tmp_path: Path, in_worker: bool) -> None:
+    async def big(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"ok": True, "items": ["x" * 20_000, "deep"]}
+
+    async def readback(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+        return {"ok": True}
+
+    settings = _settings()
+    bus = EventBus()
+    wrapped = apply_tool_output_spill(
+        [_binding("big_tool", big), _binding("grep", readback)],
+        storage=LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10_000_000),
+        config=ToolOutputSpillConfig(spill_after_chars=1000),
+    )
+    if in_worker:
+        (tool,) = load_extensions(settings, bus, entrypoint="console").derive_tools(wrapped)
+    else:
+        tool = await _codemode_tool(settings, apply_tool_call_events(wrapped, event_bus=bus), bus)
+
+    result = await tool.handler(
+        {"code": "r = await tools.big_tool(label='a', delay=None)\n[len(r['items'][0]), r['items'][1]]"}, _CONTEXT
+    )
+
+    assert result["ok"] is True
+    assert result["result"] == [20_000, "deep"]
 
 
 @pytest.mark.asyncio

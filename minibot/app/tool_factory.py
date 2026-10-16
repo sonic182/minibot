@@ -90,8 +90,8 @@ def derive_extension_tools(
 ) -> list[ToolBinding]:
     """Extension-derived tools over ``final_tools``, wrapped like the tools `build_enabled_tools` returns.
 
-    Output spill is skipped on purpose: derived tools bound their own output, and the calls they make
-    already go through the spill wrapper on ``final_tools``.
+    Output spill is skipped on purpose: derived tools bound their own output. The calls they make go through
+    the spill wrapper on ``final_tools``, which leaves calls nested in a script (``parent_call_id`` set) inline.
     """
     derived = extensions.derive_tools(final_tools)
     if not derived:

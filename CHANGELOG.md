@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the printed output and the final value. Scripts run in Pydantic's Monty sandbox in worker subprocesses, with
   `timeout_seconds` (owner approval waits are not counted), `max_tool_calls`, `max_memory_mb` and `max_output_chars`
   limits and an `exclude` pattern list. Nested calls use the agent's real, already wrapped tools, so approval gates,
-  events and output spill apply, a failed nested call keeps its `error_code`, and its tool name and `error_code` are logged at WARNING without the message, and a failed script
+  events apply (output spill does not: results reach the script in full),  a failed nested call keeps its `error_code`, and its tool name and `error_code` are logged at WARNING without the message, and a failed script
   returns a structured error with its partial output. Task workers get it through
   `[tasks] worker_extensions = ["codemode"]` plus `run_tools_script` in a specialist's `tools_allow`. See
   `docs/tools.rst`.

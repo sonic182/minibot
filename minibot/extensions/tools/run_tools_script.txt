@@ -1,17 +1,29 @@
 Run a short Python script that calls other tools and returns only what matters. Use it when a task needs several tool calls, when results must be filtered or combined before you read them, or when independent calls can run in parallel. For a single call, call the tool directly.
 
-Scripts run in a sandbox with a subset of Python: no file system, network, environment or third-party imports, only the standard modules it provides (asyncio, json, re, math, datetime, ...). The only way to act on the world is the `tools` object: call each tool as `await tools.<name>(keyword=value, ...)` with keyword arguments only. A tool result is a plain dict, list or string; large results arrive as a preview with a file path, as they do for a direct call. Tools that need approval still ask the user.
+Scripts run in a sandbox with a subset of Python: no file system, network, environment or third-party imports, only the standard modules it provides (asyncio, json, re, math, datetime, ...). The only way to act on the world is the `tools` object: call a tool as `await tools.<identifier>(kw=value, ...)`, keyword arguments only. The identifier is the tool name with every character that is not valid in a Python name replaced by `_`; use exactly the identifier shown in the signature list. A result is a plain dict, list or string; results reach the script in full (only tools with their own file spill, such as http_request, may still return a file path), so filter them before printing or returning. Tools that need approval still ask the user.
 
-- Parallel calls: `a, b = await asyncio.gather(tools.x(q="1"), tools.y(q="2"))` (`import asyncio` first).
-- A failing tool raises an exception in the script (ValueError for rejected arguments or a denied approval, RuntimeError otherwise); catch it with try/except to continue.
+- Errors: ValueError for rejected arguments, PermissionError for a denied approval (uncaught, it ends the script as denied), RuntimeError for any other failure. Catch with try/except to continue.
 - `print(...)` output and the value of the last expression (or a top-level `return`) come back to you; everything else stays out of your context, so print or return only what you need.
 - Output and the final value are each cut to a size limit, keeping their start and end. A script has a time limit covering its tool calls and a memory limit. A script that fails returns an error with the output printed before the failure.
+- If `python_execute` is listed, pass it data with `await tools.python_execute(code=...)` for computation the sandbox cannot do.
 
-Example:
+MCP tools: in bridge mode each remote tool is `tools.<prefix>_<server>__<remote_tool>(...)` and returns `{"ok", "server", "tool", "is_error", "result"}`. `result` is text (the joined text parts) whose format depends on the server: JSON for some, plain text blocks for others (for example `Title: ...\nURL: ...`). When unsure, print a short slice first, or parse defensively. An MCP-side error does not raise: check `ok` / `is_error`. In lazy mode the server exposes `<prefix>_<server>__list_tools()` (catalog with input_schema) and `<prefix>_<server>__call_tool(tool_name="...", arguments={...})`, which returns the same dict (or `{"ok": false, ...}` if the call could not be made).
 
-    import asyncio
-    first, second = await asyncio.gather(tools.memory_search(query="trip"), tools.current_datetime())
-    print(len(first.get("entries", [])), "entries")
-    {"now": second, "titles": [e["title"] for e in first.get("entries", [])][:5]}
+Examples (names are generic; use the real ones from the signature list):
+
+    import asyncio, json
+    # parallel
+    a, b = await asyncio.gather(tools.memory_search(query="trip"), tools.current_datetime())
+    # sequential: each result feeds the next call
+    hit = (await tools.memory_search(query="trip")).get("entries", [])[0]
+    detail = await tools.memory_get(id=hit["id"])
+    # MCP: check ok, parse text, fan out, return a subset
+    found = await tools.mcp_mail__imap_search_messages(query="invoice")
+    if not found["ok"]:
+        return {"error": found["result"]}
+    ids = json.loads(found["result"])["ids"][:5]
+    msgs = await asyncio.gather(*[tools.mcp_mail__imap_get_message(id=i) for i in ids])
+    return [json.loads(m["result"])["subject"] for m in msgs if m["ok"]]
+    # lazy mode: await tools.mcp_mail__call_tool(tool_name="imap_get_message", arguments={"id": "1"})
 
 Returns `{"ok": true, "output": <printed text>, "result": <final value>}`, or `{"ok": false, "error_code": ..., "error": ..., "output": <partial output>}`.

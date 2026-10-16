@@ -66,6 +66,10 @@ def _wrap(
 
     async def handler(payload: ToolPayload, context: ToolContext) -> ToolResult:
         result = normalize_tool_result(await binding.handler(payload, context))
+        # Nested in a codemode script: the result goes to the script, not the model's context, and the
+        # script's own output limits protect the context.
+        if context.parent_call_id is not None:
+            return result
         content = result.content
         if _is_error(content):
             return result

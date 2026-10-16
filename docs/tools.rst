@@ -230,6 +230,8 @@ Runtime Notes
   ``bash``. Tools in ``exclude_tools`` (``http_request`` and ``pre_response`` by default) are
   skipped since they already manage their own output size. ``activate_skill`` spills only past
   64,000 characters (or ``spill_after_chars``, if larger), so skill instructions normally arrive inline.
+  Spill does not apply to calls made from a ``run_tools_script`` script: the result goes to the script, not
+  the model, so the script can filter it, and the script's own output limits protect the context.
 - ``[tools.audio_transcription]`` requires the ``stt`` extra: ``pip install "minibot[stt]"``.
 - ``[tools.http_client]`` needs no extra: selectolax ships with the base install and renders HTML
   as compact semantic text instead of plain-text extraction.
@@ -286,6 +288,27 @@ A script prints with ``print`` and returns by ending on an expression or with a 
    except ValueError as exc:
        print("skipped:", exc)
    {"now": second, "titles": [entry["title"] for entry in first["entries"]][:5]}
+
+MCP tools are ordinary tools to a script, with three differences to keep in mind. In bridge mode each remote tool is
+``tools.<prefix>_<server>__<remote_tool>(...)`` and returns ``{"ok", "server", "tool", "is_error", "result"}``, where
+``result`` is usually text (the joined text parts, often JSON that needs ``json.loads``). An error reported by the MCP
+server does not raise: it comes back with ``ok: false`` / ``is_error: true``, so the script must check it. In lazy mode the
+server exposes ``<prefix>_<server>__list_tools()`` (the catalog with each ``input_schema``) and
+``<prefix>_<server>__call_tool(tool_name=..., arguments={...})``, which returns the same dict.
+
+.. code-block:: python
+
+   import asyncio, json
+
+   found = await tools.mcp_mail__imap_search_messages(query="invoice")
+   if not found["ok"]:
+       return {"error": found["result"]}
+   ids = json.loads(found["result"])["ids"][:5]
+   msgs = await asyncio.gather(*[tools.mcp_mail__imap_get_message(id=i) for i in ids])
+   return [json.loads(m["result"])["subject"] for m in msgs if m["ok"]]
+
+A call whose result feeds the next one is a plain sequence of ``await`` statements. When ``python_execute`` is
+available, a script can pass it data with ``tools.python_execute(code=...)`` for computation the sandbox cannot do.
 
 The result is ``{"ok": true, "output": "<printed text>", "result": <final value>}``. Output and the final value are
 each cut to ``max_output_chars`` keeping their start and end, with a marker for what was omitted.
