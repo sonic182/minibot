@@ -331,7 +331,7 @@ deliverable — see Trust model):
 
 > **Single user only.** Evolution is designed for a personal, single-user MiniBot. Do not enable `[evolution]` on a
 > deployment with several users (multi-tenant, or a bot shared through `allowed_user_ids` or group chats). Evolved code
-> runs in-process with the bot's privileges. Refusing every evolved call from a non-owner turn is a safety net, not
+> runs in-process with the bot's privileges. Refusing every `evo_` call from a non-owner turn is a safety net, not
 > tenant isolation.
 
 MiniBot authors its own extensions and restarts to load them, only when `[evolution] enabled = true`. It is off by
@@ -344,8 +344,10 @@ default, and with it off nothing new is exposed. Full design: `todos/SELF_EVOLUT
   per-tool approval policy the model proposes. The full source goes to the owner as a file, the hash and the policy are
   in the approval, and the approved hash is checked again at activation and at boot. Each evolved tool is gated or not:
   calls to a gated tool need the same owner approval, calls to the others run without a prompt, and a tool missing from
-  the policy is gated. `evo_rollback` always needs the owner's approval. Every evolved call from a non-owner turn is
-  refused, with no prompt, including tools the policy does not gate. Gated calls are refused in workers.
+  the policy is gated. Prompt-free calls suit read-only tools or tools with narrow, validated arguments, because
+  content the model reads can steer them (`todos/SELF_EVOLUTION.md`, section 8). `evo_rollback` always
+  needs the owner's approval. Every `evo_` call from a non-owner turn is refused, with no prompt, including the control
+  tools and the tools the policy does not gate. Gated calls are refused in workers.
 - Activation writes a state file, not `config.toml`. A restart is a graceful stop that exits 75 once the daemon is
   idle; new turns are refused after a 10-minute wait. Docker and systemd restart it.
 - An unclean exit counts as a failure, whether or not the set reached healthy; a clean stop does not. A set that boots
