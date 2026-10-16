@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-16
+
 ### Added
 
 - **Codemode: `run_tools_script`, Python that calls tools.** With `[tools.codemode] enabled = true` (and the new
@@ -1506,7 +1508,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.32.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.33.0...HEAD
+[0.33.0]: https://github.com/sonic182/minibot/compare/0.32.0..0.33.0
 [0.32.0]: https://github.com/sonic182/minibot/compare/0.31.0..0.32.0
 [0.31.0]: https://github.com/sonic182/minibot/compare/0.30.0..0.31.0
 [0.30.0]: https://github.com/sonic182/minibot/compare/0.29.0..0.30.0
