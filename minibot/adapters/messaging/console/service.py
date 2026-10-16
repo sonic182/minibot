@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from minibot.adapters.messaging.console.compat import CompatConsole, format_assistant_output
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent, ReasoningEvent, ToolCallEvent
+from minibot.core.events import MessageEvent, OutboundEvent, ReasoningEvent, ToolCallEvent, TurnStopRequestedEvent
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -70,6 +70,7 @@ class ConsoleService:
         self._responses: asyncio.Queue[ConsoleResponse] = asyncio.Queue()
         self._reasoning: asyncio.Queue[str] = asyncio.Queue(maxsize=_LIVE_QUEUE_LIMIT)
         self._tool_calls: asyncio.Queue[str] = asyncio.Queue(maxsize=_LIVE_QUEUE_LIMIT)
+        self._stop_notices: asyncio.Queue[str] = asyncio.Queue(maxsize=_LIVE_QUEUE_LIMIT)
 
     async def start(self) -> None:
         self._outgoing_task = asyncio.create_task(self._consume_outgoing())
@@ -99,6 +100,11 @@ class ConsoleService:
         )
         await self._event_bus.publish(MessageEvent(message=message))
 
+    async def request_stop(self) -> None:
+        await self._event_bus.publish(
+            TurnStopRequestedEvent(channel="console", chat_id=self._chat_id, user_id=self._user_id)
+        )
+
     async def wait_for_response(self, timeout_seconds: float) -> ConsoleResponse:
         result = await asyncio.wait_for(self._responses.get(), timeout=timeout_seconds)
         self._responses.task_done()
@@ -120,6 +126,17 @@ class ConsoleService:
         call = await self._tool_calls.get()
         self._tool_calls.task_done()
         return call
+
+    async def next_stop_notice(self) -> str:
+        """Await the next refused stop of the running turn, for channels that report it live."""
+        notice = await self._stop_notices.get()
+        self._stop_notices.task_done()
+        return notice
+
+    def drain_stop_notices(self) -> None:
+        while not self._stop_notices.empty():
+            self._stop_notices.get_nowait()
+            self._stop_notices.task_done()
 
     def drain_tool_calls(self) -> None:
         while not self._tool_calls.empty():
@@ -155,6 +172,11 @@ class ConsoleService:
                     continue
                 response = event.response
                 if response.channel != "console":
+                    continue
+                # A stop that raced the turn's answer gets this reply after it; queued as a response, it would
+                # be taken as the answer to the next message.
+                if response.metadata.get("turn_stop") == "nothing_running":
+                    _offer(self._stop_notices, response.text)
                     continue
                 rendered = self._render_response(response)
                 self._responses.put_nowait(ConsoleResponse(response=response, rendered_text=rendered))

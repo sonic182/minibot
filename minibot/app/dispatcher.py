@@ -7,6 +7,7 @@ from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_roster import AgentRosterChange, reload_agent_roster
@@ -382,7 +383,9 @@ class Dispatcher:
             or active.task.done()
             or active.session_id != session_identifier(event.channel, event.chat_id)
         ):
-            await self._publish_text(event.channel, event.chat_id, _NOTHING_TO_STOP_REPLY)
+            await self._publish_text(
+                event.channel, event.chat_id, _NOTHING_TO_STOP_REPLY, metadata={"turn_stop": "nothing_running"}
+            )
             return
         self._logger.info("stopping the running turn", extra={"turn_id": active.event.event_id})
         active.stopped = True
@@ -418,7 +421,9 @@ class Dispatcher:
                 await self._pending_turns.clear_pending(queued.event_id)
         await self._publish_text(message.channel, chat_id, _STOPPED_REPLY)
 
-    async def _publish_text(self, channel: str, chat_id: int, text: str) -> None:
+    async def _publish_text(
+        self, channel: str, chat_id: int, text: str, *, metadata: dict[str, Any] | None = None
+    ) -> None:
         try:
             await self._event_bus.publish(
                 OutboundEvent(
@@ -427,7 +432,7 @@ class Dispatcher:
                         chat_id=chat_id,
                         text=text,
                         render=RenderableResponse(kind="text", text=text),
-                        metadata={"should_reply": True},
+                        metadata={"should_reply": True, **(metadata or {})},
                     )
                 )
             )

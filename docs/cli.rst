@@ -74,6 +74,9 @@ Console channel
    * - ``--verbose``
      - Also log to stdout in addition to the log file.
 
+In the TUI, ``Esc`` stops the reply that is running, like ``/stop`` on Telegram (see :doc:`events`). The plain loop
+and ``--once`` have no stop key.
+
 Interactive TUI keys: ``Enter`` sends, ``Ctrl+J`` inserts a newline, and ``Ctrl+T`` toggles display
 of model thinking.
 

@@ -99,6 +99,7 @@ class ConsoleTui(App[None]):
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+t", "toggle_thinking", "Thinking"),
+        ("escape", "stop_turn", "Stop"),
     ]
     CSS = """
     #input-area {
@@ -135,6 +136,7 @@ class ConsoleTui(App[None]):
         self._show_thinking = True
         self._live_thinking: list[str] = []
         self._live_tools: list[str] = []
+        self._busy = False
 
     @staticmethod
     def _history_turns(history: list[MemoryEntry] | None) -> list[_Turn]:
@@ -155,7 +157,7 @@ class ConsoleTui(App[None]):
             yield LoadingIndicator(id="thinking")
             yield Static("", id="thinking-status")
             yield Prompt(
-                placeholder="Message minibot… (Enter send · Ctrl+J newline · Ctrl+T thinking)",
+                placeholder="Message minibot… (Enter send · Ctrl+J newline · Ctrl+T thinking · Esc stop)",
                 id="prompt",
             )
         yield Footer(show_command_palette=False)
@@ -177,6 +179,15 @@ class ConsoleTui(App[None]):
             return
         self.run_worker(self._run_turn(text), group="turn", exclusive=True, exit_on_error=False)
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "stop_turn":
+            return self._busy
+        return True
+
+    def action_stop_turn(self) -> None:
+        self.notify("Stop requested")
+        self.run_worker(self._service.request_stop(), group="stop", exit_on_error=False)
+
     def action_toggle_thinking(self) -> None:
         self._show_thinking = not self._show_thinking
         self._update_thinking_status()
@@ -192,10 +203,12 @@ class ConsoleTui(App[None]):
         await self._refresh()
         self._service.drain_reasoning()
         self._service.drain_tool_calls()
+        self._service.drain_stop_notices()
         self._live_thinking = []
         self._live_tools = []
         live_reasoning = asyncio.create_task(self._stream_reasoning())
         live_tools = asyncio.create_task(self._stream_tool_calls())
+        stop_notices = asyncio.create_task(self._stream_stop_notices())
         try:
             await self._service.publish_user_message(text)
             result = await self._service.wait_for_response(self._timeout_seconds)
@@ -214,7 +227,7 @@ class ConsoleTui(App[None]):
                 )
             )
         finally:
-            for task in (live_reasoning, live_tools):
+            for task in (live_reasoning, live_tools, stop_notices):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
@@ -238,7 +251,14 @@ class ConsoleTui(App[None]):
             self._live_tools.append(call)
             await self._refresh()
 
+    async def _stream_stop_notices(self) -> None:
+        while True:
+            await self._service.next_stop_notice()
+            self.notify("Nothing to stop yet; press Esc again.", severity="warning")
+
     def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        self.refresh_bindings()
         self.query_one("#thinking", LoadingIndicator).display = busy
         prompt = self.query_one("#prompt", Prompt)
         prompt.disabled = busy

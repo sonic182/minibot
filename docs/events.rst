@@ -46,7 +46,8 @@ answer when the turn has no step left, becomes the next turn. Task results and s
 prompts always get a turn of their own, and a message that arrives while one of them runs
 waits for its own turn too.
 
-``TurnStopRequestedEvent`` (``/stop`` on Telegram, the stop button in the web chat) cancels the running turn of that chat
+``TurnStopRequestedEvent`` (``/stop`` on Telegram, the stop button in the web chat, ``Esc`` in the console TUI)
+cancels the running turn of that chat
 instead, whether it answers the owner, a task result or a scheduled prompt. The dispatcher then publishes ``TurnFailedEvent`` with ``error = "stopped by user"``
 and a ``Stopped.`` reply, and records the stop in the history. Messages still waiting for that
 turn are saved to the history without being run. A tool call cancelled midway is not undone:
@@ -130,9 +131,12 @@ Payload:
 TurnStopRequestedEvent
 ~~~~~~~~~~~~~~~~~~~~~~
 
-**Fires when**: an authorized Telegram user sends ``/stop``, or the web chat sends a stop request. The dispatcher cancels that chat's
-running turn, or answers ``Nothing is running.`` when there is none or the model has already
-produced its answer.
+**Fires when**: an authorized Telegram user sends ``/stop``, the web chat sends a stop request, or the owner presses
+``Esc`` in the console TUI while a reply runs. The dispatcher cancels that chat's running turn, or answers ``Nothing is
+running.`` when there is none or the model has already produced its answer. That reply carries
+``metadata["turn_stop"] = "nothing_running"``. The console TUI shows it as a warning instead of a reply: a stop
+that raced the answer would otherwise be read as the reply to the next message, and one sent before the turn
+started tells the owner to press ``Esc`` again.
 
 Payload:
 
