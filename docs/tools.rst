@@ -294,10 +294,11 @@ What a script can call
    The tools the agent sees after its ``tools_allow`` / ``tools_deny`` and ownership filtering, built after
    approval, event and output-spill wrapping, minus the delegation tools and anything matching ``exclude`` (below).
    A tool the agent cannot see is not callable from a script, and a tool listed in ``require_approval`` still asks
-   the owner for every nested call. A denied approval or a tool that
-   raises reaches the script as an exception (``ValueError`` for rejected arguments and denials, ``RuntimeError``
-   otherwise); catch it to continue. A script that ends on an uncaught denial returns the ``tool_approval:denied``
-   error, like a direct call. The delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``,
+   the owner for every nested call. A tool that
+   raises reaches the script as an exception (``ValueError`` for rejected arguments, ``PermissionError`` for a denied
+   approval, ``RuntimeError`` otherwise); catch it to continue. A script that ends on an uncaught
+   ``PermissionError`` from a denial returns the ``tool_approval:denied`` error, like a direct call; a denial the
+   script wraps in another exception type is an ordinary ``codemode:script_error``. The delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``,
    ``list_tasks``, ``get_task``, ``cancel_task``), ``run_tools_script`` itself and anything matching ``exclude`` are
    never exposed, and nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
    ``mcp_<server>__list_tools`` and ``mcp_<server>__call_tool``. Large nested results arrive as a preview plus a file

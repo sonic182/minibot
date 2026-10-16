@@ -141,15 +141,13 @@ class _ScriptDeadline:
 
 @dataclass
 class _Run:
-    """What one script execution did, kept host-side so a failure can be reported structurally."""
-
     output: _BoundedText
     tool_errors: list[dict[str, str]] = field(default_factory=list)
-    # Exception text the sandbox was handed for each approval denial, mapped to the denied tool. Monty rebuilds
-    # exceptions as plain builtins, so the script's final exception can only be matched to a denial by what we
-    # raised; a script that ends on one surfaces the denial itself, so the turn loop stops the remaining calls
-    # like it does for a direct one, and a denial the script caught earlier does not leak into an unrelated failure.
-    denials: dict[str, str] = field(default_factory=dict)
+    # Tools whose approval was denied, in order. A denial reaches the script as PermissionError, one of the
+    # builtins Monty keeps intact; a script that ends on an uncaught PermissionError surfaces the denial itself so
+    # the turn loop stops the remaining calls like it does for a direct one. A denial the script caught or wrapped
+    # in another exception type ends as an ordinary script failure.
+    denied: list[str] = field(default_factory=list)
     called: list[str] = field(default_factory=list)
 
 
@@ -205,6 +203,8 @@ class _ScriptRunner:
         deadline = _ScriptDeadline()
         try:
             async with monty.AsyncMonty() as pool, pool.checkout(limits=limits) as session:
+                # Monty's feed limit only counts time inside the sandbox, not awaits on host tools, so the
+                # script's real wall-clock budget has to be enforced here.
                 async with asyncio.timeout(self._config.timeout_seconds) as timeout:
                     deadline.attach(timeout)
                     observer_token = approval_wait_observer.set(deadline)
@@ -278,10 +278,8 @@ class _ScriptRunner:
 
     @staticmethod
     def _denied_tool(run: _Run, exc: Any) -> str | None:
-        """The tool whose denial ended the script, or None when the final exception is anything else."""
-        inner = exc.exception()
-        if isinstance(inner, ValueError) and len(inner.args) == 1 and isinstance(inner.args[0], str):
-            return run.denials.get(inner.args[0])
+        if isinstance(exc.exception(), PermissionError) and run.denied:
+            return run.denied[-1]
         return None
 
     @staticmethod
@@ -302,8 +300,7 @@ class _ScriptRunner:
         return namespace
 
 
-class _ToolsNamespace:
-    """The ``tools`` object scripts see; each tool is attached as an async method of the same name."""
+class _ToolsNamespace: ...
 
 
 def _bind_call(
@@ -337,7 +334,8 @@ def _bind_call(
             _record_failure(run, tool_name, exc.error_code)
             message = f"{exc.error_code}: {exc}"
             if exc.error_code == TOOL_APPROVAL_DENIED:
-                run.denials[message] = tool_name
+                run.denied.append(tool_name)
+                raise PermissionError(message) from exc
             raise ValueError(message) from exc
         except Exception as exc:
             error_code = getattr(exc, "error_code", "") or "tool_execution_failed"

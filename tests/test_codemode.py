@@ -150,7 +150,7 @@ async def test_denied_approval_reaches_the_script_and_stops_the_turn_when_uncaug
     tool = await _codemode_tool(_settings(), _fake_tools(approve))
 
     caught = await tool.handler(
-        {"code": "try:\n    await tools.guarded_tool(label='x')\nexcept ValueError as exc:\n    print('denied')\n"},
+        {"code": "try:\n    await tools.guarded_tool(label='x')\nexcept PermissionError:\n    print('denied')\n"},
         _CONTEXT,
     )
     with pytest.raises(ToolInputError) as denied:
@@ -164,12 +164,27 @@ async def test_denied_approval_reaches_the_script_and_stops_the_turn_when_uncaug
 
 
 @pytest.mark.asyncio
+async def test_a_denial_wrapped_in_another_exception_does_not_stop_the_turn() -> None:
+    tool = await _codemode_tool(_settings(), _fake_tools(AsyncMock(return_value=False)))
+    code = """
+try:
+    await tools.guarded_tool(label='x')
+except PermissionError as exc:
+    raise RuntimeError('wrapped')
+"""
+
+    result = await tool.handler({"code": code}, _CONTEXT)
+
+    assert result["error_code"] == "codemode:script_error"
+
+
+@pytest.mark.asyncio
 async def test_a_caught_denial_does_not_relabel_a_later_unrelated_script_failure() -> None:
     tool = await _codemode_tool(_settings(), _fake_tools(AsyncMock(return_value=False)))
     code = """
 try:
     await tools.guarded_tool(label='x')
-except ValueError:
+except PermissionError:
     pass
 await tools.slow_lookup(label='y', delay=0.01)
 {}['missing']
