@@ -30,6 +30,7 @@ so the order here is the order to work in, not the numeric order.
 | 3 | 3b | steering leftovers | steering workers and specialists, deferred until the addressee is decided |
 | 4 | 4 | MCP OAuth (issue #65) | demand-driven: only when an MCP server in use requires it |
 | 5 | 5, 6 | security defence in depth: guardrail heuristics, bash hardening | pending, lower priority than the deterministic controls already shipped |
+| 6 | 14 | self-evolution behind an opt-in (`[evolution]`) | designed, see todos/SELF_EVOLUTION.md |
 
 Shipped and removed from this file: 0 bash env default, 1 credential vault, 2 skills for specialist
 agents, 3 native skills, runtime self-knowledge and agent management, 3b main-agent steering and `/stop`
@@ -46,10 +47,13 @@ Decided: scheduler cron expressions stay in UTC, as documented in `docs/schedule
 Dropped: a native SMTP tool. Mail is covered by an MCP server (`docs/mcp_servers.rst`) behind the
 `[tools.approval]` gate, so there is nothing left for MiniBot to own.
 
-Parked on purpose: more self-modification (agent auto-evolution, automatic skill or tool creation,
-self-tuning prompts, autonomous agent spawning). `create_agent` / `update_agent` / `delete_agent` /
-`reload_agents` are enough metaprogramming; the effort goes into delegate, interrupt, resume, cancel
-and observe.
+Self-modification is planned only behind an explicit opt-in (`[evolution]`, Phase 14, see
+`todos/SELF_EVOLUTION.md`). Still out, on purpose: activation without an owner approval, autonomous
+agent spawning, self-tuning prompts, edits to `config.toml` or to the agent ceiling, and edits to
+MiniBot's own source. Skill authoring by the model is deferred to v2 (`todos/SELF_EVOLUTION.md`,
+section 10, Later (v2)). `create_agent` / `update_agent` / `delete_agent` / `reload_agents` stay the
+model's way to author specialists; the effort goes into delegate, interrupt, resume, cancel and
+observe first.
 
 ## Trust model
 
@@ -322,6 +326,35 @@ deliverable — see Trust model):
 3. Containerize tool execution itself (run `bash`/`python_exec` inside a
    throwaway container per call) — strongest isolation, biggest change to
    the deployment model (today MiniBot assumes a plain host process).
+
+## [ ] Phase 14 — Self-evolution (opt-in) (priority 6)
+
+MiniBot authors its own extensions and restarts to load them, only when `[evolution] enabled = true`. It is off by
+default, and with it off nothing new is exposed. Full design: `todos/SELF_EVOLUTION.md`.
+
+- Authoring is free: the model writes and statically checks a standalone `register(mb)` module in a dedicated
+  workspace, never in MiniBot's source. Only static checks run before activation; the first import of model code
+  happens after the owner's approval, in a subprocess.
+- Activation needs the approval of the configured owner (`[evolution] owner_user_id`) for the exact bytes. The full
+  source goes to the owner as a file, the hash in the approval is the hash activated, and the approved hash is checked
+  again at activation and at boot. Calls to evolved tools and to `evo_rollback` need the same owner approval, and
+  non-owner turns are refused without a prompt.
+- Activation writes a state file, not `config.toml`. A restart is a graceful stop that exits 75 once the daemon is
+  idle; new turns are refused after a 10-minute wait. Docker and systemd restart it.
+- An unclean exit counts as a failure, whether or not the set reached healthy; a clean stop does not. A set that boots
+  more than `max_boots_per_hour` times in an hour is passed over even when its exits were clean.
+  A failing set is passed over and the boot falls back: candidate, then promoted, then previous, then core only.
+- Ceilings the code enforces: module and tool name prefixes, workspace-only paths, size and count, no name collisions,
+  no vault and redacted settings for evolved code.
+- Trust: this makes self-change explicit, reviewed and reversible. It does not isolate activated code, and the
+  host-write tools (`bash`, `python_exec`, `apply_patch`, stdio MCP servers) can bypass the gate, so they stay off or
+  are acknowledged.
+
+Prerequisites, pre-existing gaps the design depends on: a poison pending turn can crash-loop boots, a graceful stop
+mid-turn drops the turn, and queued messages live only in memory.
+
+Steps, each its own PR with its own tests: 1 config and validation; 2 restart and boot safety; 3 author and validate;
+4 activate with approval; 5 rollback and boot notice.
 
 ## Explicitly deferred
 
