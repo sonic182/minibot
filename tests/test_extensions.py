@@ -511,3 +511,36 @@ def test_rag_stays_quiet_when_the_backend_choice_is_unambiguous(monkeypatch: pyt
     )
 
     assert emitted == []
+
+
+def test_derive_tools_skips_a_clashing_name_and_keeps_the_existing_tool(caplog: pytest.LogCaptureFixture) -> None:
+    from llm_async.models import Tool
+
+    from minibot.app.extensions import ExtensionRegistry
+    from minibot.llm.tools.base import ToolBinding
+
+    async def original(_: dict, __: ToolContext) -> dict:
+        return {"ok": True}
+
+    def binding(name: str) -> ToolBinding:
+        return ToolBinding(
+            tool=Tool(name=name, description=name, parameters={"type": "object", "properties": {}}),
+            handler=original,
+        )
+
+    context = ExtensionContext(
+        name="derivers",
+        config={},
+        settings=Settings(),
+        event_bus=EventBus(),
+        logger=logging.getLogger("test.extensions.derive"),
+    )
+    context.add_tool_deriver(lambda tools: [binding("run_tools_script"), binding("extra")])
+    registry = ExtensionRegistry([context], logging.getLogger("test.extensions.derive"))
+    existing = binding("run_tools_script")
+
+    with caplog.at_level(logging.WARNING, logger="test.extensions.derive"):
+        derived = registry.derive_tools([existing])
+
+    assert [item.tool.name for item in derived] == ["extra"]
+    assert "run_tools_script" in caplog.text and "derivers" in caplog.text

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import logging
 import unicodedata
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from minibot.app.event_bus import EventBus
@@ -28,6 +29,21 @@ _ESCAPED_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 _ESCAPED_CHARS = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
 _LAZY_MCP_CALL_SUFFIX = "__call_tool"
 _logger = logging.getLogger("minibot.tool_approval")
+
+
+class ApprovalWaitObserver(Protocol):
+    """Told when a gated call starts and stops waiting for the owner's answer."""
+
+    def begin(self) -> None: ...
+
+    def end(self) -> None: ...
+
+
+# A tool that runs other tools under its own deadline (codemode) installs an observer here so the owner's
+# thinking time is not charged to that deadline. The context is copied into tasks the caller spawns.
+approval_wait_observer: contextvars.ContextVar[ApprovalWaitObserver | None] = contextvars.ContextVar(
+    "approval_wait_observer", default=None
+)
 
 
 def apply_tool_approval(
@@ -70,7 +86,9 @@ def _wrap(binding: ToolBinding, patterns: Sequence[str], approve: Approver) -> T
         if matches_any(name, patterns) or matches_any(binding_name, patterns):
             is_lazy_call = name != binding_name
             arguments = payload.get("arguments") if is_lazy_call else payload
-            if not await approve(name, dict(arguments) if isinstance(arguments, dict) else {}, context):
+            if not await _approve_observed(
+                approve, name, dict(arguments) if isinstance(arguments, dict) else {}, context
+            ):
                 raise ToolInputError(
                     f"The user did not approve {name}. Do not retry it unless the user asks again.",
                     error_code=TOOL_APPROVAL_DENIED,
@@ -78,6 +96,17 @@ def _wrap(binding: ToolBinding, patterns: Sequence[str], approve: Approver) -> T
         return await binding.handler(payload, context)
 
     return ToolBinding(tool=binding.tool, handler=handler)
+
+
+async def _approve_observed(approve: Approver, name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
+    observer = approval_wait_observer.get()
+    if observer is None:
+        return await approve(name, arguments, context)
+    observer.begin()
+    try:
+        return await approve(name, arguments, context)
+    finally:
+        observer.end()
 
 
 async def request_tool_approval(

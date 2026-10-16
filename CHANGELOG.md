@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Codemode: `run_tools_script`, Python that calls tools.** With `[tools.codemode] enabled = true` (and the new
+  `codemode` extra, `poetry install --extras codemode`) the model can write one short script that calls the tools the
+  agent sees (after its allow/deny and ownership filtering, minus the delegation tools and `exclude`) as
+  `await tools.<name>(keyword=value)`, runs independent calls in parallel with `asyncio.gather`, and gets back only
+  the printed output and the final value. Scripts run in Pydantic's Monty sandbox in worker subprocesses, with
+  `timeout_seconds` (owner approval waits are not counted), `max_tool_calls`, `max_memory_mb` and `max_output_chars`
+  limits and an `exclude` pattern list. Nested calls use the agent's real, already wrapped tools, so approval gates,
+  events apply (output spill does not: results reach the script in full),  a failed nested call keeps its `error_code`, and its tool name and `error_code` are logged at WARNING without the message, and a failed script
+  returns a structured error with its partial output. Task workers get it through
+  `[tasks] worker_extensions = ["codemode"]` plus `run_tools_script` in a specialist's `tools_allow`. See
+  `docs/tools.rst`.
+- **`ExtensionContext.add_tool_deriver()`**, a generic extension hook that builds tools from the final tool list an
+  agent ends up with (after approval, event and spill wrapping and `tools_allow`/`tools_deny`), for the main agent and
+  for task workers. `ToolCallEvent` gains an optional `parent_call_id` and `ToolContext` gains `call_id` and
+  `parent_call_id`, so a tool that calls other tools can link its nested calls.
+
 - **`Esc` stops the running reply in the console TUI**, like `/stop` on Telegram and the stop button in the web chat.
   The dispatcher's `Nothing is running.` reply now carries `metadata["turn_stop"] = "nothing_running"`, and the
   console TUI shows it as a warning ("Nothing to stop yet; press Esc again.") instead of a reply, so a stop that raced

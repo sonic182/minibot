@@ -98,6 +98,7 @@ _DETAILS: dict[str, _Detail] = {
     "self_insert_artifact": _Detail(("path", "filename"), labelled=True),
     "send_file": _Detail(("path", "caption"), labelled=True),
     "spawn_task": _Detail(("agent_name",), labelled=True),
+    "run_tools_script": _Detail(()),
     "transcribe_audio": _Detail(("path",)),
     "wait": _Detail(("milliseconds",), labelled=True),
     "write_file": _Detail(("path",)),

@@ -49,6 +49,11 @@ def test_summarize_tool_call_clips_long_values() -> None:
     assert line.endswith("…")
 
 
+def test_summarize_tool_call_never_echoes_script_code() -> None:
+    call = ToolCallDisplay(phase="started", tool_name="run_tools_script", arguments={"code": "print('s3cret')"})
+    assert summarize_tool_call(call) == "`run_tools_script`"
+
+
 def test_summarize_tool_call_includes_failed_error() -> None:
     call = ToolCallDisplay(phase="failed", tool_name="read_file", arguments={"path": "/tmp/x"}, error="boom")
     line = summarize_tool_call(call)
