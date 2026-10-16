@@ -342,15 +342,15 @@ default, and with it off nothing new is exposed. Full design: `todos/SELF_EVOLUT
   happens after the owner's approval, in a subprocess.
 - Activation needs the approval of the configured owner (`[evolution] owner_user_id`) for the exact bytes and the
   per-tool approval policy the model proposes. The full source goes to the owner as a file, the hash and the policy are
-  in the approval, and the approved hash is checked again at activation and at boot. Each evolved tool is gated or not:
-  calls to a gated tool need the same owner approval, calls to the others run without a prompt, and a tool missing from
+  in the approval, and the approved hash is checked again at activation and at boot. Each evolved tool is gated or not. The model marks a prompt-free tool explicitly, and the approval lists those first for the owner to sign off:
+  calls to a gated tool need the same owner approval, and a tool missing from
   the policy is gated. Prompt-free calls suit read-only tools or tools with narrow, validated arguments, because
   content the model reads can steer them (`todos/SELF_EVOLUTION.md`, section 8). `evo_rollback` always
   needs the owner's approval. Every `evo_` call from a non-owner turn is refused, with no prompt, including the control
   tools and the tools the policy does not gate. Gated calls are refused in workers.
 - Activation writes a state file, not `config.toml`. A restart is a graceful stop that exits 75 once the daemon is
   idle; new turns are refused after a 10-minute wait. Docker and systemd restart it.
-- An unclean exit counts as a failure, whether or not the set reached healthy; a clean stop does not. A set that boots
+- An unclean exit counts as a failure once the boot has begun importing the set, whether or not it reached healthy; a crash before that and a clean stop do not. A set that boots
   more than `max_boots_per_hour` times in an hour is passed over even when its exits were clean.
   A failing set is passed over and the boot falls back: candidate, then promoted, then previous, then core only.
 - Ceilings the code enforces: module and tool name prefixes, workspace-only paths, size and count, no name collisions,
