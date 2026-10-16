@@ -329,16 +329,23 @@ deliverable — see Trust model):
 
 ## [ ] Phase 14 — Self-evolution (opt-in) (priority 6)
 
+> **Single user only.** Evolution is designed for a personal, single-user MiniBot. Do not enable `[evolution]` on a
+> deployment with several users (multi-tenant, or a bot shared through `allowed_user_ids` or group chats). Evolved code
+> runs in-process with the bot's privileges for everyone, and the non-owner refusals are a safety net, not tenant
+> isolation.
+
 MiniBot authors its own extensions and restarts to load them, only when `[evolution] enabled = true`. It is off by
 default, and with it off nothing new is exposed. Full design: `todos/SELF_EVOLUTION.md`.
 
 - Authoring is free: the model writes and statically checks a standalone `register(mb)` module in a dedicated
   workspace, never in MiniBot's source. Only static checks run before activation; the first import of model code
   happens after the owner's approval, in a subprocess.
-- Activation needs the approval of the configured owner (`[evolution] owner_user_id`) for the exact bytes. The full
-  source goes to the owner as a file, the hash in the approval is the hash activated, and the approved hash is checked
-  again at activation and at boot. Calls to evolved tools and to `evo_rollback` need the same owner approval, and
-  non-owner turns are refused without a prompt.
+- Activation needs the approval of the configured owner (`[evolution] owner_user_id`) for the exact bytes and the
+  per-tool approval policy the model proposes. The full source goes to the owner as a file, the hash and the policy are
+  in the approval, and the approved hash is checked again at activation and at boot. Each evolved tool is gated or not:
+  calls to a gated tool need the same owner approval, calls to the others run without a prompt, and a tool missing from
+  the policy is gated. `evo_rollback` always needs the owner's approval. Gated calls are refused in workers and in
+  non-owner turns.
 - Activation writes a state file, not `config.toml`. A restart is a graceful stop that exits 75 once the daemon is
   idle; new turns are refused after a 10-minute wait. Docker and systemd restart it.
 - An unclean exit counts as a failure, whether or not the set reached healthy; a clean stop does not. A set that boots
