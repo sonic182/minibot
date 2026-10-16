@@ -435,16 +435,18 @@ default, and with it off nothing new is exposed. Full design: `todos/SELF_EVOLUT
   happens after the owner's approval, in a subprocess.
 - Activation needs the approval of the configured owner (`[evolution] owner_user_id`) for the exact bytes. The full
   source goes to the owner as a file, the hash in the approval is the hash activated, and the approved hash is checked
-  again at activation and at boot. Calls to evolved tools and to `evo_rollback` need the same owner approval.
+  again at activation and at boot. Calls to evolved tools and to `evo_rollback` need the same owner approval, and
+  non-owner turns are refused without a prompt.
 - Activation writes a state file, not `config.toml`. A restart is a graceful stop that exits 75 once the daemon is
-  idle; Docker and systemd restart it.
+  idle; new turns are refused after a 10-minute wait. Docker and systemd restart it.
 - An unclean exit counts as a failure, whether or not the set reached healthy; a clean stop does not. A set that boots
-  more than `max_boots_per_hour` times in an hour falls back even when its exits were clean.
-  Failures quarantine the new candidate and roll back to the last promoted set, then to core only.
+  more than `max_boots_per_hour` times in an hour is passed over even when its exits were clean.
+  A failing set is passed over and the boot falls back: candidate, then promoted, then previous, then core only.
 - Ceilings the code enforces: module and tool name prefixes, workspace-only paths, size and count, no name collisions,
-  no vault and redacted settings for evolved code. The AST import list is a review aid, not a boundary.
+  no vault and redacted settings for evolved code.
 - Trust: this makes self-change explicit, reviewed and reversible. It does not isolate activated code, and the
-  host-write tools (`bash`, `python_exec`, `apply_patch`) can bypass the gate, so they stay off or are acknowledged.
+  host-write tools (`bash`, `python_exec`, `apply_patch`, stdio MCP servers) can bypass the gate, so they stay off or
+  are acknowledged.
 
 Prerequisites, pre-existing gaps the design depends on: a poison pending turn can crash-loop boots, a graceful stop
 mid-turn drops the turn, and queued messages live only in memory.
