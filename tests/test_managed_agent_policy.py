@@ -62,7 +62,9 @@ def test_management_tools_are_reserved(name: str) -> None:
         _policy(tools_allow=[name]).authorize(_spec(tools_allow=[name]))
 
 
-@pytest.mark.parametrize("name", ["spawn_task", "fetch_agent_info", "cancel_task", "list_tasks", "get_task"])
+@pytest.mark.parametrize(
+    "name", ["spawn_task", "delegate", "fetch_agent_info", "cancel_task", "list_tasks", "get_task"]
+)
 def test_delegation_tools_are_reserved(name: str) -> None:
     with pytest.raises(ValueError, match="is reserved"):
         _policy(tools_allow=[name]).authorize(_spec(tools_allow=[name]))

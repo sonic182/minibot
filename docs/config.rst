@@ -170,7 +170,7 @@ tool name, because only an exact name can be checked against a pattern without e
 list. A managed definition may not use ``tools_deny`` at all — it grants every tool except the
 listed ones, so no ceiling can bound it — and it claims MCP servers through ``mcp_servers`` rather
 than through tool names. ``providers`` restricts which model provider a managed agent may target,
-including a ``spawn_task`` model override; the provider the daemon already runs on is always
+including a ``spawn_task`` or ``delegate`` model override; the provider the daemon already runs on is always
 allowed, since reusing it is not an escalation. Owner-authored agents are not subject to the
 ceiling, so their permissions stay exactly as the owner wrote them.
 
@@ -251,11 +251,11 @@ The default is ``"sqlite"``. A config written before that default changed and le
 unset now uses the SQLite queue; set ``backend = "rabbitmq"`` explicitly to keep using the broker.
 
 By default a worker starts with no context: it sees only its system prompt, the task ``prompt`` and
-``context_json``, and the ``spawn_task`` description tells the main agent so. ``[tasks].history = true``
+``context_json``, and the ``spawn_task`` and ``delegate`` descriptions tell the main agent so. ``[tasks].history = true``
 gives worker conversations a persistent history instead. It needs ``backend = "sqlite"``.
 
 A conversation is a named agent in a chat, or that agent plus a ``session`` name the main agent passes to
-``spawn_task`` (for example one per client). A general worker only gets a conversation when it is given a
+``spawn_task`` or ``delegate`` (for example one per client). A general worker only gets a conversation when it is given a
 ``session``; otherwise it starts empty as before. Every finished task appends its prompt and answer to the
 conversation, each capped at 8000 characters (failed or timed-out tasks append nothing), and the next task
 receives it before its own prompt. Tasks of one conversation run one at a time: the queue does not lease a
@@ -263,7 +263,7 @@ task while another task of the same conversation is leased or running, so a late
 the earlier result. Different sessions run in parallel. When the stored history grows past roughly 16 KB
 and the model's context limit is known, the worker summarizes it before running and the summary replaces
 it; when the limit is unknown nothing is summarized and the worker only receives the newest messages that
-fit in about 32 KB. Tasks without a chat (no ``chat_id``) never get a history. ``fresh = true`` on ``spawn_task`` clears the conversation before a task, and the tool description
+fit in about 32 KB. Tasks without a chat (no ``chat_id``) never get a history. ``fresh = true`` on ``spawn_task`` or ``delegate`` clears the conversation before a task, and the tool description
 switches to explain all this:
 
 .. code-block:: toml
@@ -429,7 +429,7 @@ Tool Configuration
      - ``enabled``, ``backend``, ``sqlite_url``/``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
    * - ``[tasks]``
      - ``TasksConfig``
-     - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``worker_max_steps``, ``worker_max_tool_calls``, ``max_concurrent_workers``, ``continue_turn_default``, ``continue_turn_mode``, ``history``, ``worker_extensions``, ``sqlite``
+     - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``worker_max_steps``, ``worker_max_tool_calls``, ``max_concurrent_workers``, ``delegation_mode``, ``history``, ``worker_extensions``, ``sqlite``
    * - ``[tasks.sqlite]``
      - ``SqliteTaskQueueConfig``
      - ``sqlite_url``, ``poll_interval_seconds``, ``lease_timeout_seconds``, ``batch_size``, ``max_attempts``, ``done_retention_seconds``; terminal rows and compact event history are retained for 30 days by default

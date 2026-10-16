@@ -135,7 +135,7 @@ base_url = ""
 # Named provider: any section name works when `api_format` says which API the endpoint speaks, so
 # several endpoints of the same format can coexist (one [providers.openai_responses] would not be
 # enough for both OpenCode Go and z.ai). Agents reference the section name in `model_provider`, and
-# the main agent can retarget a single `spawn_task` call at it. `models` is an
+# the main agent can retarget a single `spawn_task` or `delegate` call at it. `models` is an
 # advisory list the orchestrator is offered to choose from; it is not validated against the endpoint.
 # [providers.opencode_go]
 # api_format = "openai_responses"
@@ -621,8 +621,8 @@ native = true
 # install = true
 
 # Async task system. Gates both the task consumer and the
-# spawn_task / cancel_task / list_tasks / get_task tools. `spawn_task` is also the only way to
-# delegate to a specialist agent, so turning this off disables multi-agent orchestration.
+# spawn_task / delegate / cancel_task / list_tasks / get_task tools. `spawn_task` and `delegate` are also the only
+# ways to hand work to a specialist agent, so turning this off disables multi-agent orchestration.
 [tasks]
 enabled = true
 # Queue backend: "sqlite" (default, no broker needed) or "rabbitmq" (see [rabbitmq] below).
@@ -630,25 +630,24 @@ backend = "sqlite"
 # Seconds to wait for a spawned worker process to return a result before it is terminated.
 worker_timeout_seconds = 1800
 # Worker execution limits accept a positive integer or "unlimited". A finite timeout is always required.
-# These are the only step/tool-call bounds: `spawn_task` itself takes just a timeout_seconds.
+# These are the only step/tool-call bounds: `spawn_task` and `delegate` take just a timeout_seconds.
 worker_max_steps = "unlimited"
 worker_max_tool_calls = "unlimited"
 # Max subprocesses running simultaneously; excess tasks wait in the queue.
 max_concurrent_workers = 4
-# What spawn_task does when the model leaves continue_turn unset: false delivers the worker's answer straight to
-# the chat (it is also recorded in the history); true returns it to the main agent as a new turn.
-continue_turn_default = true
-# "auto" (default): the model chooses per task through continue_turn; continue_turn_default covers an unset value.
-# "always": the model's choice is ignored and every result returns to the main agent as a new turn (falling back
-# to direct delivery past the continuation limit). continue_turn_default has no effect in that mode.
-continue_turn_mode = "auto"
+# "auto" (default): both `delegate` (the result comes back to the main agent as a new turn) and `spawn_task` (the
+# worker's answer goes straight to the chat) are registered and the model picks by tool.
+# "delegate": only `delegate` is registered, so every result returns to the main agent (falling back to direct
+# delivery past the continuation limit). Replaces the removed continue_turn_mode = "always"; continue_turn_mode and
+# continue_turn_default are rejected at config load.
+delegation_mode = "auto"
 # Persistent history per worker conversation (default false; needs backend = "sqlite"). A conversation is a named
-# agent in a chat, optionally split by a `session` name from spawn_task; its tasks run one at a time and see earlier
-# prompts and answers, summarized when they grow. spawn_task gains `fresh` to clear that history first.
+# agent in a chat, optionally split by a `session` name from spawn_task/delegate; its tasks run one at a time and see earlier
+# prompts and answers, summarized when they grow. spawn_task and delegate gain `fresh` to clear that history first.
 history = false
 # Bundled tool extensions a worker loads on top of the scheduler and utility ones: "kv_memory" and/or "rag".
 # Each needs its [tools.*] section enabled. Only a specialist that claims them (tools_allow, or a tools_deny that
-# leaves them out) gets them; a spawn_task without an agent does not. A RAG task loads the embedding model itself.
+# leaves them out) gets them; a task without an agent does not. A RAG task loads the embedding model itself.
 worker_extensions = []
 
 # Queue storage used when tasks.backend = "sqlite". No external broker required.

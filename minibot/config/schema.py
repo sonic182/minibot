@@ -1049,9 +1049,9 @@ class SqliteTaskQueueConfig(BaseModel):
 class TasksConfig(BaseModel):
     """Async task system settings. TOML section: ``[tasks]``
 
-    Gates both the task consumer service and the ``spawn_task``/``cancel_task``/``list_tasks``/``get_task`` tools.
-    ``spawn_task`` is also the only way to delegate to a specialist agent, so disabling this
-    section turns multi-agent orchestration off entirely.
+    Gates both the task consumer service and the ``spawn_task``/``delegate``/``cancel_task``/``list_tasks``/
+    ``get_task`` tools. ``spawn_task`` and ``delegate`` are also the only ways to hand work to a specialist
+    agent, so disabling this section turns multi-agent orchestration off entirely.
 
     - ``enabled`` — enable the async task system (default: ``true``; the ``sqlite`` backend
       needs no broker and no extra).
@@ -1061,13 +1061,12 @@ class TasksConfig(BaseModel):
     - ``worker_max_steps`` — optional execution-step ceiling; ``"unlimited"`` disables it (default).
     - ``worker_max_tool_calls`` — optional tool-call ceiling; ``"unlimited"`` disables it (default).
     - ``max_concurrent_workers`` — maximum parallel task handlers (default: ``4``).
-    - ``continue_turn_default`` — what ``spawn_task`` does when the model leaves ``continue_turn`` unset
-      (default: ``false``). ``true`` returns every result to the main agent as a new turn; once a turn reaches
-      the continuation limit, further tasks fall back to delivering straight to the chat instead of failing.
-    - ``continue_turn_mode`` — ``"auto"`` (default) lets the model choose per task through ``continue_turn``, with
-      ``continue_turn_default`` covering an unset value. ``"always"`` ignores the model's choice and returns every
-      result to the main agent as a new turn, falling back to direct delivery at the continuation limit;
-      ``continue_turn_default`` has no effect in that mode.
+    - ``delegation_mode`` — which delegation tools the main agent gets. ``"auto"`` (default) attaches both:
+      ``delegate`` when the model needs the result to keep working (it comes back as a new turn) and
+      ``spawn_task`` when the worker's answer is the final deliverable (it goes straight to the chat).
+      ``"delegate"`` attaches only ``delegate``, so every result returns to the main agent as a new turn; past
+      the continuation limit it delivers straight to the chat instead of failing. Replaces the removed
+      ``continue_turn_mode = "always"``; ``continue_turn_mode`` and ``continue_turn_default`` are rejected.
     - ``history`` — keep a persistent history per worker conversation (default: ``false``; needs
       ``backend = "sqlite"``). A conversation is a named agent in a chat, ``task:<channel>:<chat_id>:<agent_name>``,
       or that plus a ``session`` name passed to ``spawn_task``; general workers only get one when given a
@@ -1090,11 +1089,28 @@ class TasksConfig(BaseModel):
     worker_max_steps: TaskLimitValue = "unlimited"
     worker_max_tool_calls: TaskLimitValue = "unlimited"
     max_concurrent_workers: PositiveInt = 4
-    continue_turn_default: bool = False
-    continue_turn_mode: Literal["auto", "always"] = "auto"
+    delegation_mode: Literal["auto", "delegate"] = "auto"
     history: bool = False
     worker_extensions: list[Literal["kv_memory", "rag"]] = Field(default_factory=list)
     sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_continue_turn_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "continue_turn_mode" in data:
+                raise ValueError(
+                    'tasks.continue_turn_mode was removed: replace continue_turn_mode = "always" with '
+                    'delegation_mode = "delegate", or delete it if it is "auto"; also delete '
+                    "continue_turn_default if present"
+                )
+            if "continue_turn_default" in data:
+                raise ValueError(
+                    "tasks.continue_turn_default was removed: delete it, the model now picks the `delegate` tool "
+                    "(result comes back to it) or `spawn_task` (answer goes to the user); "
+                    'set delegation_mode = "delegate" to offer only `delegate`'
+                )
+        return data
 
     @model_validator(mode="after")
     def _validate_lease_outlives_worker(self) -> TasksConfig:

@@ -70,7 +70,7 @@ Console channel
    * - ``--timeout-seconds FLOAT``
      - Per-turn timeout; values below ``120`` are clamped to ``120``.
    * - ``--config PATH``
-     - Path to a ``config.toml`` file.
+     - Path to a ``config.toml`` file. It is exported as ``MINIBOT_CONFIG``, so task workers load the same file.
    * - ``--verbose``
      - Also log to stdout in addition to the log file.
 

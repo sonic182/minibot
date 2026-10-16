@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `delegate` and `spawn_task` replace the `continue_turn` flag.** Delegation now has two tools: `delegate`
+  for when the model needs the worker's result (it comes back as a new turn) and `spawn_task` for when the worker's
+  answer is the final deliverable (it goes straight to the user). `spawn_task` loses its `continue_turn` argument and
+  always delivers directly. `delegate` takes the same parameters and is limited to three delegations per turn and
+  three chained turns deep; past either limit it is rejected with `task:continuation_limit`. `[tasks]
+  continue_turn_mode` and `continue_turn_default` are removed and rejected at config load, with the replacement in the
+  error. Migrate `continue_turn_mode = "always"` to `delegation_mode = "delegate"` (only `delegate` is registered, and
+  past the limits it delivers directly instead of failing); delete `continue_turn_mode = "auto"` and
+  `continue_turn_default`, since the model now picks the tool. The new `delegation_mode` defaults to `"auto"`, which
+  registers both tools. A `[orchestration.main_agent] tools_allow` list must add `delegate`. `delegate` is a reserved
+  delegation tool, so specialists never inherit it.
+
+### Fixed
+
+- **`minibot console --config` now reaches task workers.** Workers reload settings from `MINIBOT_CONFIG` or
+  `./config.toml`, so a console started with `--config` ran its tasks on a different file. The console now exports
+  the path as `MINIBOT_CONFIG`.
+
 ## [0.32.0] - 2026-10-11
 
 ### Changed

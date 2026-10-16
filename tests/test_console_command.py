@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -156,6 +157,22 @@ async def test_console_run_once_uses_console_service(monkeypatch: pytest.MonkeyP
     assert calls["dispatcher_stopped"] is True
     assert calls["service_started"] is True
     assert calls["service_stopped"] is True
+
+
+@pytest.mark.asyncio
+async def test_console_run_exports_its_config_path_for_task_workers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from minibot.app import console as console_module
+
+    calls = _install_console_fakes(monkeypatch)
+    monkeypatch.setenv("MINIBOT_CONFIG", "other.toml")
+    monkeypatch.chdir(tmp_path)
+
+    await console_module.run(once="hello", chat_id=1, user_id=1, timeout_seconds=1, config_path="cfg/minibot.toml")
+
+    assert os.environ["MINIBOT_CONFIG"] == str(tmp_path / "cfg" / "minibot.toml")
+    assert calls["config_path"] == tmp_path / "cfg" / "minibot.toml"
 
 
 @pytest.mark.asyncio
