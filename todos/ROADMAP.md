@@ -429,16 +429,17 @@ deliverable — see Trust model):
 MiniBot authors its own extensions and restarts to load them, only when `[evolution] enabled = true`. It is off by
 default, and with it off nothing new is exposed. Full design: `todos/SELF_EVOLUTION.md`.
 
-- Authoring is free: the model writes and validates a standalone `register(mb)` module in a dedicated workspace,
-  never in MiniBot's source. Nothing runs before activation.
-- Activation needs an owner approval of the exact bytes. The full source goes to the owner with `send_file`, and
-  the approved hash is checked again at activation and at boot.
+- Authoring is free: the model writes and statically checks a standalone `register(mb)` module in a dedicated
+  workspace, never in MiniBot's source. Only static checks run before activation; the first import of model code
+  happens after the owner's approval, in a subprocess.
+- Activation needs an owner approval of the exact bytes. The full source goes to the owner as a file, the hash in the
+  approval is the hash activated, and the approved hash is checked again at activation and at boot.
 - Activation writes a state file, not `config.toml`. A restart is a graceful stop that exits 75 once the daemon is
   idle; Docker and systemd restart it.
 - A boot that does not reach healthy counts as a failure. Two failures roll back to the last promoted set, then to
   core only.
-- Ceilings the code enforces: name prefix, workspace-only paths, size and count, no name collisions, no vault for
-  evolved code. Import checks are review aids, not a boundary.
+- Ceilings the code enforces: module and tool name prefixes, workspace-only paths, size and count, no name collisions,
+  no vault and redacted settings for evolved code. The AST import list is a review aid, not a boundary.
 - Trust: this makes self-change explicit, reviewed and reversible. It does not isolate activated code, and the
   host-write tools (`bash`, `python_exec`, `apply_patch`) can bypass the gate, so they stay off or are acknowledged.
 
