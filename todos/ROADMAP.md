@@ -435,10 +435,11 @@ default, and with it off nothing new is exposed. Full design: `todos/SELF_EVOLUT
   happens after the owner's approval, in a subprocess.
 - Activation needs the approval of the configured owner (`[evolution] owner_user_id`) for the exact bytes. The full
   source goes to the owner as a file, the hash in the approval is the hash activated, and the approved hash is checked
-  again at activation and at boot.
+  again at activation and at boot. Calls to evolved tools and to `evo_rollback` need the same owner approval.
 - Activation writes a state file, not `config.toml`. A restart is a graceful stop that exits 75 once the daemon is
   idle; Docker and systemd restart it.
-- An unclean exit counts as a failure, whether or not the set reached healthy; a clean stop does not.
+- An unclean exit counts as a failure, whether or not the set reached healthy; a clean stop does not. A set that boots
+  more than `max_boots_per_hour` times in an hour falls back even when its exits were clean.
   Failures quarantine the new candidate and roll back to the last promoted set, then to core only.
 - Ceilings the code enforces: module and tool name prefixes, workspace-only paths, size and count, no name collisions,
   no vault and redacted settings for evolved code. The AST import list is a review aid, not a boundary.
