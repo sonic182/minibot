@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from minibot.adapters.messaging.console.compat import CompatConsole, format_assistant_output
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelMessage, ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent, ReasoningEvent, ToolCallEvent
+from minibot.core.events import MessageEvent, OutboundEvent, ReasoningEvent, ToolCallEvent, TurnStopRequestedEvent
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -99,6 +99,11 @@ class ConsoleService:
         )
         await self._event_bus.publish(MessageEvent(message=message))
 
+    async def request_stop(self) -> None:
+        await self._event_bus.publish(
+            TurnStopRequestedEvent(channel="console", chat_id=self._chat_id, user_id=self._user_id)
+        )
+
     async def wait_for_response(self, timeout_seconds: float) -> ConsoleResponse:
         result = await asyncio.wait_for(self._responses.get(), timeout=timeout_seconds)
         self._responses.task_done()
@@ -155,6 +160,10 @@ class ConsoleService:
                     continue
                 response = event.response
                 if response.channel != "console":
+                    continue
+                # A stop that raced the turn's answer gets this reply after it; queued, it would be taken
+                # as the answer to the next message.
+                if response.metadata.get("turn_stop") == "nothing_running":
                     continue
                 rendered = self._render_response(response)
                 self._responses.put_nowait(ConsoleResponse(response=response, rendered_text=rendered))

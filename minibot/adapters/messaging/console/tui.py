@@ -99,6 +99,7 @@ class ConsoleTui(App[None]):
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+t", "toggle_thinking", "Thinking"),
+        ("escape", "stop_turn", "Stop"),
     ]
     CSS = """
     #input-area {
@@ -135,6 +136,7 @@ class ConsoleTui(App[None]):
         self._show_thinking = True
         self._live_thinking: list[str] = []
         self._live_tools: list[str] = []
+        self._busy = False
 
     @staticmethod
     def _history_turns(history: list[MemoryEntry] | None) -> list[_Turn]:
@@ -155,7 +157,7 @@ class ConsoleTui(App[None]):
             yield LoadingIndicator(id="thinking")
             yield Static("", id="thinking-status")
             yield Prompt(
-                placeholder="Message minibot… (Enter send · Ctrl+J newline · Ctrl+T thinking)",
+                placeholder="Message minibot… (Enter send · Ctrl+J newline · Ctrl+T thinking · Esc stop)",
                 id="prompt",
             )
         yield Footer(show_command_palette=False)
@@ -176,6 +178,15 @@ class ConsoleTui(App[None]):
             self.exit()
             return
         self.run_worker(self._run_turn(text), group="turn", exclusive=True, exit_on_error=False)
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "stop_turn":
+            return self._busy
+        return True
+
+    def action_stop_turn(self) -> None:
+        self.notify("Stopping…")
+        self.run_worker(self._service.request_stop(), group="stop")
 
     def action_toggle_thinking(self) -> None:
         self._show_thinking = not self._show_thinking
@@ -239,6 +250,8 @@ class ConsoleTui(App[None]):
             await self._refresh()
 
     def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        self.refresh_bindings()
         self.query_one("#thinking", LoadingIndicator).display = busy
         prompt = self.query_one("#prompt", Prompt)
         prompt.disabled = busy

@@ -112,7 +112,8 @@ If you'd rather test without Telegram first, skip to `Console Test Channel`_ bel
 
 While the bot is working you can keep writing: corrections such as "also check Barcelona" are
 folded into the running turn after the current tool returns. Send ``/stop`` to cancel the
-running turn (see :doc:`events`); the web chat shows a stop button in place of send while a reply runs.
+running turn (see :doc:`events`); the web chat shows a stop button in place of send while a reply runs, and the
+console TUI stops it with ``Esc``.
 
 Console Test Channel
 --------------------

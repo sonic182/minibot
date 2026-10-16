@@ -7,7 +7,7 @@ import pytest
 from minibot.adapters.messaging.console.service import ConsoleService
 from minibot.app.event_bus import EventBus
 from minibot.core.channels import ChannelResponse, RenderableResponse
-from minibot.core.events import MessageEvent, OutboundEvent
+from minibot.core.events import MessageEvent, OutboundEvent, TurnStopRequestedEvent
 
 
 class _CollectConsole:
@@ -80,4 +80,30 @@ async def test_console_service_ignores_non_console_outbound_events() -> None:
     with pytest.raises(asyncio.TimeoutError):
         await service.wait_for_response(0.1)
     assert console.printed == []
+    await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_console_service_requests_a_stop_and_drops_a_late_nothing_running_reply() -> None:
+    bus = EventBus()
+    service = ConsoleService(bus, chat_id=5, user_id=6, console=_CollectConsole())
+    await service.start()
+    subscription = bus.subscribe(types=(TurnStopRequestedEvent,))
+
+    await service.request_stop()
+    stop = await asyncio.wait_for(subscription._queue.get(), timeout=0.5)
+    for text, metadata in (("Nothing is running.", {"turn_stop": "nothing_running"}), ("answer", {})):
+        response = ChannelResponse(
+            channel="console",
+            chat_id=5,
+            text=text,
+            render=RenderableResponse(kind="text", text=text),
+            metadata=metadata,
+        )
+        await bus.publish(OutboundEvent(response=response))
+    item = await service.wait_for_response(1.0)
+
+    assert (stop.channel, stop.chat_id, stop.user_id) == ("console", 5, 6)
+    assert item.rendered_text == "answer"
+    await subscription.close()
     await service.stop()

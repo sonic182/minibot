@@ -25,7 +25,7 @@ so the order here is the order to work in, not the numeric order.
 
 | priority | phase | topic | status |
 |---|---|---|---|
-| 1 | 3b | steering leftovers | steering workers and specialists, `/stop` on the console |
+| 1 | 3b | steering leftovers | steering workers and specialists |
 | 2 | 10 | external agents (ACP) as an agent runtime backend | pending, experimental through `acpx` first |
 | 3 | 11 | task observability | pending |
 | 4 | 4 | MCP OAuth (issue #65) | demand-driven: only when an MCP server in use requires it |
@@ -33,8 +33,8 @@ so the order here is the order to work in, not the numeric order.
 
 Shipped and removed from this file: 0 bash env default, 1 credential vault, 2 skills for specialist
 agents, 3 native skills, runtime self-knowledge and agent management, 3b main-agent steering and `/stop`
-(Telegram, web), 7 shared tool construction with task workers, 8 task lifecycle, bounded output, MCP HTTP
-and approval binding (PR #112, released in 0.29.0) plus the container smoke test of task cancellation,
+(Telegram, web, and `Esc` in the console TUI), 7 shared tool construction with task workers, 8 task lifecycle,
+bounded output, MCP HTTP and approval binding (PR #112, released in 0.29.0) plus the container smoke test of task cancellation,
 12 opt-in bundled extensions for task workers (`[tasks] worker_extensions`), 9 delegation semantics
 (`delegate` versus background `spawn_task`, `[tasks] delegation_mode`). The commit history keeps their
 design notes.
@@ -107,9 +107,8 @@ Deliberately left, still true after the runtime reliability work (Phase 8, shipp
 ## [ ] Phase 3b — Steering leftovers (priority 1)
 
 Steering and `/stop` shipped for the main agent: the dispatcher hands same-chat messages to the running turn
-(`app/turn_inbox.py`), and `/stop` exists on Telegram and in the web chat. Still open:
+(`app/turn_inbox.py`), and `/stop` exists on Telegram, in the web chat and as `Esc` in the console TUI. Still open:
 
-- [ ] `/stop` on the console channel.
 - [ ] Steering a specific worker or specialist. Deferred on purpose: with several active tasks, "change this"
   needs an unambiguous addressee, so decide how the owner names the target before building anything.
 

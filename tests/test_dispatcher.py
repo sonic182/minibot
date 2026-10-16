@@ -590,6 +590,7 @@ async def test_stop_cancels_the_running_turn_and_records_it(monkeypatch: pytest.
     assert set(pending_store.cleared) == set(pending_store.marked)
     assert nothing is not None
     assert nothing.response.text == "Nothing is running."
+    assert nothing.response.metadata["turn_stop"] == "nothing_running"
 
 
 @pytest.mark.timeout(15)
