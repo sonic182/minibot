@@ -65,6 +65,7 @@ _DETAILS: dict[str, _Detail] = {
     "chat_history_trim": _Detail(("keep_latest",), labelled=True),
     "code_read": _Detail(("path",)),
     "current_datetime": _Detail(()),
+    "delegate": _Detail(("agent_name",), labelled=True),
     "delete_file": _Detail(("path", "target"), labelled=True),
     "delete_scheduled_prompt": _Detail(("job_id",)),
     "fetch_agent_info": _Detail(("agent_name",)),

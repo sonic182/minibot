@@ -79,7 +79,7 @@ and again by pydantic validators in `config/schema.py`.
 
 Reserved names always stripped from delegated agents (`RESERVED_DELEGATION_TOOL_NAMES` in
 `app/agent_policies.py`): `fetch_agent_info`,
-`spawn_task`, `list_tasks`, `get_task`, `cancel_task` — so there is no recursive delegation.
+`spawn_task`, `delegate`, `list_tasks`, `get_task`, `cancel_task` — so there is no recursive delegation.
 
 One tool escapes the system entirely: `pre_response` is prepended by `AgentRuntime` to every
 runtime's tool list, bypassing both the factory and allow/deny filtering. Listing it in

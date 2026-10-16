@@ -35,3 +35,23 @@ def test_rabbitmq_backend_ignores_the_lease_guard() -> None:
 def test_task_history_requires_the_sqlite_backend() -> None:
     with pytest.raises(ValidationError):
         TasksConfig(backend="rabbitmq", history=True)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "replacement"),
+    [
+        ("continue_turn_mode", "always", 'delegation_mode = "delegate"'),
+        ("continue_turn_default", True, "`delegate`"),
+    ],
+)
+def test_removed_continue_turn_keys_are_rejected_with_the_replacement(
+    key: str, value: object, replacement: str
+) -> None:
+    with pytest.raises(ValidationError, match=f"tasks.{key} was removed") as excinfo:
+        TasksConfig.model_validate({key: value})
+
+    assert replacement in str(excinfo.value)
+
+
+def test_delegation_mode_defaults_to_auto() -> None:
+    assert TasksConfig().delegation_mode == "auto"

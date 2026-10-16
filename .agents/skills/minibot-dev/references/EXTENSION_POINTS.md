@@ -131,8 +131,9 @@ AppContainer.configure()
       └─ → AgentSpec                              core/agents.py
   └─ AgentRegistry(agent_specs)                   app/agent_registry.py
 Dispatcher → build_enabled_tools(agent_registry=...) → AgentInfoTool → fetch_agent_info
-Delegation itself is spawn_task, from the tasks extension:
-  extensions/services/tasks.py → TaskTools → spawn_task → TaskManager → worker subprocess
+Delegation itself is delegate / spawn_task, from the tasks extension (delegate: result returns to the model;
+spawn_task: answer goes to the user; [tasks].delegation_mode = "delegate" registers only delegate):
+  extensions/services/tasks.py → TaskTools → delegate | spawn_task → TaskManager → worker subprocess
 PromptService._specialist_roster_fragment         app/handlers/services/prompt_service.py
 ```
 
@@ -145,7 +146,7 @@ Read the tool-scoping semantics in CONVENTIONS.md before setting `tools_allow` /
 they do not mean what they appear to mean for MCP tools.
 
 Agents are re-loaded independently by the worker and the task extensions, so an agent is
-available to `spawn_task` without extra wiring.
+available to `spawn_task` and `delegate` without extra wiring.
 
 ---
 
@@ -225,7 +226,7 @@ export it from that package's `__init__.py`, construct it in `build_llm_turn_ser
 Workers are **forked subprocesses** with a deliberately narrower assembly than the daemon.
 
 ```
-spawn_task (LLM tool)
+delegate / spawn_task (LLM tools)
   └─ producer.enqueue(TaskRequest)         core/tasks.py  (TaskProducer protocol)
       ├─ SQLiteTaskProducer                adapters/tasks/sqlite_store.py
       └─ RabbitMQTaskProducer              adapters/messaging/rabbitmq/producer.py

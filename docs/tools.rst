@@ -168,10 +168,16 @@ Tool Surface
      - ``[tools.skills] install = true``
      - Preview or install a published skill from GitHub or an archive URL.
    * - Async tasks
-     - ``spawn_task``
+     - ``delegate``
      - ``[tasks]``
-     - Queue a background worker task; the only way to delegate to a specialist agent. Can override
-       ``model_provider``, ``model`` and ``reasoning_effort`` for that one task.
+     - Queue a background worker task whose result comes back to the main agent as a new turn; with
+       ``spawn_task``, the only way to hand work to a specialist agent. Can override ``model_provider``,
+       ``model`` and ``reasoning_effort`` for that one task.
+   * - Async tasks
+     - ``spawn_task``
+     - ``[tasks] delegation_mode = "auto"``
+     - Queue a background worker task whose answer goes straight to the user. Same parameters as
+       ``delegate``; not registered when ``delegation_mode = "delegate"``.
    * - Async tasks
      - ``cancel_task``
      - ``[tasks]``

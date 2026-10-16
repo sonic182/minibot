@@ -72,8 +72,8 @@ prompt (or the compaction pass):
    Cross-channel rules appended right after the base prompt, in alphabetical order,
    regardless of the active channel and regardless of which tools are attached.
 
-   - ``delegation.md`` — keep trivial requests local; prefer ``spawn_task`` for multi-step
-     specialist work; use ``fetch_agent_info`` when the roster description is not enough;
+   - ``delegation.md`` — keep trivial requests local; prefer ``delegate`` (result needed) or
+     ``spawn_task`` (final answer) for multi-step specialist work; use ``fetch_agent_info`` when the roster description is not enough;
      never claim a delegated result, since it arrives as a later message; continue locally
      when delegation is unavailable or fails.
    - ``graph.md`` — decide between the relation ``graph_*`` tools and the durable ``memory_*`` tools: a fact naming

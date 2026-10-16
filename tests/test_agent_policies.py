@@ -124,6 +124,7 @@ def test_strip_reserved_delegation_tools_removes_recursive_tools() -> None:
     tools = [
         _binding("fetch_agent_info"),
         _binding("spawn_task"),
+        _binding("delegate"),
         _binding("cancel_task"),
         _binding("list_tasks"),
         _binding("current_datetime"),

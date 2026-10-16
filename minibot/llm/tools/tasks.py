@@ -62,14 +62,20 @@ class TaskTools:
         self._providers = list(providers)
 
     def bindings(self) -> list[ToolBinding]:
-        return [
-            ToolBinding(tool=self._spawn_schema(), handler=self._spawn_task),
-            ToolBinding(tool=self._cancel_schema(), handler=self._cancel_task),
-            ToolBinding(tool=self._list_schema(), handler=self._list_tasks),
-            ToolBinding(tool=self._get_schema(), handler=self._get_task),
-        ]
+        bindings: list[ToolBinding] = []
+        if self._config.delegation_mode == "auto":
+            bindings.append(ToolBinding(tool=self._task_schema("spawn_task"), handler=self._spawn_task))
+        bindings.extend(
+            [
+                ToolBinding(tool=self._task_schema("delegate"), handler=self._delegate),
+                ToolBinding(tool=self._cancel_schema(), handler=self._cancel_task),
+                ToolBinding(tool=self._list_schema(), handler=self._list_tasks),
+                ToolBinding(tool=self._get_schema(), handler=self._get_task),
+            ]
+        )
+        return bindings
 
-    def _spawn_schema(self) -> Tool:
+    def _task_schema(self, name: str) -> Tool:
         properties: dict[str, Any] = {
             "prompt": {
                 "type": "string",
@@ -106,14 +112,6 @@ class TaskTools:
                 "type": ["string", "null"],
                 "description": "Optional reasoning budget for this task (provider-specific).",
             },
-            "continue_turn": {
-                "type": ["boolean", "null"],
-                "description": (
-                    "True to get the result back as a new turn so you can keep working on it; "
-                    "false to deliver the worker's answer straight to the user; null uses the "
-                    "configured default."
-                ),
-            },
         }
         if self._config.history:
             properties["fresh"] = {
@@ -128,8 +126,8 @@ class TaskTools:
                 ),
             }
         return Tool(
-            name="spawn_task",
-            description=load_tool_description("spawn_task_history" if self._config.history else "spawn_task"),
+            name=name,
+            description=load_tool_description(f"{name}_history" if self._config.history else name),
             parameters=strict_object(properties=properties, required=["prompt"]),
         )
 
@@ -138,7 +136,9 @@ class TaskTools:
             name="cancel_task",
             description=load_tool_description("cancel_task"),
             parameters=strict_object(
-                properties={"task_id": {"type": "string", "description": "Task identifier returned by spawn_task."}},
+                properties={
+                    "task_id": {"type": "string", "description": "Task identifier returned by spawn_task or delegate."}
+                },
                 required=["task_id"],
             ),
         )
@@ -173,6 +173,12 @@ class TaskTools:
         )
 
     async def _spawn_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._enqueue(payload, context, continue_turn=False)
+
+    async def _delegate(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._enqueue(payload, context, continue_turn=True)
+
+    async def _enqueue(self, payload: dict[str, Any], context: ToolContext, *, continue_turn: bool) -> dict[str, Any]:
         task_id = str(uuid4())
         channel = require_channel(context, message="channel context is required for task spawning")
         owner_id = self._owner_id(context)
@@ -198,11 +204,10 @@ class TaskTools:
         task_context = _coerce_task_context(payload)
         limits = _resolve_limits(payload, self._config, spec_timeout_seconds=spec.timeout_seconds if spec else None)
         history_session = self._history_session(payload, channel, context.chat_id, agent_name)
-        continuation_depth = _resolve_continuation_depth(
-            payload,
-            context,
-            default=self._config.continue_turn_default,
-            mode=self._config.continue_turn_mode,
+        continuation_depth = (
+            _resolve_continuation_depth(context, fallback=self._config.delegation_mode == "delegate")
+            if continue_turn
+            else None
         )
         try:
             await self._producer.enqueue(
@@ -350,36 +355,27 @@ def _resolve_limits(
     )
 
 
-def _resolve_continuation_depth(
-    payload: dict[str, Any], context: ToolContext, *, default: bool, mode: str = "auto"
-) -> int | None:
-    if mode == "always":
-        continue_turn = None
-        default = True
-    else:
-        continue_turn = payload.get("continue_turn")
-    if continue_turn is not None and not isinstance(continue_turn, bool):
-        raise ToolInputError("continue_turn must be a boolean or null", error_code="invalid_tool_arguments")
-    if continue_turn is None:
-        if not default:
-            return None
-        if context.task_chain_depth >= MAX_TASK_CONTINUATIONS:
-            return None
-        if context.claim_task_continuation is not None and not context.claim_task_continuation():
-            return None
-        return context.task_chain_depth + 1
-    if not continue_turn:
-        return None
+def _resolve_continuation_depth(context: ToolContext, *, fallback: bool) -> int | None:
+    """Claim a continuation slot for a delegated task, or ``None`` to deliver its answer directly.
+
+    Past the chain or per-turn limit the call is rejected, unless ``fallback`` (``delegation_mode =
+    "delegate"``) is set: there ``delegate`` is the only tool, so rejecting would leave the model no way
+    to hand the work off.
+    """
     if context.task_chain_depth >= MAX_TASK_CONTINUATIONS:
+        if fallback:
+            return None
         raise ToolInputError(
             f"This turn already continues from {context.task_chain_depth} chained tasks, which is the limit. "
-            "Answer the user now, or spawn the task with continue_turn false.",
+            "Answer the user now, or hand the task off with spawn_task.",
             error_code="task:continuation_limit",
         )
     if context.claim_task_continuation is not None and not context.claim_task_continuation():
+        if fallback:
+            return None
         raise ToolInputError(
-            f"This turn already started {MAX_TASK_CONTINUATIONS} tasks with continue_turn, which is the limit. "
-            "Wait for their results, or spawn this task with continue_turn false.",
+            f"This turn already delegated {MAX_TASK_CONTINUATIONS} tasks, which is the limit. "
+            "Wait for their results, or hand this task off with spawn_task.",
             error_code="task:continuation_limit",
         )
     return context.task_chain_depth + 1

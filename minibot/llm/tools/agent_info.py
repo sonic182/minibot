@@ -54,8 +54,8 @@ class AgentInfoTool:
             },
             "available_providers": [option.as_payload() for option in self._providers],
             "override_hint": (
-                "spawn_task accepts model_provider, model and reasoning_effort to run this specialist on one "
-                "of the providers listed above for a single task. A null default means the specialist "
+                "spawn_task and delegate accept model_provider, model and reasoning_effort to run this specialist "
+                "on one of the providers listed above for a single task. A null default means the specialist "
                 "inherits the main configured provider or model."
             ),
         }

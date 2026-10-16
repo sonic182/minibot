@@ -56,10 +56,12 @@ def _build_tools(
     task_manager: _TaskManagerStub,
     agent_registry: AgentRegistry | None = None,
     specialists_enabled: bool = True,
+    config: TasksConfig | None = None,
 ) -> dict[str, Any]:
     tools = TaskTools(
         cast(Any, producer),
         cast(Any, task_manager),
+        config=config,
         agent_registry=agent_registry,
         specialists_enabled=specialists_enabled,
     )
@@ -327,52 +329,47 @@ async def test_spawn_task_carries_model_overrides_to_the_queue() -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_task_continue_turn_records_the_chain_depth() -> None:
+async def test_delegate_continues_the_turn_and_records_the_chain_depth_while_spawn_task_never_does() -> None:
     producer = _ProducerStub()
     bindings = _build_tools(producer, _TaskManagerStub())
 
-    await bindings["spawn_task"].handler({"prompt": "fire and forget"}, ToolContext(channel="console"))
-    continued = await bindings["spawn_task"].handler(
-        {"prompt": "need the result", "continue_turn": True},
-        ToolContext(channel="console", task_chain_depth=1),
+    spawned = await bindings["spawn_task"].handler(
+        {"prompt": "fire and forget"}, ToolContext(channel="console", task_chain_depth=1)
+    )
+    delegated = await bindings["delegate"].handler(
+        {"prompt": "need the result"}, ToolContext(channel="console", task_chain_depth=1)
     )
 
     assert [task.continuation_depth for task in producer.enqueued] == [None, 2]
-    assert continued["continue_turn"] is True
+    assert [spawned["continue_turn"], delegated["continue_turn"]] == [False, True]
+    assert "continue_turn" not in bindings["spawn_task"].tool.parameters["properties"]
+    assert "continue_turn" not in bindings["delegate"].tool.parameters["properties"]
+
+
+def test_delegation_mode_decides_which_delegation_tools_are_registered() -> None:
+    both = _build_tools(_ProducerStub(), _TaskManagerStub())
+    only_delegate = _build_tools(_ProducerStub(), _TaskManagerStub(), config=TasksConfig(delegation_mode="delegate"))
+
+    assert {"spawn_task", "delegate"} <= set(both)
+    assert "delegate" in only_delegate
+    assert "spawn_task" not in only_delegate
+    assert {"cancel_task", "list_tasks", "get_task"} <= set(only_delegate)
 
 
 @pytest.mark.asyncio
-async def test_spawn_task_continue_turn_default_applies_when_unset_and_falls_back_at_the_limit() -> None:
+async def test_delegate_mode_falls_back_to_direct_delivery_past_the_limits() -> None:
     producer = _ProducerStub()
-    tools = TaskTools(
-        cast(Any, producer), cast(Any, _TaskManagerStub()), config=TasksConfig(continue_turn_default=True)
-    )
-    spawn = {binding.tool.name: binding for binding in tools.bindings()}["spawn_task"]
+    bindings = _build_tools(producer, _TaskManagerStub(), config=TasksConfig(delegation_mode="delegate"))
+    delegate = bindings["delegate"].handler
 
-    defaulted = await spawn.handler({"prompt": "default"}, ToolContext(channel="console"))
-    at_limit = await spawn.handler({"prompt": "too deep"}, ToolContext(channel="console", task_chain_depth=3))
-    opted_out = await spawn.handler({"prompt": "direct", "continue_turn": False}, ToolContext(channel="console"))
+    continued = await delegate({"prompt": "first"}, ToolContext(channel="console"))
+    too_deep = await delegate({"prompt": "too deep"}, ToolContext(channel="console", task_chain_depth=3))
+    over_claim = await delegate(
+        {"prompt": "fan out"}, ToolContext(channel="console", claim_task_continuation=lambda: False)
+    )
 
     assert [task.continuation_depth for task in producer.enqueued] == [1, None, None]
-    assert [defaulted["continue_turn"], at_limit["continue_turn"], opted_out["continue_turn"]] == [True, False, False]
-
-
-@pytest.mark.asyncio
-async def test_spawn_task_always_mode_ignores_the_model_choice_and_falls_back_at_the_limit() -> None:
-    producer = _ProducerStub()
-    tools = TaskTools(
-        cast(Any, producer), cast(Any, _TaskManagerStub()), config=TasksConfig(continue_turn_mode="always")
-    )
-    spawn = {binding.tool.name: binding for binding in tools.bindings()}["spawn_task"]
-
-    opted_out = await spawn.handler({"prompt": "no", "continue_turn": False}, ToolContext(channel="console"))
-    unset = await spawn.handler({"prompt": "unset"}, ToolContext(channel="console"))
-    at_limit = await spawn.handler(
-        {"prompt": "too deep", "continue_turn": True}, ToolContext(channel="console", task_chain_depth=3)
-    )
-
-    assert [task.continuation_depth for task in producer.enqueued] == [1, 1, None]
-    assert [opted_out["continue_turn"], unset["continue_turn"], at_limit["continue_turn"]] == [True, True, False]
+    assert [continued["continue_turn"], too_deep["continue_turn"], over_claim["continue_turn"]] == [True, False, False]
 
 
 @pytest.mark.asyncio
@@ -450,38 +447,35 @@ async def test_list_tasks_includes_a_result_preview() -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_task_refuses_to_continue_past_the_chain_limit() -> None:
+async def test_delegate_refuses_to_continue_past_the_chain_limit() -> None:
     producer = _ProducerStub()
     bindings = _build_tools(producer, _TaskManagerStub())
 
     with pytest.raises(ToolInputError) as excinfo:
-        await bindings["spawn_task"].handler(
-            {"prompt": "one more", "continue_turn": True},
-            ToolContext(channel="console", task_chain_depth=3),
-        )
+        await bindings["delegate"].handler({"prompt": "one more"}, ToolContext(channel="console", task_chain_depth=3))
 
     assert excinfo.value.error_code == "task:continuation_limit"
     assert producer.enqueued == []
 
 
 @pytest.mark.asyncio
-async def test_spawn_task_refuses_continuing_tasks_past_the_per_turn_claim() -> None:
+async def test_delegate_refuses_tasks_past_the_per_turn_claim() -> None:
     producer = _ProducerStub()
     bindings = _build_tools(producer, _TaskManagerStub())
     claims = iter([True, True, True, False])
     context = ToolContext(channel="console", claim_task_continuation=lambda: next(claims))
 
     for _ in range(3):
-        await bindings["spawn_task"].handler({"prompt": "fan out", "continue_turn": True}, context)
+        await bindings["delegate"].handler({"prompt": "fan out"}, context)
     with pytest.raises(ToolInputError) as excinfo:
-        await bindings["spawn_task"].handler({"prompt": "one too many", "continue_turn": True}, context)
+        await bindings["delegate"].handler({"prompt": "one too many"}, context)
 
     assert excinfo.value.error_code == "task:continuation_limit"
     assert len(producer.enqueued) == 3
 
 
 @pytest.mark.asyncio
-async def test_spawn_task_releases_the_continuation_claim_when_enqueue_fails() -> None:
+async def test_delegate_releases_the_continuation_claim_when_enqueue_fails() -> None:
     bindings = _build_tools(_FailingProducer(), _TaskManagerStub())
     released: list[None] = []
     context = ToolContext(
@@ -491,22 +485,9 @@ async def test_spawn_task_releases_the_continuation_claim_when_enqueue_fails() -
     )
 
     with pytest.raises(RuntimeError, match="queue down"):
-        await bindings["spawn_task"].handler({"prompt": "x", "continue_turn": True}, context)
+        await bindings["delegate"].handler({"prompt": "x"}, context)
 
     assert len(released) == 1
-
-
-@pytest.mark.asyncio
-async def test_spawn_task_rejects_a_non_boolean_continue_turn() -> None:
-    bindings = _build_tools(_ProducerStub(), _TaskManagerStub())
-
-    with pytest.raises(ToolInputError, match="continue_turn") as excinfo:
-        await bindings["spawn_task"].handler(
-            {"prompt": "x", "continue_turn": "yes"},
-            ToolContext(channel="console"),
-        )
-
-    assert excinfo.value.error_code == "invalid_tool_arguments"
 
 
 @pytest.mark.asyncio

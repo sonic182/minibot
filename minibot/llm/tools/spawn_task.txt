@@ -1,6 +1,6 @@
-Delegate work to a background worker agent.
+Hand work to a background worker agent whose answer goes straight to the user.
 
-This is the only way to delegate. Use it for non-trivial work: multi-step tasks, investigations, code/file/browser workflows, or anything likely to need several tool calls. Keep trivial requests local.
+Use it for non-trivial work: multi-step tasks, investigations, code/file/browser workflows, or anything likely to need several tool calls. Keep trivial requests local. Use it only when the worker's answer is the final deliverable and nothing depends on it. When a step remains after the result (indexing or verifying it, a dependent step, a comparison, a follow-up delegation), use `delegate` instead.
 
 The worker starts with no access to this conversation and no memory of earlier tasks: it sees only its own system prompt, `prompt` and `context_json`. Put every fact it needs in those two fields, written out in full: texts, names, recipients, addresses, ids, earlier results and decisions. Never refer to "the conversation", "the proposals above" or "what we discussed"; the worker cannot resolve such references and will guess.
 
@@ -16,6 +16,5 @@ Provide:
 - model_provider, model, reasoning_effort: optional, for this task only. Use them when the request names a
   provider, model or thinking budget. Check fetch_agent_info for the providers that have credentials
   configured — an unconfigured provider is rejected before the task is queued.
-- continue_turn: optional boolean. Set it to true whenever a step remains after the result (indexing or verifying it, a dependent step, a comparison, a follow-up delegation): the result comes back to you as a new message with `metadata.source == "task_result"` and you answer from it. Set it to false only when the worker's answer is the final deliverable: it goes straight to the user, and only a short notice with the task id is kept in the history, so call get_task on the next user message if you need it. When unset, the configured default applies; the operator may force true for every task, ignoring your value. At most three continuing tasks per turn and three chained turns deep: past either limit an explicit true is rejected with `task:continuation_limit` (answer the user instead) and an unset value sends the answer straight to the user.
 
-This returns a task_id immediately, not the answer: the worker runs asynchronously and its result, including any files it produced, reaches the same conversation as a later message (or as a new turn for you when continue_turn is true). Tell the user the work was handed off; never invent the outcome. Use get_task to retrieve it, list_tasks to see what is running, and cancel_task to stop one.
+This returns a task_id immediately, not the answer: the worker runs asynchronously and its result, including any files it produced, is delivered straight to the user as a later message. You do not receive it as a new turn, and only a short notice with the task id is kept in the history, so call get_task on the next user message if you need it. Tell the user the work was handed off; never invent the outcome. Use get_task to retrieve it, list_tasks to see what is running, and cancel_task to stop one.

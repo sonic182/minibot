@@ -54,6 +54,9 @@ def test_all_builtin_descriptions_load() -> None:
         "bash",
         "apply_patch",
         "spawn_task",
+        "delegate",
+        "delegate_history",
+        "spawn_task_history",
         "fetch_agent_info",
         "transcribe_audio",
     ]
