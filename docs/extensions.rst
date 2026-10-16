@@ -120,7 +120,7 @@ Extension API
    and again whenever the tool list is rebuilt, so keep it a pure function of its argument. The returned tools get
    approval and event wrapping and are then filtered by the same agent policy (the main agent's allow/deny, a
    specialist's ``tools_allow``/``tools_deny``); they are not part of the list the deriver received, and a name
-   that already exists is rejected. Runs in the daemon, the console and task workers; the bundled
+   that already exists is skipped with a warning and the existing tool is kept. Runs in the daemon, the console and task workers; the bundled
    ``run_tools_script`` (:doc:`tools`) is built this way.
 
 ``mb.on(EventType)`` / ``mb.on(EventType, handler)``

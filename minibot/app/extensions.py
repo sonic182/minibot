@@ -252,16 +252,24 @@ class ExtensionRegistry:
         return [binding for context in self._contexts if context.name not in names for binding in context.tools]
 
     def derive_tools(self, final_tools: Sequence[ToolBinding]) -> list[ToolBinding]:
-        """Run every ``add_tool_deriver`` function over ``final_tools`` and return only what they add."""
+        """Run every ``add_tool_deriver`` function over ``final_tools`` and return only what they add.
+
+        A derived tool whose name already exists (say an MCP server exposing ``run_tools_script``) is
+        skipped with a warning and the existing tool is kept: this runs on every tool refresh and in
+        workers, so raising would break turns at runtime.
+        """
         existing = {binding.tool.name for binding in final_tools}
         derived: list[ToolBinding] = []
         for context in self._contexts:
             for deriver in context.tool_derivers:
                 for binding in deriver(final_tools):
                     if binding.tool.name in existing:
-                        raise ValueError(
-                            f"extension {context.name!r} derived tool {binding.tool.name!r}, which already exists"
+                        self._logger.warning(
+                            "extension %r derived tool %r, which already exists; keeping the existing tool",
+                            context.name,
+                            binding.tool.name,
                         )
+                        continue
                     existing.add(binding.tool.name)
                     derived.append(binding)
         return derived

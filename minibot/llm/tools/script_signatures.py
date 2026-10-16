@@ -70,14 +70,23 @@ def render_signature(
         entries = [(str(key), value if isinstance(value, Mapping) else {}) for key, value in properties.items()]
         # Required arguments first, as a Python signature would list them.
         entries.sort(key=lambda entry: entry[0] not in required or admits_null(entry[1]))
+        # Keys that cannot be Python keyword names are still passable as `**{"key": value}`, so they are
+        # listed in that form instead of as a signature the model could not write.
+        unpacked: list[str] = []
         for key, schema in entries:
             hint = _type_hint(schema, 0)
             if admits_null(schema) and not hint.endswith("None"):
                 hint = f"{hint} | None"
             if key in required and not admits_null(schema):
-                arguments.append(f"{key}: {hint}")
+                default = ""
             else:
-                arguments.append(f"{key}: {hint} = None" if admits_null(schema) else f"{key}: {hint} = ...")
+                default = " = None" if admits_null(schema) else " = ..."
+            if key.isidentifier() and not keyword.iskeyword(key):
+                arguments.append(f"{key}: {hint}{default}")
+            else:
+                unpacked.append(f"{key!r}: {hint}{default}")
+        if unpacked:
+            arguments.append(f"**{{{', '.join(unpacked)}}}")
     signature = f"await tools.{identifier}({', '.join(['*', *arguments]) if arguments else ''})"
     summary = _first_line(description, max_description_chars)
     return f"{signature}  # {summary}" if summary else signature
