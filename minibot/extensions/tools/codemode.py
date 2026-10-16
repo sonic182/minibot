@@ -13,6 +13,7 @@ from llm_async.models import Tool
 
 from minibot.app.agent_policies import RESERVED_DELEGATION_TOOL_NAMES
 from minibot.app.extensions import ExtensionContext
+from minibot.app.tool_approval import approval_wait_observer
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns
 from minibot.config.schema import CodemodeToolConfig
 from minibot.core.tools import ToolContext, ToolPayload
@@ -28,6 +29,7 @@ SYNTAX_ERROR = "codemode:syntax_error"
 SCRIPT_ERROR = "codemode:script_error"
 TIMEOUT = "codemode:timeout"
 MEMORY_LIMIT = "codemode:memory_limit"
+TOOL_CALL_LIMIT = "codemode:tool_call_limit"
 SANDBOX_FAILED = "codemode:sandbox_failed"
 _SIGNATURES_MAX_CHARS = 6000
 _logger = logging.getLogger("minibot.codemode")
@@ -101,15 +103,53 @@ class _BoundedText:
         return f"{self._head}\n...[{self._omitted} characters omitted]...\n{self._tail}"
 
 
+class _ScriptDeadline:
+    """The script's wall-clock budget, paused while a nested call waits for the owner's approval.
+
+    The owner's thinking time must not count: the approval has its own timeout, and a script that ran out
+    of time first would leave a late approval with nothing to do. Waits can overlap (``asyncio.gather``),
+    so the budget stays paused until the last one ends.
+    """
+
+    def __init__(self) -> None:
+        self._timeout: asyncio.Timeout | None = None
+        self._waiting = 0
+        self._remaining = 0.0
+
+    def attach(self, timeout: asyncio.Timeout) -> None:
+        self._timeout = timeout
+
+    def close(self) -> None:
+        self._timeout = None
+
+    def begin(self) -> None:
+        timeout = self._timeout
+        if timeout is not None and self._waiting == 0 and not timeout.expired():
+            when = timeout.when()
+            if when is not None:
+                self._remaining = max(when - asyncio.get_running_loop().time(), 0.0)
+                timeout.reschedule(None)
+        self._waiting += 1
+
+    def end(self) -> None:
+        self._waiting -= 1
+        timeout = self._timeout
+        # An expired timeout is already cancelling the script; its state can no longer be changed.
+        if timeout is not None and self._waiting == 0 and timeout.when() is None and not timeout.expired():
+            timeout.reschedule(asyncio.get_running_loop().time() + self._remaining)
+
+
 @dataclass
 class _Run:
     """What one script execution did, kept host-side so a failure can be reported structurally."""
 
     output: _BoundedText
     tool_errors: list[dict[str, str]] = field(default_factory=list)
-    # Set while the most recent failed nested call was an approval denial: a script that then fails
-    # surfaces the denial itself, so the turn loop stops the remaining calls like it does for a direct one.
-    denied_tool: str | None = None
+    # Exception text the sandbox was handed for each approval denial, mapped to the denied tool. Monty rebuilds
+    # exceptions as plain builtins, so the script's final exception can only be matched to a denial by what we
+    # raised; a script that ends on one surfaces the denial itself, so the turn loop stops the remaining calls
+    # like it does for a direct one, and a denial the script caught earlier does not leak into an unrelated failure.
+    denials: dict[str, str] = field(default_factory=dict)
     called: list[str] = field(default_factory=list)
 
 
@@ -160,24 +200,34 @@ class _ScriptRunner:
         )
         namespace = monty.ClassInstance(self._namespace(run, context), allowed_methods=frozenset(self._tools))
         failure: tuple[str, str, dict[str, Any]] | None = None
+        denied_tool: str | None = None
         value: Any = None
+        deadline = _ScriptDeadline()
         try:
             async with monty.AsyncMonty() as pool, pool.checkout(limits=limits) as session:
-                async with asyncio.timeout(self._config.timeout_seconds):
-                    value = await session.feed_run(
-                        code,
-                        inputs={"tools": namespace},
-                        print_callback=lambda _stream, text: run.output.write(text),
-                    )
+                async with asyncio.timeout(self._config.timeout_seconds) as timeout:
+                    deadline.attach(timeout)
+                    observer_token = approval_wait_observer.set(deadline)
+                    try:
+                        value = await session.feed_run(
+                            code,
+                            inputs={"tools": namespace},
+                            print_callback=lambda _stream, text: run.output.write(text),
+                        )
+                    finally:
+                        approval_wait_observer.reset(observer_token)
         except TimeoutError:
             failure = (TIMEOUT, f"the script did not finish within {self._config.timeout_seconds} seconds", {})
         except monty.MontySyntaxError as exc:
             failure = (SYNTAX_ERROR, str(exc), {})
         except monty.MontyRuntimeError as exc:
             failure = self._classify_runtime_error(exc)
+            denied_tool = self._denied_tool(run, exc)
         except monty.MontyError as exc:
             _logger.warning("codemode sandbox failed", exc_info=True)
             failure = (SANDBOX_FAILED, f"the script sandbox failed: {exc}", {})
+        finally:
+            deadline.close()
         _logger.info(
             "codemode script finished",
             extra={"ok": failure is None, "tool_calls": run.called, "tool_errors": len(run.tool_errors)},
@@ -185,8 +235,8 @@ class _ScriptRunner:
         if failure is None:
             return self._success(run, value)
         error_code, message, extra = failure
-        if run.denied_tool is not None:
-            raise ToolInputError(self._denial_message(run), error_code=TOOL_APPROVAL_DENIED)
+        if denied_tool is not None:
+            raise ToolInputError(self._denial_message(run, denied_tool), error_code=TOOL_APPROVAL_DENIED)
         result: dict[str, Any] = {"ok": False, "error_code": error_code, "error": message, **extra}
         result["output"] = run.output.render()
         if run.tool_errors:
@@ -227,8 +277,16 @@ class _ScriptRunner:
         return result
 
     @staticmethod
-    def _denial_message(run: _Run) -> str:
-        message = f"The user did not approve {run.denied_tool}. Do not retry it unless the user asks again."
+    def _denied_tool(run: _Run, exc: Any) -> str | None:
+        """The tool whose denial ended the script, or None when the final exception is anything else."""
+        inner = exc.exception()
+        if isinstance(inner, ValueError) and len(inner.args) == 1 and isinstance(inner.args[0], str):
+            return run.denials.get(inner.args[0])
+        return None
+
+    @staticmethod
+    def _denial_message(run: _Run, denied_tool: str) -> str:
+        message = f"The user did not approve {denied_tool}. Do not retry it unless the user asks again."
         printed = run.output.render()
         return f"{message}\nScript output before the denial:\n{printed}" if printed else message
 
@@ -236,7 +294,11 @@ class _ScriptRunner:
         nested_context = replace(context, parent_call_id=context.call_id, call_id=None)
         namespace = _ToolsNamespace()
         for identifier, binding in self._tools.items():
-            setattr(namespace, identifier, _bind_call(identifier, binding, run, nested_context))
+            setattr(
+                namespace,
+                identifier,
+                _bind_call(identifier, binding, run, nested_context, self._config.max_tool_calls),
+            )
         return namespace
 
 
@@ -245,7 +307,7 @@ class _ToolsNamespace:
 
 
 def _bind_call(
-    identifier: str, binding: ToolBinding, run: _Run, context: ToolContext
+    identifier: str, binding: ToolBinding, run: _Run, context: ToolContext, max_tool_calls: int
 ) -> Callable[..., Awaitable[Any]]:
     tool_name = binding.tool.name
     parameters = binding.tool.parameters or {}
@@ -264,20 +326,32 @@ def _bind_call(
         if args:
             raise TypeError(f"tools.{identifier}() takes keyword arguments only")
         payload: ToolPayload = {key: None for key in nullable_required} | kwargs
+        # Nested calls skip the agent's per-turn tool-call cap, so the script gets its own.
+        if len(run.called) >= max_tool_calls:
+            _record_failure(run, tool_name, TOOL_CALL_LIMIT)
+            raise ValueError(f"{TOOL_CALL_LIMIT}: a script can make at most {max_tool_calls} tool calls")
         run.called.append(tool_name)
         try:
             raw = await binding.handler(payload, context)
         except ToolInputError as exc:
-            run.tool_errors.append({"tool": tool_name, "error_code": exc.error_code})
-            run.denied_tool = tool_name if exc.error_code == TOOL_APPROVAL_DENIED else None
-            raise ValueError(f"{exc.error_code}: {exc}") from exc
+            _record_failure(run, tool_name, exc.error_code)
+            message = f"{exc.error_code}: {exc}"
+            if exc.error_code == TOOL_APPROVAL_DENIED:
+                run.denials[message] = tool_name
+            raise ValueError(message) from exc
         except Exception as exc:
-            run.tool_errors.append({"tool": tool_name, "error_code": "tool_execution_failed"})
-            run.denied_tool = None
+            error_code = getattr(exc, "error_code", "") or "tool_execution_failed"
+            _record_failure(run, tool_name, error_code)
             raise RuntimeError(f"{tool_name} failed: {exc}") from exc
         return _plain(normalize_tool_result(raw).content)
 
     return call
+
+
+def _record_failure(run: _Run, tool_name: str, error_code: str) -> None:
+    # The message is left out of the log: it may carry what the tool was given.
+    run.tool_errors.append({"tool": tool_name, "error_code": error_code})
+    _logger.warning("codemode nested tool call failed", extra={"tool": tool_name, "error_code": error_code})
 
 
 def _plain(content: Any) -> Any:

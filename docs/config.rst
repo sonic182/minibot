@@ -429,7 +429,7 @@ Tool Configuration
      - ``enabled``, ``backend``, ``sqlite_url``/``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
    * - ``[tools.codemode]``
      - ``CodemodeToolConfig``
-     - ``enabled``, ``timeout_seconds``, ``max_memory_mb``, ``max_output_chars``, ``exclude``; needs the ``codemode`` extra; see :doc:`tools`
+     - ``enabled``, ``timeout_seconds`` (default ``60``; time spent waiting for a ``[tools.approval]`` answer is not counted), ``max_tool_calls`` (default ``50``; the extra call raises a catchable ``codemode:tool_call_limit`` error), ``max_memory_mb``, ``max_output_chars``, ``exclude``; needs the ``codemode`` extra; see :doc:`tools`
    * - ``[tasks]``
      - ``TasksConfig``
      - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``worker_max_steps``, ``worker_max_tool_calls``, ``max_concurrent_workers``, ``delegation_mode``, ``history``, ``worker_extensions``, ``sqlite``

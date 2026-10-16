@@ -47,6 +47,14 @@ async def _flaky(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
     raise ToolInputError("label is not known", error_code="flaky:bad_label")
 
 
+class _CodedFailure(RuntimeError):
+    error_code = "coded:failure"
+
+
+async def _coded_failure(_: dict[str, Any], __: ToolContext) -> dict[str, Any]:
+    raise _CodedFailure("boom")
+
+
 def _settings(**codemode: Any) -> Settings:
     return Settings.from_dict({"tools": {"codemode": {"enabled": True, **codemode}}})
 
@@ -57,6 +65,7 @@ def _fake_tools(approve: AsyncMock | None = None) -> list[ToolBinding]:
         _binding("flaky-tool.v2", _flaky),
         _binding("guarded_tool", _slow_lookup),
         _binding("spawn_task", _slow_lookup),
+        _binding("coded_failure", _coded_failure),
     ]
     return apply_tool_approval(tools, patterns=["guarded_tool"], approve=approve or AsyncMock(return_value=True))
 
@@ -152,6 +161,67 @@ async def test_denied_approval_reaches_the_script_and_stops_the_turn_when_uncaug
     assert caught["tool_errors"] == [{"tool": "guarded_tool", "error_code": TOOL_APPROVAL_DENIED}]
     assert denied.value.error_code == TOOL_APPROVAL_DENIED
     assert "before" in str(denied.value)
+
+
+@pytest.mark.asyncio
+async def test_a_caught_denial_does_not_relabel_a_later_unrelated_script_failure() -> None:
+    tool = await _codemode_tool(_settings(), _fake_tools(AsyncMock(return_value=False)))
+    code = """
+try:
+    await tools.guarded_tool(label='x')
+except ValueError:
+    pass
+await tools.slow_lookup(label='y', delay=0.01)
+{}['missing']
+"""
+
+    result = await tool.handler({"code": code}, _CONTEXT)
+
+    assert result["ok"] is False
+    assert result["error_code"] == "codemode:script_error"
+    assert result["tool_errors"] == [{"tool": "guarded_tool", "error_code": TOOL_APPROVAL_DENIED}]
+
+
+@pytest.mark.asyncio
+async def test_time_spent_waiting_for_approval_does_not_count_against_the_script_timeout() -> None:
+    async def slow_approve(*_: Any) -> bool:
+        await asyncio.sleep(1.3)
+        return True
+
+    tool = await _codemode_tool(_settings(timeout_seconds=1), _fake_tools(slow_approve))
+    waits = "await asyncio.gather(tools.guarded_tool(label='a'), tools.guarded_tool(label='b'))\n"
+
+    approved = await tool.handler({"code": f"import asyncio\n{waits}'done'"}, _CONTEXT)
+    runaway = await tool.handler(
+        {"code": f"import asyncio\n{waits}await tools.slow_lookup(label='x', delay=30)"}, _CONTEXT
+    )
+
+    assert approved["ok"] is True and approved["result"] == "done"
+    assert runaway["error_code"] == "codemode:timeout"
+
+
+@pytest.mark.asyncio
+async def test_nested_failures_keep_their_error_code_and_scripts_get_a_tool_call_limit() -> None:
+    tool = await _codemode_tool(_settings(max_tool_calls=2), _fake_tools())
+    code = """
+try:
+    await tools.coded_failure(label='x')
+except RuntimeError:
+    pass
+await tools.slow_lookup(label='a', delay=0.01)
+try:
+    await tools.slow_lookup(label='b', delay=0.01)
+except ValueError as exc:
+    print('limited', exc)
+"""
+
+    result = await tool.handler({"code": code}, _CONTEXT)
+
+    assert result["ok"] is True and "limited codemode:tool_call_limit" in result["output"]
+    assert result["tool_errors"] == [
+        {"tool": "coded_failure", "error_code": "coded:failure"},
+        {"tool": "slow_lookup", "error_code": "codemode:tool_call_limit"},
+    ]
 
 
 @pytest.mark.asyncio

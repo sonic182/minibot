@@ -259,6 +259,7 @@ default; enable it with ``[tools.codemode] enabled = true`` (see :doc:`config`).
    [tools.codemode]
    enabled = true
    timeout_seconds = 60        # wall-clock limit for the whole script, nested tool calls included
+   max_tool_calls = 50         # tool calls one script may make
    max_memory_mb = 64          # heap limit of the script itself
    max_output_chars = 20000    # cap on the printed output and on the returned value
    exclude = ["mcp_mail__*"]   # tool names scripts can never call
@@ -290,23 +291,33 @@ The result is ``{"ok": true, "output": "<printed text>", "result": <final value>
 each cut to ``max_output_chars`` keeping their start and end, with a marker for what was omitted.
 
 What a script can call
-   Exactly the tools the agent itself could call, built after approval, event and output-spill wrapping and after
-   ``tools_allow`` / ``tools_deny`` filtering. A tool the agent cannot call is not callable from a script, and a
-   tool listed in ``require_approval`` still asks the owner for every nested call. A denied approval or a tool that
+   The tools the agent sees after its ``tools_allow`` / ``tools_deny`` and ownership filtering, built after
+   approval, event and output-spill wrapping, minus the delegation tools and anything matching ``exclude`` (below).
+   A tool the agent cannot see is not callable from a script, and a tool listed in ``require_approval`` still asks
+   the owner for every nested call. A denied approval or a tool that
    raises reaches the script as an exception (``ValueError`` for rejected arguments and denials, ``RuntimeError``
    otherwise); catch it to continue. A script that ends on an uncaught denial returns the ``tool_approval:denied``
    error, like a direct call. The delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``,
    ``list_tasks``, ``get_task``, ``cancel_task``), ``run_tools_script`` itself and anything matching ``exclude`` are
-   never exposed. MCP tools appear under their exposed names; for lazy MCP servers that means
+   never exposed, and nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
    ``mcp_<server>__list_tools`` and ``mcp_<server>__call_tool``. Large nested results arrive as a preview plus a file
    path, as they do for a direct call, and a tool that returns a file or a message directive (``send_file``) loses
    the directive when called from a script.
+
+Time and call limits
+   ``timeout_seconds`` is wall-clock time for the whole script, nested calls included, except the time a nested
+   call spends waiting for an owner approval (``[tools.approval]``): the clock stops while any approval is pending,
+   so a slow decision never ends the script, and the approval's own ``timeout_seconds`` still bounds the wait.
+   ``max_tool_calls`` caps how many tool calls one script makes; the call past the cap raises a ``ValueError``
+   whose text starts with ``codemode:tool_call_limit`` (listed in ``tool_errors`` too), which the script may catch.
 
 Failures
    A script that fails returns ``{"ok": false, "error_code": ..., "error": ..., "output": <partial output>}``.
    ``error_code`` is ``codemode:syntax_error``, ``codemode:timeout``, ``codemode:memory_limit``,
    ``codemode:script_error`` (any uncaught exception, with a ``hint`` when it named a tool that does not exist) or
-   ``codemode:sandbox_failed``. ``tool_errors`` lists the nested calls that failed, as tool name and error code.
+   ``codemode:sandbox_failed``. ``tool_errors`` lists the nested calls that failed, as tool name and error code (the tool's own
+   ``error_code`` when it raised one, ``tool_execution_failed`` otherwise). Each failed nested call is also logged at
+   warning level with the tool name and error code, never its arguments or message.
    Calls that already ran are not undone, and calls still running at a timeout are cancelled.
 
 Nested calls and events

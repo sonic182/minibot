@@ -939,7 +939,10 @@ class CodemodeToolConfig(BaseModel):
     ``poetry install --extras codemode``.
 
     - ``enabled`` — attach the tool (default: ``false``).
-    - ``timeout_seconds`` — wall-clock limit for one script, nested tool calls included (default: ``60``).
+    - ``timeout_seconds`` — wall-clock limit for one script, nested tool calls included; the time a nested call
+      spends waiting for an owner approval is not counted (default: ``60``).
+    - ``max_tool_calls`` — how many tool calls one script may make; the next call raises a catchable
+      ``codemode:tool_call_limit`` error (default: ``50``).
     - ``max_memory_mb`` — heap limit of the script itself, in MiB (default: ``64``).
     - ``max_output_chars`` — cap on the printed output and on the returned value; longer text keeps its start
       and end (default: ``20000``).
@@ -949,6 +952,7 @@ class CodemodeToolConfig(BaseModel):
 
     enabled: bool = False
     timeout_seconds: PositiveInt = 60
+    max_tool_calls: PositiveInt = 50
     max_memory_mb: PositiveInt = 64
     max_output_chars: PositiveInt = 20000
     exclude: list[str] = Field(default_factory=list)
