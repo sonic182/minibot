@@ -109,8 +109,8 @@ Worker limits live on ``[tasks]``:
   ``[orchestration.main_agent] tools_allow`` list must name ``delegate`` as well as ``spawn_task``, or the main
   agent loses the tool that returns results to it. See :doc:`agents`.
 - ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
-  (default ``[]``). ``"kv_memory"`` and ``"rag"`` are accepted, each at most once, and each needs its
-  ``[tools.*]`` section enabled. Their storage is prepared on the first call in each worker.
+  (default ``[]``). ``"kv_memory"``, ``"rag"`` and ``"codemode"`` (the ``run_tools_script`` tool, which calls
+  the tools that specialist has) are accepted, each at most once, and each needs its ``[tools.*]`` section enabled. Their storage is prepared on the first call in each worker.
 
   .. code-block:: toml
 

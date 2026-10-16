@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 EventHandler = Callable[[Any], Awaitable[None]]
 ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
+type ToolDeriver = Callable[[Sequence[ToolBinding]], Sequence[ToolBinding]]
 type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
 type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 
@@ -33,6 +34,7 @@ type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 WORKER_OPT_IN_MODULES = {
     "kv_memory": "minibot.extensions.tools.memory",
     "rag": "minibot.extensions.integrations.rag",
+    "codemode": "minibot.extensions.tools.codemode",
 }
 
 
@@ -45,6 +47,7 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint, worker_extensions: Sequenc
         "minibot.extensions.services.scheduler",
         "minibot.extensions.services.tasks",
         "minibot.extensions.tools.agent_management",
+        "minibot.extensions.tools.codemode",
         "minibot.extensions.tools.execution",
         "minibot.extensions.tools.media",
         "minibot.extensions.tools.memory",
@@ -106,6 +109,7 @@ class ExtensionContext:
     agent_management: AgentManagementService | None = None
     refresh_tools: Callable[[], Awaitable[None]] | None = None
     tools: list[ToolBinding] = field(default_factory=list)
+    tool_derivers: list[ToolDeriver] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
     routes: list[RouteSpec] = field(default_factory=list)
@@ -174,6 +178,19 @@ class ExtensionContext:
             return
         self.tools.extend(bindings)
 
+    def add_tool_deriver(self, deriver: ToolDeriver) -> None:
+        """Contribute tools built from the tool list an agent ends up with.
+
+        ``add_tool`` registers before any agent exists, so a tool that must act on other tools (call
+        them, describe them) cannot be built there. ``deriver`` runs once per agent, with the final
+        list: after approval, event and output-spill wrapping, ``tools_allow``/``tools_deny`` and the
+        removal of the delegation tools. It returns the extra bindings, which are then approval- and
+        event-wrapped like any tool and filtered by the same agent policy. The input list does not
+        contain them, and it is rebuilt whenever the tool list is, so a deriver must be a pure function
+        of its argument. Runs in the daemon, the console and task workers.
+        """
+        self.tool_derivers.append(deriver)
+
     def add_service(self, service: ExtensionService) -> None:
         self.services.append(service)
 
@@ -234,6 +251,21 @@ class ExtensionRegistry:
     def tools_outside(self, names: Collection[str]) -> list[ToolBinding]:
         return [binding for context in self._contexts if context.name not in names for binding in context.tools]
 
+    def derive_tools(self, final_tools: Sequence[ToolBinding]) -> list[ToolBinding]:
+        """Run every ``add_tool_deriver`` function over ``final_tools`` and return only what they add."""
+        existing = {binding.tool.name for binding in final_tools}
+        derived: list[ToolBinding] = []
+        for context in self._contexts:
+            for deriver in context.tool_derivers:
+                for binding in deriver(final_tools):
+                    if binding.tool.name in existing:
+                        raise ValueError(
+                            f"extension {context.name!r} derived tool {binding.tool.name!r}, which already exists"
+                        )
+                    existing.add(binding.tool.name)
+                    derived.append(binding)
+        return derived
+
     @property
     def routes(self) -> list[RouteSpec]:
         return [route for context in self._contexts for route in context.routes]
@@ -265,6 +297,7 @@ class ExtensionRegistry:
             {
                 "name": context.name,
                 "tools": len(context.tools),
+                "tool_derivers": len(context.tool_derivers),
                 "services": len(context.services),
                 "subscriptions": len(context.subscriptions),
                 "routes": len(context.routes),

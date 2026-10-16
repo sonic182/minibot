@@ -930,6 +930,32 @@ class RagToolConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class CodemodeToolConfig(BaseModel):
+    """Model-written Python scripts that call tools. TOML section: ``[tools.codemode]``
+
+    Adds one tool, ``run_tools_script``, that runs a short Python script in a sandbox (Pydantic's Monty
+    interpreter); the script calls the agent's other tools as ``await tools.<name>(...)`` and only its
+    printed output and final value come back to the model. Requires the ``codemode`` extra:
+    ``poetry install --extras codemode``.
+
+    - ``enabled`` — attach the tool (default: ``false``).
+    - ``timeout_seconds`` — wall-clock limit for one script, nested tool calls included (default: ``60``).
+    - ``max_memory_mb`` — heap limit of the script itself, in MiB (default: ``64``).
+    - ``max_output_chars`` — cap on the printed output and on the returned value; longer text keeps its start
+      and end (default: ``20000``).
+    - ``exclude`` — fnmatch patterns of tool names scripts cannot call (default: empty). The delegation tools
+      and ``run_tools_script`` itself are always excluded.
+    """
+
+    enabled: bool = False
+    timeout_seconds: PositiveInt = 60
+    max_memory_mb: PositiveInt = 64
+    max_output_chars: PositiveInt = 20000
+    exclude: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ToolApprovalConfig(BaseModel):
     """Human approval before dangerous tool calls. TOML section: ``[tools.approval]``
 
@@ -976,6 +1002,7 @@ class ToolsConfig(BaseModel):
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
     rag: RagToolConfig = RagToolConfig()
+    codemode: CodemodeToolConfig = CodemodeToolConfig()
 
 
 class RabbitMQConsumerConfig(BaseModel):
@@ -1075,11 +1102,13 @@ class TasksConfig(BaseModel):
       the queue. A large history is summarized before the next task when the model's context limit is known, and
       ``spawn_task`` gains ``fresh`` to clear it first. With ``false`` every worker starts with no history.
     - ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
-      (default: ``[]``). ``"kv_memory"`` adds the ``[tools.kv_memory]`` tools and ``"rag"`` the ``[tools.rag]``
-      tools. Only a specialist that names them in ``tools_allow`` gets them (a ``tools_deny``-only specialist gets
-      every tool it does not deny, these included); a ``spawn_task`` without an agent never does. Each listed
-      extension needs its ``[tools.*]`` section enabled, and must appear once. Storage is prepared on the first
-      call in each worker; RAG also loads its embedding model in every worker that calls it.
+      (default: ``[]``). ``"kv_memory"`` adds the ``[tools.kv_memory]`` tools, ``"rag"`` the ``[tools.rag]``
+      tools and ``"codemode"`` the ``run_tools_script`` tool (``[tools.codemode]``), which calls the tools that
+      specialist itself has. Only a specialist that names them in ``tools_allow`` gets them (a
+      ``tools_deny``-only specialist gets every tool it does not deny, these included); a ``spawn_task`` without
+      an agent never does. Each listed extension needs its ``[tools.*]`` section enabled, and must appear once.
+      Storage is prepared on the first call in each worker; RAG also loads its embedding model in every worker
+      that calls it.
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
@@ -1091,7 +1120,7 @@ class TasksConfig(BaseModel):
     max_concurrent_workers: PositiveInt = 4
     delegation_mode: Literal["auto", "delegate"] = "auto"
     history: bool = False
-    worker_extensions: list[Literal["kv_memory", "rag"]] = Field(default_factory=list)
+    worker_extensions: list[Literal["kv_memory", "rag", "codemode"]] = Field(default_factory=list)
     sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
 
     @model_validator(mode="before")

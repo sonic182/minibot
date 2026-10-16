@@ -6,6 +6,7 @@ from typing import Any
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.extensions import ExtensionRegistry
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_definitions_loader import NATIVE_SKILLS_DIR, parse_skill_file
 from minibot.app.skill_registry import SkillRegistry
@@ -73,6 +74,31 @@ def build_enabled_tools(
                 storage=managed_storage,
                 config=settings.tools.tool_output_spill,
             ),
+            patterns=settings.tools.approval.require_approval,
+            approve=_event_bus_approver(event_bus, settings.tools.approval.timeout_seconds),
+        ),
+        event_bus=event_bus,
+    )
+
+
+def derive_extension_tools(
+    final_tools: Sequence[ToolBinding],
+    *,
+    settings: Settings,
+    extensions: ExtensionRegistry,
+    event_bus: EventBus | None = None,
+) -> list[ToolBinding]:
+    """Extension-derived tools over ``final_tools``, wrapped like the tools `build_enabled_tools` returns.
+
+    Output spill is skipped on purpose: derived tools bound their own output, and the calls they make
+    already go through the spill wrapper on ``final_tools``.
+    """
+    derived = extensions.derive_tools(final_tools)
+    if not derived:
+        return []
+    return apply_tool_call_events(
+        apply_tool_approval(
+            derived,
             patterns=settings.tools.approval.require_approval,
             approve=_event_bus_approver(event_bus, settings.tools.approval.timeout_seconds),
         ),

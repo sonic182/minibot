@@ -18,7 +18,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
-from minibot.app.extensions import WORKER_OPT_IN_MODULES, load_extensions
+from minibot.app.extensions import WORKER_OPT_IN_MODULES, ExtensionRegistry, load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.managed_agent_policy import (
     ManagedAgentPolicy,
@@ -243,6 +243,7 @@ async def run_agent_loop(
             build_client=backends.build_mcp_client,
             secrets=secrets,
         )
+        approve = approval_callback or _deny_approval
         tools = apply_tool_approval(
             _build_worker_tools(
                 settings=settings,
@@ -252,8 +253,9 @@ async def run_agent_loop(
                 mcp_bindings=mcp_bindings,
             ),
             patterns=settings.tools.approval.require_approval,
-            approve=approval_callback or _deny_approval,
+            approve=approve,
         )
+        tools = _with_derived_tools(tools, extensions=extensions, spec=spec, settings=settings, approve=approve)
         limits = _task_limits(task, settings)
         compactor = build_compactor(
             llm_client=llm_client,
@@ -420,6 +422,29 @@ def _build_worker_tools(
         storage=managed_storage,
         config=settings.tools.tool_output_spill,
     )
+
+
+def _with_derived_tools(
+    tools: list[ToolBinding],
+    *,
+    extensions: ExtensionRegistry,
+    spec: AgentSpec,
+    settings: Settings,
+    approve: Approver,
+) -> list[ToolBinding]:
+    """Add the extension-derived tools over the worker's final list, if the agent's policy lets them in.
+
+    Runs after approval wrapping so the calls a derived tool makes are gated, and filters the derived
+    tools through the same spec as everything else: a ``tools_allow`` spec (the generic worker's included)
+    only gets the ones it names, which is how only specialists that claim ``run_tools_script`` have it.
+    """
+    derived = strip_reserved_delegation_tools(
+        filter_tools_for_agent(extensions.derive_tools(tools), spec, mcp_name_prefix=settings.tools.mcp.name_prefix)
+    )
+    return [
+        *tools,
+        *apply_tool_approval(derived, patterns=settings.tools.approval.require_approval, approve=approve),
+    ]
 
 
 async def _build_worker_mcp_bindings(

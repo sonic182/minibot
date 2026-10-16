@@ -1,0 +1,17 @@
+Run a short Python script that calls other tools and returns only what matters. Use it when a task needs several tool calls, when results must be filtered or combined before you read them, or when independent calls can run in parallel. For a single call, call the tool directly.
+
+Scripts run in a sandbox with a subset of Python: no file system, network, environment or third-party imports, only the standard modules it provides (asyncio, json, re, math, datetime, ...). The only way to act on the world is the `tools` object: call each tool as `await tools.<name>(keyword=value, ...)` with keyword arguments only. A tool result is a plain dict, list or string; large results arrive as a preview with a file path, as they do for a direct call. Tools that need approval still ask the user.
+
+- Parallel calls: `a, b = await asyncio.gather(tools.x(q="1"), tools.y(q="2"))` (`import asyncio` first).
+- A failing tool raises an exception in the script (ValueError for rejected arguments or a denied approval, RuntimeError otherwise); catch it with try/except to continue.
+- `print(...)` output and the value of the last expression (or a top-level `return`) come back to you; everything else stays out of your context, so print or return only what you need.
+- Output and the final value are each cut to a size limit, keeping their start and end. A script has a time limit covering its tool calls and a memory limit. A script that fails returns an error with the output printed before the failure.
+
+Example:
+
+    import asyncio
+    first, second = await asyncio.gather(tools.memory_search(query="trip"), tools.current_datetime())
+    print(len(first.get("entries", [])), "entries")
+    {"now": second, "titles": [e["title"] for e in first.get("entries", [])][:5]}
+
+Returns `{"ok": true, "output": <printed text>, "result": <final value>}`, or `{"ok": false, "error_code": ..., "error": ..., "output": <partial output>}`.

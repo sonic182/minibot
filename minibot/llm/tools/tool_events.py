@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -38,7 +39,7 @@ def _wrap(binding: ToolBinding, *, event_bus: EventPublisher) -> ToolBinding:
         call_id = uuid4().hex
         await _publish(event_bus, tool_name, "started", call_id, context, arguments)
         try:
-            result = await binding.handler(payload, context)
+            result = await binding.handler(payload, replace(context, call_id=call_id))
         except Exception as exc:
             await _publish(event_bus, tool_name, "failed", call_id, context, arguments, error=str(exc))
             raise
@@ -78,6 +79,7 @@ async def _publish(
                 chat_id=context.chat_id,
                 detail=detail,
                 error=error,
+                parent_call_id=context.parent_call_id,
             )
         )
     except Exception:  # noqa: BLE001

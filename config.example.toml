@@ -312,6 +312,18 @@ default_limit = 20
 max_limit = 100
 
 
+# Codemode: one tool, run_tools_script, where the model writes a short Python script that calls the agent's other
+# tools (`await tools.<name>(keyword=value)`, parallel with asyncio.gather) and gets back only what it prints and
+# returns. Scripts run in the Monty sandbox (extra: codemode, `poetry install --extras codemode`); every nested call
+# goes through the agent's normal tool pipeline, so approvals and tools_allow/tools_deny still apply. For task
+# workers add "codemode" to [tasks] worker_extensions and name run_tools_script in the specialist's tools_allow.
+# [tools.codemode]
+# enabled = true
+# timeout_seconds = 60       # wall clock for the whole script, nested tool calls included
+# max_memory_mb = 64         # heap limit of the script itself
+# max_output_chars = 20000   # cap on printed output and on the returned value (start and end are kept)
+# exclude = []               # tool name patterns scripts can never call; delegation tools are always excluded
+
 # Optional RAG (Retrieval-Augmented Generation).
 # Requires `tools.file_storage.enabled = true` and manual `torch` + `sentence-transformers`
 # installation. PDF ingestion and the sqlite backend's numpy additionally come from extras: rag.
@@ -645,7 +657,8 @@ delegation_mode = "auto"
 # agent in a chat, optionally split by a `session` name from spawn_task/delegate; its tasks run one at a time and see earlier
 # prompts and answers, summarized when they grow. spawn_task and delegate gain `fresh` to clear that history first.
 history = false
-# Bundled tool extensions a worker loads on top of the scheduler and utility ones: "kv_memory" and/or "rag".
+# Bundled tool extensions a worker loads on top of the scheduler and utility ones: "kv_memory", "rag" and/or
+# "codemode" (the run_tools_script tool; the specialist must also name it in tools_allow).
 # Each needs its [tools.*] section enabled. Only a specialist that claims them (tools_allow, or a tools_deny that
 # leaves them out) gets them; a task without an agent does not. A RAG task loads the embedding model itself.
 worker_extensions = []

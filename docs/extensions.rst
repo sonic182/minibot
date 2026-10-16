@@ -112,6 +112,17 @@ Extension API
    Add a typed decorator-based tool or explicit ``ToolBinding`` instances. Use ``add_tool``
    for a custom tool name or hand-written JSON schema.
 
+``mb.add_tool_deriver(deriver)``
+   Contribute tools built from the tool list an agent ends up with. ``add_tool`` registers before any agent
+   exists, so it cannot build a tool that acts on other tools. ``deriver`` is a plain function that takes the
+   agent's final ``Sequence[ToolBinding]`` (after approval, event and output-spill wrapping, ``tools_allow`` /
+   ``tools_deny`` and the removal of the delegation tools) and returns the extra bindings. It runs once per agent
+   and again whenever the tool list is rebuilt, so keep it a pure function of its argument. The returned tools get
+   approval and event wrapping and are then filtered by the same agent policy (the main agent's allow/deny, a
+   specialist's ``tools_allow``/``tools_deny``); they are not part of the list the deriver received, and a name
+   that already exists is rejected. Runs in the daemon, the console and task workers; the bundled
+   ``run_tools_script`` (:doc:`tools`) is built this way.
+
 ``mb.on(EventType)`` / ``mb.on(EventType, handler)``
    Observe internal events such as ``TurnCompletedEvent``. Handlers are async and lossy:
    slow handlers drop events rather than blocking MiniBot.
