@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -379,6 +380,57 @@ def test_build_worker_tools_strips_recursive_delegation_tools() -> None:
     assert "cancel_task" not in tool_names
     assert "list_tasks" not in tool_names
     assert "fetch_agent_info" not in tool_names
+
+
+@pytest.mark.asyncio
+async def test_opted_in_worker_tools_reach_only_specialists_that_claim_them(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {
+            "scheduler": {"prompts": {"enabled": False}},
+            "tools": {"kv_memory": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'kv.db'}"}},
+            "tasks": {"worker_extensions": ["kv_memory"]},
+        }
+    )
+    with (
+        patch("minibot.app.tasks.worker.LLMClientFactory", _FakeFactory),
+        patch("minibot.app.tasks.worker.AgentRuntime", _ToolCapturingRuntime),
+    ):
+        await worker.run_agent_loop(
+            {"task_id": "t1", "channel": "console", "prompt": "Remember this", "chat_id": 1, "user_id": 2},
+            backends=_backends(settings),
+        )
+    generic_names = {binding.tool.name for binding in _ToolCapturingRuntime.tools}
+
+    extensions = load_extensions(settings, EventBus(), entrypoint="worker")
+    spec = AgentSpec(
+        name="librarian",
+        description="desc",
+        system_prompt="prompt",
+        source_path=worker.Path("/tmp/librarian.md"),
+        tools_allow=["memory_*"],
+    )
+    bindings = worker._build_worker_tools(
+        settings=settings, spec=spec, managed_storage=None, extension_tools=extensions.tools
+    )
+    deny_only = replace(spec, tools_allow=[], tools_deny=["bash"])
+    deny_only_names = {
+        binding.tool.name
+        for binding in worker._build_worker_tools(
+            settings=settings, spec=deny_only, managed_storage=None, extension_tools=extensions.tools
+        )
+    }
+
+    assert "current_datetime" in generic_names
+    assert {"memory_create", "memory_delete"} <= deny_only_names
+    assert not any(name.startswith("memory_") for name in generic_names)
+    assert {binding.tool.name for binding in bindings} == {
+        "memory_create",
+        "memory_update",
+        "memory_get",
+        "memory_search",
+        "memory_delete",
+        "memory_list_titles",
+    }
 
 
 def test_a_specialist_claims_a_utility_extension_tool_in_the_worker() -> None:

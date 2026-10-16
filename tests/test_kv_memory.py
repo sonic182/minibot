@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import event
 
 from minibot.adapters.config.schema import KeyValueMemoryConfig
 from minibot.adapters.memory.kv_sqlalchemy import SQLAlchemyKeyValueMemory
@@ -19,6 +21,39 @@ async def kv_memory(tmp_path: Path) -> SQLAlchemyKeyValueMemory:
     )
     await backend.initialize()
     return backend
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_initialize_shares_a_fresh_database(tmp_path: Path) -> None:
+    config = KeyValueMemoryConfig(enabled=True, sqlite_url=f"sqlite+aiosqlite:///{tmp_path / 'shared.db'}")
+    backends = [SQLAlchemyKeyValueMemory(config) for _ in range(8)]
+    try:
+        results = await asyncio.gather(*(backend.initialize() for backend in backends), return_exceptions=True)
+        assert results == [None] * len(backends)
+        await backends[0].create_entry(owner_id="tenant", title="Wifi", data="hunter2")
+        found = await backends[-1].search_entries("tenant", query="hunter2")
+        assert [entry.title for entry in found.entries] == ["Wifi"]
+    finally:
+        await asyncio.gather(*(backend._engine.dispose() for backend in backends))
+
+
+@pytest.mark.asyncio
+async def test_initialize_without_rebuild_index_rebuilds_only_a_new_search_index(tmp_path: Path) -> None:
+    config = KeyValueMemoryConfig(enabled=True, sqlite_url=f"sqlite+aiosqlite:///{tmp_path / 'kv.db'}")
+    rebuilds: list[str] = []
+    for rebuild_index in (False, False, True):
+        backend = SQLAlchemyKeyValueMemory(config)
+        event.listen(
+            backend._engine.sync_engine,
+            "before_cursor_execute",
+            lambda _conn, _cursor, statement, *_: rebuilds.append(statement) if "'rebuild'" in statement else None,
+        )
+        try:
+            await backend.initialize(rebuild_index=rebuild_index)
+        finally:
+            await backend._engine.dispose()
+
+    assert len(rebuilds) == 2
 
 
 @pytest.mark.asyncio

@@ -139,8 +139,8 @@ Operational rules
   inside ``register()`` cannot be resolved.
 - Check ``mb.entrypoint`` before adding channel services. Only the daemon runs channels.
 - Configured extension tools are available to task workers, but worker registries do not start
-  extension services or event subscriptions. The scheduler is the one bundled extension a worker
-  loads, and it contributes tools only.
+  extension services or event subscriptions. A worker loads the scheduler and utility bundles, plus
+  the ones listed in ``[tasks] worker_extensions``, and they contribute tools only.
 
 For the full type signatures behind ``mb``, see :doc:`extension-api`.
 

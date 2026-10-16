@@ -5,7 +5,7 @@ import contextlib
 import importlib
 import inspect
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, get_type_hints
 
@@ -30,7 +30,13 @@ type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
 type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 
 
-def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
+WORKER_OPT_IN_MODULES = {
+    "kv_memory": "minibot.extensions.tools.memory",
+    "rag": "minibot.extensions.integrations.rag",
+}
+
+
+def _bundled_modules(entrypoint: ExtensionEntrypoint, worker_extensions: Sequence[str] = ()) -> tuple[str, ...]:
     common = (
         "minibot.extensions.integrations.decision",
         "minibot.extensions.integrations.rag",
@@ -51,9 +57,13 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
         return ("minibot.extensions.channels.telegram", *common)
     if entrypoint == "console":
         return common
-    # Workers retain their deliberately narrower tool assembly: the scheduler and utility tools
-    # plus user-configured extensions.
-    return ("minibot.extensions.services.scheduler", "minibot.extensions.tools.utility")
+    # Workers retain their deliberately narrower tool assembly: the scheduler and utility tools, the
+    # bundles opted in through [tasks].worker_extensions, plus user-configured extensions.
+    return (
+        "minibot.extensions.services.scheduler",
+        "minibot.extensions.tools.utility",
+        *(WORKER_OPT_IN_MODULES[name] for name in worker_extensions),
+    )
 
 
 class ExtensionService(Protocol):
@@ -221,6 +231,9 @@ class ExtensionRegistry:
     def tools(self) -> list[ToolBinding]:
         return [binding for context in self._contexts for binding in context.tools]
 
+    def tools_outside(self, names: Collection[str]) -> list[ToolBinding]:
+        return [binding for context in self._contexts if context.name not in names for binding in context.tools]
+
     @property
     def routes(self) -> list[RouteSpec]:
         return [route for context in self._contexts for route in context.routes]
@@ -317,7 +330,7 @@ def load_extensions(
     """
     log = logger or logging.getLogger("minibot.extensions")
     contexts: list[ExtensionContext] = []
-    for name in (*_bundled_modules(entrypoint), *settings.extensions.modules):
+    for name in (*_bundled_modules(entrypoint, settings.tasks.worker_extensions), *settings.extensions.modules):
         try:
             module = importlib.import_module(name)
         except Exception as exc:

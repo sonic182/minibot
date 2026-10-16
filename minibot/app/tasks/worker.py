@@ -18,7 +18,7 @@ from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_runtime import AgentRuntime
 from minibot.app.environment_context import build_environment_prompt_fragment
 from minibot.app.event_bus import EventBus
-from minibot.app.extensions import load_extensions
+from minibot.app.extensions import WORKER_OPT_IN_MODULES, load_extensions
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.managed_agent_policy import (
     ManagedAgentPolicy,
@@ -220,8 +220,8 @@ async def run_agent_loop(
         secrets = task.pop("secrets", None)
         settings = backends.load_settings(secrets)
         # ponytail: no vault object here, so a user extension sees `mb.vault is None` even though
-        # ${secret:} resolved above. The bundles a worker loads (scheduler, utility) need no vault; build a
-        # Vault from `secrets` if a user extension ever needs one.
+        # ${secret:} resolved above. The bundles a worker loads (scheduler, utility, kv_memory, rag) need no vault;
+        # build a Vault from `secrets` if a user extension ever needs one.
         extensions = load_extensions(settings, EventBus(), _LOGGER, entrypoint="worker")
         llm_factory = LLMClientFactory(settings)
         environment_prompt_fragment = build_environment_prompt_fragment(settings)
@@ -231,7 +231,9 @@ async def run_agent_loop(
             llm_factory=llm_factory,
             environment_prompt_fragment=environment_prompt_fragment,
             task=task,
-            extension_tool_names=[binding.tool.name for binding in extensions.tools],
+            extension_tool_names=[
+                binding.tool.name for binding in extensions.tools_outside(WORKER_OPT_IN_MODULES.values())
+            ],
         )
         llm_client = llm_factory.create_for_agent(spec)
         mcp_bindings = await _build_worker_mcp_bindings(

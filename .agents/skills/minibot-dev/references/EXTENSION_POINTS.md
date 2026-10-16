@@ -235,7 +235,7 @@ spawn_task (LLM tool)
           └─ worker_entry(pipe, backends)  app/tasks/worker.py
               └─ run_agent_loop(...)       app/tasks/worker.py
                   ├─ load_settings()
-                  ├─ load_extensions(..., entrypoint="worker")   ← bundled modules: scheduler + utility
+                  ├─ load_extensions(..., entrypoint="worker")   ← scheduler + utility + worker_extensions
                   ├─ _resolve_task_spec(...)
                   ├─ _build_worker_tools(...)  app/tasks/worker.py
                   └─ AgentRuntime(...)
@@ -246,7 +246,12 @@ Two traps:
 - **Workers load only the scheduler and utility bundles** (`_bundled_modules`,
   `app/extensions.py`). Besides them, only user-configured `[extensions].modules` load there,
   and bundled tool modules self-narrow when `mb.entrypoint == "worker"` (e.g. `read_docs`).
-  To give workers a bundled extension tool, add its module to the worker branch.
+  To give workers a bundled extension tool, add its module to the worker branch. A bundle with a
+  service (kv_memory, rag) is opt-in instead: it is listed in `WORKER_OPT_IN_MODULES` and the
+  `[tasks] worker_extensions` literal, and in a worker wraps its tools with `start_on_first_call`
+  (`extensions/_lazy_start.py`), because worker registries never start services. Opt-in tools are
+  left out of the generic worker's allowlist (`ExtensionRegistry.tools_outside` in `run_agent_loop`):
+  only a specialist that claims them gets them.
 - **Workers build their core tools independently of `tool_factory.py`.** To make a core tool
   worker-visible, add it to `_build_worker_tools` **and** `_WORKER_TOOL_ALLOWLIST`
   (both in `app/tasks/worker.py`). Extension tools are auto-appended and
