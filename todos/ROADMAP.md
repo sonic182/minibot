@@ -16,7 +16,7 @@ What made this possible is the combination of `spawn_task`, `delegate` (a worker
 feed the main agent's next step instead of ending in a dead-end message), specialists with their own
 tools and providers, runtime agent reload, the approval gate and `get_settings` / `minibot-docs`.
 The work ahead therefore favours making delegation, interruption and cancellation dependable over
-adding more capability.
+adding more capability; codemode (Phase 13) is the one deliberate exception, explained in its section.
 
 ## Status at a glance
 
@@ -166,8 +166,12 @@ Shape for MiniBot (to settle in the implementing PR):
   - Specialists and task workers: in `_build_worker_tools` (`minibot/app/tasks/worker.py:372`), after
     `filter_tools_for_agent` (`minibot/app/agent_policies.py:25`) and the reserved-name strip (`:15`), and
     inside the worker's `apply_tool_approval` (`worker.py:246`, `minibot/app/tool_approval.py:33`). Workers
-    load only the extensions in `[tasks] worker_extensions` (`minibot/config/schema.py:1094`,
-    `minibot/app/extensions.py:33`), so codemode needs an entry there to exist for specialists.
+    load only the extensions in `[tasks] worker_extensions`, so codemode in specialists needs: `"codemode"`
+    in that `Literal` (`minibot/config/schema.py:1094`), a `WORKER_OPT_IN_MODULES` entry
+    (`minibot/app/extensions.py:33`), the existing check that a listed extension's `[tools.*]` section is
+    enabled (`Settings._validate_worker_extensions`), and a decision about `tools_outside`
+    (`minibot/app/tasks/worker.py:235`), which keeps opt-in modules' tools off the generic worker. Codemode
+    builds its tool from the final list rather than registering a plain one, so it may need its own path there.
 - **Extension point needed:** an extension registers its tools before an agent's tool list exists. Codemode
   needs a small, generic hook to build its tool over that final list, per agent and after every wrapper and
   filter, at both sites above.
@@ -178,7 +182,9 @@ Shape for MiniBot (to settle in the implementing PR):
 - **MCP:** eager (`bridge`) servers are plain bindings and appear under their prefixed names. Lazy servers,
   where codemode helps most, only register `<prefix>_<server>__list_tools` and `__call_tool`
   (`minibot/llm/tools/mcp_bridge.py:174`, `:185`); v1 exposes those two as they are, so a script lists and
-  calls remote tools through them and the approval gate keeps resolving `call_tool` by its target.
+  calls remote tools through them and the approval gate keeps resolving `call_tool` by its target. That
+  inherits the known gap of recognising a lazy `call_tool` by name suffix (see Known gaps); codemode adds no
+  new case, so it does not wait for the explicit marker, and the marker fixes both when it lands.
 - **Nested-call events:** `ToolCallEvent` (`minibot/core/events.py:133`) has no parent field and
   `apply_tool_call_events` mints a fresh `call_id` per call (`minibot/llm/tools/tool_events.py:16`). Showing
   nested calls under the script needs a `parent_call_id` on the event and on `ToolContext`. Today the web chat
