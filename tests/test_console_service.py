@@ -84,7 +84,7 @@ async def test_console_service_ignores_non_console_outbound_events() -> None:
 
 
 @pytest.mark.asyncio
-async def test_console_service_requests_a_stop_and_drops_a_late_nothing_running_reply() -> None:
+async def test_console_service_requests_a_stop_and_turns_nothing_running_into_a_notice() -> None:
     bus = EventBus()
     service = ConsoleService(bus, chat_id=5, user_id=6, console=_CollectConsole())
     await service.start()
@@ -102,8 +102,10 @@ async def test_console_service_requests_a_stop_and_drops_a_late_nothing_running_
         )
         await bus.publish(OutboundEvent(response=response))
     item = await service.wait_for_response(1.0)
+    notice = await asyncio.wait_for(service.next_stop_notice(), timeout=0.5)
 
     assert (stop.channel, stop.chat_id, stop.user_id) == ("console", 5, 6)
     assert item.rendered_text == "answer"
+    assert notice == "Nothing is running."
     await subscription.close()
     await service.stop()

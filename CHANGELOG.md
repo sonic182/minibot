@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`Esc` stops the running reply in the console TUI**, like `/stop` on Telegram and the stop button in the web chat.
   The dispatcher's `Nothing is running.` reply now carries `metadata["turn_stop"] = "nothing_running"`, and the
-  console drops it so a stop that raced the answer is not taken as the reply to the next message.
+  console TUI shows it as a warning ("Nothing to stop yet; press Esc again.") instead of a reply, so a stop that raced
+  the answer is not taken as the reply to the next message.
 
 ### Changed
 

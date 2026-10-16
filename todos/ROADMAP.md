@@ -34,10 +34,9 @@ so the order here is the order to work in, not the numeric order.
 Shipped and removed from this file: 0 bash env default, 1 credential vault, 2 skills for specialist
 agents, 3 native skills, runtime self-knowledge and agent management, 3b main-agent steering and `/stop`
 (Telegram, web, and `Esc` in the console TUI), 7 shared tool construction with task workers, 8 task lifecycle,
-bounded output, MCP HTTP and approval binding (PR #112, released in 0.29.0) plus the container smoke test of task cancellation,
-12 opt-in bundled extensions for task workers (`[tasks] worker_extensions`), 9 delegation semantics
-(`delegate` versus background `spawn_task`, `[tasks] delegation_mode`). The commit history keeps their
-design notes.
+bounded output, MCP HTTP and approval binding (PR #112, released in 0.29.0) plus the container smoke test of task
+cancellation, 12 opt-in bundled extensions for task workers (`[tasks] worker_extensions`), 9 delegation semantics
+(`delegate` versus background `spawn_task`, `[tasks] delegation_mode`). The commit history keeps their design notes.
 
 Decided: scheduler cron expressions stay in UTC, as documented in `docs/scheduler.rst`; there is no
 `[scheduler]` timezone setting.
