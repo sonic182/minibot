@@ -146,6 +146,14 @@ worker subprocesses, so a crash cannot take the daemon down. Checked in a scratc
 
 Shape for MiniBot (to settle in the implementing PR):
 
+- **Packaging (decided):** a bundled extension, `minibot.extensions.tools.codemode`, and a poetry extra,
+  `codemode = ["pydantic-monty"]`, like `rag` or `http`. Nothing in `core`, `app` or `llm` imports Monty;
+  the extension imports it only when `[tools.codemode].enabled` is true, and enabling it without the extra
+  fails at startup with a message naming `poetry install --extras codemode`.
+- **Extension point needed:** an extension registers its tools before the agent's tool list exists, but
+  codemode has to call that final list. The extension therefore needs a small hook to build its tool over
+  the tools an agent ends up with, per agent and after every wrapper and filter. That hook is part of the
+  implementing PR, kept generic rather than codemode-specific.
 - `[tools.codemode]`, default off: `enabled`, `timeout_seconds`, `max_memory_mb`, `max_output_chars`, and
   `exclude` patterns for tools never exposed to scripts (the delegation tools at least).
 - One tool, `run_tools_script` or similar, taking `code`. It wraps the agent's *final* tool list, after
@@ -161,10 +169,10 @@ Shape for MiniBot (to settle in the implementing PR):
 - Trust model: the script itself has no ambient capability; every effect is a tool call that already passed
   the existing gates. No new secret surface: tools resolve secrets as they do today.
 
-Effort: one extension plus a schema-to-signature renderer and tests; no change below the tool layer. A new
-runtime dependency, best as an optional extra: the Monty client plus its worker binary, shipped like `ruff`.
-Wheels exist for manylinux and musllinux x86_64 and aarch64, macOS and Windows, which covers the x86_64
-container.
+Effort: the extension, the extension-point hook, a schema-to-signature renderer, and tests; no change below
+the tool layer. The extra adds the Monty client plus its worker binary, shipped like `ruff`. Wheels exist for
+manylinux and musllinux x86_64 and aarch64, macOS and Windows, which covers the x86_64 container; the image
+installs it with the other extras it uses.
 
 ## [ ] Phase 3b — Steering leftovers (priority 4)
 
