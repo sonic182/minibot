@@ -144,35 +144,58 @@ worker subprocesses, so a crash cannot take the daemon down. Checked in a scratc
 - Limits: a subset of Python with no third-party imports. That is the point here, since data work stays in
   `python_execute`.
 
+Why it comes before observability and ACP, despite the "dependable over more capability" line above: it is
+contained (one opt-in extension, no change to how turns, tasks or delegation run) and it cuts the round trips
+that delegation and multi-tool work cost today, which is the same goal by another route.
+
 Shape for MiniBot (to settle in the implementing PR):
 
 - **Packaging (decided):** a bundled extension, `minibot.extensions.tools.codemode`, and a poetry extra,
-  `codemode = ["pydantic-monty"]`, like `rag` or `http`. Nothing in `core`, `app` or `llm` imports Monty;
-  the extension imports it only when `[tools.codemode].enabled` is true, and enabling it without the extra
-  fails at startup with a message naming `poetry install --extras codemode`.
-- **Extension point needed:** an extension registers its tools before the agent's tool list exists, but
-  codemode has to call that final list. The extension therefore needs a small hook to build its tool over
-  the tools an agent ends up with, per agent and after every wrapper and filter. That hook is part of the
-  implementing PR, kept generic rather than codemode-specific.
-- `[tools.codemode]`, default off: `enabled`, `timeout_seconds`, `max_memory_mb`, `max_output_chars`, and
-  `exclude` patterns for tools never exposed to scripts (the delegation tools at least).
-- One tool, `run_tools_script` or similar, taking `code`. It wraps the agent's *final* tool list, after
-  `apply_tool_approval`, `tools_allow` / `tools_deny` and the reserved-name filters, so a script can call
-  exactly what the agent could call directly and an approval-gated tool still asks the owner. Built per
-  agent, specialists included, through the same policy path (`tool_capabilities.py`, `agent_policies.py`).
-- Tools are exposed as `tools.<name>(**kwargs)` (Monty `ClassInstance` or flat functions), MCP tools under
-  their prefixed names, plus `ALL_TOOLS` and a `describe_tool(name)` helper. The description lists Python
-  signatures generated from the JSON schemas under a budget.
-- Nested calls emit `ToolCallEvent`s with the parent call id, so Telegram, web and the console show them,
-  and the result records them with capped arguments.
-- Output: printed text plus the repr or JSON of the return value, capped like tool output spill.
-- Trust model: the script itself has no ambient capability; every effect is a tool call that already passed
-  the existing gates. No new secret surface: tools resolve secrets as they do today.
+  `codemode = ["pydantic-monty"]`, like `rag` or `http` (`pyproject.toml`, `[tool.poetry.extras]`; the image
+  installs every extra). Nothing in `core`, `app` or `llm` imports Monty; the extension imports it only when
+  `[tools.codemode].enabled` is true, and enabling it without the extra fails at startup with a message
+  naming `poetry install --extras codemode`.
+- **v1 scope:** `tools.<name>(**kwargs)` for the agent's tools, `print` and return value as output, limits,
+  nested-call events, and Python signatures for the declared tools in the description. Later, when use asks
+  for it: a signature budget with `describe_tool()` / `ALL_TOOLS` discovery, type-check stubs, a cross-call
+  store.
+- **One tool,** `run_tools_script` or similar, taking `code`, built over the agent's *final* tool list, so a
+  script can call exactly what the agent could call directly and an approval-gated tool still asks the owner:
+  - Main agent: after `main_agent_tool_view` (`minibot/app/tool_capabilities.py:20`), over the bindings that
+    `build_enabled_tools` already wrapped with approval, events and spill (`minibot/app/tool_factory.py:70`).
+  - Specialists and task workers: in `_build_worker_tools` (`minibot/app/tasks/worker.py:372`), after
+    `filter_tools_for_agent` (`minibot/app/agent_policies.py:25`) and the reserved-name strip (`:15`), and
+    inside the worker's `apply_tool_approval` (`worker.py:246`, `minibot/app/tool_approval.py:33`). Workers
+    load only the extensions in `[tasks] worker_extensions` (`minibot/config/schema.py:1094`,
+    `minibot/app/extensions.py:33`), so codemode needs an entry there to exist for specialists.
+- **Extension point needed:** an extension registers its tools before an agent's tool list exists. Codemode
+  needs a small, generic hook to build its tool over that final list, per agent and after every wrapper and
+  filter, at both sites above.
+- **Config:** `[tools.codemode]` is a new field on `ToolsConfig` (`minibot/config/schema.py:961`), default off:
+  `enabled`, `timeout_seconds`, `max_memory_mb`, `max_output_chars`, and `exclude` patterns for tools never
+  exposed to scripts (the delegation tools at least). `ToolsConfig` ignores unknown tables, so the field must
+  exist before anyone can enable it.
+- **MCP:** eager (`bridge`) servers are plain bindings and appear under their prefixed names. Lazy servers,
+  where codemode helps most, only register `<prefix>_<server>__list_tools` and `__call_tool`
+  (`minibot/llm/tools/mcp_bridge.py:174`, `:185`); v1 exposes those two as they are, so a script lists and
+  calls remote tools through them and the approval gate keeps resolving `call_tool` by its target.
+- **Nested-call events:** `ToolCallEvent` (`minibot/core/events.py:133`) has no parent field and
+  `apply_tool_call_events` mints a fresh `call_id` per call (`minibot/llm/tools/tool_events.py:16`). Showing
+  nested calls under the script needs a `parent_call_id` on the event and on `ToolContext`. Today the web chat
+  and the console subscribe to these events; Telegram does not, so there they stay in the logs.
+- **Output:** codemode enforces `max_output_chars` itself; tool output spill does not wrap the codemode tool,
+  which is added after `build_enabled_tools`. Nested results do pass through spill, so a large result reaches
+  the script as a preview plus a file path; v1 keeps that and says so in the description.
+- **Trust model:** Monty limits what the script itself can reach (no file system, network or environment), and
+  every effect is a tool call that already passed the existing gates. That narrows the surface but is not
+  containment: MiniBot is still not a security boundary, and deployment isolation still applies (see the
+  Trust model above). No new secret surface: tools resolve secrets as they do today.
 
-Effort: the extension, the extension-point hook, a schema-to-signature renderer, and tests; no change below
-the tool layer. The extra adds the Monty client plus its worker binary, shipped like `ruff`. Wheels exist for
-manylinux and musllinux x86_64 and aarch64, macOS and Windows, which covers the x86_64 container; the image
-installs it with the other extras it uses.
+Effort: the extension, the extension-point hook at both sites, `parent_call_id` on `ToolCallEvent` and
+`ToolContext`, a schema-to-signature renderer, the `[tools.codemode]` field and `worker_extensions` entry, and
+tests; `docs/config.rst`, `docs/tools.rst` and `docs/extensions.rst` are updated in the same PR. The extra adds
+the Monty client plus its worker binary, shipped like `ruff`. Wheels exist for manylinux and musllinux x86_64
+and aarch64, macOS and Windows, which covers the x86_64 container.
 
 ## [ ] Phase 3b — Steering leftovers (priority 4)
 
