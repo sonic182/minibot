@@ -22,6 +22,10 @@ class ToolContext:
     task_chain_depth: int = 0
     claim_task_continuation: Callable[[], bool] | None = None
     release_task_continuation: Callable[[], None] | None = None
+    # Set by the tool-call event wrapper to the id of the call being run, so a tool that makes nested calls
+    # (a script calling tools) can name it as their parent. None when events are not wired.
+    call_id: str | None = None
+    parent_call_id: str | None = None
 
 
 ToolHandler = Callable[[ToolPayload, ToolContext], Awaitable[ToolResult | Any]]

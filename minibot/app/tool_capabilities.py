@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from minibot.app.agent_policies import filter_tools_for_agent
+from minibot.app.extensions import ToolDeriver
 from minibot.app.mcp_tool_name import DEFAULT_MCP_NAME_PREFIX, extract_mcp_server, is_mcp_tool_name
 from minibot.app.tool_policy_utils import apply_allow_deny, normalize_patterns
 from minibot.config.schema import MainAgentConfig, OrchestrationConfig
@@ -23,8 +24,27 @@ def main_agent_tool_view(
     orchestration_config: OrchestrationConfig,
     agent_specs: Sequence[AgentSpec],
     mcp_name_prefix: str = DEFAULT_MCP_NAME_PREFIX,
+    derive_tools: ToolDeriver | None = None,
 ) -> MainAgentToolView:
+    """The tools the main agent sees, after ``main_agent`` allow/deny and exclusive ownership.
+
+    ``derive_tools`` builds extra tools from that final list (see ``ExtensionContext.add_tool_deriver``);
+    they are subject to the same ``main_agent`` allow/deny policy and are never hidden by ownership.
+    """
     main_agent_tools = _apply_main_agent_policy(list(tools), orchestration_config.main_agent)
+    view = _apply_tool_ownership(main_agent_tools, orchestration_config, agent_specs, mcp_name_prefix)
+    if derive_tools is None:
+        return view
+    derived = _apply_main_agent_policy(list(derive_tools(view.tools)), orchestration_config.main_agent)
+    return MainAgentToolView(tools=[*view.tools, *derived], hidden_tool_names=view.hidden_tool_names)
+
+
+def _apply_tool_ownership(
+    main_agent_tools: list[ToolBinding],
+    orchestration_config: OrchestrationConfig,
+    agent_specs: Sequence[AgentSpec],
+    mcp_name_prefix: str,
+) -> MainAgentToolView:
     if orchestration_config.tool_ownership_mode not in {"exclusive", "exclusive_mcp"}:
         return MainAgentToolView(tools=main_agent_tools, hidden_tool_names=[])
 

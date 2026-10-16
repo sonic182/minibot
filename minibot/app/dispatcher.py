@@ -25,7 +25,7 @@ from minibot.app.incoming_files_context import build_history_user_entry
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_capabilities import MainAgentToolView, main_agent_tool_view
-from minibot.app.tool_factory import build_enabled_tools
+from minibot.app.tool_factory import build_enabled_tools, derive_extension_tools
 from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
 from minibot.app.turn_inbox import TurnInbox
 from minibot.config.schema import Settings
@@ -239,6 +239,9 @@ class Dispatcher:
             orchestration_config=self._settings.orchestration,
             agent_specs=self._agent_registry.all(),
             mcp_name_prefix=self._settings.tools.mcp.name_prefix,
+            derive_tools=lambda final_tools: derive_extension_tools(
+                final_tools, settings=self._settings, extensions=self._extensions, event_bus=self._event_bus
+            ),
         )
 
     async def refresh_agent_roster(self, reader: AgentDefinitionReader) -> AgentRosterChange:

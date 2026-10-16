@@ -172,6 +172,9 @@ Payload:
   ``minibot/llm/tools/tool_call_display.py`` before the event is published. Raw argument values
   never leave the tool-execution layer because they can be large and can hold credentials.
 - ``error`` — set when ``phase`` is ``failed``.
+- ``parent_call_id`` — the ``call_id`` of the call that made this one, or ``None``. Only the calls a
+  ``run_tools_script`` script makes carry it (set to the script's own ``call_id``); calls the model
+  makes directly leave it empty.
 
 Typical use: audit which tools ran, safely, without exposing argument values.
 

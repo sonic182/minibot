@@ -198,6 +198,11 @@ Tool Surface
      - ``rag_index``, ``rag_search``, ``rag_list_metadata``, ``rag_delete``
      - ``[tools.rag]``
      - Index text files into the configured vector store and retrieve semantically relevant chunks.
+   * - Scripting
+     - ``run_tools_script``
+     - ``[tools.codemode]``
+     - Run a short Python script in a sandbox that calls the agent's other tools and returns only its printed
+       output and final value. See `Codemode scripts`_ below.
    * - Credential vault
      - ``list_secrets``
      - ``[vault] enabled`` (unlocked)
@@ -225,6 +230,8 @@ Runtime Notes
   ``bash``. Tools in ``exclude_tools`` (``http_request`` and ``pre_response`` by default) are
   skipped since they already manage their own output size. ``activate_skill`` spills only past
   64,000 characters (or ``spill_after_chars``, if larger), so skill instructions normally arrive inline.
+  Spill does not apply to calls made from a ``run_tools_script`` script: the result goes to the script, not
+  the model, so the script can filter it, and the script's own output limits protect the context.
 - ``[tools.audio_transcription]`` requires the ``stt`` extra: ``pip install "minibot[stt]"``.
 - ``[tools.http_client]`` needs no extra: selectolax ships with the base install and renders HTML
   as compact semantic text instead of plain-text extraction.
@@ -237,7 +244,121 @@ Runtime Notes
   ``backend = "sqlite"`` needs no service; ``"qdrant"`` needs a running instance. See :doc:`rag`.
 - The relation graph requires the ``graph`` extra and the ``minibot.extensions.tools.graph``
   extension. It persists typed edges in SQLite; see :doc:`graph`.
+- ``[tools.codemode]`` requires the ``codemode`` extra (``pip install "minibot[codemode]"``, or
+  ``poetry install --extras codemode``); enabling it without the extra stops startup with that hint.
 - Hidden compatibility aliases are normalized at execution time; prefer the public names in the table.
+
+Codemode scripts
+----------------
+
+``run_tools_script`` lets the model write one short Python script instead of making a tool call per step. The
+script calls other tools, combines and filters their results, and returns only what matters: each nested result
+stays out of the model's context, and independent calls run in parallel with ``asyncio.gather``. It is off by
+default; enable it with ``[tools.codemode] enabled = true`` (see :doc:`config`).
+
+.. code-block:: toml
+
+   [tools.codemode]
+   enabled = true
+   timeout_seconds = 60        # wall-clock limit for the whole script, nested tool calls included
+   max_tool_calls = 50         # tool calls one script may make
+   max_memory_mb = 64          # heap limit of the script itself
+   max_output_chars = 20000    # cap on the printed output and on the returned value
+   exclude = ["mcp_mail__*"]   # tool names scripts can never call
+
+Scripts run in `Pydantic Monty <https://github.com/pydantic/monty>`_, a Python interpreter written in Rust that
+runs in a pool of worker subprocesses, so a crash cannot take the daemon down. It implements a subset of Python:
+no file system, network, environment or third-party imports, and the only way to act on the world is the ``tools``
+namespace. Scripts call tools as ``await tools.<name>(keyword=value)``, keyword arguments only; every character of
+a tool name that is not valid in a Python identifier becomes ``_`` (``mcp_exa__web_search`` is unchanged,
+``my-tool.v2`` becomes ``my_tool_v2``). The tool description lists a one-line signature per available tool,
+generated from its JSON schema (capped at about 6000 characters; tools beyond the cap are omitted from the list).
+A script prints with ``print`` and returns by ending on an expression or with a top-level ``return``:
+
+.. code-block:: python
+
+   import asyncio
+
+   first, second = await asyncio.gather(
+       tools.memory_search(query="trip"),
+       tools.current_datetime(),
+   )
+   try:
+       await tools.http_request(url="https://example.org/missing")
+   except ValueError as exc:
+       print("skipped:", exc)
+   {"now": second, "titles": [entry["title"] for entry in first["entries"]][:5]}
+
+MCP tools are ordinary tools to a script, with three differences to keep in mind. In bridge mode each remote tool is
+``tools.<prefix>_<server>__<remote_tool>(...)`` and returns ``{"ok", "server", "tool", "is_error", "result"}``, where
+``result`` is usually text (the joined text parts, often JSON that needs ``json.loads``). An error reported by the MCP
+server does not raise: it comes back with ``ok: false`` / ``is_error: true``, so the script must check it. In lazy mode the
+server exposes ``<prefix>_<server>__list_tools()`` (the catalog with each ``input_schema``) and
+``<prefix>_<server>__call_tool(tool_name=..., arguments={...})``, which returns the same dict.
+
+.. code-block:: python
+
+   import asyncio, json
+
+   found = await tools.mcp_mail__imap_search_messages(query="invoice")
+   if not found["ok"]:
+       return {"error": found["result"]}
+   ids = json.loads(found["result"])["ids"][:5]
+   msgs = await asyncio.gather(*[tools.mcp_mail__imap_get_message(id=i) for i in ids])
+   return [json.loads(m["result"])["subject"] for m in msgs if m["ok"]]
+
+A call whose result feeds the next one is a plain sequence of ``await`` statements. When ``python_execute`` is
+available, a script can pass it data with ``tools.python_execute(code=...)`` for computation the sandbox cannot do.
+
+The result is ``{"ok": true, "output": "<printed text>", "result": <final value>}``. Output and the final value are
+each cut to ``max_output_chars`` keeping their start and end, with a marker for what was omitted.
+
+What a script can call
+   The tools the agent sees after its ``tools_allow`` / ``tools_deny`` and ownership filtering, built after
+   approval, event and output-spill wrapping, minus the delegation tools and anything matching ``exclude`` (below).
+   A tool the agent cannot see is not callable from a script, and a tool listed in ``require_approval`` still asks
+   the owner for every nested call. A tool that
+   raises reaches the script as an exception (``ValueError`` for rejected arguments, ``PermissionError`` for a denied
+   approval, ``RuntimeError`` otherwise); catch it to continue. A script that ends on an uncaught
+   ``PermissionError`` from a denial returns the ``tool_approval:denied`` error, like a direct call; a denial the
+   script wraps in another exception type is an ordinary ``codemode:script_error``. The delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``,
+   ``list_tasks``, ``get_task``, ``cancel_task``), ``run_tools_script`` itself and anything matching ``exclude`` are
+   never exposed, and nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
+   ``mcp_<server>__list_tools`` and ``mcp_<server>__call_tool``. Large nested results arrive as a preview plus a file
+   path, as they do for a direct call, and a tool that returns a file or a message directive (``send_file``) loses
+   the directive when called from a script.
+
+Time and call limits
+   ``timeout_seconds`` is wall-clock time for the whole script, nested calls included, except the time a nested
+   call spends waiting for an owner approval (``[tools.approval]``): the clock stops while any approval is pending,
+   so a slow decision never ends the script, and the approval's own ``timeout_seconds`` still bounds the wait.
+   ``max_tool_calls`` caps how many tool calls one script makes; the call past the cap raises a ``ValueError``
+   whose text starts with ``codemode:tool_call_limit`` (listed in ``tool_errors`` too), which the script may catch.
+
+Failures
+   A script that fails returns ``{"ok": false, "error_code": ..., "error": ..., "output": <partial output>}``.
+   ``error_code`` is ``codemode:syntax_error``, ``codemode:timeout``, ``codemode:memory_limit``,
+   ``codemode:script_error`` (any uncaught exception, with a ``hint`` when it named a tool that does not exist) or
+   ``codemode:sandbox_failed``. ``tool_errors`` lists the nested calls that failed, as tool name and error code (the tool's own
+   ``error_code`` when it raised one, ``tool_execution_failed`` otherwise). Each failed nested call is also logged at
+   warning level with the tool name and error code, never its arguments or message.
+   Calls that already ran are not undone, and calls still running at a timeout are cancelled.
+
+Nested calls and events
+   Every nested call publishes its own ``ToolCallEvent`` whose ``parent_call_id`` is the ``call_id`` of the
+   ``run_tools_script`` call (see :doc:`events`). The web chat and the console subscribe to these events;
+   Telegram does not.
+
+Specialists
+   In task workers the tool is opt-in like the other bundled extensions: list ``"codemode"`` in
+   ``[tasks] worker_extensions`` and name ``run_tools_script`` in a specialist's ``tools_allow``; its scripts then
+   call the tools that specialist itself has. A ``tools_deny``-only specialist gets it too, and a task without an
+   agent never does.
+
+Trust model
+   Monty keeps the script itself away from the file system, network and environment, and every effect is a tool
+   call that already passed the existing gates. That narrows the surface but is not containment: MiniBot is still
+   not a security boundary, and deployment isolation (see :doc:`security`) still applies.
 
 Implementation Reference
 ------------------------
