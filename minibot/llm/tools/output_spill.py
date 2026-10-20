@@ -47,7 +47,7 @@ def apply_tool_output_spill(
         update={"spill_after_chars": max(config.spill_after_chars, _SKILL_SPILL_AFTER_CHARS)}
     )
     return [
-        binding
+        _bounded(binding)
         if canonical_tool_name(binding.tool.name) in excluded
         else _wrap(
             binding,
@@ -140,6 +140,7 @@ def _cut(result: ToolResult, tool_name: str, limit: int | None) -> ToolResult:
         return result
     return ToolResult(
         content={
+            **_short_fields(result.content),
             "ok": not _is_error(result.content),
             "tool": tool_name,
             "output_truncated": True,

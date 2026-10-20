@@ -35,12 +35,13 @@ defers ``tools/list`` until the catalog is requested.
 
 In both modes a call returns the server's text content whole, with binary payloads (images, and
 ``data``/``base64``/``bytes``/``blob`` fields such as an embedded resource's) replaced by a marker. A result up
-to 25,000 characters stays inline, even when ``[tools.tool_output_spill]`` ``spill_after_chars`` is lower, so a
+to 25,000 characters (measured on the serialized result, so escaped newlines and non-ASCII text count more)
+stays inline, even when ``[tools.tool_output_spill]`` ``spill_after_chars`` is lower, so a
 typical web search result reaches the model directly. A larger result, error results included, is handled by the
 generic output spill (``[tools.tool_output_spill]``, see :doc:`config`): the model gets a preview and the path of a
 managed file holding the whole text. When spill cannot run (it is disabled, file storage is off, which is the
-default, or no read-back tool is attached), the result is cut at 25,000 characters and marked
-``output_truncated``. Inside a codemode script the result reaches the script in full; cut it there with
+default, or no read-back tool is attached) or the tool is listed in ``exclude_tools``, the result is cut at
+25,000 characters and marked ``output_truncated``. Inside a codemode script the result reaches the script in full; cut it there with
 ``text(value, limit=...)`` (see :doc:`tools`).
 
 Configuration

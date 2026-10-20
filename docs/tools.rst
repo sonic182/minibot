@@ -235,9 +235,10 @@ Runtime Notes
   ``bash``. Tools in ``exclude_tools`` (``http_request`` and ``pre_response`` by default) are
   skipped since they already manage their own output size. ``activate_skill`` spills only past
   64,000 characters (or ``spill_after_chars``, if larger), so skill instructions normally arrive inline,
-  and MCP tools only past 25,000 characters (see :doc:`mcp`). Error results spill too; the spilled result keeps
-  ``ok: false`` and the failure's short fields. Spill does not apply to calls made from a ``run_tools_script`` script: the result goes to the script, not
-  the model, so the script can filter it, and the script's own output limits protect the context.
+  and MCP tools only past 25,000 characters (see :doc:`mcp`). Error results spill too; the spilled result
+  keeps ``ok: false`` and the failure's short fields. Spill does not apply to calls made from a
+  ``run_tools_script`` script: the result goes to the script, not the model, so the script can filter it, and
+  the script's own output limits protect the context.
 - ``[tools.audio_transcription]`` requires the ``stt`` extra: ``pip install "minibot[stt]"``.
 - ``[tools.http_client]`` needs no extra: selectolax ships with the base install and renders HTML
   as compact semantic text instead of plain-text extraction.

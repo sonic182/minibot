@@ -126,15 +126,18 @@ async def test_a_binding_threshold_keeps_larger_results_inline_and_cuts_them_wit
     (inline, _grep) = apply_tool_output_spill(
         [hinted, _readback_binding()], storage=_storage(tmp_path), config=ToolOutputSpillConfig()
     )
-    (cut,) = apply_tool_output_spill(
-        [ToolBinding(tool=hinted.tool, handler=handler, spill_after_chars=1000)],
-        storage=None,
-        config=ToolOutputSpillConfig(),
+    small = ToolBinding(tool=hinted.tool, handler=handler, spill_after_chars=1000)
+    (cut,) = apply_tool_output_spill([small], storage=None, config=ToolOutputSpillConfig())
+    (excluded, _grep) = apply_tool_output_spill(
+        [small, _readback_binding()],
+        storage=_storage(tmp_path),
+        config=ToolOutputSpillConfig(exclude_tools=["search"]),
     )
 
     assert cast(ToolResult, await _call(inline)).content == {"ok": True, "result": "y" * 20_000}
-    truncated = cast(ToolResult, await _call(cut)).content
-    assert truncated["output_truncated"] is True and len(truncated["output_preview"]) == 1000
+    for bounded in (cut, excluded):
+        truncated = cast(ToolResult, await _call(bounded)).content
+        assert truncated["output_truncated"] is True and len(truncated["output_preview"]) == 1000
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A tool binding can raise its own output-spill threshold (`ToolBinding.spill_after_chars`); it never
+  lowers the configured one. Where spill cannot run, the binding's results are cut to it.
+
 ### Changed
 
 - **Codemode is now a mode.** With `[tools.codemode] enabled = true`, the tools a script can call are no longer
@@ -33,8 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   payloads, now including embedded-resource `blob` fields, are replaced by a marker.
 - Failed tool results now spill like successful ones, so a huge error no longer rides inline. The spilled result
   keeps `ok: false` and the failure's short fields (such as `error_code` and the repeated-failure signature).
-- A tool binding can now raise its own spill threshold (`ToolBinding.spill_after_chars`); it never lowers the
-  configured one.
 
 ## [0.34.0] - 2026-10-20
 
