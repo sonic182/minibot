@@ -1085,6 +1085,19 @@ def test_provider_advertises_supported_response_compression(monkeypatch: pytest.
     assert client._provider._default_headers()["Accept-Encoding"] == "gzip, deflate"
 
 
+def test_configured_accept_encoding_replaces_the_default_in_any_case(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minibot.llm.services import provider_registry
+
+    monkeypatch.setitem(provider_registry.LLM_PROVIDERS, "openai", _FakeProvider)
+    client = LLMClient(
+        LLMMConfig(provider="openai", api_key="secret", model="x", extra_headers={"accept-encoding": "identity"})
+    )
+
+    headers = client._provider._default_headers()
+    assert headers["accept-encoding"] == "identity"
+    assert "Accept-Encoding" not in headers
+
+
 @pytest.mark.asyncio
 async def test_generate_sends_prompt_cache_retention_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     from minibot.llm.services import provider_registry

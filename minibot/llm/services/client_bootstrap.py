@@ -60,7 +60,12 @@ def create_provider(config: LLMMConfig) -> tuple[Any, str]:
             provider_kwargs["base_url"] = normalized_base_url
         provider = provider_cls(**provider_kwargs)
 
-    extra_headers = {**PROVIDER_TRANSPORT_HEADERS, **(getattr(config, "extra_headers", None) or {})}
+    configured_headers = getattr(config, "extra_headers", None) or {}
+    configured_names = {name.lower() for name in configured_headers}
+    extra_headers = {
+        **{name: value for name, value in PROVIDER_TRANSPORT_HEADERS.items() if name.lower() not in configured_names},
+        **configured_headers,
+    }
     if provider_name == "openrouter" and config.openrouter.attribution_enabled:
         extra_headers.update(OPENROUTER_ATTRIBUTION_HEADERS)
     # llm_async has no constructor hook for extra headers; overriding the accessor covers
