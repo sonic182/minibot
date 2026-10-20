@@ -84,8 +84,7 @@ def build_incoming_files_text(prompt_text: str, incoming_files: Sequence[Incomin
     suggested_destination = suggest_persist_destination(first_path)
     lines.append(
         "For file-management requests, use the file tools "
-        "(move_file, delete_file, send_file, list_files), from a run_tools_script script if they are not "
-        "attached directly. "
+        "(move_file, delete_file, send_file, list_files), from a script if they are only reachable that way. "
         "Do NOT call self_insert_artifact unless user explicitly asks to inspect content."
     )
     if suggested_destination:

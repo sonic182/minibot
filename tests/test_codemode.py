@@ -362,21 +362,25 @@ def test_the_main_agent_sees_only_the_script_and_the_tools_scripts_cannot_call()
     registry = load_extensions(settings, EventBus(), entrypoint="console")
     tools = [*_fake_tools(), _binding("activate_skill", _slow_lookup), _binding("self_insert_artifact", _slow_lookup)]
 
-    def view(main_agent: MainAgentConfig) -> tuple[set[str], set[str]]:
+    def view(main_agent: MainAgentConfig) -> tuple[set[str], set[str], list[str]]:
         result = main_agent_tool_view(
             tools=tools,
             orchestration_config=OrchestrationConfig(main_agent=main_agent),
             agent_specs=[],
             derive_tools=lambda final: derive_extension_tools(final, settings=settings, extensions=registry),
         )
-        return {binding.tool.name for binding in result.tools}, {
-            binding.tool.name for binding in result.replaced_tools
-        }
+        offered = {binding.tool.name for binding in result.tools}
+        return offered, {binding.tool.name for binding in result.replaced_tools}, result.withheld_derived_tool_names
 
-    offered, replaced = view(MainAgentConfig())
+    offered, replaced, withheld = view(MainAgentConfig())
     assert offered == {"run_tools_script", "spawn_task", "coded_failure", "activate_skill", "self_insert_artifact"}
     assert replaced == {"slow_lookup", "flaky-tool.v2", "guarded_tool"}
-    assert view(MainAgentConfig(tools_deny=["run_tools_script"])) == ({binding.tool.name for binding in tools}, set())
+    assert withheld == []
+    assert view(MainAgentConfig(tools_deny=["run_tools_script"])) == (
+        {binding.tool.name for binding in tools},
+        set(),
+        ["run_tools_script"],
+    )
 
 
 @pytest.mark.asyncio

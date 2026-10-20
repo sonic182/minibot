@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A tool binding can raise its own output-spill threshold (`ToolBinding.spill_after_chars`); it never
+  lowers the configured one. Where spill cannot run, the binding's results are cut to it.
+
 ### Changed
 
 - **Codemode is now a mode.** With `[tools.codemode] enabled = true`, the tools a script can call are no longer
@@ -23,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new `max_timeout_seconds` (default 600).
 - Extensions: a tool deriver can return `DerivedTool(binding, replaces=...)` to take over the tools it was built
   from; `ExtensionRegistry.derive_tools` returns a `DerivedTools` with the bindings and what each replaces.
+
+### Fixed
+
+- MCP results are no longer cut to 12,000 characters per text block, in bridge and lazy mode. A result up to
+  25,000 characters stays inline (a web search result is about that size); a larger one is saved whole to the
+  managed spill file, so its end is no longer lost. Where spill cannot run (file storage off, the default, or no
+  read-back tool), the result is cut at 25,000 characters, with a preview marked `output_truncated`. Binary
+  payloads, now including embedded-resource `blob` fields, are replaced by a marker.
+- Failed tool results now spill like successful ones, so a huge error no longer rides inline. The spilled result
+  keeps `ok: false` and the failure's short fields (such as `error_code` and the repeated-failure signature).
 
 ## [0.34.0] - 2026-10-20
 

@@ -99,15 +99,45 @@ async def test_no_readback_tool_disables_spill(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_error_results_stay_inline(tmp_path) -> None:
-    failure = {"ok": False, "error": "x" * 20_000, "failure_signature": "abc"}
+async def test_a_large_failure_is_spilled_and_keeps_its_short_fields(tmp_path) -> None:
+    failure = {"ok": False, "error": "x" * 20_000, "failure_signature": "abc", "is_repeated_failure_candidate": True}
     wrapped = apply_tool_output_spill(
         [_binding("python_execute", failure), _readback_binding()],
         storage=_storage(tmp_path),
         config=ToolOutputSpillConfig(),
     )
     result = cast(ToolResult, await _call(wrapped[0]))
-    assert result.content == failure
+    assert result.content["output_storage"] == "managed_file"
+    assert result.content["ok"] is False
+    assert result.content["failure_signature"] == "abc"
+    assert result.content["is_repeated_failure_candidate"] is True
+    assert "error" not in result.content
+    assert (tmp_path / result.content["output_file_path"]).read_text(encoding="utf-8").count("x") == 20_000
+
+
+@pytest.mark.asyncio
+async def test_a_binding_threshold_keeps_larger_results_inline_and_cuts_them_without_spill(tmp_path) -> None:
+    async def handler(_payload: dict[str, Any], _context: ToolContext) -> Any:
+        return {"ok": True, "result": "y" * 20_000}
+
+    hinted = ToolBinding(
+        tool=Tool(name="search", description="s", parameters={}), handler=handler, spill_after_chars=25_000
+    )
+    (inline, _grep) = apply_tool_output_spill(
+        [hinted, _readback_binding()], storage=_storage(tmp_path), config=ToolOutputSpillConfig()
+    )
+    small = ToolBinding(tool=hinted.tool, handler=handler, spill_after_chars=1000)
+    (cut,) = apply_tool_output_spill([small], storage=None, config=ToolOutputSpillConfig())
+    (excluded, _grep) = apply_tool_output_spill(
+        [small, _readback_binding()],
+        storage=_storage(tmp_path),
+        config=ToolOutputSpillConfig(exclude_tools=["search"]),
+    )
+
+    assert cast(ToolResult, await _call(inline)).content == {"ok": True, "result": "y" * 20_000}
+    for bounded in (cut, excluded):
+        truncated = cast(ToolResult, await _call(bounded)).content
+        assert truncated["output_truncated"] is True and len(truncated["output_preview"]) == 1000
 
 
 @pytest.mark.asyncio

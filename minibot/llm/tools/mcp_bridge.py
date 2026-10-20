@@ -19,6 +19,10 @@ from minibot.llm.tools.schema_utils import (
     strict_object,
 )
 
+# Large enough for a web search result (Parallel's search MCP returns about 25,000 characters); larger results
+# go whole to the output-spill file.
+_INLINE_RESULT_CHARS = 25_000
+
 
 @dataclass(frozen=True)
 class MCPDynamicTool:
@@ -130,7 +134,7 @@ class MCPToolBridge:
                 }
             )
 
-        return ToolBinding(tool=llm_tool, handler=_handler)
+        return ToolBinding(tool=llm_tool, handler=_handler, spill_after_chars=_INLINE_RESULT_CHARS)
 
     def _tool_name(self, remote_tool_name: str) -> str:
         return f"{self._name_prefix}_{self._server_name}__{remote_tool_name}"
@@ -200,6 +204,7 @@ class MCPLazyToolBridge:
                     ),
                 ),
                 handler=self._handle_call_tool,
+                spill_after_chars=_INLINE_RESULT_CHARS,
             ),
         ]
 
@@ -523,6 +528,13 @@ def _drop_none_in_value(value: Any) -> Any:
 
 
 def _stringify_content_parts(content: list[Any]) -> str:
+    """Join MCP content parts into one text, keeping every text block whole.
+
+    Size is left to the output-spill wrapper (the bindings declare ``spill_after_chars``): it keeps results up to
+    ``_INLINE_RESULT_CHARS`` inline, saves larger ones whole to a managed file, and cuts them where it cannot
+    spill. Cutting here would lose the end of the result before it could be saved. Binary payloads (images and
+    ``data``/``base64``/``bytes``/``blob`` fields) are replaced by a marker.
+    """
     rendered: list[str] = []
     for part in content:
         if isinstance(part, dict):
@@ -532,19 +544,12 @@ def _stringify_content_parts(content: list[Any]) -> str:
                 rendered.append(f"[image payload omitted ({mime_type})]")
                 continue
             if "text" in part:
-                rendered.append(_truncate_text(str(part.get("text", ""))))
+                rendered.append(str(part.get("text", "")))
                 continue
             rendered.append(json.dumps(_redact_large_payload_fields(part), ensure_ascii=True))
             continue
-        rendered.append(_truncate_text(str(part)))
+        rendered.append(str(part))
     return "\n".join(rendered)
-
-
-def _truncate_text(text: str, *, max_chars: int = 12_000) -> str:
-    if len(text) <= max_chars:
-        return text
-    remaining = len(text) - max_chars
-    return f"{text[:max_chars]}\n...[truncated {remaining} chars]"
 
 
 def _redact_large_payload_fields(value: Any) -> Any:
@@ -553,7 +558,7 @@ def _redact_large_payload_fields(value: Any) -> Any:
         for key, nested_value in value.items():
             if (
                 isinstance(nested_value, str)
-                and key.lower() in {"data", "base64", "bytes"}
+                and key.lower() in {"data", "base64", "bytes", "blob"}
                 and len(nested_value) > 256
             ):
                 sanitized[key] = f"<omitted {len(nested_value)} chars>"
@@ -562,8 +567,6 @@ def _redact_large_payload_fields(value: Any) -> Any:
         return sanitized
     if isinstance(value, list):
         return [_redact_large_payload_fields(item) for item in value]
-    if isinstance(value, str):
-        return _truncate_text(value)
     return value
 
 
