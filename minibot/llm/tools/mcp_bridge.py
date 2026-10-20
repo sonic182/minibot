@@ -523,6 +523,12 @@ def _drop_none_in_value(value: Any) -> Any:
 
 
 def _stringify_content_parts(content: list[Any]) -> str:
+    """Join MCP content parts into one text, keeping every text block whole.
+
+    Size is left to the output-spill wrapper, which saves an oversized result to a managed file; cutting here
+    would lose the end of the result before it could be saved. Binary payloads (images, ``data``/``base64``
+    fields) are still replaced by a marker.
+    """
     rendered: list[str] = []
     for part in content:
         if isinstance(part, dict):
@@ -532,19 +538,12 @@ def _stringify_content_parts(content: list[Any]) -> str:
                 rendered.append(f"[image payload omitted ({mime_type})]")
                 continue
             if "text" in part:
-                rendered.append(_truncate_text(str(part.get("text", ""))))
+                rendered.append(str(part.get("text", "")))
                 continue
             rendered.append(json.dumps(_redact_large_payload_fields(part), ensure_ascii=True))
             continue
-        rendered.append(_truncate_text(str(part)))
+        rendered.append(str(part))
     return "\n".join(rendered)
-
-
-def _truncate_text(text: str, *, max_chars: int = 12_000) -> str:
-    if len(text) <= max_chars:
-        return text
-    remaining = len(text) - max_chars
-    return f"{text[:max_chars]}\n...[truncated {remaining} chars]"
 
 
 def _redact_large_payload_fields(value: Any) -> Any:
@@ -562,8 +561,6 @@ def _redact_large_payload_fields(value: Any) -> Any:
         return sanitized
     if isinstance(value, list):
         return [_redact_large_payload_fields(item) for item in value]
-    if isinstance(value, str):
-        return _truncate_text(value)
     return value
 
 

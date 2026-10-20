@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP results are no longer cut to 12,000 characters per text block before the output spill runs, in bridge and
+  lazy mode. An oversized result is saved whole to the managed spill file, so its end is no longer lost; binary
+  payloads are still replaced by a marker.
+
 ### Changed
 
 - **Codemode is now a mode.** With `[tools.codemode] enabled = true`, the tools a script can call are no longer
