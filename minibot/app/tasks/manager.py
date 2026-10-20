@@ -17,7 +17,7 @@ from aiopipe import aioduplex
 from minibot.app.agent_policies import is_retargeted, resolve_delegation_target
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
-from minibot.app.tasks.worker import task_message_text
+from minibot.app.tasks.worker import task_message_line, task_message_text
 from minibot.app.token_limits_autoconfig import ensure_model_limits
 from minibot.app.tool_approval import request_tool_approval
 from minibot.config.schema import Settings
@@ -138,6 +138,7 @@ class Task:
     semaphore: asyncio.Semaphore
     lease_token: str | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    writer: Any = None
 
 
 class TaskManager:
@@ -338,6 +339,14 @@ class TaskManager:
             await task.reader_task
         if self._tasks.get(task_id) is task:
             await self._cancel_task(task_id, task)
+        return True
+
+    def send_message(self, task_id: str, text: str) -> bool:
+        task = self._tasks.get(task_id)
+        if task is None or task.writer is None:
+            return False
+        task.writer.write(task_message_line(text))
+        self._logger.info("message sent to running task", extra={"task_id": task_id})
         return True
 
     def active(self) -> list[Task]:
@@ -547,58 +556,75 @@ class TaskManager:
             # result publishing carry around.
             wire_payload = {**payload, "secrets": self._secrets} if self._secrets is not None else payload
             writer_pipe.write(json.dumps(wire_payload).encode() + b"\n")
-            while True:
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    raise TimeoutError
+            registered = self._tasks.get(str(payload["task_id"]))
+            if registered is not None:
+                registered.writer = writer_pipe
+            try:
+                return await self._read_worker_events(
+                    reader_pipe, writer_pipe, payload, deadline, lease_token, lease_timeout_seconds
+                )
+            finally:
+                if registered is not None and registered.writer is writer_pipe:
+                    registered.writer = None
+
+    async def _read_worker_events(
+        self,
+        reader_pipe: Any,
+        writer_pipe: Any,
+        payload: dict[str, Any],
+        deadline: float,
+        lease_token: str | None,
+        lease_timeout_seconds: int,
+    ) -> dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError
+            try:
+                raw = await asyncio.wait_for(reader_pipe.readline(), timeout=remaining)
+            except ValueError:
+                return _protocol_failure("worker sent an oversized message")
+            if not raw:
+                return {"status": TaskStatus.FAILED.value, "error": "worker closed without a result"}
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError:
+                return _protocol_failure("worker returned invalid JSON")
+            if event.get("type") == "progress":
+                progress = event.get("progress")
+                if self._task_repository is not None and lease_token is not None and isinstance(progress, dict):
+                    task_id = str(payload["task_id"])
+                    renewed = await self._task_repository.renew_execution(task_id, lease_token, lease_timeout_seconds)
+                    if not renewed:
+                        raise _LeaseLostError
+                    if not await self._task_repository.update_progress(task_id, lease_token, progress):
+                        raise _LeaseLostError
+                continue
+            if event.get("type") == "approval_request":
+                approved = False
                 try:
-                    raw = await asyncio.wait_for(reader_pipe.readline(), timeout=remaining)
-                except ValueError:
-                    return _protocol_failure("worker sent an oversized message")
-                if not raw:
-                    return {"status": TaskStatus.FAILED.value, "error": "worker closed without a result"}
-                try:
-                    event = json.loads(raw)
-                except json.JSONDecodeError:
-                    return _protocol_failure("worker returned invalid JSON")
-                if event.get("type") == "progress":
-                    progress = event.get("progress")
-                    if self._task_repository is not None and lease_token is not None and isinstance(progress, dict):
-                        task_id = str(payload["task_id"])
-                        renewed = await self._task_repository.renew_execution(
-                            task_id, lease_token, lease_timeout_seconds
-                        )
-                        if not renewed:
-                            raise _LeaseLostError
-                        if not await self._task_repository.update_progress(task_id, lease_token, progress):
-                            raise _LeaseLostError
-                    continue
-                if event.get("type") == "approval_request":
-                    approved = False
-                    try:
-                        approved = await request_tool_approval(
-                            self._event_bus,
-                            tool_name=str(event.get("tool_name") or ""),
-                            arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else {},
-                            channel=event.get("channel") if isinstance(event.get("channel"), str) else None,
-                            chat_id=event.get("chat_id") if isinstance(event.get("chat_id"), int) else None,
-                            detail=event.get("detail") if isinstance(event.get("detail"), str) else None,
-                            timeout_seconds=min(self._approval_timeout_seconds, max(deadline - loop.time(), 0)),
-                            supports_tool_approval=self._capabilities_for(event.get("channel")).supports_tool_approval,
-                            requester_user_id=payload.get("user_id")
-                            if isinstance(payload.get("user_id"), int)
-                            else None,
-                        )
-                    except Exception:
-                        self._logger.exception("tool approval request failed", extra={"task_id": payload["task_id"]})
-                    reply = {"type": "approval_result", "approval_id": event.get("approval_id"), "approved": approved}
-                    writer_pipe.write(json.dumps(reply).encode() + b"\n")
-                    continue
-                if event.get("type") == "result":
-                    return event
-                if "type" not in event:
-                    return _legacy_result_event(event)
-                return _protocol_failure("worker returned an invalid message")
+                    approved = await request_tool_approval(
+                        self._event_bus,
+                        tool_name=str(event.get("tool_name") or ""),
+                        arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else {},
+                        channel=event.get("channel") if isinstance(event.get("channel"), str) else None,
+                        chat_id=event.get("chat_id") if isinstance(event.get("chat_id"), int) else None,
+                        detail=event.get("detail") if isinstance(event.get("detail"), str) else None,
+                        timeout_seconds=min(self._approval_timeout_seconds, max(deadline - loop.time(), 0)),
+                        supports_tool_approval=self._capabilities_for(event.get("channel")).supports_tool_approval,
+                        requester_user_id=payload.get("user_id") if isinstance(payload.get("user_id"), int) else None,
+                    )
+                except Exception:
+                    self._logger.exception("tool approval request failed", extra={"task_id": payload["task_id"]})
+                reply = {"type": "approval_result", "approval_id": event.get("approval_id"), "approved": approved}
+                writer_pipe.write(json.dumps(reply).encode() + b"\n")
+                continue
+            if event.get("type") == "result":
+                return event
+            if "type" not in event:
+                return _legacy_result_event(event)
+            return _protocol_failure("worker returned an invalid message")
 
     async def _cancel_task(self, task_id: str, task: Task) -> None:
         self._logger.info("task cancelled before reader cleanup", extra={"task_id": task_id})

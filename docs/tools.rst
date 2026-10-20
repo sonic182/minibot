@@ -183,6 +183,10 @@ Tool Surface
      - ``[tasks]``
      - Cancel an active background task by ID.
    * - Async tasks
+     - ``message_task``
+     - ``[tasks]``
+     - Send an instruction to a running background task; the worker reads it between steps.
+   * - Async tasks
      - ``list_tasks``
      - ``[tasks]``
      - List persisted background tasks and their terminal state.

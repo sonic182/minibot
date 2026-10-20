@@ -22,10 +22,16 @@ class _TaskManagerStub:
         self.cancel_calls: list[str] = []
         self.cancel_result = False
         self.active_tasks: list[Any] = []
+        self.sent: list[tuple[str, str]] = []
+        self.running: set[str] = set()
 
     async def cancel(self, task_id: str) -> bool:
         self.cancel_calls.append(task_id)
         return self.cancel_result
+
+    def send_message(self, task_id: str, text: str) -> bool:
+        self.sent.append((task_id, text))
+        return task_id in self.running
 
     def active(self) -> list[Any]:
         return list(self.active_tasks)
@@ -397,11 +403,15 @@ async def test_cancel_and_get_task_use_the_full_id_resolved_from_a_prefix() -> N
     bindings = {binding.tool.name: binding for binding in tools.bindings()}
     context = ToolContext(channel="console", owner_id="primary")
 
+    manager.running.add(full_id)
     await bindings["cancel_task"].handler({"task_id": "a0dbc23f"}, context)
     await bindings["get_task"].handler({"task_id": "a0dbc23f"}, context)
+    messaged = await bindings["message_task"].handler({"task_id": "a0dbc23f", "message": "wrap up"}, context)
 
     assert manager.cancel_calls == [full_id]
     assert repository.events_calls == [full_id]
+    assert manager.sent == [(full_id, "wrap up")]
+    assert messaged == {"task_id": full_id, "delivered": True}
 
 
 @pytest.mark.asyncio
@@ -417,11 +427,14 @@ async def test_cancel_and_get_task_report_an_ambiguous_prefix() -> None:
 
     cancelled = await bindings["cancel_task"].handler({"task_id": "b1c2d3e4"}, context)
     fetched = await bindings["get_task"].handler({"task_id": "b1c2d3e4"}, context)
+    messaged = await bindings["message_task"].handler({"task_id": "b1c2d3e4", "message": "hi"}, context)
 
     assert cancelled["cancelled"] is False
     assert fetched["found"] is False
-    assert "ambiguous" in cancelled["reason"] and "ambiguous" in fetched["reason"]
+    assert messaged["delivered"] is False
+    assert all("ambiguous" in result["reason"] for result in (cancelled, fetched, messaged))
     assert manager.cancel_calls == []
+    assert manager.sent == []
 
 
 @pytest.mark.asyncio
@@ -575,3 +588,35 @@ async def test_spawn_task_without_a_chat_gets_no_history_session() -> None:
     await spawn.handler({"prompt": "Send it", "agent_name": "mailer"}, ToolContext(channel="console", user_id=2))
 
     assert producer.enqueued[0].history_session is None
+
+
+@pytest.mark.asyncio
+async def test_message_task_reports_a_task_that_is_not_running_here() -> None:
+    manager = _TaskManagerStub()
+    bindings = _build_tools(_ProducerStub(), manager)
+
+    result = await bindings["message_task"].handler(
+        {"task_id": "t-done", "message": "wrap up"}, ToolContext(channel="console")
+    )
+
+    assert result == {"task_id": "t-done", "delivered": False, "reason": "task is not running in this process"}
+
+
+@pytest.mark.asyncio
+async def test_message_task_reports_a_finished_task_without_trying_to_deliver() -> None:
+    record = TaskRecord(request=TaskRequest(task_id="t-done", channel="console", prompt="p"), status=TaskStatus.DONE)
+
+    class _Repository:
+        async def get(self, task_id: str, owner_id: str | None = None) -> TaskRecord | None:
+            return record
+
+    manager = _TaskManagerStub()
+    tools = TaskTools(cast(Any, _ProducerStub()), cast(Any, manager), task_repository=cast(Any, _Repository()))
+    bindings = {binding.tool.name: binding for binding in tools.bindings()}
+
+    result = await bindings["message_task"].handler(
+        {"task_id": "t-done", "message": "wrap up"}, ToolContext(channel="console", owner_id="primary")
+    )
+
+    assert result == {"task_id": "t-done", "delivered": False, "reason": "task already done"}
+    assert manager.sent == []

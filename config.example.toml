@@ -634,7 +634,7 @@ native = true
 # install = true
 
 # Async task system. Gates both the task consumer and the
-# spawn_task / delegate / cancel_task / list_tasks / get_task tools. `spawn_task` and `delegate` are also the only
+# spawn_task / delegate / cancel_task / message_task / list_tasks / get_task tools. `spawn_task` and `delegate` are also the only
 # ways to hand work to a specialist agent, so turning this off disables multi-agent orchestration.
 [tasks]
 enabled = true

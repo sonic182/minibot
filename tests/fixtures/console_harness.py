@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 from minibot.adapters.container.app_container import AppContainer
-from minibot.adapters.messaging.console.service import ConsoleService
+from minibot.adapters.messaging.console.service import ConsoleService, ConsoleSink
 from minibot.app.dispatcher import Dispatcher
 from tests.fixtures.llm.mock_client import ScriptedLLMFactory
 
@@ -125,14 +127,16 @@ def write_agent(
     )
 
 
-async def run_console_turn(
+@asynccontextmanager
+async def console_session(
     *,
     config_path: Path,
     llm_factory: ScriptedLLMFactory,
-    text: str,
     chat_id: int = 999,
     user_id: int = 777,
-):
+    console: ConsoleSink | None = None,
+) -> AsyncIterator[ConsoleService]:
+    """A console channel over the real container, dispatcher and extension services."""
     reset_container()
     AppContainer.configure(config_path)
     await AppContainer.initialize_storage()
@@ -154,7 +158,7 @@ async def run_console_turn(
             extensions=AppContainer.get_extensions(),
             managed_storage=AppContainer.get_file_storage(),
         )
-        console_service = ConsoleService(bus, chat_id=chat_id, user_id=user_id)
+        console_service = ConsoleService(bus, chat_id=chat_id, user_id=user_id, console=console)
         await dispatcher.start()
         # The task queue's schema is created by the extension's own service, exactly as the daemon
         # does it; without this an enqueue hits "no such table: tasks".
@@ -162,10 +166,24 @@ async def run_console_turn(
         await extensions.start()
         await console_service.start()
         try:
-            await console_service.publish_user_message(text)
-            return await console_service.wait_for_response(3.0)
+            yield console_service
         finally:
             await console_service.stop()
             await extensions.stop()
             await dispatcher.stop()
             reset_container()
+
+
+async def run_console_turn(
+    *,
+    config_path: Path,
+    llm_factory: ScriptedLLMFactory,
+    text: str,
+    chat_id: int = 999,
+    user_id: int = 777,
+):
+    async with console_session(
+        config_path=config_path, llm_factory=llm_factory, chat_id=chat_id, user_id=user_id
+    ) as console_service:
+        await console_service.publish_user_message(text)
+        return await console_service.wait_for_response(3.0)

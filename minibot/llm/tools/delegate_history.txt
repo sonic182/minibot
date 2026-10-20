@@ -21,4 +21,4 @@ Provide:
 
 Limits: at most three delegations per turn and three chained turns deep. Past either limit the call is rejected with `task:continuation_limit`: answer the user with what you have, or use `spawn_task` if it is available. The result reports `continue_turn`; when it is false (the operator's fallback past those limits) the worker's answer goes straight to the user instead of coming back to you.
 
-This returns a task_id immediately, not the answer: the worker runs asynchronously and its result, including any files it produced, reaches you as a new message once it finishes. Never invent the outcome while you wait for it. Use get_task to retrieve it, list_tasks to see what is running, and cancel_task to stop one.
+This returns a task_id immediately, not the answer: the worker runs asynchronously and its result, including any files it produced, reaches you as a new message once it finishes. Never invent the outcome while you wait for it. Use get_task to retrieve it, list_tasks to see what is running, message_task to steer one that is still running, and cancel_task to stop one.

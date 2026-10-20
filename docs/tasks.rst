@@ -63,6 +63,11 @@ Tool Surface
        three chained turns deep. See :doc:`agents`.
    * - ``cancel_task``
      - Cancel an active task by ``task_id``.
+   * - ``message_task``
+     - Send a ``message`` to a task that is still running, without stopping it: narrow its scope, add a
+       missing fact, or tell it to wrap up. The worker folds it in as an instruction between steps (a tool
+       call in progress finishes first). Returns ``delivered = false`` when the task is not running in this
+       process: not started yet, already finished, or leased by another consumer.
    * - ``list_tasks``
      - List the owner's tasks, optionally filtered by ``status`` (up to 100).
    * - ``get_task``

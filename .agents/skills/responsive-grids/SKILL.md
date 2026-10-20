@@ -1,200 +1,91 @@
 ---
 name: responsive-grids
-description: Repo-local guidance for building and reviewing responsive layouts in MiniBot's built-in web UI. Use this skill when adding or fixing grid/flex layouts in the Jinja2 templates and stylesheet under minibot/adapters/http, especially card grids, status panels, tables of long identifiers, and any layout that must reflow from phone to desktop without horizontal overflow.
+description: Build and review responsive layouts in MiniBot's built-in web UI (Jinja2 templates and dashboard.css under minibot/adapters/http). Use when adding or changing a page template or stylesheet rule, card grids, status panels, tables of long identifiers, or fixing horizontal overflow on phones. Not for route handlers, registering a page (minibot-dev), or other Python code.
 ---
 
 # Responsive Grids
 
-## Overview
+The web UI is server-rendered Jinja2 plus one hand-written, mobile-first stylesheet: no Sass, no
+build step, no CSS framework, no utility classes. Under `minibot/adapters/http/`:
 
-MiniBot's web UI is server-rendered Jinja2 plus one hand-written stylesheet. There is no Sass, no
-build step, no CSS framework, and no utility classes. Everything lives in three places:
+- `templates/base.html` holds the navbar, `.shell`, sidebar and `<main>`. Every page extends it
+  and fills `{% block content %}`; page JS goes in `{% block scripts %}` (rendered last).
+- `static/dashboard.css` is the whole stylesheet. It has one width breakpoint,
+  `@media (min-width: 640px)`.
+- `static/*.js` holds small vanilla scripts loaded by `base.html` (`nav.js`, `pager.js`,
+  `confirm.js`) and the chat page's `chat.js`. Third-party code is vendored in `static/vendor/`,
+  never a CDN; upgrade it per `static/vendor/README.md`.
+- `server.py` `render()` (exported as `minibot.adapters.http.render`) renders these templates for
+  core routes and extension pages alike, so these rules apply to `mb.add_page` pages too. Wiring
+  the route and menu entry belongs to the `minibot-dev` skill.
 
-- `minibot/adapters/http/templates/` — `base.html` holds the navbar, sidebar and `<main>`; every page
-  does `{% extends "base.html" %}` and fills `{% block content %}`.
-- `minibot/adapters/http/static/dashboard.css` — the whole stylesheet, mobile-first.
-- `minibot/adapters/http/static/nav.js` — the sidebar toggle, vanilla JS. Keep JS at this size.
+Repo-wide rules (git, lint, comments, docs) are owned by `AGENTS.md` and the `minibot-dev` skill.
 
-Write semantic classes for the page you are building. Do not add a utility-class system.
+## Core rules
+
+- **Mobile first.** Base rules are the phone layout; desktop overrides go only in the existing
+  640px block.
+- **Never a bare `1fr`.** Write `minmax(0, 1fr)`.
+- **Children must shrink.** `min-width: 0` on every text-bearing grid/flex item;
+  `overflow-wrap: anywhere` on long identifiers.
+- **Every table sits in `<div class="table-wrap">`.** In a table, undo `overflow-wrap: anywhere`
+  at desktop.
+- **Space sections with the `<main>` grid gap**, never per-section margins.
+- **Use the `:root` tokens:** `--gap` (1rem, layout gap and box padding), `--gap-sm` (0.5rem,
+  inside a component), `--radius` (0.6rem) / `--radius-sm` (0.4rem), `--border` (`#8886`),
+  `--surface` / `--surface-strong` (`color-mix` of `currentColor`). Do not use a radius token as
+  spacing or a spacing token as a font size. Keep true one-offs literal (`0.15rem` chip padding,
+  `0.35rem` chip gap); promote a literal to a token once it repeats in three or more rules.
+- **Inherit the theme.** `:root` sets `color-scheme: light dark`; do not hardcode text or
+  background colors. The only literal colors are `--border`, the `.badge` green (`#2a2`), the
+  error red (`#c33`) and alpha-only shadows and backdrops. Reuse them; add none.
+- **Semantic classes only.** One container class for the layout, one per item, inner classes only
+  where a part needs its own shrink or alignment. Delete a class when no rule uses it.
+- **Autoescape stays on.** Do not apply `| safe` to stored values.
+- **Guard page JS** with the same `{% if %}` as the markup it drives, so the empty state does not
+  throw.
 
 ## Workflow
 
-1. Identify the content type: repeating cards, a fixed set of panels, or tabular data.
-2. Pick the primitive (below), mobile-first: the base rules are the phone layout.
-3. Make the children able to shrink — this is where almost every bug here comes from.
-4. Add overrides inside the single `@media (min-width: 640px)` block only if the content needs them.
-5. Redeploy and check both widths (see Verification).
+1. Find the existing page or selector closest to what you need (`rg -n '<selector>'` over
+   `minibot/adapters/http`) and match it.
+2. Classify the content and pick the primitive:
+   - repeating items of unknown length: flex chips (`.nodes`);
+   - a fixed, meaningful set of boxes: a flex column, then `repeat(N, minmax(0, 1fr))` at 640px
+     (`.panels`, `.status-grid`);
+   - tabular identifiers: `.table-wrap`, plus the stacked-card pattern of `.edges` when a phone
+     must read every column.
 
-## Design tokens
-
-Defined in `:root` at the top of `dashboard.css`:
-
-- `--gap: 1rem` — the standard layout gap and box padding.
-- `--gap-sm: 0.5rem` — tight gaps inside a component.
-- `--radius: 0.5rem` / `--radius-sm: 0.4rem` — box and chip corners.
-- `--border: #8886` — every border and separator. Alpha-based so it works in both themes.
-
-Use tokens for layout spacing and radii. Keep genuinely one-off values inline (`0.15rem` padding on a
-chip, `1.2rem` on the burger icon). Never use a radius token as spacing or a spacing token as a font
-size. If a literal starts repeating across three or more rules, promote it to a token.
-
-`color-scheme: light dark` is set on `:root`; the page inherits the reader's theme. Do not hardcode
-background or text colors — only `--border` and the one status green (`.badge`) are literal.
-
-## Choose the primitive
-
-**Repeating collection of unknown length** — flex chips, not a grid. Node names, tags and identifiers
-here vary from 8 to 40 characters, and fixed grid tracks either clip them or widen the page:
-
-```css
-.nodes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-```
-
-If you truly need a grid for a repeating collection, guard the track against narrow screens:
-
-```css
-grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
-```
-
-The `min(100%, …)` is what stops a single tile from being wider than the viewport.
-
-**Fixed, meaningful set of boxes** — an explicit column count, but always `minmax(0, 1fr)`:
-
-```css
-@media (min-width: 640px) {
-  .status-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-```
-
-A bare `1fr` means `minmax(auto, 1fr)`, and that `auto` minimum refuses to shrink below the content.
-One long unbreakable token then stretches the column past the viewport. Never write a bare `1fr`.
-
-**Page shell** — one sidebar column plus content:
-
-```css
-.shell {
-  display: grid;
-  grid-template-columns: 14rem minmax(0, 1fr);
-  align-items: start;
-}
-```
-
-**Section spacing** — `<main>` is itself a grid with `gap: var(--gap)`. Do not add `margin-bottom` to
-sections to space them apart; the parent gap already handles it, uniformly, at every width.
-
-## Make children shrink correctly
-
-Layout bugs here are caused by the children, not the container.
-
-- Put `min-width: 0` on any grid or flex item that holds text. The default is `min-width: auto`,
-  which will not shrink below its content. `.panel`, `.status-card`, `.message` and `.entry` all
-  carry it.
-- Put `overflow-wrap: anywhere` on long unbreakable strings. This UI is full of them: extension
-  module paths (`minibot.extensions.integrations.rabbitmq`), graph nodes
-  (`market:agencias_inmobiliarias_caracas`), session ids (`telegram:100864173`), KV titles.
-- Message and entry bodies use `<pre>` with `white-space: pre-wrap; overflow-wrap: anywhere;` so
-  stored text keeps its newlines without escaping the card.
-
-## Tables
-
-Tables of identifiers are the hardest case. The pattern in `.edges` is the reference: stacked cards
-on a phone, real columns on desktop, driven by `data-label` attributes in the template.
-
-```html
-<td data-label="Source">{{ edge.source }}</td>
-```
-
-```css
-/* mobile: every cell is its own labelled row */
-.edges, .edges tbody, .edges tr, .edges td { display: block; width: 100%; }
-.edges thead { display: none; }
-.edges td::before { content: attr(data-label) ": "; }
-
-@media (min-width: 640px) {
-  .edges { display: table; }
-  .edges thead { display: table-header-group; }
-  .edges td { display: table-cell; overflow-wrap: normal; white-space: nowrap; }
-  .table-wrap .edges { width: auto; }
-}
-```
-
-Two traps this encodes, both hit in real bugs:
-
-- `overflow-wrap: anywhere` must be **undone** at desktop. It drops each column's min-content width
-  to a single character, so the auto table layout starves every column after the first and text
-  wraps letter by letter. Pair the reset with `white-space: nowrap` and let the wrapper scroll.
-- The mobile `width: 100%` leaks into desktop and stretches the table, dumping all slack into the
-  first column. Reset it — and note the selector needs `.table-wrap .edges` to outrank
-  `.table-wrap table`.
-
-Wrap every table in `<div class="table-wrap">`; it owns `overflow-x: auto`, so a wide table scrolls
-by itself instead of widening the page. Generic table styling hangs off `.table-wrap`, so a table
-gets it just by being wrapped — do not add a per-page class for that.
-
-## Template guidance
-
-- One container class for the layout, one class per item, inner classes only where a part needs its
-  own shrink or alignment behavior.
-- Do not add a class that no rule uses; if you remove the rules, remove the class.
-- Templates are plain HTML plus Jinja. Escaping is automatic — do not reach for `| safe` on values
-  that came out of the database.
-- Keep the page inside `{% block content %}`; the navbar, sidebar and `<main>` grid come from
-  `base.html` and should not be re-declared per page.
-- Page-specific JS goes in `{% block scripts %}` (rendered last, before `</body>`), not in a new
-  static file. Guard it with the same `{% if %}` as the markup it drives, or it will throw on the
-  empty state.
-- A page added by an extension renders through `minibot.adapters.http.render` and extends the same
-  `base.html`, so these conventions apply to extension pages too.
+   Read [references/LAYOUT_RECIPES.md](references/LAYOUT_RECIPES.md) for the CSS of each
+   primitive, the table traps and the troubleshooting table.
+3. Make the children shrink (core rules), then add desktop overrides only where content needs them.
+4. Review the change against the checklist, then verify.
 
 ## Review checklist
 
-- Does every multi-column grid use `minmax(0, 1fr)` rather than a bare `1fr`?
-- Does every text-bearing grid/flex item have `min-width: 0`?
-- Do long identifiers have `overflow-wrap: anywhere`?
-- Is any `overflow-wrap: anywhere` inside a table reset at the desktop breakpoint?
-- Is every table inside `.table-wrap`?
-- Is spacing coming from `--gap` / `--gap-sm` and radii from `--radius` / `--radius-sm`?
-- Are sections spaced by the `<main>` grid gap rather than per-section margins?
-- Are colors limited to `--border` and theme-inherited defaults?
+- Every multi-column track uses `minmax(0, 1fr)`, and every repeating grid guards its minimum
+  with `min(100%, …)`.
+- Every text-bearing grid/flex item has `min-width: 0`; long identifiers have
+  `overflow-wrap: anywhere`, reset inside tables at desktop.
+- Every table is inside `.table-wrap`; no per-page class duplicates its styling.
+- Spacing, radii and backgrounds come from the tokens; colors are limited to the literals above.
+- No new width breakpoint, utility class, unused class, `| safe`, inline color or CDN script.
 
-## Common fixes
+## Verify
 
-Page scrolls sideways on a phone:
-
-- Find the widest element, not the page. Usually a grid with fixed tracks or an item without
-  `min-width: 0`.
-- Swap fixed tracks for flex chips, or use `minmax(min(100%, Npx), 1fr)`.
-- Add `overflow-wrap: anywhere` to the long string inside it.
-
-Table text wraps one character per line on desktop:
-
-- An `overflow-wrap: anywhere` from the mobile rules is still active. Reset it to `normal` in the
-  media query and add `white-space: nowrap`.
-
-A column is enormous and the rest are squeezed:
-
-- The table is stretched to `width: 100%` while the other columns can collapse. Reset the width so
-  the table hugs its content and let `.table-wrap` scroll.
-
-## Verification
-
-`dashboard.css` is bind-mounted via `./minibot:/app/minibot`, but the daemon reads templates through
-a cached Jinja environment, so redeploy after changes:
-
-```
-docker compose up -d --force-recreate minibot
-curl -s -u <user>:<pass> http://minibot.minipc.local/static/dashboard.css | head
-```
-
-Then check the page itself at both widths. Under `runtime.environment = "development"` (or `"debug"`)
-the server serves `dashboard.css` with `Cache-Control: no-store`, so a normal reload picks up edits.
-In `"production"` the response carries no `Cache-Control` and the browser caches it aggressively, so
-verify there in a private window or with an empty-cache reload — otherwise you will be looking at the
-previous stylesheet and think the fix did nothing.
+1. If the change affects rendered markup, run the test file for that page:
+   `tests/test_http_server.py` (dashboard, history), `tests/test_web_chat.py`, or
+   `tests/test_<name>_page.py` (memory, scheduled, task, MCP); the graph page has none. Writing
+   new tests is owned by the `minibot-testing` skill.
+2. Load the page at phone width (~375px) and above 640px. Nothing may scroll sideways except
+   inside `.table-wrap`.
+3. In Docker, `docker-compose.yml` bind-mounts `./minibot` at `/app/minibot`, where the package is
+   installed, so CSS and template edits reach the running container: static files are served from
+   disk and Jinja reloads changed templates. Run `docker compose restart minibot` only after a
+   Python change, or when an edit still does not show.
+4. Static caching depends on `[runtime] environment`. With `"development"` (the default) or
+   `"debug"`, static assets are sent with `Cache-Control: no-store`. With any other value the
+   browser caches them normally, so use a private window or an empty-cache reload, or you will
+   be looking at the old stylesheet. Check what the server is serving with
+   `curl -s -u <user>:<pass> http://<host>:<port>/static/dashboard.css | head`; send a bearer
+   token instead when the server is configured with one.

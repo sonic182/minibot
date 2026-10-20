@@ -44,7 +44,7 @@ Before:
 
 After:
 - Keep the implementation in its adapter package.
-- Let `minibot.extensions.<name>.register(mb)` select config and add the existing service, tool, or subscription.
+- Let `minibot.extensions.<group>.<name>.register(mb)` (`channels`, `integrations`, `services`, `tools`) select config and add the existing service, tool, or subscription.
 - Gate channel-service construction on `mb.entrypoint == "daemon"`; `ExtensionRegistry` owns its lifecycle.
 
 ## Protect `shared`

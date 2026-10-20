@@ -38,7 +38,7 @@ result reports ``"continue_turn": false``. The default, ``"auto"``, leaves the c
 tool it calls. The removed ``continue_turn_mode = "always"`` is now ``delegation_mode = "delegate"``, and
 ``continue_turn_default`` is gone. A rate-limit retry notice still goes straight to the user, and a
 delegated task that is cancelled does not report back. Use ``get_task`` to retrieve a result, ``list_tasks``
-to see what is running, and ``cancel_task`` to stop one.
+to see what is running, ``message_task`` to steer one that is still running, and ``cancel_task`` to stop one.
 
 Two switches decide whether any of this exists. ``[orchestration.specialists].enabled`` (default
 ``true``) is the one for specialists themselves: with it off, the roster, ``fetch_agent_info`` and

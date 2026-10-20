@@ -1,25 +1,24 @@
 ---
 name: python-hex-review
-description: Review and refactor Python code to preserve Minibot's mini hex architecture. Use when checking layer boundaries across `minibot.core`, `minibot.app`, `minibot.adapters` and `minibot.llm`, dependency direction, async orchestration, or when a refactor risks moving logic into the wrong layer.
+description: Review and refactor MiniBot Python code to preserve its mini hex architecture. Use when checking layer boundaries and import direction across minibot.core/app/adapters/llm, async orchestration, or a refactor that may move logic into the wrong layer. Not for adding features (minibot-dev).
 ---
 
 # Python Hex Review
 
-Review and refactor Minibot Python code without weakening its architecture.
-
-Start with the `minibot-dev` skill if you are *adding* something rather than reviewing it.
+Review and refactor MiniBot Python code without weakening its architecture. If you are *adding*
+something rather than reviewing it, start with the `minibot-dev` skill.
 
 Use this skill when the task involves:
 - reviewing Python changes for architectural regressions
-- moving logic between `core`, `app`, `adapters`, `llm`, or `shared`
+- moving logic between `core`, `app`, `adapters`, `llm`, `config`, `rag` or `shared`
 - validating import direction and boundary ownership
-- reviewing bundled or third-party Python extensions, their tools, event handlers, and services
+- reviewing bundled or third-party extensions, their tools, event handlers, and services
 - checking async correctness on I/O-heavy paths
 - tightening a handler, service, adapter, or provider integration
 
 ## Priorities
 
-1. Preserve Minibot's current mini hex layout.
+1. Preserve MiniBot's current mini hex layout.
 2. Preserve behavior unless the user requested a behavior change.
 3. Prefer the smallest refactor that restores a boundary.
 4. Keep I/O paths async-friendly.
@@ -28,10 +27,17 @@ Use this skill when the task involves:
 ## Workflow
 
 1. Identify the touched files and classify each one by layer.
-2. Read [references/HEX_RULES.md](references/HEX_RULES.md) for layer ownership, import rules, and extension boundaries.
-3. Read [references/REVIEW_CHECKLIST.md](references/REVIEW_CHECKLIST.md) while reviewing behavior, lifecycle, async flow, and dependency direction.
-4. If proposing code movement, use [references/REFACTOR_PATTERNS.md](references/REFACTOR_PATTERNS.md) to keep the refactor incremental.
-5. Report findings ordered by severity: architecture violation, correctness risk, maintainability issue, style issue.
+2. Read [references/HEX_RULES.md](references/HEX_RULES.md) for layer ownership, import rules,
+   extension boundaries and async rules.
+3. Walk [references/REVIEW_CHECKLIST.md](references/REVIEW_CHECKLIST.md) over the change.
+4. If proposing code movement, use [references/REFACTOR_PATTERNS.md](references/REFACTOR_PATTERNS.md)
+   to keep the refactor incremental.
+5. Check the actual imports rather than trusting the layer name: `rg -n "^\s*(from|import) minibot\." <files>`.
+6. Report findings ordered by severity: architecture violation, correctness risk,
+   maintainability issue, style issue.
+
+If ownership is ambiguous, choose the most conservative interpretation that keeps dependencies
+pointing inward.
 
 ## Review output
 
@@ -53,27 +59,3 @@ When reviewing, return:
 - optional follow-up cleanup
 
 Only include refactored code when the user asked for code changes or an example.
-
-## Minibot-specific expectations
-
-- `minibot.core` stays free of framework, transport, database, provider, and filesystem details.
-- `minibot.app` orchestrates runtime flow and policy, but should not absorb adapter or provider specifics.
-- `minibot.adapters` owns concrete integrations for config, messaging, memory, files, scheduler, logging, and MCP clients.
-- `minibot.llm` owns provider wiring, request shaping, schema policy, and tool integration details.
-- `minibot.rag` owns chunking/embedding/reranking/retrieval; it may use the Qdrant adapter client but no channel or provider policy.
-- `minibot.core.tasks` owns the task contracts (`TaskRequest`/`TaskRecord`/`TaskStatus`/`TaskProducer`).
-- `minibot.app.extensions` owns the extension API and registry lifecycle; `minibot.extensions` contains bundled, thin `register(mb)` composition modules.
-- Extension modules use the curated `ExtensionContext`, not `AppContainer`; adapter implementations remain under `minibot.adapters`.
-- Channel handlers stay thin and should not become a second application layer.
-- `minibot.shared` should stay small and generic; do not turn it into a dumping ground for mixed-layer logic.
-
-## Async rules
-
-- Prefer `async def` across I/O paths.
-- Do not hide blocking work in handlers, tool execution, or provider calls.
-- Keep cancellation, retry, and timeout policy in orchestration or dedicated helpers.
-- Keep side effects explicit and close to the boundary that owns them.
-
-## Ambiguity handling
-
-If the current ownership is ambiguous, choose the most conservative interpretation that keeps dependencies pointing inward.

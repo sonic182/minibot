@@ -36,6 +36,7 @@ from minibot.shared.errors import ToolInputError
 
 _RESULT_PREVIEW_CHARS = 300
 _SESSION_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_FINISHED_STATUSES = {TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.TIMED_OUT}
 _AMBIGUOUS_PREFIX_REASON = "ambiguous task id prefix: more than one task matches, use more characters of the id"
 
 
@@ -69,6 +70,7 @@ class TaskTools:
             [
                 ToolBinding(tool=self._task_schema("delegate"), handler=self._delegate),
                 ToolBinding(tool=self._cancel_schema(), handler=self._cancel_task),
+                ToolBinding(tool=self._message_schema(), handler=self._message_task),
                 ToolBinding(tool=self._list_schema(), handler=self._list_tasks),
                 ToolBinding(tool=self._get_schema(), handler=self._get_task),
             ]
@@ -140,6 +142,22 @@ class TaskTools:
                     "task_id": {"type": "string", "description": "Task identifier returned by spawn_task or delegate."}
                 },
                 required=["task_id"],
+            ),
+        )
+
+    def _message_schema(self) -> Tool:
+        return Tool(
+            name="message_task",
+            description=load_tool_description("message_task"),
+            parameters=strict_object(
+                properties={
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task identifier returned by spawn_task or delegate.",
+                    },
+                    "message": {"type": "string", "description": "Instruction or information for the worker."},
+                },
+                required=["task_id", "message"],
             ),
         )
 
@@ -264,19 +282,35 @@ class TaskTools:
         return f"{key}:{session}" if session else key
 
     async def _cancel_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        task_id = require_non_empty_str(payload, "task_id")
-        if self._task_repository is not None:
-            try:
-                task = await self._task_repository.get(task_id, self._owner_id(context))
-            except AmbiguousTaskIdError:
-                return {"task_id": task_id, "cancelled": False, "reason": _AMBIGUOUS_PREFIX_REASON}
-            if task is None:
-                return {"task_id": task_id, "cancelled": False, "reason": "not found"}
-            task_id = task.request.task_id
+        task_id, _record, reason = await self._resolve_task_id(require_non_empty_str(payload, "task_id"), context)
+        if reason is not None:
+            return {"task_id": task_id, "cancelled": False, "reason": reason}
         cancelled = await self._task_manager.cancel(task_id)
         if not cancelled and self._task_repository is not None:
             cancelled = await self._task_repository.mark_cancelled(task_id)
         return {"task_id": task_id, "cancelled": cancelled}
+
+    async def _message_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        message = require_non_empty_str(payload, "message")
+        task_id, record, reason = await self._resolve_task_id(require_non_empty_str(payload, "task_id"), context)
+        if reason is None and record is not None and record.status in _FINISHED_STATUSES:
+            reason = f"task already {record.status.value}"
+        if reason is not None:
+            return {"task_id": task_id, "delivered": False, "reason": reason}
+        if not self._task_manager.send_message(task_id, message):
+            return {"task_id": task_id, "delivered": False, "reason": "task is not running in this process"}
+        return {"task_id": task_id, "delivered": True}
+
+    async def _resolve_task_id(self, task_id: str, context: ToolContext) -> tuple[str, TaskRecord | None, str | None]:
+        if self._task_repository is None:
+            return task_id, None, None
+        try:
+            task = await self._task_repository.get(task_id, self._owner_id(context))
+        except AmbiguousTaskIdError:
+            return task_id, None, _AMBIGUOUS_PREFIX_REASON
+        if task is None:
+            return task_id, None, "not found"
+        return task.request.task_id, task, None
 
     async def _list_tasks(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         status = _status_filter(payload.get("status"))

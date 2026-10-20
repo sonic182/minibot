@@ -19,6 +19,7 @@ RESERVED_DELEGATION_TOOL_NAMES = {
     "list_tasks",
     "get_task",
     "cancel_task",
+    "message_task",
 }
 
 
