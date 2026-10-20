@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-21
+
 ### Added
 
 - A tool binding can raise its own output-spill threshold (`ToolBinding.spill_after_chars`); it never
@@ -1560,7 +1562,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.34.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.35.0...HEAD
+[0.35.0]: https://github.com/sonic182/minibot/compare/0.34.0..0.35.0
 [0.34.0]: https://github.com/sonic182/minibot/compare/0.33.0..0.34.0
 [0.33.0]: https://github.com/sonic182/minibot/compare/0.32.0..0.33.0
 [0.32.0]: https://github.com/sonic182/minibot/compare/0.31.0..0.32.0
