@@ -766,3 +766,20 @@ def test_audio_auto_transcription_finds_transcribe_audio_when_codemode_replaced_
     dispatcher_module.Dispatcher(EventBus(), **dependencies)
 
     assert seen == [["run_tools_script", "transcribe_audio"]]
+
+
+def test_dispatcher_warns_when_the_policy_removes_a_derived_tool_that_replaces_others(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from minibot.app import dispatcher as dispatcher_module
+    from minibot.app.tool_capabilities import MainAgentToolView
+
+    dependencies = _dispatcher_dependencies(monkeypatch, dispatcher_module, _StubHandlerBase)
+    view = MainAgentToolView(tools=[], hidden_tool_names=[], withheld_derived_tool_names=["run_tools_script"])
+    monkeypatch.setattr(dispatcher_module.Dispatcher, "_main_agent_view", lambda self, tools: view)
+
+    with caplog.at_level(logging.WARNING, logger="minibot.dispatcher"):
+        dispatcher_module.Dispatcher(EventBus(), **dependencies)
+
+    [record] = [record for record in caplog.records if "removed derived tools" in record.getMessage()]
+    assert record.derived_tools == ["run_tools_script"]
