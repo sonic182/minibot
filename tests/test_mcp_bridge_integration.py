@@ -38,6 +38,7 @@ from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient, MCPServerMetadata, MCPToolCallResult, MCPToolDefinition
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext
+from minibot.app.mcp_servers import mcp_discovery_kwargs
 from minibot.llm.services.tool_executor import normalize_tool_result
 from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.mcp_bridge import (
@@ -305,6 +306,31 @@ async def test_a_long_mcp_result_reaches_the_output_spill_file_whole(tmp_path: P
     assert result.content["output_storage"] == "managed_file"
     saved = (tmp_path / result.content["output_file_path"]).read_text(encoding="utf-8")
     assert json.loads(saved)["result"] == text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["bridge", "lazy"])
+async def test_a_server_inline_result_chars_keeps_a_larger_result_inline(tmp_path: Path, mode: str) -> None:
+    text = "x" * 35_000
+    server = MCPServerConfig(name="docs", mode=mode, inline_result_chars=40_000)
+    bindings = build_mcp_bindings(
+        **mcp_discovery_kwargs(server, client=cast(MCPClient, _LongResultMCPClient(text)), name_prefix="mcp")
+    )
+    name, payload = (
+        ("mcp_docs__fetch", {})
+        if mode == "bridge"
+        else ("mcp_docs__call_tool", {"tool_name": "fetch", "arguments": {}})
+    )
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10_000_000)
+    readback = ToolBinding(tool=Tool(name="grep", description="g", parameters={"type": "object"}), handler=None)
+    wrapped = {
+        binding.tool.name: binding
+        for binding in apply_tool_output_spill([*bindings, readback], storage=storage, config=ToolOutputSpillConfig())
+    }
+
+    result = normalize_tool_result(await wrapped[name].handler(payload, ToolContext(owner_id="tester")))
+
+    assert result.content["result"] == text
 
 
 @pytest.mark.asyncio

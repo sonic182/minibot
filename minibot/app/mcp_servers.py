@@ -56,4 +56,5 @@ def mcp_discovery_kwargs(server: MCPServerConfig, *, client: Any, name_prefix: s
         "enabled_tools": server.enabled_tools,
         "disabled_tools": server.disabled_tools,
         "catalog_cache_ttl_seconds": server.catalog_cache_ttl_seconds,
+        "inline_result_chars": server.inline_result_chars,
     }

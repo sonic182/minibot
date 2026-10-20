@@ -19,8 +19,6 @@ from minibot.llm.tools.schema_utils import (
     strict_object,
 )
 
-# Large enough for a web search result (Parallel's search MCP returns about 25,000 characters); larger results
-# go whole to the output-spill file.
 _INLINE_RESULT_CHARS = 25_000
 
 
@@ -66,12 +64,14 @@ class MCPToolBridge:
         name_prefix: str = "mcp",
         enabled_tools: list[str] | None = None,
         disabled_tools: list[str] | None = None,
+        inline_result_chars: int = _INLINE_RESULT_CHARS,
     ) -> None:
         self._server_name = server_name
         self._client = client
         self._name_prefix = name_prefix
         self._enabled_tools = set(enabled_tools or [])
         self._disabled_tools = set(disabled_tools or [])
+        self._inline_result_chars = inline_result_chars
         self._logger = logging.getLogger("minibot.mcp.bridge")
 
     def build_bindings(self) -> list[ToolBinding]:
@@ -134,7 +134,7 @@ class MCPToolBridge:
                 }
             )
 
-        return ToolBinding(tool=llm_tool, handler=_handler, spill_after_chars=_INLINE_RESULT_CHARS)
+        return ToolBinding(tool=llm_tool, handler=_handler, spill_after_chars=self._inline_result_chars)
 
     def _tool_name(self, remote_tool_name: str) -> str:
         return f"{self._name_prefix}_{self._server_name}__{remote_tool_name}"
@@ -152,6 +152,7 @@ class MCPLazyToolBridge:
         enabled_tools: list[str] | None = None,
         disabled_tools: list[str] | None = None,
         catalog_cache_ttl_seconds: int = 60,
+        inline_result_chars: int = _INLINE_RESULT_CHARS,
     ) -> None:
         self._server_name = server_name
         self._client = client
@@ -159,6 +160,7 @@ class MCPLazyToolBridge:
         self._enabled_tools = set(enabled_tools or [])
         self._disabled_tools = set(disabled_tools or [])
         self._catalog_cache_ttl_seconds = catalog_cache_ttl_seconds
+        self._inline_result_chars = inline_result_chars
         self._catalog: list[MCPToolDefinition] | None = None
         self._catalog_loaded_at: float | None = None
         self._catalog_lock = asyncio.Lock()
@@ -204,7 +206,7 @@ class MCPLazyToolBridge:
                     ),
                 ),
                 handler=self._handle_call_tool,
-                spill_after_chars=_INLINE_RESULT_CHARS,
+                spill_after_chars=self._inline_result_chars,
             ),
         ]
 
@@ -351,6 +353,7 @@ def build_mcp_bindings(
     enabled_tools: list[str],
     disabled_tools: list[str],
     catalog_cache_ttl_seconds: int,
+    inline_result_chars: int = _INLINE_RESULT_CHARS,
 ) -> list[ToolBinding]:
     return _make_bridge(
         mode=mode,
@@ -360,6 +363,7 @@ def build_mcp_bindings(
         enabled_tools=enabled_tools,
         disabled_tools=disabled_tools,
         catalog_cache_ttl_seconds=catalog_cache_ttl_seconds,
+        inline_result_chars=inline_result_chars,
     ).build_bindings()
 
 
@@ -372,6 +376,7 @@ async def build_mcp_bindings_async(
     enabled_tools: list[str],
     disabled_tools: list[str],
     catalog_cache_ttl_seconds: int,
+    inline_result_chars: int = _INLINE_RESULT_CHARS,
 ) -> list[ToolBinding]:
     return await _make_bridge(
         mode=mode,
@@ -381,6 +386,7 @@ async def build_mcp_bindings_async(
         enabled_tools=enabled_tools,
         disabled_tools=disabled_tools,
         catalog_cache_ttl_seconds=catalog_cache_ttl_seconds,
+        inline_result_chars=inline_result_chars,
     ).abuild_bindings()
 
 
@@ -393,6 +399,7 @@ def _make_bridge(
     enabled_tools: list[str],
     disabled_tools: list[str],
     catalog_cache_ttl_seconds: int,
+    inline_result_chars: int,
 ) -> MCPToolBridge | MCPLazyToolBridge:
     if mode == "lazy":
         return MCPLazyToolBridge(
@@ -402,6 +409,7 @@ def _make_bridge(
             enabled_tools=enabled_tools,
             disabled_tools=disabled_tools,
             catalog_cache_ttl_seconds=catalog_cache_ttl_seconds,
+            inline_result_chars=inline_result_chars,
         )
     if mode == "bridge":
         return MCPToolBridge(
@@ -410,6 +418,7 @@ def _make_bridge(
             name_prefix=name_prefix,
             enabled_tools=enabled_tools,
             disabled_tools=disabled_tools,
+            inline_result_chars=inline_result_chars,
         )
     raise ValueError(f"unsupported mcp mode: {mode}")
 
@@ -531,7 +540,7 @@ def _stringify_content_parts(content: list[Any]) -> str:
     """Join MCP content parts into one text, keeping every text block whole.
 
     Size is left to the output-spill wrapper (the bindings declare ``spill_after_chars``): it keeps results up to
-    ``_INLINE_RESULT_CHARS`` inline, saves larger ones whole to a managed file, and cuts them where it cannot
+    ``inline_result_chars`` inline, saves larger ones whole to a managed file, and cuts them where it cannot
     spill. Cutting here would lose the end of the result before it could be saved. Binary payloads (images and
     ``data``/``base64``/``bytes``/``blob`` fields) are replaced by a marker.
     """

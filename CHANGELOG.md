@@ -34,7 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP results are no longer cut to 12,000 characters per text block, in bridge and lazy mode. A result up to
   25,000 characters stays inline (a web search result is about that size); a larger one is saved whole to the
   managed spill file, so its end is no longer lost. Where spill cannot run (file storage off, the default, or no
-  read-back tool), the result is cut at 25,000 characters, with a preview marked `output_truncated`. Binary
+  read-back tool), the result is cut at 25,000 characters, with a preview marked `output_truncated`. The limit is
+  set per server with `[[tools.mcp.servers]] inline_result_chars` (default 25,000). Binary
   payloads, now including embedded-resource `blob` fields, are replaced by a marker.
 - Failed tool results now spill like successful ones, so a huge error no longer rides inline. The spilled result
   keeps `ok: false` and the failure's short fields (such as `error_code` and the repeated-failure signature).

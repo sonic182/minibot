@@ -419,7 +419,7 @@ Tool Configuration
      - ``enabled``, ``name_prefix``, ``timeout_seconds``, ``reload``, ``servers``
    * - ``[[tools.mcp.servers]]``
      - ``MCPServerConfig``
-     - ``name``, ``transport``, stdio command fields, HTTP fields, tool allow/deny filters
+     - ``name``, ``transport``, stdio command fields, HTTP fields, tool allow/deny filters, ``inline_result_chars`` (default ``25000``: larger results go to the output spill, or are cut to it without spill; see :doc:`mcp`)
    * - ``[tools.skills]``
      - ``SkillsToolConfig``
      - ``enabled``, ``paths``, ``preload_catalog``, ``native``, ``native_disabled``, ``write_path``,

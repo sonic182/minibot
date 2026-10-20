@@ -235,7 +235,7 @@ Runtime Notes
   ``bash``. Tools in ``exclude_tools`` (``http_request`` and ``pre_response`` by default) are
   skipped since they already manage their own output size. ``activate_skill`` spills only past
   64,000 characters (or ``spill_after_chars``, if larger), so skill instructions normally arrive inline,
-  and MCP tools only past 25,000 characters (see :doc:`mcp`). Error results spill too; the spilled result
+  and MCP tools only past their server's ``inline_result_chars`` (default 25,000; see :doc:`mcp`). Error results spill too; the spilled result
   keeps ``ok: false`` and the failure's short fields. Spill does not apply to calls made from a
   ``run_tools_script`` script: the result goes to the script, not the model, so the script can filter it, and
   the script's own output limits protect the context.

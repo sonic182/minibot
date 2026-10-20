@@ -764,7 +764,7 @@ class ToolOutputSpillConfig(BaseModel):
     file storage is enabled and the agent also has a read-back tool available
     (``grep``, ``code_read``, ``read_file`` or ``bash``). ``activate_skill`` spills only
     past 64,000 characters (or ``spill_after_chars``, if larger), so skill instructions
-    normally arrive inline; MCP tools spill only past 25,000 characters. Error results spill
+    normally arrive inline; MCP tools spill only past their server's ``inline_result_chars``. Error results spill
     too, keeping ``ok: false`` and their short fields.
     """
 
@@ -803,6 +803,9 @@ class MCPServerConfig(BaseModel):
     enabled_tools: list[str] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
     catalog_cache_ttl_seconds: Annotated[int, Field(ge=0)] = 60
+    # Results up to this size stay inline (a web search result is about 25,000 characters); larger ones go
+    # whole to the output-spill file, or are cut to it where spill cannot run.
+    inline_result_chars: PositiveInt = 25000
 
 
 class MCPToolConfig(BaseModel):
