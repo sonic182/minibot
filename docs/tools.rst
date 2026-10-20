@@ -267,11 +267,16 @@ as direct tool calls, so every tool use goes through a script, a single call inc
 
 - the delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``, ``list_tasks``, ``get_task``,
   ``cancel_task``, ``message_task``);
-- the skill tools (``activate_skill``, ``list_skills``), since they load instructions into the turn;
+- ``activate_skill``, ``list_skills`` and ``self_insert_artifact``, since they put content into the turn itself
+  (skill instructions, an image or document), which a script result cannot carry;
 - anything matching ``exclude``.
 
-If the agent's policy removes ``run_tools_script`` (for example ``[orchestration.main_agent] tools_deny``), the
-other tools are offered directly again.
+If the agent's policy removes ``run_tools_script``, the other tools are offered directly again: with
+``[orchestration.main_agent] tools_deny = ["run_tools_script"]``, or with a ``tools_allow`` list that does not name
+it, so a main agent with ``tools_allow`` must list ``run_tools_script`` to use codemode. Usage instructions
+contributed for a tool (an MCP server's, for example) stay in the system prompt when the tool is only reachable
+from scripts. Recent-file tracking only sees direct file tool calls, so a file a script wrote is not remembered as
+a recent file.
 
 .. code-block:: toml
 
@@ -357,13 +362,12 @@ What a script can call
    raises reaches the script as an exception (``ValueError`` for rejected arguments, ``PermissionError`` for a denied
    approval, ``RuntimeError`` otherwise); catch it to continue. A script that ends on an uncaught
    ``PermissionError`` from a denial returns the ``tool_approval:denied`` error, like a direct call; a denial the
-   script wraps in another exception type is an ordinary ``codemode:script_error``. The delegation and skill tools,
+   script wraps in another exception type is an ordinary ``codemode:script_error``. The tools listed above as direct,
    ``run_tools_script`` itself and anything matching ``exclude`` are never exposed (they stay direct tools), and
    nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
    ``mcp_<server>__list_tools`` and ``mcp_<server>__call_tool``. Large nested results arrive as a preview plus a file
-   path, as they do for a direct call. A message directive from a nested call (``self_insert_artifact`` adding an
-   image or document to the conversation) is returned with the script's result, so it still reaches the turn when
-   the script succeeds.
+   path, as they do for a direct call. A tool that returns a message directive loses it when called from a script,
+   which is why ``self_insert_artifact`` stays a direct tool.
 
 Time and call limits
    ``timeout_seconds`` is wall-clock time for the whole script, nested calls included, except the time a nested
@@ -390,8 +394,8 @@ Specialists
    In task workers the tool is opt-in like the other bundled extensions: list ``"codemode"`` in
    ``[tasks] worker_extensions`` and name ``run_tools_script`` in a specialist's ``tools_allow``; its scripts then
    call the tools that specialist itself has, and those tools are no longer direct calls for it. A
-   ``tools_deny``-only specialist gets it too. A specialist that does not claim it, and a task without an agent,
-   keep their tools as direct calls.
+   ``tools_deny``-only specialist gets it too, unless its ``tools_deny`` names ``run_tools_script``. A
+   ``tools_allow`` specialist that does not name it, and a task without an agent, keep their tools as direct calls.
 
 Trust model
    Monty keeps the script itself away from the file system, network and environment, and every effect is a tool

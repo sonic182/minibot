@@ -60,8 +60,12 @@ class DerivedTools:
         ``visible`` is the subset of ``tools`` the agent's policy kept, so a derived tool the policy removed
         replaces nothing.
         """
-        replaced = {name for binding in visible for name in self.replaces.get(binding.tool.name, ())}
+        replaced = self.replaced_names(visible)
         return [binding for binding in final_tools if binding.tool.name not in replaced] + list(visible)
+
+    def replaced_names(self, visible: Sequence[ToolBinding]) -> set[str]:
+        """Names of the tools the ``visible`` derived tools take over."""
+        return {name for binding in visible for name in self.replaces.get(binding.tool.name, ())}
 
 
 WORKER_OPT_IN_MODULES = {

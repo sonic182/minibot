@@ -20,7 +20,6 @@ from minibot.app.tasks import worker
 from minibot.app.tool_approval import apply_tool_approval
 from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_factory import derive_extension_tools
-from minibot.core.agent_runtime import AgentMessage, AppendMessageDirective, MessagePart, ToolResult
 from minibot.core.agents import AgentSpec
 from minibot.core.events import ToolCallEvent
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -332,25 +331,6 @@ except ValueError as exc:
 
 
 @pytest.mark.asyncio
-async def test_directives_from_nested_calls_reach_the_turn() -> None:
-    message = AgentMessage(role="user", content=[MessagePart(type="text", text="inserted")])
-
-    async def insert(_: dict[str, Any], __: ToolContext) -> ToolResult:
-        return ToolResult(
-            content={"status": "ok"},
-            directives=[AppendMessageDirective(type="append_message", message=message)],
-        )
-
-    tool = await _codemode_tool(_settings(), [_binding("self_insert_artifact", insert)])
-
-    result = await tool.handler({"code": "(await tools.self_insert_artifact(label='a'))['status']"}, _CONTEXT)
-
-    assert isinstance(result, ToolResult)
-    assert result.content["result"] == "ok"
-    assert [directive.message for directive in result.directives] == [message]
-
-
-@pytest.mark.asyncio
 async def test_long_output_keeps_start_and_end() -> None:
     tool = await _codemode_tool(_settings(max_output_chars=100), _fake_tools())
 
@@ -365,19 +345,23 @@ async def test_long_output_keeps_start_and_end() -> None:
 def test_the_main_agent_sees_only_the_script_and_the_tools_scripts_cannot_call() -> None:
     settings = _settings(exclude=["coded_*"])
     registry = load_extensions(settings, EventBus(), entrypoint="console")
-    tools = [*_fake_tools(), _binding("activate_skill", _slow_lookup)]
+    tools = [*_fake_tools(), _binding("activate_skill", _slow_lookup), _binding("self_insert_artifact", _slow_lookup)]
 
-    def view(main_agent: MainAgentConfig) -> set[str]:
+    def view(main_agent: MainAgentConfig) -> tuple[set[str], set[str]]:
         result = main_agent_tool_view(
             tools=tools,
             orchestration_config=OrchestrationConfig(main_agent=main_agent),
             agent_specs=[],
             derive_tools=lambda final: derive_extension_tools(final, settings=settings, extensions=registry),
         )
-        return {binding.tool.name for binding in result.tools}
+        return {binding.tool.name for binding in result.tools}, {
+            binding.tool.name for binding in result.replaced_tools
+        }
 
-    assert view(MainAgentConfig()) == {"run_tools_script", "spawn_task", "coded_failure", "activate_skill"}
-    assert view(MainAgentConfig(tools_deny=["run_tools_script"])) == {binding.tool.name for binding in tools}
+    offered, replaced = view(MainAgentConfig())
+    assert offered == {"run_tools_script", "spawn_task", "coded_failure", "activate_skill", "self_insert_artifact"}
+    assert replaced == {"slow_lookup", "flaky-tool.v2", "guarded_tool"}
+    assert view(MainAgentConfig(tools_deny=["run_tools_script"])) == ({binding.tool.name for binding in tools}, set())
 
 
 @pytest.mark.asyncio

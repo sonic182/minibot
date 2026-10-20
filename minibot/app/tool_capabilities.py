@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from minibot.app.agent_policies import filter_tools_for_agent
 from minibot.app.extensions import DerivedTools
@@ -16,6 +16,8 @@ from minibot.llm.tools.base import ToolBinding
 class MainAgentToolView:
     tools: list[ToolBinding]
     hidden_tool_names: list[str]
+    # Tools a derived tool took over (codemode): not offered to the model, still usable through it.
+    replaced_tools: list[ToolBinding] = field(default_factory=list)
 
 
 def main_agent_tool_view(
@@ -38,7 +40,12 @@ def main_agent_tool_view(
         return view
     derived = derive_tools(view.tools)
     visible = _apply_main_agent_policy(derived.tools, orchestration_config.main_agent)
-    return MainAgentToolView(tools=derived.merge(view.tools, visible), hidden_tool_names=view.hidden_tool_names)
+    replaced = derived.replaced_names(visible)
+    return MainAgentToolView(
+        tools=derived.merge(view.tools, visible),
+        hidden_tool_names=view.hidden_tool_names,
+        replaced_tools=[binding for binding in view.tools if binding.tool.name in replaced],
+    )
 
 
 def _apply_tool_ownership(

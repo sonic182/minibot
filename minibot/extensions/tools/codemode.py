@@ -17,7 +17,6 @@ from minibot.app.extensions import DerivedTool, ExtensionContext
 from minibot.app.tool_approval import approval_wait_observer
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns
 from minibot.config.schema import CodemodeToolConfig
-from minibot.core.agent_runtime import Directive, ToolResult
 from minibot.core.tools import ToolContext, ToolPayload
 from minibot.llm.services.tool_executor import canonical_tool_name, normalize_tool_result
 from minibot.llm.tools.base import ToolBinding
@@ -35,9 +34,11 @@ TOOL_CALL_LIMIT = "codemode:tool_call_limit"
 SANDBOX_FAILED = "codemode:sandbox_failed"
 _SIGNATURES_MAX_CHARS = 6000
 _SUMMARY_MAX_CHARS = 200
-# Skill tools load instructions into the turn and the system prompt only advertises skills while they are
-# attached, so they stay direct tools instead of moving into scripts, like the delegation tools.
-_DIRECT_TOOL_NAMES = frozenset({"activate_skill", "list_skills"})
+# These tools put content into the turn itself: skill instructions (the system prompt only advertises skills
+# while the skill tools are attached) and self_insert_artifact's message directive, which the runtime only accepts
+# from that tool by name. Called from a script that would be lost, so they stay direct, like the delegation tools.
+_DIRECT_TOOL_NAMES = frozenset({"activate_skill", "list_skills", "self_insert_artifact"})
+_UNLISTED_NAMES_MAX = 100
 _TEXT_UNITS = ("chars", "lines", "bytes")
 _TEXT_DEFAULT_LIMIT = 2000
 _logger = logging.getLogger("minibot.codemode")
@@ -64,7 +65,7 @@ def _import_monty() -> ModuleType:
 def _derive(monty: ModuleType, config: CodemodeToolConfig, tools: Sequence[ToolBinding]) -> list[DerivedTool]:
     """``run_tools_script`` over every tool a script may call, replacing them as direct tools.
 
-    The delegation and skill tools, and those matching ``exclude``, are not callable from scripts and stay
+    The delegation tools, ``_DIRECT_TOOL_NAMES`` and those matching ``exclude`` are not callable from scripts and stay
     direct tools.
     """
     excluded = normalize_patterns(config.exclude)
@@ -168,9 +169,6 @@ class _Run:
     # in another exception type ends as an ordinary script failure.
     denied: list[str] = field(default_factory=list)
     called: list[str] = field(default_factory=list)
-    # Directives from nested results (self_insert_artifact's append_message), returned with the script's result
-    # so they still reach the turn.
-    directives: list[Directive] = field(default_factory=list)
 
 
 class _ScriptRunner:
@@ -208,9 +206,10 @@ class _ScriptRunner:
         header = "Tools available to scripts:"
         footer = ""
         if unlisted:
-            footer = (
-                f"\nMore tools, without their signature here (use describe_tool(name) first): {', '.join(unlisted)}"
-            )
+            shown = ", ".join(unlisted[:_UNLISTED_NAMES_MAX])
+            more = len(unlisted) - _UNLISTED_NAMES_MAX
+            rest = f", and {more} more (search them with list_tools(query))" if more > 0 else ""
+            footer = f"\nMore tools, without their signature here (use describe_tool(name) first): {shown}{rest}"
         return f"{static}\n\n{header}\n" + "\n".join(lines) + footer
 
     async def handle(self, payload: ToolPayload, context: ToolContext) -> dict[str, Any]:
@@ -261,8 +260,7 @@ class _ScriptRunner:
             extra={"ok": failure is None, "tool_calls": run.called, "tool_errors": len(run.tool_errors)},
         )
         if failure is None:
-            result = self._success(run, value)
-            return ToolResult(content=result, directives=run.directives) if run.directives else result
+            return self._success(run, value)
         error_code, message, extra = failure
         if denied_tool is not None:
             raise ToolInputError(self._denial_message(run, denied_tool), error_code=TOOL_APPROVAL_DENIED)
@@ -392,7 +390,7 @@ def _bind_call(
             raise ValueError(f"{TOOL_CALL_LIMIT}: a script can make at most {max_tool_calls} tool calls")
         run.called.append(tool_name)
         try:
-            raw = normalize_tool_result(await binding.handler(payload, context))
+            raw = await binding.handler(payload, context)
         except ToolInputError as exc:
             _record_failure(run, tool_name, exc.error_code)
             message = f"{exc.error_code}: {exc}"
@@ -404,8 +402,7 @@ def _bind_call(
             error_code = getattr(exc, "error_code", "") or "tool_execution_failed"
             _record_failure(run, tool_name, error_code)
             raise RuntimeError(f"{tool_name} failed: {exc}") from exc
-        run.directives.extend(raw.directives)
-        return _plain(raw.content)
+        return _plain(normalize_tool_result(raw).content)
 
     return call
 

@@ -167,7 +167,9 @@ class Dispatcher:
             preload_skill_catalog=settings.tools.skills.preload_catalog,
             event_bus=event_bus,
             task_handoff_callback=task_handoff_callback,
-            extension_prompt_fragments=extensions.prompt_fragments_for(main_agent_tools_view.tools),
+            extension_prompt_fragments=extensions.prompt_fragments_for(
+                [*main_agent_tools_view.tools, *main_agent_tools_view.replaced_tools]
+            ),
         )
         self._handler = LLMMessageHandler(turn_service)
         self._turn_service = turn_service
@@ -263,7 +265,7 @@ class Dispatcher:
         self._main_agent_tool_names = sorted(binding.tool.name for binding in view.tools)
         self._turn_service.replace_tools(
             view.tools,
-            extension_prompt_fragments=self._extensions.prompt_fragments_for(view.tools),
+            extension_prompt_fragments=self._extensions.prompt_fragments_for([*view.tools, *view.replaced_tools]),
         )
         if view.hidden_tool_names:
             self._logger.info(
