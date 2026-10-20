@@ -764,7 +764,8 @@ class ToolOutputSpillConfig(BaseModel):
     file storage is enabled and the agent also has a read-back tool available
     (``grep``, ``code_read``, ``read_file`` or ``bash``). ``activate_skill`` spills only
     past 64,000 characters (or ``spill_after_chars``, if larger), so skill instructions
-    normally arrive inline.
+    normally arrive inline; MCP tools spill only past 25,000 characters. Error results spill
+    too, keeping ``ok: false`` and their short fields.
     """
 
     enabled: bool = True

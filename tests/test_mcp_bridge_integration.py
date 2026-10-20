@@ -308,31 +308,31 @@ async def test_a_long_mcp_result_reaches_the_output_spill_file_whole(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_an_mcp_result_without_spill_keeps_resource_text_and_hides_blobs_under_a_ceiling(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from minibot.llm.tools import mcp_bridge
-
-    monkeypatch.setattr(mcp_bridge, "_MAX_RESULT_CHARS", 30_000)
+async def test_mcp_results_up_to_25k_stay_inline_with_resource_text_whole_and_blobs_hidden(tmp_path: Path) -> None:
     client = _LongResultMCPClient("")
-    resource_text = "r" * 20_000 + "-resource-end"
+    resource_text = "r" * 12_000 + "-resource-end"
     parts = [
         {"type": "resource", "resource": {"uri": "file:///a.txt", "text": resource_text}},
         {"type": "resource", "resource": {"uri": "file:///a.pdf", "mimeType": "application/pdf", "blob": "Q" * 5000}},
-        {"type": "text", "text": "t" * 20_000},
+        {"type": "text", "text": "t" * 10_000},
     ]
 
     async def call_tool(tool_name: str, payload: dict[str, object]) -> MCPToolCallResult:
         return MCPToolCallResult(content=parts)
 
     client.call_tool = call_tool  # type: ignore[method-assign]
-    (binding,) = MCPToolBridge(server_name="docs", client=cast(MCPClient, client)).build_bindings()
+    bindings = MCPToolBridge(server_name="docs", client=cast(MCPClient, client)).build_bindings()
+    readback = ToolBinding(tool=Tool(name="grep", description="g", parameters={"type": "object"}), handler=None)
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10_000_000)
+    spilled = apply_tool_output_spill([*bindings, readback], storage=storage, config=ToolOutputSpillConfig())
+    (without_spill,) = apply_tool_output_spill(bindings, storage=None, config=ToolOutputSpillConfig())
 
-    result = normalize_tool_result(await binding.handler({}, ToolContext(owner_id="tester"))).content["result"]
+    inline = normalize_tool_result(await spilled[0].handler({}, ToolContext(owner_id="tester"))).content
+    unspilled = normalize_tool_result(await without_spill.handler({}, ToolContext(owner_id="tester"))).content
 
-    assert resource_text in result
-    assert "<omitted 5000 chars>" in result and "Q" * 300 not in result
-    assert result.endswith("chars]") and "...[truncated " in result
+    assert resource_text in inline["result"]
+    assert "<omitted 5000 chars>" in inline["result"] and "Q" * 300 not in inline["result"]
+    assert unspilled == inline
 
 
 @pytest.mark.asyncio

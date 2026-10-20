@@ -19,7 +19,9 @@ from minibot.llm.tools.schema_utils import (
     strict_object,
 )
 
-_MAX_RESULT_CHARS = 200_000
+# Large enough for a web search result (Parallel's search MCP returns about 25,000 characters); larger results
+# go whole to the output-spill file.
+_INLINE_RESULT_CHARS = 25_000
 
 
 @dataclass(frozen=True)
@@ -132,7 +134,7 @@ class MCPToolBridge:
                 }
             )
 
-        return ToolBinding(tool=llm_tool, handler=_handler)
+        return ToolBinding(tool=llm_tool, handler=_handler, spill_after_chars=_INLINE_RESULT_CHARS)
 
     def _tool_name(self, remote_tool_name: str) -> str:
         return f"{self._name_prefix}_{self._server_name}__{remote_tool_name}"
@@ -202,6 +204,7 @@ class MCPLazyToolBridge:
                     ),
                 ),
                 handler=self._handle_call_tool,
+                spill_after_chars=_INLINE_RESULT_CHARS,
             ),
         ]
 
@@ -525,11 +528,11 @@ def _drop_none_in_value(value: Any) -> Any:
 
 
 def _stringify_content_parts(content: list[Any]) -> str:
-    """Join MCP content parts into one text, keeping text blocks whole up to ``_MAX_RESULT_CHARS`` in total.
+    """Join MCP content parts into one text, keeping every text block whole.
 
-    Size is left to the output-spill wrapper, which saves an oversized result to a managed file; cutting each
-    block here would lose the end of the result before it could be saved. The total ceiling only bounds a huge
-    result where spill does not apply (no file storage, no read-back tool). Binary payloads (images and
+    Size is left to the output-spill wrapper (the bindings declare ``spill_after_chars``): it keeps results up to
+    ``_INLINE_RESULT_CHARS`` inline, saves larger ones whole to a managed file, and cuts them where it cannot
+    spill. Cutting here would lose the end of the result before it could be saved. Binary payloads (images and
     ``data``/``base64``/``bytes``/``blob`` fields) are replaced by a marker.
     """
     rendered: list[str] = []
@@ -546,10 +549,7 @@ def _stringify_content_parts(content: list[Any]) -> str:
             rendered.append(json.dumps(_redact_large_payload_fields(part), ensure_ascii=True))
             continue
         rendered.append(str(part))
-    text = "\n".join(rendered)
-    if len(text) <= _MAX_RESULT_CHARS:
-        return text
-    return f"{text[:_MAX_RESULT_CHARS]}\n...[truncated {len(text) - _MAX_RESULT_CHARS} chars]"
+    return "\n".join(rendered)
 
 
 def _redact_large_payload_fields(value: Any) -> Any:
