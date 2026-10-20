@@ -208,7 +208,14 @@ async def _worker_async(pipe: Any, backends: WorkerBackends) -> None:
         turn_input = _PipeTurnInput()
 
         async def read_manager_events() -> None:
-            while line := await reader_pipe.readline():
+            while True:
+                try:
+                    line = await reader_pipe.readline()
+                except ValueError:
+                    # The pipe's line limit was exceeded; StreamReader drops that line, so keep reading.
+                    continue
+                if not line:
+                    break
                 with contextlib.suppress(json.JSONDecodeError):
                     event = json.loads(line)
                     if not isinstance(event, dict):

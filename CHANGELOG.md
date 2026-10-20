@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - LLM provider requests send `Accept-Encoding: gzip, deflate`, so providers can compress their responses.
   Configured `extra_headers` can still override it, in any letter case. Streamed Responses and Codex
-  requests ask for `identity`, because the stream is parsed without decompressing it.
+  requests always ask for `identity`, even over a configured value, because the stream is parsed
+  without decompressing it.
 - `aiosonic` bumped to 1.3.3 (and `onecache` to 0.10). It fixes `http_request` failing with
   `unparseable status line` after a server sent `Transfer-Encoding` with extra whitespace, which left the chunked
   body unread on a pooled connection.

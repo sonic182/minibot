@@ -37,6 +37,7 @@ from minibot.shared.errors import ToolInputError
 _RESULT_PREVIEW_CHARS = 300
 _SESSION_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _FINISHED_STATUSES = {TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.TIMED_OUT}
+_MAX_TASK_MESSAGE_CHARS = 8000
 _AMBIGUOUS_PREFIX_REASON = "ambiguous task id prefix: more than one task matches, use more characters of the id"
 
 
@@ -292,6 +293,12 @@ class TaskTools:
 
     async def _message_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         message = require_non_empty_str(payload, "message")
+        if len(message) > _MAX_TASK_MESSAGE_CHARS:
+            raise ToolInputError(
+                f"message is {len(message)} characters; the limit is {_MAX_TASK_MESSAGE_CHARS}. "
+                "Send a shorter instruction, or save the content to a file and point the task to it.",
+                error_code="task:message_too_long",
+            )
         task_id, record, reason = await self._resolve_task_id(require_non_empty_str(payload, "task_id"), context)
         if reason is None and record is not None and record.status in _FINISHED_STATUSES:
             reason = f"task already {record.status.value}"

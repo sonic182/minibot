@@ -603,6 +603,20 @@ async def test_message_task_reports_a_task_that_is_not_running_here() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_task_rejects_a_message_over_the_limit() -> None:
+    manager = _TaskManagerStub()
+    bindings = _build_tools(_ProducerStub(), manager)
+
+    with pytest.raises(ToolInputError) as exc_info:
+        await bindings["message_task"].handler(
+            {"task_id": "t-1", "message": "x" * 8001}, ToolContext(channel="console")
+        )
+
+    assert exc_info.value.error_code == "task:message_too_long"
+    assert manager.sent == []
+
+
+@pytest.mark.asyncio
 async def test_message_task_reports_a_finished_task_without_trying_to_deliver() -> None:
     record = TaskRecord(request=TaskRequest(task_id="t-done", channel="console", prompt="p"), status=TaskStatus.DONE)
 

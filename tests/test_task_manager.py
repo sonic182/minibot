@@ -1080,7 +1080,7 @@ class _PipeRecordingHang:
 class _WorkerSidePipe:
     """Fake pipe as the worker sees it: the task payload, then the given manager lines, then EOF."""
 
-    def __init__(self, *lines: bytes) -> None:
+    def __init__(self, *lines: bytes | Exception) -> None:
         self._lines = [json.dumps({"task_id": "t1"}).encode() + b"\n", *lines]
         self.drained = asyncio.Event()
 
@@ -1092,7 +1092,10 @@ class _WorkerSidePipe:
         class _RX:
             async def readline(self) -> bytes:
                 if lines:
-                    return lines.pop(0)
+                    line = lines.pop(0)
+                    if isinstance(line, Exception):
+                        raise line
+                    return line
                 await drained.wait()
                 return b""
 
@@ -1120,7 +1123,8 @@ async def test_message_sent_to_a_running_task_reaches_the_worker_loop_as_steerin
         await reader_task
     assert manager.send_message("t1", "too late") is False
 
-    worker_pipe = _WorkerSidePipe(manager_pipe.written[-1])
+    # An over-long line (the pipe's StreamReader limit) must not stop the worker from reading the rest.
+    worker_pipe = _WorkerSidePipe(ValueError("chunk exceed the limit"), manager_pipe.written[-1])
     received: list[Any] = []
 
     async def _fake_loop(_task, progress_callback=None, approval_callback=None, turn_input=None, *, backends):

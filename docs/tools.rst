@@ -326,7 +326,7 @@ What a script can call
    approval, ``RuntimeError`` otherwise); catch it to continue. A script that ends on an uncaught
    ``PermissionError`` from a denial returns the ``tool_approval:denied`` error, like a direct call; a denial the
    script wraps in another exception type is an ordinary ``codemode:script_error``. The delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``,
-   ``list_tasks``, ``get_task``, ``cancel_task``), ``run_tools_script`` itself and anything matching ``exclude`` are
+   ``list_tasks``, ``get_task``, ``cancel_task``, ``message_task``), ``run_tools_script`` itself and anything matching ``exclude`` are
    never exposed, and nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
    ``mcp_<server>__list_tools`` and ``mcp_<server>__call_tool``. Large nested results arrive as a preview plus a file
    path, as they do for a direct call, and a tool that returns a file or a message directive (``send_file``) loses
