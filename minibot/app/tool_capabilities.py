@@ -14,9 +14,11 @@ from minibot.llm.tools.base import ToolBinding
 
 @dataclass(frozen=True)
 class MainAgentToolView:
+    """The main agent's tools. ``replaced_tools`` were taken over by a derived tool (codemode): they are not
+    offered to the model but stay usable through it."""
+
     tools: list[ToolBinding]
     hidden_tool_names: list[str]
-    # Tools a derived tool took over (codemode): not offered to the model, still usable through it.
     replaced_tools: list[ToolBinding] = field(default_factory=list)
 
 

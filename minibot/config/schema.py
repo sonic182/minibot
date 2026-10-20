@@ -543,7 +543,8 @@ class OrchestrationConfig(BaseModel):
     - ``shared_mcp_servers`` — MCP server names whose tools stay visible to the main agent even when a
       specialist claims them under an exclusive ownership mode (default: empty).
     - ``main_tool_use_guardrail`` — optional guardrail before tool execution:
-      ``"disabled"`` (default) or ``"llm_classifier"``.
+      ``"disabled"`` (default) or ``"llm_classifier"``. With ``[tools.codemode]`` on, the classifier only sees
+      ``run_tools_script`` and the direct tools, not the calls a script makes.
     - ``main_agent`` — tool allow/deny policy for the main agent (``[orchestration.main_agent]``).
     - ``specialists`` — whether owner-defined specialists are used at all
       (``[orchestration.specialists]``).
@@ -948,7 +949,8 @@ class CodemodeToolConfig(BaseModel):
     - ``max_timeout_seconds`` — the highest limit a script may ask for; larger requests are lowered to it
       (default: ``600``). The turn's own deadline (``[runtime] agent_timeout_seconds``) still applies.
     - ``max_tool_calls`` — how many tool calls one script may make; the next call raises a catchable
-      ``codemode:tool_call_limit`` error (default: ``50``).
+      ``codemode:tool_call_limit`` error (default: ``50``). These calls do not count against the turn's own
+      tool-call limit, so a turn may make up to this many per script.
     - ``max_memory_mb`` — heap limit of the script itself, in MiB (default: ``64``).
     - ``max_output_chars`` — cap on the printed output and on the returned value; longer text keeps its start
       and end (default: ``20000``).

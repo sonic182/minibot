@@ -35,9 +35,6 @@ TOOL_CALL_LIMIT = "codemode:tool_call_limit"
 SANDBOX_FAILED = "codemode:sandbox_failed"
 _SIGNATURES_MAX_CHARS = 6000
 _SUMMARY_MAX_CHARS = 200
-# These tools put content into the turn itself: skill instructions (the system prompt only advertises skills
-# while the skill tools are attached) and self_insert_artifact's message directive, which the runtime only accepts
-# from that tool by name. Called from a script that would be lost, so they stay direct, like the delegation tools.
 _DIRECT_TOOL_NAMES = frozenset({"activate_skill", "list_skills", "self_insert_artifact"})
 _UNLISTED_NAMES_MAX = 100
 _TEXT_UNITS = ("chars", "lines", "bytes")
@@ -67,7 +64,9 @@ def _derive(monty: ModuleType, config: CodemodeToolConfig, tools: Sequence[ToolB
     """``run_tools_script`` over every tool a script may call, replacing them as direct tools.
 
     The delegation tools, ``_DIRECT_TOOL_NAMES`` and those matching ``exclude`` are not callable from scripts and stay
-    direct tools.
+    direct tools. ``_DIRECT_TOOL_NAMES`` put content into the turn itself, which a script result cannot carry: skill
+    instructions (the system prompt only advertises skills while the skill tools are attached) and
+    self_insert_artifact's message directive, which the runtime only accepts from that tool by name.
     """
     excluded = normalize_patterns(config.exclude)
     callable_tools = sorted(
@@ -193,7 +192,8 @@ class _ScriptRunner:
                         minimum=1,
                         description=(
                             f"Wall-clock limit for this script, nested tool calls included. null uses the default "
-                            f"({self._config.timeout_seconds}s); at most {self._config.max_timeout_seconds}s."
+                            f"({self._config.timeout_seconds}s); at most {self._config.max_timeout_seconds}s. "
+                            "The turn's own time limit still applies."
                         ),
                     ),
                 },
@@ -443,7 +443,7 @@ def render_text(value: Any, limit: int = _TEXT_DEFAULT_LIMIT, unit: str = "chars
     """``value`` as text cut to ``limit`` chars, lines or UTF-8 bytes, keeping the start.
 
     Strings are kept as they are; anything else is rendered as indented JSON. A cut text ends with a marker
-    saying how much was left out.
+    saying how much was left out; a byte cut inside a multi-byte character drops that character and counts it.
     """
     if unit not in _TEXT_UNITS:
         raise ValueError(f"unit must be one of {', '.join(_TEXT_UNITS)}, not {unit!r}")
@@ -459,7 +459,6 @@ def render_text(value: Any, limit: int = _TEXT_DEFAULT_LIMIT, unit: str = "chars
         encoded = rendered.encode("utf-8")
         if len(encoded) <= limit:
             return rendered
-        # A cut inside a multi-byte character drops that character, so count what was really kept.
         kept = encoded[:limit].decode("utf-8", errors="ignore")
         return kept + f"\n...[{len(encoded) - len(kept.encode('utf-8'))} more bytes]"
     if len(rendered) <= limit:
