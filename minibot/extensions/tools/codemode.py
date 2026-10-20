@@ -19,9 +19,10 @@ from minibot.app.tool_policy_utils import matches_any, normalize_patterns
 from minibot.config.schema import CodemodeToolConfig
 from minibot.core.tools import ToolContext, ToolPayload
 from minibot.llm.services.tool_executor import canonical_tool_name, normalize_tool_result
+from minibot.llm.tools.arg_utils import int_with_default
 from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.description_loader import load_tool_description
-from minibot.llm.tools.schema_utils import single_required_field_object, string_field
+from minibot.llm.tools.schema_utils import nullable_integer, strict_object, string_field
 from minibot.llm.tools.script_signatures import admits_null, render_signature, unique_identifiers
 from minibot.shared.errors import TOOL_APPROVAL_DENIED, ToolInputError
 
@@ -182,12 +183,21 @@ class _ScriptRunner:
         return Tool(
             name=TOOL_NAME,
             description=self._description(),
-            parameters=single_required_field_object(
-                "code",
-                string_field(
-                    "Python script. Call tools as `await tools.<name>(keyword=value)`; "
-                    "print what you need and end with the value to return."
-                ),
+            parameters=strict_object(
+                {
+                    "code": string_field(
+                        "Python script. Call tools as `await tools.<name>(keyword=value)`; "
+                        "print what you need and end with the value to return."
+                    ),
+                    "timeout_seconds": nullable_integer(
+                        minimum=1,
+                        description=(
+                            f"Wall-clock limit for this script, nested tool calls included. null uses the default "
+                            f"({self._config.timeout_seconds}s); at most {self._config.max_timeout_seconds}s."
+                        ),
+                    ),
+                },
+                ["code", "timeout_seconds"],
             ),
         )
 
@@ -216,10 +226,11 @@ class _ScriptRunner:
         code = payload.get("code") if isinstance(payload, dict) else None
         if not isinstance(code, str) or not code.strip():
             raise ToolInputError("code must be a non-empty Python script", error_code="invalid_tool_arguments")
+        timeout_seconds = self._timeout_seconds(payload.get("timeout_seconds"))
         run = _Run(output=_BoundedText(self._config.max_output_chars))
         monty = self._monty
         limits = monty.ResourceLimits(
-            max_feed_duration_secs=float(self._config.timeout_seconds),
+            max_feed_duration_secs=float(timeout_seconds),
             max_memory=self._config.max_memory_mb * 1024 * 1024,
         )
         namespace = monty.ClassInstance(self._namespace(run, context), allowed_methods=frozenset(self._tools))
@@ -231,7 +242,7 @@ class _ScriptRunner:
             async with monty.AsyncMonty() as pool, pool.checkout(limits=limits) as session:
                 # Monty's feed limit only counts time inside the sandbox, not awaits on host tools, so the
                 # script's real wall-clock budget has to be enforced here.
-                async with asyncio.timeout(self._config.timeout_seconds) as timeout:
+                async with asyncio.timeout(timeout_seconds) as timeout:
                     deadline.attach(timeout)
                     observer_token = approval_wait_observer.set(deadline)
                     try:
@@ -244,7 +255,7 @@ class _ScriptRunner:
                     finally:
                         approval_wait_observer.reset(observer_token)
         except TimeoutError:
-            failure = (TIMEOUT, f"the script did not finish within {self._config.timeout_seconds} seconds", {})
+            failure = (TIMEOUT, f"the script did not finish within {timeout_seconds} seconds", {})
         except monty.MontySyntaxError as exc:
             failure = (SYNTAX_ERROR, str(exc), {})
         except monty.MontyRuntimeError as exc:
@@ -269,6 +280,21 @@ class _ScriptRunner:
         if run.tool_errors:
             result["tool_errors"] = run.tool_errors
         return result
+
+    def _timeout_seconds(self, value: Any) -> int:
+        try:
+            return int_with_default(
+                value,
+                default=self._config.timeout_seconds,
+                field="timeout_seconds",
+                min_value=1,
+                max_value=self._config.max_timeout_seconds,
+                clamp_max=True,
+                type_error="timeout_seconds must be an integer or null",
+                min_error="timeout_seconds must be >= 1",
+            )
+        except ValueError as exc:
+            raise ToolInputError(str(exc), error_code="invalid_tool_arguments") from exc
 
     def _helpers(self) -> dict[str, Callable[..., Any]]:
         """Host functions scripts call by name: tool discovery and bounded text rendering."""

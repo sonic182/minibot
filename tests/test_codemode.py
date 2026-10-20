@@ -331,6 +331,21 @@ except ValueError as exc:
 
 
 @pytest.mark.asyncio
+async def test_a_script_can_ask_for_more_time_up_to_the_configured_maximum() -> None:
+    tool = await _codemode_tool(_settings(timeout_seconds=1, max_timeout_seconds=2), _fake_tools())
+    slow = "await tools.slow_lookup(label='x', delay={delay})\n'done'"
+
+    extended = await tool.handler({"code": slow.format(delay=1.3), "timeout_seconds": 2}, _CONTEXT)
+    capped = await tool.handler({"code": slow.format(delay=5), "timeout_seconds": 99}, _CONTEXT)
+    with pytest.raises(ToolInputError):
+        await tool.handler({"code": "1", "timeout_seconds": 0}, _CONTEXT)
+
+    assert extended["ok"] is True and extended["result"] == "done"
+    assert capped["error_code"] == "codemode:timeout" and "within 2 seconds" in capped["error"]
+    assert "timeout_seconds" in tool.tool.parameters["required"]
+
+
+@pytest.mark.asyncio
 async def test_long_output_keeps_start_and_end() -> None:
     tool = await _codemode_tool(_settings(max_output_chars=100), _fake_tools())
 
@@ -418,12 +433,19 @@ async def test_worker_gets_the_tool_only_for_specialists_that_claim_it() -> None
         tools_allow=["run_tools_script", "slow_lookup"],
     )
     generic_names = {binding.tool.name for binding in derive(replace(generic, tools_allow=["slow_lookup"]))}
+    deny_only = replace(specialist, tools_allow=[], tools_deny=["guarded_tool"])
+    deny_only_names = {binding.tool.name for binding in derive(deny_only)}
+    denies_script = {
+        binding.tool.name for binding in derive(replace(deny_only, tools_deny=["guarded_tool", "run_tools_script"]))
+    }
     specialist_tools = derive(specialist)
     script = next(binding for binding in specialist_tools if binding.tool.name == "run_tools_script")
     result = await script.handler({"code": "await tools.flaky_tool_v2(label='x')"}, _CONTEXT)
 
     assert "run_tools_script" not in generic_names and "slow_lookup" in generic_names
     assert {binding.tool.name for binding in specialist_tools} == {"run_tools_script"}
+    assert "run_tools_script" in deny_only_names and "slow_lookup" not in deny_only_names
+    assert "run_tools_script" not in denies_script and "slow_lookup" in denies_script
     assert "flaky_tool_v2" not in script.tool.description
     assert result["error_code"] == "codemode:script_error"
 

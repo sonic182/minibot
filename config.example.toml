@@ -322,7 +322,8 @@ max_limit = 100
 # workers add "codemode" to [tasks] worker_extensions and name run_tools_script in the specialist's tools_allow.
 # [tools.codemode]
 # enabled = true
-# timeout_seconds = 60       # wall clock for the whole script, nested tool calls included (approval waits excluded)
+# timeout_seconds = 120      # default wall clock for one script, nested tool calls included (approval waits excluded)
+# max_timeout_seconds = 600  # the most a script may ask for with its own timeout_seconds argument
 # max_tool_calls = 50        # tool calls one script may make; the next one raises codemode:tool_call_limit
 # max_memory_mb = 64         # heap limit of the script itself
 # max_output_chars = 20000   # cap on printed output and on the returned value (start and end are kept)

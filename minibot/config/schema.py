@@ -942,7 +942,11 @@ class CodemodeToolConfig(BaseModel):
 
     - ``enabled`` — switch the agent to codemode (default: ``false``).
     - ``timeout_seconds`` — wall-clock limit for one script, nested tool calls included; the time a nested call
-      spends waiting for an owner approval is not counted (default: ``60``).
+      spends waiting for an owner approval is not counted (default: ``120``). With codemode every tool call runs
+      in a script, so this also bounds a single long call such as ``bash``; the model can ask for another limit
+      per script with the tool's ``timeout_seconds`` argument.
+    - ``max_timeout_seconds`` — the highest limit a script may ask for; larger requests are lowered to it
+      (default: ``600``). The turn's own deadline (``[runtime] agent_timeout_seconds``) still applies.
     - ``max_tool_calls`` — how many tool calls one script may make; the next call raises a catchable
       ``codemode:tool_call_limit`` error (default: ``50``).
     - ``max_memory_mb`` — heap limit of the script itself, in MiB (default: ``64``).
@@ -954,13 +958,20 @@ class CodemodeToolConfig(BaseModel):
     """
 
     enabled: bool = False
-    timeout_seconds: PositiveInt = 60
+    timeout_seconds: PositiveInt = 120
+    max_timeout_seconds: PositiveInt = 600
     max_tool_calls: PositiveInt = 50
     max_memory_mb: PositiveInt = 64
     max_output_chars: PositiveInt = 20000
     exclude: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _timeout_within_max(self) -> CodemodeToolConfig:
+        if self.timeout_seconds > self.max_timeout_seconds:
+            raise ValueError("tools.codemode.timeout_seconds must not exceed max_timeout_seconds")
+        return self
 
 
 class ToolApprovalConfig(BaseModel):

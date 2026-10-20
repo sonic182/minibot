@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fragments for tools only reachable from scripts (MCP server instructions) stay in the system prompt. Scripts
   get three helpers: `list_tools(query)` and `describe_tool(name)` to discover tools (signatures beyond the
   description's budget are now listed by name instead of being dropped), and `text(value, limit, unit)` to cut a
-  result to characters, lines or bytes.
+  result to characters, lines or bytes. `[tools.codemode] timeout_seconds` now defaults to 120 (was 60), and
+  `run_tools_script` takes a `timeout_seconds` argument so the model can give one script more time, up to the
+  new `max_timeout_seconds` (default 600).
 - Extensions: a tool deriver can return `DerivedTool(binding, replaces=...)` to take over the tools it was built
   from; `ExtensionRegistry.derive_tools` returns a `DerivedTools` with the bindings and what each replaces.
 

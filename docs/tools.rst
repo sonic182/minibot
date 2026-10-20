@@ -286,7 +286,8 @@ checks only see ``run_tools_script``, not the calls inside it:
 
    [tools.codemode]
    enabled = true
-   timeout_seconds = 60        # wall-clock limit for the whole script, nested tool calls included
+   timeout_seconds = 120       # default wall-clock limit for one script, nested tool calls included
+   max_timeout_seconds = 600   # the most a script may ask for with its timeout_seconds argument
    max_tool_calls = 50         # tool calls one script may make
    max_memory_mb = 64          # heap limit of the script itself
    max_output_chars = 20000    # cap on the printed output and on the returned value
@@ -377,6 +378,10 @@ Time and call limits
    ``timeout_seconds`` is wall-clock time for the whole script, nested calls included, except the time a nested
    call spends waiting for an owner approval (``[tools.approval]``): the clock stops while any approval is pending,
    so a slow decision never ends the script, and the approval's own ``timeout_seconds`` still bounds the wait.
+   Since every tool use runs in a script, it is also the limit for a single long call. The model can ask for
+   another limit per script with the tool's ``timeout_seconds`` argument (``null`` keeps the default); a request
+   above ``max_timeout_seconds`` is lowered to it, and the turn's own deadline still applies. Nested tools keep
+   their own defaults inside the script, for example ``bash``'s ``default_timeout_seconds``.
    ``max_tool_calls`` caps how many tool calls one script makes; the call past the cap raises a ``ValueError``
    whose text starts with ``codemode:tool_call_limit`` (listed in ``tool_errors`` too), which the script may catch.
 
