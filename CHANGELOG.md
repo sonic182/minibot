@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- MCP results are no longer cut to 12,000 characters per text block before the output spill runs, in bridge and
-  lazy mode. An oversized result is saved whole to the managed spill file, so its end is no longer lost; binary
-  payloads are still replaced by a marker.
-
 ### Changed
 
 - **Codemode is now a mode.** With `[tools.codemode] enabled = true`, the tools a script can call are no longer
@@ -29,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new `max_timeout_seconds` (default 600).
 - Extensions: a tool deriver can return `DerivedTool(binding, replaces=...)` to take over the tools it was built
   from; `ExtensionRegistry.derive_tools` returns a `DerivedTools` with the bindings and what each replaces.
+
+### Fixed
+
+- MCP results are no longer cut to 12,000 characters per text block before the output spill runs, in bridge and
+  lazy mode. An oversized result is saved whole to the managed spill file, so its end is no longer lost. Where
+  spill does not apply (file storage off, the default, or no read-back tool), a result now stays inline up to a
+  200,000-character ceiling for the whole result instead of 12,000 per block. Binary payloads, now including
+  embedded-resource `blob` fields, are replaced by a marker.
 
 ## [0.34.0] - 2026-10-20
 

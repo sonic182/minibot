@@ -19,6 +19,8 @@ from minibot.llm.tools.schema_utils import (
     strict_object,
 )
 
+_MAX_RESULT_CHARS = 200_000
+
 
 @dataclass(frozen=True)
 class MCPDynamicTool:
@@ -523,11 +525,12 @@ def _drop_none_in_value(value: Any) -> Any:
 
 
 def _stringify_content_parts(content: list[Any]) -> str:
-    """Join MCP content parts into one text, keeping every text block whole.
+    """Join MCP content parts into one text, keeping text blocks whole up to ``_MAX_RESULT_CHARS`` in total.
 
-    Size is left to the output-spill wrapper, which saves an oversized result to a managed file; cutting here
-    would lose the end of the result before it could be saved. Binary payloads (images, ``data``/``base64``
-    fields) are still replaced by a marker.
+    Size is left to the output-spill wrapper, which saves an oversized result to a managed file; cutting each
+    block here would lose the end of the result before it could be saved. The total ceiling only bounds a huge
+    result where spill does not apply (no file storage, no read-back tool). Binary payloads (images and
+    ``data``/``base64``/``bytes``/``blob`` fields) are replaced by a marker.
     """
     rendered: list[str] = []
     for part in content:
@@ -543,7 +546,10 @@ def _stringify_content_parts(content: list[Any]) -> str:
             rendered.append(json.dumps(_redact_large_payload_fields(part), ensure_ascii=True))
             continue
         rendered.append(str(part))
-    return "\n".join(rendered)
+    text = "\n".join(rendered)
+    if len(text) <= _MAX_RESULT_CHARS:
+        return text
+    return f"{text[:_MAX_RESULT_CHARS]}\n...[truncated {len(text) - _MAX_RESULT_CHARS} chars]"
 
 
 def _redact_large_payload_fields(value: Any) -> Any:
@@ -552,7 +558,7 @@ def _redact_large_payload_fields(value: Any) -> Any:
         for key, nested_value in value.items():
             if (
                 isinstance(nested_value, str)
-                and key.lower() in {"data", "base64", "bytes"}
+                and key.lower() in {"data", "base64", "bytes", "blob"}
                 and len(nested_value) > 256
             ):
                 sanitized[key] = f"<omitted {len(nested_value)} chars>"

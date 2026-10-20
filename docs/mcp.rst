@@ -33,12 +33,13 @@ names, descriptions, and complete input schemas, then call ``call_tool`` with th
 name and arguments. MiniBot initializes lazy servers at startup to obtain that metadata, but
 defers ``tools/list`` until the catalog is requested.
 
-In both modes a call returns the server's text content whole, with only binary payloads (images,
-``data``/``base64`` fields) replaced by a marker. An oversized result is handled by the generic
-output spill (``[tools.tool_output_spill]``, see :doc:`config`): the model gets a preview and the path of a
-managed file holding the complete text. When spill does not apply (it is disabled, file storage is off, or no
-read-back tool is attached), the full text stays inline, as for any other tool. Inside a codemode script the
-result reaches the script in full.
+In both modes a call returns the server's text content whole, up to 200,000 characters for the whole
+result, with binary payloads (images, and ``data``/``base64``/``bytes``/``blob`` fields such as an embedded
+resource's) replaced by a marker. An oversized result is handled by the generic output spill
+(``[tools.tool_output_spill]``, see :doc:`config`): the model gets a preview and the path of a managed file
+holding the text. When spill does not apply (it is disabled, file storage is off, which is the default, or no
+read-back tool is attached), the text stays inline up to that ceiling. Inside a codemode script the result
+reaches the script in full; cut it there with ``text(value, limit=...)`` (see :doc:`tools`).
 
 Configuration
 -------------
