@@ -29,7 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP results are no longer cut to 12,000 characters per text block before the output spill runs, in bridge and
   lazy mode. An oversized result is saved whole to the managed spill file, so its end is no longer lost. Where
   spill does not apply (file storage off, the default, or no read-back tool), a result now stays inline up to a
-  200,000-character ceiling for the whole result instead of 12,000 per block. Binary payloads, now including
+  200,000-character ceiling for the whole result instead of 12,000 per block; the ceiling also applies to what
+  spill saves, so a larger result is still cut, with a marker. Binary payloads, now including
   embedded-resource `blob` fields, are replaced by a marker.
 
 ## [0.34.0] - 2026-10-20

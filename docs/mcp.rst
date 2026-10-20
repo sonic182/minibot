@@ -37,8 +37,9 @@ In both modes a call returns the server's text content whole, up to 200,000 char
 result, with binary payloads (images, and ``data``/``base64``/``bytes``/``blob`` fields such as an embedded
 resource's) replaced by a marker. An oversized result is handled by the generic output spill
 (``[tools.tool_output_spill]``, see :doc:`config`): the model gets a preview and the path of a managed file
-holding the text. When spill does not apply (it is disabled, file storage is off, which is the default, or no
-read-back tool is attached), the text stays inline up to that ceiling. Inside a codemode script the result
+holding the text. The ceiling applies before spill too, so a result above 200,000 characters is cut, with a
+marker, even in the spilled file. When spill does not apply (it is disabled, file storage is off, which is the
+default, or no read-back tool is attached), the text stays inline up to that ceiling. Inside a codemode script the result
 reaches the script in full; cut it there with ``text(value, limit=...)`` (see :doc:`tools`).
 
 Configuration
