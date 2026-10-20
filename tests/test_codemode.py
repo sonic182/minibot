@@ -20,6 +20,7 @@ from minibot.app.tasks import worker
 from minibot.app.tool_approval import apply_tool_approval
 from minibot.app.tool_capabilities import main_agent_tool_view
 from minibot.app.tool_factory import derive_extension_tools
+from minibot.core.agent_runtime import AgentMessage, AppendMessageDirective, MessagePart, ToolResult
 from minibot.core.agents import AgentSpec
 from minibot.core.events import ToolCallEvent
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -76,7 +77,7 @@ async def _codemode_tool(
     settings: Settings, tools: list[ToolBinding], event_bus: EventBus | None = None
 ) -> ToolBinding:
     registry = load_extensions(settings, event_bus or EventBus(), entrypoint="console")
-    (tool,) = derive_extension_tools(tools, settings=settings, extensions=registry, event_bus=event_bus)
+    (tool,) = derive_extension_tools(tools, settings=settings, extensions=registry, event_bus=event_bus).tools
     return tool
 
 
@@ -148,7 +149,7 @@ async def test_nested_results_reach_the_script_in_full_despite_output_spill(tmp_
         config=ToolOutputSpillConfig(spill_after_chars=1000),
     )
     if in_worker:
-        (tool,) = load_extensions(settings, bus, entrypoint="console").derive_tools(wrapped)
+        (tool,) = load_extensions(settings, bus, entrypoint="console").derive_tools(wrapped).tools
     else:
         tool = await _codemode_tool(settings, apply_tool_call_events(wrapped, event_bus=bus), bus)
 
@@ -294,6 +295,62 @@ async def test_failed_scripts_return_a_structured_error_with_partial_output(
 
 
 @pytest.mark.asyncio
+async def test_scripts_discover_tools_and_cut_results_with_text() -> None:
+    tool = await _codemode_tool(_settings(), _fake_tools())
+    code = """
+names = [entry["name"] for entry in list_tools()]
+flaky = list_tools("FLAKY")
+info = describe_tool("flaky-tool.v2")
+rows = {"rows": list(range(50))}
+try:
+    describe_tool("nope")
+except ValueError as exc:
+    print("unknown:", exc)
+{
+    "names": names,
+    "flaky": [entry["name"] for entry in flaky],
+    "signature": info["signature"],
+    "lines": text(rows, limit=3, unit="lines"),
+    "chars": text("abcdef", limit=4),
+    "bytes": text("ñññ", limit=3, unit="bytes"),
+    "whole": text("short"),
+}
+"""
+
+    result = await tool.handler({"code": code}, _CONTEXT)
+
+    assert result["ok"] is True, result
+    value = result["result"]
+    assert value["names"] == ["coded_failure", "flaky_tool_v2", "guarded_tool", "slow_lookup"]
+    assert value["flaky"] == ["flaky_tool_v2"]
+    assert value["signature"] == "await tools.flaky_tool_v2(*, label: str, delay: float | None = None)"
+    assert value["lines"] == '{\n  "rows": [\n    0,\n...[51 more lines]'
+    assert value["chars"] == "abcd\n...[2 more characters]"
+    assert value["bytes"] == "ñ\n...[4 more bytes]"
+    assert value["whole"] == "short"
+    assert "unknown: unknown tool 'nope'" in result["output"]
+
+
+@pytest.mark.asyncio
+async def test_directives_from_nested_calls_reach_the_turn() -> None:
+    message = AgentMessage(role="user", content=[MessagePart(type="text", text="inserted")])
+
+    async def insert(_: dict[str, Any], __: ToolContext) -> ToolResult:
+        return ToolResult(
+            content={"status": "ok"},
+            directives=[AppendMessageDirective(type="append_message", message=message)],
+        )
+
+    tool = await _codemode_tool(_settings(), [_binding("self_insert_artifact", insert)])
+
+    result = await tool.handler({"code": "(await tools.self_insert_artifact(label='a'))['status']"}, _CONTEXT)
+
+    assert isinstance(result, ToolResult)
+    assert result.content["result"] == "ok"
+    assert [directive.message for directive in result.directives] == [message]
+
+
+@pytest.mark.asyncio
 async def test_long_output_keeps_start_and_end() -> None:
     tool = await _codemode_tool(_settings(max_output_chars=100), _fake_tools())
 
@@ -303,6 +360,24 @@ async def test_long_output_keeps_start_and_end() -> None:
     assert result["output"].startswith("S" * 50)
     assert result["output"].rstrip().endswith("E" * 40)
     assert "characters omitted" in result["output"]
+
+
+def test_the_main_agent_sees_only_the_script_and_the_tools_scripts_cannot_call() -> None:
+    settings = _settings(exclude=["coded_*"])
+    registry = load_extensions(settings, EventBus(), entrypoint="console")
+    tools = [*_fake_tools(), _binding("activate_skill", _slow_lookup)]
+
+    def view(main_agent: MainAgentConfig) -> set[str]:
+        result = main_agent_tool_view(
+            tools=tools,
+            orchestration_config=OrchestrationConfig(main_agent=main_agent),
+            agent_specs=[],
+            derive_tools=lambda final: derive_extension_tools(final, settings=settings, extensions=registry),
+        )
+        return {binding.tool.name for binding in result.tools}
+
+    assert view(MainAgentConfig()) == {"run_tools_script", "spawn_task", "coded_failure", "activate_skill"}
+    assert view(MainAgentConfig(tools_deny=["run_tools_script"])) == {binding.tool.name for binding in tools}
 
 
 @pytest.mark.asyncio
@@ -363,8 +438,8 @@ async def test_worker_gets_the_tool_only_for_specialists_that_claim_it() -> None
     script = next(binding for binding in specialist_tools if binding.tool.name == "run_tools_script")
     result = await script.handler({"code": "await tools.flaky_tool_v2(label='x')"}, _CONTEXT)
 
-    assert "run_tools_script" not in generic_names
-    assert {binding.tool.name for binding in specialist_tools} == {"slow_lookup", "run_tools_script"}
+    assert "run_tools_script" not in generic_names and "slow_lookup" in generic_names
+    assert {binding.tool.name for binding in specialist_tools} == {"run_tools_script"}
     assert "flaky_tool_v2" not in script.tool.description
     assert result["error_code"] == "codemode:script_error"
 

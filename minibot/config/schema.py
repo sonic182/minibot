@@ -935,10 +935,11 @@ class CodemodeToolConfig(BaseModel):
 
     Adds one tool, ``run_tools_script``, that runs a short Python script in a sandbox (Pydantic's Monty
     interpreter); the script calls the agent's other tools as ``await tools.<name>(...)`` and only its
-    printed output and final value come back to the model. Requires the ``codemode`` extra:
-    ``poetry install --extras codemode``.
+    printed output and final value come back to the model. The tools a script can call are then no longer
+    offered as direct calls; the delegation and skill tools and those matching ``exclude`` stay direct.
+    Requires the ``codemode`` extra: ``poetry install --extras codemode``.
 
-    - ``enabled`` — attach the tool (default: ``false``).
+    - ``enabled`` — switch the agent to codemode (default: ``false``).
     - ``timeout_seconds`` — wall-clock limit for one script, nested tool calls included; the time a nested call
       spends waiting for an owner approval is not counted (default: ``60``).
     - ``max_tool_calls`` — how many tool calls one script may make; the next call raises a catchable
@@ -946,8 +947,8 @@ class CodemodeToolConfig(BaseModel):
     - ``max_memory_mb`` — heap limit of the script itself, in MiB (default: ``64``).
     - ``max_output_chars`` — cap on the printed output and on the returned value; longer text keeps its start
       and end (default: ``20000``).
-    - ``exclude`` — fnmatch patterns of tool names scripts cannot call (default: empty). The delegation tools
-      and ``run_tools_script`` itself are always excluded.
+    - ``exclude`` — fnmatch patterns of tool names scripts cannot call; they stay direct tools (default: empty).
+      The delegation and skill tools and ``run_tools_script`` itself are always excluded.
     """
 
     enabled: bool = False

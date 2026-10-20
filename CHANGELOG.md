@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Codemode is now a mode.** With `[tools.codemode] enabled = true`, the tools a script can call are no longer
+  offered as direct tool calls: the model uses them through `run_tools_script`, a single call included. The
+  delegation tools, `activate_skill` / `list_skills` and anything matching `exclude` stay direct, and removing
+  `run_tools_script` through the agent's policy brings the others back. The same applies to a task-worker
+  specialist that claims `run_tools_script`. Scripts get three helpers: `list_tools(query)` and
+  `describe_tool(name)` to discover tools (signatures beyond the description's budget are now listed by name
+  instead of being dropped), and `text(value, limit, unit)` to cut a result to characters, lines or bytes. A
+  message directive from a nested call (`self_insert_artifact`) now reaches the turn instead of being lost.
+- Extensions: a tool deriver can return `DerivedTool(binding, replaces=...)` to take over the tools it was built
+  from; `ExtensionRegistry.derive_tools` returns a `DerivedTools` with the bindings and what each replaces.
+
 ## [0.34.0] - 2026-10-20
 
 ### Added

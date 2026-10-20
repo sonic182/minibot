@@ -491,15 +491,16 @@ def _with_derived_tools(
 
     Runs after approval wrapping so the calls a derived tool makes are gated, and filters the derived
     tools through the same spec as everything else: a ``tools_allow`` spec (the generic worker's included)
-    only gets the ones it names, which is how only specialists that claim ``run_tools_script`` have it.
+    only gets the ones it names, which is how only specialists that claim ``run_tools_script`` have it. A
+    derived tool that is kept hides the tools it replaces.
     """
-    derived = strip_reserved_delegation_tools(
-        filter_tools_for_agent(extensions.derive_tools(tools), spec, mcp_name_prefix=settings.tools.mcp.name_prefix)
+    derived = extensions.derive_tools(tools)
+    visible = strip_reserved_delegation_tools(
+        filter_tools_for_agent(derived.tools, spec, mcp_name_prefix=settings.tools.mcp.name_prefix)
     )
-    return [
-        *tools,
-        *apply_tool_approval(derived, patterns=settings.tools.approval.require_approval, approve=approve),
-    ]
+    return derived.merge(
+        tools, apply_tool_approval(visible, patterns=settings.tools.approval.require_approval, approve=approve)
+    )
 
 
 async def _build_worker_mcp_bindings(

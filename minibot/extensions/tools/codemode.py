@@ -13,10 +13,11 @@ from uuid import uuid4
 from llm_async.models import Tool
 
 from minibot.app.agent_policies import RESERVED_DELEGATION_TOOL_NAMES
-from minibot.app.extensions import ExtensionContext
+from minibot.app.extensions import DerivedTool, ExtensionContext
 from minibot.app.tool_approval import approval_wait_observer
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns
 from minibot.config.schema import CodemodeToolConfig
+from minibot.core.agent_runtime import Directive, ToolResult
 from minibot.core.tools import ToolContext, ToolPayload
 from minibot.llm.services.tool_executor import canonical_tool_name, normalize_tool_result
 from minibot.llm.tools.base import ToolBinding
@@ -33,6 +34,12 @@ MEMORY_LIMIT = "codemode:memory_limit"
 TOOL_CALL_LIMIT = "codemode:tool_call_limit"
 SANDBOX_FAILED = "codemode:sandbox_failed"
 _SIGNATURES_MAX_CHARS = 6000
+_SUMMARY_MAX_CHARS = 200
+# Skill tools load instructions into the turn and the system prompt only advertises skills while they are
+# attached, so they stay direct tools instead of moving into scripts, like the delegation tools.
+_DIRECT_TOOL_NAMES = frozenset({"activate_skill", "list_skills"})
+_TEXT_UNITS = ("chars", "lines", "bytes")
+_TEXT_DEFAULT_LIMIT = 2000
 _logger = logging.getLogger("minibot.codemode")
 _INSTALL_HINT = "run `poetry install --extras codemode` (or `pip install 'minibot[codemode]'`)"
 
@@ -54,13 +61,19 @@ def _import_monty() -> ModuleType:
         ) from exc
 
 
-def _derive(monty: ModuleType, config: CodemodeToolConfig, tools: Sequence[ToolBinding]) -> list[ToolBinding]:
+def _derive(monty: ModuleType, config: CodemodeToolConfig, tools: Sequence[ToolBinding]) -> list[DerivedTool]:
+    """``run_tools_script`` over every tool a script may call, replacing them as direct tools.
+
+    The delegation and skill tools, and those matching ``exclude``, are not callable from scripts and stay
+    direct tools.
+    """
     excluded = normalize_patterns(config.exclude)
     callable_tools = sorted(
         (
             binding
             for binding in tools
             if binding.tool.name not in RESERVED_DELEGATION_TOOL_NAMES
+            and binding.tool.name not in _DIRECT_TOOL_NAMES
             and binding.tool.name != TOOL_NAME
             and not matches_any(canonical_tool_name(binding.tool.name), excluded)
         ),
@@ -69,7 +82,12 @@ def _derive(monty: ModuleType, config: CodemodeToolConfig, tools: Sequence[ToolB
     if not callable_tools:
         return []
     runner = _ScriptRunner(monty, config, callable_tools)
-    return [ToolBinding(tool=runner.schema(), handler=runner.handle)]
+    return [
+        DerivedTool(
+            binding=ToolBinding(tool=runner.schema(), handler=runner.handle),
+            replaces=frozenset(binding.tool.name for binding in callable_tools),
+        )
+    ]
 
 
 class _BoundedText:
@@ -150,6 +168,9 @@ class _Run:
     # in another exception type ends as an ordinary script failure.
     denied: list[str] = field(default_factory=list)
     called: list[str] = field(default_factory=list)
+    # Directives from nested results (self_insert_artifact's append_message), returned with the script's result
+    # so they still reach the turn.
+    directives: list[Directive] = field(default_factory=list)
 
 
 class _ScriptRunner:
@@ -175,16 +196,21 @@ class _ScriptRunner:
     def _description(self) -> str:
         static = load_tool_description(TOOL_NAME, package=__spec__.parent if __spec__ else __package__ or "")
         lines: list[str] = []
+        unlisted: list[str] = []
         used = 0
         for identifier, binding in self._tools.items():
             line = render_signature(identifier, binding.tool.description or "", binding.tool.parameters or {})
-            if used + len(line) + 1 > _SIGNATURES_MAX_CHARS:
-                break
+            if unlisted or used + len(line) + 1 > _SIGNATURES_MAX_CHARS:
+                unlisted.append(identifier)
+                continue
             lines.append(line)
             used += len(line) + 1
-        omitted = len(self._tools) - len(lines)
         header = "Tools available to scripts:"
-        footer = f"\n({omitted} more tools are omitted from this list.)" if omitted else ""
+        footer = ""
+        if unlisted:
+            footer = (
+                f"\nMore tools, without their signature here (use describe_tool(name) first): {', '.join(unlisted)}"
+            )
         return f"{static}\n\n{header}\n" + "\n".join(lines) + footer
 
     async def handle(self, payload: ToolPayload, context: ToolContext) -> dict[str, Any]:
@@ -213,6 +239,7 @@ class _ScriptRunner:
                         value = await session.feed_run(
                             code,
                             inputs={"tools": namespace},
+                            external_lookup=self._helpers(),
                             print_callback=lambda _stream, text: run.output.write(text),
                         )
                     finally:
@@ -234,7 +261,8 @@ class _ScriptRunner:
             extra={"ok": failure is None, "tool_calls": run.called, "tool_errors": len(run.tool_errors)},
         )
         if failure is None:
-            return self._success(run, value)
+            result = self._success(run, value)
+            return ToolResult(content=result, directives=run.directives) if run.directives else result
         error_code, message, extra = failure
         if denied_tool is not None:
             raise ToolInputError(self._denial_message(run, denied_tool), error_code=TOOL_APPROVAL_DENIED)
@@ -244,6 +272,35 @@ class _ScriptRunner:
             result["tool_errors"] = run.tool_errors
         return result
 
+    def _helpers(self) -> dict[str, Callable[..., Any]]:
+        """Host functions scripts call by name: tool discovery and bounded text rendering."""
+        by_name = {binding.tool.name: identifier for identifier, binding in self._tools.items()}
+
+        def list_tools(query: str | None = None) -> list[dict[str, str]]:
+            needle = (query or "").strip().lower()
+            entries = []
+            for identifier, binding in self._tools.items():
+                description = binding.tool.description or ""
+                if needle and needle not in f"{identifier} {binding.tool.name} {description}".lower():
+                    continue
+                entries.append({"name": identifier, "summary": _summary(description)})
+            return entries
+
+        def describe_tool(name: str) -> dict[str, Any]:
+            identifier = name if name in self._tools else by_name.get(name)
+            if identifier is None:
+                raise ValueError(f"unknown tool {name!r}; list_tools() returns the names scripts can call")
+            binding = self._tools[identifier]
+            parameters = binding.tool.parameters or {}
+            return {
+                "name": identifier,
+                "signature": render_signature(identifier, "", parameters),
+                "description": binding.tool.description or "",
+                "parameters": parameters,
+            }
+
+        return {"list_tools": list_tools, "describe_tool": describe_tool, "text": render_text}
+
     def _classify_runtime_error(self, exc: Any) -> tuple[str, str, dict[str, Any]]:
         inner = exc.exception()
         message = exc.display("type-msg")
@@ -252,7 +309,10 @@ class _ScriptRunner:
         if isinstance(inner, MemoryError):
             return MEMORY_LIMIT, message, {}
         if isinstance(inner, AttributeError | NameError):
-            hint = "Scripts can only call the tools listed in this tool's description, as `await tools.<name>(...)`."
+            hint = (
+                "Scripts can only call the tools listed in this tool's description or by list_tools(), "
+                "as `await tools.<name>(...)`."
+            )
             return SCRIPT_ERROR, message, {"hint": hint}
         return SCRIPT_ERROR, message, {}
 
@@ -332,7 +392,7 @@ def _bind_call(
             raise ValueError(f"{TOOL_CALL_LIMIT}: a script can make at most {max_tool_calls} tool calls")
         run.called.append(tool_name)
         try:
-            raw = await binding.handler(payload, context)
+            raw = normalize_tool_result(await binding.handler(payload, context))
         except ToolInputError as exc:
             _record_failure(run, tool_name, exc.error_code)
             message = f"{exc.error_code}: {exc}"
@@ -344,7 +404,8 @@ def _bind_call(
             error_code = getattr(exc, "error_code", "") or "tool_execution_failed"
             _record_failure(run, tool_name, error_code)
             raise RuntimeError(f"{tool_name} failed: {exc}") from exc
-        return _plain(normalize_tool_result(raw).content)
+        run.directives.extend(raw.directives)
+        return _plain(raw.content)
 
     return call
 
@@ -353,6 +414,42 @@ def _record_failure(run: _Run, tool_name: str, error_code: str) -> None:
     # The message is left out of the log: it may carry what the tool was given.
     run.tool_errors.append({"tool": tool_name, "error_code": error_code})
     _logger.warning("codemode nested tool call failed", extra={"tool": tool_name, "error_code": error_code})
+
+
+def render_text(value: Any, limit: int = _TEXT_DEFAULT_LIMIT, unit: str = "chars") -> str:
+    """``value`` as text cut to ``limit`` chars, lines or UTF-8 bytes, keeping the start.
+
+    Strings are kept as they are; anything else is rendered as indented JSON. A cut text ends with a marker
+    saying how much was left out.
+    """
+    if unit not in _TEXT_UNITS:
+        raise ValueError(f"unit must be one of {', '.join(_TEXT_UNITS)}, not {unit!r}")
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise ValueError("limit must be a positive integer")
+    rendered = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    if unit == "lines":
+        lines = rendered.splitlines(keepends=True)
+        if len(lines) <= limit:
+            return rendered
+        return "".join(lines[:limit]).rstrip("\n") + f"\n...[{len(lines) - limit} more lines]"
+    if unit == "bytes":
+        encoded = rendered.encode("utf-8")
+        if len(encoded) <= limit:
+            return rendered
+        # A cut inside a multi-byte character drops that character, so count what was really kept.
+        kept = encoded[:limit].decode("utf-8", errors="ignore")
+        return kept + f"\n...[{len(encoded) - len(kept.encode('utf-8'))} more bytes]"
+    if len(rendered) <= limit:
+        return rendered
+    return rendered[:limit] + f"\n...[{len(rendered) - limit} more characters]"
+
+
+def _summary(description: str) -> str:
+    for line in description.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped if len(stripped) <= _SUMMARY_MAX_CHARS else f"{stripped[: _SUMMARY_MAX_CHARS - 3]}..."
+    return ""
 
 
 def _plain(content: Any) -> Any:

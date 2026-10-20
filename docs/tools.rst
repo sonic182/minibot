@@ -206,7 +206,8 @@ Tool Surface
      - ``run_tools_script``
      - ``[tools.codemode]``
      - Run a short Python script in a sandbox that calls the agent's other tools and returns only its printed
-       output and final value. See `Codemode scripts`_ below.
+       output and final value. When enabled, it replaces those tools as direct calls. See `Codemode scripts`_
+       below.
    * - Credential vault
      - ``list_secrets``
      - ``[vault] enabled`` (unlocked)
@@ -260,6 +261,18 @@ script calls other tools, combines and filters their results, and returns only w
 stays out of the model's context, and independent calls run in parallel with ``asyncio.gather``. It is off by
 default; enable it with ``[tools.codemode] enabled = true`` (see :doc:`config`).
 
+Codemode is a mode, not an extra tool: with it on, the tools a script can call are no longer offered to the model
+as direct tool calls, so every tool use goes through a script, a single call included. The model sees
+``run_tools_script`` plus the tools scripts cannot call, which stay direct:
+
+- the delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``, ``list_tasks``, ``get_task``,
+  ``cancel_task``, ``message_task``);
+- the skill tools (``activate_skill``, ``list_skills``), since they load instructions into the turn;
+- anything matching ``exclude``.
+
+If the agent's policy removes ``run_tools_script`` (for example ``[orchestration.main_agent] tools_deny``), the
+other tools are offered directly again.
+
 .. code-block:: toml
 
    [tools.codemode]
@@ -276,8 +289,27 @@ no file system, network, environment or third-party imports, and the only way to
 namespace. Scripts call tools as ``await tools.<name>(keyword=value)``, keyword arguments only; every character of
 a tool name that is not valid in a Python identifier becomes ``_`` (``mcp_exa__web_search`` is unchanged,
 ``my-tool.v2`` becomes ``my_tool_v2``). The tool description lists a one-line signature per available tool,
-generated from its JSON schema (capped at about 6000 characters; tools beyond the cap are omitted from the list).
-A script prints with ``print`` and returns by ending on an expression or with a top-level ``return``:
+generated from its JSON schema, up to about 6000 characters; the tools beyond that are listed by name only.
+A script prints with ``print`` and returns by ending on an expression or with a top-level ``return``.
+
+Three helpers are called by name, without ``await`` or ``tools.``:
+
+``list_tools(query=None)``
+   ``[{"name", "summary"}]`` for the tools the script can call; with ``query``, only those whose name or
+   description contains it (case-insensitive).
+
+``describe_tool(name)``
+   ``{"name", "signature", "description", "parameters"}`` for one tool, by identifier or tool name; an unknown
+   name raises ``ValueError``.
+
+``text(value, limit=2000, unit="chars")``
+   ``value`` as text, strings as they are and anything else as indented JSON, cut to ``limit`` characters,
+   lines (``unit="lines"``) or UTF-8 bytes (``unit="bytes"``) keeping the start, with a marker saying how much
+   was left out.
+
+.. code-block:: python
+
+   print(text(await tools.memory_search(query="trip"), limit=40, unit="lines"))
 
 .. code-block:: python
 
@@ -325,12 +357,13 @@ What a script can call
    raises reaches the script as an exception (``ValueError`` for rejected arguments, ``PermissionError`` for a denied
    approval, ``RuntimeError`` otherwise); catch it to continue. A script that ends on an uncaught
    ``PermissionError`` from a denial returns the ``tool_approval:denied`` error, like a direct call; a denial the
-   script wraps in another exception type is an ordinary ``codemode:script_error``. The delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``,
-   ``list_tasks``, ``get_task``, ``cancel_task``, ``message_task``), ``run_tools_script`` itself and anything matching ``exclude`` are
-   never exposed, and nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
+   script wraps in another exception type is an ordinary ``codemode:script_error``. The delegation and skill tools,
+   ``run_tools_script`` itself and anything matching ``exclude`` are never exposed (they stay direct tools), and
+   nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
    ``mcp_<server>__list_tools`` and ``mcp_<server>__call_tool``. Large nested results arrive as a preview plus a file
-   path, as they do for a direct call, and a tool that returns a file or a message directive (``send_file``) loses
-   the directive when called from a script.
+   path, as they do for a direct call. A message directive from a nested call (``self_insert_artifact`` adding an
+   image or document to the conversation) is returned with the script's result, so it still reaches the turn when
+   the script succeeds.
 
 Time and call limits
    ``timeout_seconds`` is wall-clock time for the whole script, nested calls included, except the time a nested
@@ -356,8 +389,9 @@ Nested calls and events
 Specialists
    In task workers the tool is opt-in like the other bundled extensions: list ``"codemode"`` in
    ``[tasks] worker_extensions`` and name ``run_tools_script`` in a specialist's ``tools_allow``; its scripts then
-   call the tools that specialist itself has. A ``tools_deny``-only specialist gets it too, and a task without an
-   agent never does.
+   call the tools that specialist itself has, and those tools are no longer direct calls for it. A
+   ``tools_deny``-only specialist gets it too. A specialist that does not claim it, and a task without an agent,
+   keep their tools as direct calls.
 
 Trust model
    Monty keeps the script itself away from the file system, network and environment, and every effect is a tool

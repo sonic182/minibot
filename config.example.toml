@@ -314,7 +314,9 @@ max_limit = 100
 
 # Codemode: one tool, run_tools_script, where the model writes a short Python script that calls the agent's other
 # tools (`await tools.<name>(keyword=value)`, parallel with asyncio.gather) and gets back only what it prints and
-# returns. Scripts run in the Monty sandbox (extra: codemode, `poetry install --extras codemode`); every nested call
+# returns. Those tools are then no longer direct tool calls; delegation and skill tools and `exclude` stay direct.
+# Scripts discover tools with list_tools() / describe_tool(name) and cut big results with text(value, limit=...).
+# Scripts run in the Monty sandbox (extra: codemode, `poetry install --extras codemode`); every nested call
 # goes through the agent's normal tool pipeline, so approvals and tools_allow/tools_deny still apply. For task
 # workers add "codemode" to [tasks] worker_extensions and name run_tools_script in the specialist's tools_allow.
 # [tools.codemode]
@@ -323,7 +325,7 @@ max_limit = 100
 # max_tool_calls = 50        # tool calls one script may make; the next one raises codemode:tool_call_limit
 # max_memory_mb = 64         # heap limit of the script itself
 # max_output_chars = 20000   # cap on printed output and on the returned value (start and end are kept)
-# exclude = []               # tool name patterns scripts can never call; delegation tools are always excluded
+# exclude = []               # tool name patterns scripts never call (they stay direct tools)
 
 # Optional RAG (Retrieval-Augmented Generation).
 # Requires `tools.file_storage.enabled = true` and manual `torch` + `sentence-transformers`

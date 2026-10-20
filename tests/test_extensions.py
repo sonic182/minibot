@@ -542,5 +542,5 @@ def test_derive_tools_skips_a_clashing_name_and_keeps_the_existing_tool(caplog: 
     with caplog.at_level(logging.WARNING, logger="test.extensions.derive"):
         derived = registry.derive_tools([existing])
 
-    assert [item.tool.name for item in derived] == ["extra"]
+    assert [item.tool.name for item in derived.tools] == ["extra"]
     assert "run_tools_script" in caplog.text and "derivers" in caplog.text
