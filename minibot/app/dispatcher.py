@@ -213,7 +213,7 @@ class Dispatcher:
             )
             if not strip_logs:
                 self._logger.debug("mcp tools enabled", extra={"mcp_tools_enabled": mcp_tool_names or ["none"]})
-        self._warn_if_codemode_inactive(main_agent_tools_view)
+        self._warn_if_derived_tools_withheld(main_agent_tools_view)
         if main_agent_tools_view.hidden_tool_names:
             self._logger.info(
                 "main agent tools hidden due to exclusive ownership",
@@ -273,18 +273,14 @@ class Dispatcher:
                 "main agent tools hidden due to exclusive ownership",
                 extra={"hidden_tools": view.hidden_tool_names},
             )
-        self._warn_if_codemode_inactive(view)
+        self._warn_if_derived_tools_withheld(view)
 
-    def _warn_if_codemode_inactive(self, view: MainAgentToolView) -> None:
-        codemode = getattr(self._settings.tools, "codemode", None)
-        if not getattr(codemode, "enabled", False):
-            return
-        if any(binding.tool.name == "run_tools_script" for binding in view.tools):
-            return
-        self._logger.warning(
-            "codemode is enabled but run_tools_script is not offered to the main agent (removed by its policy, "
-            "or no tool is callable from scripts); tools stay direct calls"
-        )
+    def _warn_if_derived_tools_withheld(self, view: MainAgentToolView) -> None:
+        if view.withheld_derived_tool_names:
+            self._logger.warning(
+                "main agent policy removed derived tools; the tools they replace stay direct calls",
+                extra={"derived_tools": view.withheld_derived_tool_names},
+            )
 
     @property
     def main_agent_tool_names(self) -> list[str]:

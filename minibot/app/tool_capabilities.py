@@ -15,11 +15,13 @@ from minibot.llm.tools.base import ToolBinding
 @dataclass(frozen=True)
 class MainAgentToolView:
     """The main agent's tools. ``replaced_tools`` were taken over by a derived tool (codemode): they are not
-    offered to the model but stay usable through it."""
+    offered to the model but stay usable through it. ``withheld_derived_tool_names`` are derived tools that would
+    replace others but the main agent's policy removed, so the tools they replace stay direct."""
 
     tools: list[ToolBinding]
     hidden_tool_names: list[str]
     replaced_tools: list[ToolBinding] = field(default_factory=list)
+    withheld_derived_tool_names: list[str] = field(default_factory=list)
 
 
 def main_agent_tool_view(
@@ -43,10 +45,16 @@ def main_agent_tool_view(
     derived = derive_tools(view.tools)
     visible = _apply_main_agent_policy(derived.tools, orchestration_config.main_agent)
     replaced = derived.replaced_names(visible)
+    visible_names = {binding.tool.name for binding in visible}
     return MainAgentToolView(
         tools=derived.merge(view.tools, visible),
         hidden_tool_names=view.hidden_tool_names,
         replaced_tools=[binding for binding in view.tools if binding.tool.name in replaced],
+        withheld_derived_tool_names=sorted(
+            binding.tool.name
+            for binding in derived.tools
+            if binding.tool.name in derived.replaces and binding.tool.name not in visible_names
+        ),
     )
 
 
