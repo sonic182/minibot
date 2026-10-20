@@ -769,7 +769,7 @@ def test_audio_auto_transcription_finds_transcribe_audio_when_codemode_replaced_
 
 
 def test_dispatcher_warns_when_the_policy_removes_a_derived_tool_that_replaces_others(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from minibot.app import dispatcher as dispatcher_module
     from minibot.app.tool_capabilities import MainAgentToolView
@@ -778,8 +778,22 @@ def test_dispatcher_warns_when_the_policy_removes_a_derived_tool_that_replaces_o
     view = MainAgentToolView(tools=[], hidden_tool_names=[], withheld_derived_tool_names=["run_tools_script"])
     monkeypatch.setattr(dispatcher_module.Dispatcher, "_main_agent_view", lambda self, tools: view)
 
-    with caplog.at_level(logging.WARNING, logger="minibot.dispatcher"):
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler(level=logging.WARNING)
+    handler.emit = records.append  # type: ignore[method-assign]
+    # Attached to the logger itself and re-enabled: logging setup in other tests can stop propagation to caplog
+    # or disable existing loggers.
+    logger = logging.getLogger("minibot.dispatcher")
+    disabled, level = logger.disabled, logger.level
+    logger.disabled = False
+    logger.setLevel(logging.WARNING)
+    logger.addHandler(handler)
+    try:
         dispatcher_module.Dispatcher(EventBus(), **dependencies)
+    finally:
+        logger.removeHandler(handler)
+        logger.disabled = disabled
+        logger.setLevel(level)
 
-    [record] = [record for record in caplog.records if "removed derived tools" in record.getMessage()]
+    [record] = [record for record in records if "removed derived tools" in record.getMessage()]
     assert record.derived_tools == ["run_tools_script"]
