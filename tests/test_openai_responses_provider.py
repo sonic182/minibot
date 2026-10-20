@@ -218,6 +218,24 @@ async def test_stream_error_event_keeps_message_param_and_response_id(monkeypatc
     assert str(exc_info.value) == "provider response failed: error (Upstream overloaded)"
 
 
+@pytest.mark.asyncio
+async def test_stream_asks_for_an_uncompressed_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[dict[str, str]] = []
+
+    async def _stream(_client: Any, _url: str, _payload: Any, headers: dict[str, str], **_: Any) -> Any:
+        sent.append(headers)
+        yield {"type": "response.completed", "response": {"id": "resp-4", "status": "completed"}}
+
+    monkeypatch.setattr(openai_responses_module, "stream_json", _stream)
+    response = _provider()._stream_responses_request(
+        "https://example.test/responses", {}, {"accept-encoding": "gzip, deflate", "Authorization": "Bearer x"}
+    )
+    async for _ in response.stream_generator:
+        pass
+
+    assert sent == [{"Authorization": "Bearer x", "Accept-Encoding": "identity"}]
+
+
 def test_codex_provider_uses_patched_stream() -> None:
     assert PatchedCodexProvider._stream_responses_request is PatchedOpenAIResponsesProvider._stream_responses_request
 

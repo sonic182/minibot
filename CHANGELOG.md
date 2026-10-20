@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`message_task`: steer a running background task.** The main agent can send a message to a task that is
+  still running, for example to narrow its scope or tell it to wrap up with what it has, without cancelling it.
+  The worker folds the message into its loop between steps, like a user message that arrives mid-turn.
+  `delivered` is `false` when the task is not running in this process.
+
+### Changed
+
+- LLM provider requests send `Accept-Encoding: gzip, deflate`, so providers can compress their responses.
+  Configured `extra_headers` can still override it, in any letter case. Streamed Responses and Codex
+  requests always ask for `identity`, even over a configured value, because the stream is parsed
+  without decompressing it.
+- `aiosonic` bumped to 1.3.3 (and `onecache` to 0.10). It fixes `http_request` failing with
+  `unparseable status line` after a server sent `Transfer-Encoding` with extra whitespace, which left the chunked
+  body unread on a pooled connection.
+
 ## [0.33.0] - 2026-10-16
 
 ### Added

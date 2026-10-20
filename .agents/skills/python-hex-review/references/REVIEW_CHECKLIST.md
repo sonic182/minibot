@@ -3,13 +3,18 @@
 ## Architecture
 
 - Is the file in the correct package for the responsibility it owns?
-- Does it import inward, or is it reaching across layers?
+- Does it import inward, or is it reaching across layers (HEX_RULES.md, *Dependency direction*)?
 - Is it mixing orchestration, transport, persistence, and provider logic in one place?
 - Are framework or provider-native types leaking into `core` or deeper into `app` than necessary?
 - Is `shared` being used for a genuinely generic helper, or as a shortcut around boundaries?
-- Does a bundled extension remain a thin `register(mb)` composition module while its concrete transport/persistence code stays in `adapters`?
+- Does a bundled extension remain a thin `register(mb)` composition module while its concrete
+  transport/persistence code stays in `adapters`?
 - Does the extension use `ExtensionContext` rather than `AppContainer` or private container state?
-- Do extension tools enter through `mb.tool`/`mb.add_tool` so normal tool validation, event emission, and output handling still apply?
+- Do extension tools enter through `mb.tool`/`mb.add_tool` so normal tool validation, event
+  emission, and output handling still apply?
+- Does a new core mechanism acting on tools treat extension tools exactly like core ones?
+- Is any LLM intent, state or provider error classified by structured fields rather than text
+  matching (`AGENTS.md`, *Output Classification Rule*)?
 
 ## Async
 
@@ -27,7 +32,9 @@
 - Are tool visibility, delegation, or handler semantics changing unintentionally?
 - Are storage and provider boundaries still explicit after the change?
 - Does an extension fail fast at import/registration while runtime handler errors remain isolated and logged?
-- If task-worker behavior is claimed, does the worker explicitly load extensions? It does not today.
+- If task-worker behavior is claimed, is the module actually loaded in workers (the worker
+  branch of `_bundled_modules`, `[tasks] worker_extensions`, or `[extensions].modules`), and
+  does a service-backed tool start lazily there?
 
 ## Refactoring
 

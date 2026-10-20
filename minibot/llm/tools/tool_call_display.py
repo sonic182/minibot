@@ -87,6 +87,7 @@ _DETAILS: dict[str, _Detail] = {
     "memory_list_titles": _Detail(("category",), labelled=True),
     "memory_search": _Detail(("query", "category"), labelled=True),
     "memory_update": _Detail(("entry_id", "category"), labelled=True),
+    "message_task": _Detail(("task_id",)),
     "move_file": _Detail(("source_path", "destination_path"), labelled=True),
     "python_execute": _Detail(("code",)),
     "rag_delete": _Detail(("document_id",), labelled=True),

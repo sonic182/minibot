@@ -1053,3 +1053,91 @@ async def test_protocol_failure_terminates_the_worker_and_fails_the_task(line: b
     assert status.response.metadata["status"] == "failed"
     result = await manager._read_worker_result(_BadLinePipe(line), {"task_id": "t2"}, 5.0, None, 5)
     assert result["error"] == error
+
+
+class _PipeRecordingHang:
+    """Fake pipe: worker never answers; records what the manager writes."""
+
+    def __init__(self) -> None:
+        self.written: list[bytes] = []
+
+    @asynccontextmanager
+    async def open(self):
+        written = self.written
+
+        class _RX:
+            async def readline(self) -> bytes:
+                await asyncio.sleep(100)
+                return b""
+
+        class _TX:
+            def write(self, data: bytes) -> None:
+                written.append(data)
+
+        yield _RX(), _TX()
+
+
+class _WorkerSidePipe:
+    """Fake pipe as the worker sees it: the task payload, then the given manager lines, then EOF."""
+
+    def __init__(self, *lines: bytes | Exception) -> None:
+        self._lines = [json.dumps({"task_id": "t1"}).encode() + b"\n", *lines]
+        self.drained = asyncio.Event()
+
+    @asynccontextmanager
+    async def open(self):
+        lines = self._lines
+        drained = self.drained
+
+        class _RX:
+            async def readline(self) -> bytes:
+                if lines:
+                    line = lines.pop(0)
+                    if isinstance(line, Exception):
+                        raise line
+                    return line
+                await drained.wait()
+                return b""
+
+        class _TX:
+            def write(self, _data: bytes) -> None:
+                pass
+
+        yield _RX(), _TX()
+
+
+@pytest.mark.asyncio
+async def test_message_sent_to_a_running_task_reaches_the_worker_loop_as_steering() -> None:
+    from minibot.app.tasks import worker
+    from minibot.core.agent_runtime import STEERING_METADATA_KEY
+
+    manager = _make_manager(EventBus())
+    manager_pipe = _PipeRecordingHang()
+    _, _, _, _, reader_task = await _spawn(manager, manager_pipe, task_id="t1")
+    await asyncio.sleep(0)
+
+    assert manager.send_message("t1", "wrap up with what you have") is True
+    assert manager.send_message("missing", "hello") is False
+    reader_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reader_task
+    assert manager.send_message("t1", "too late") is False
+
+    # An over-long line (the pipe's StreamReader limit) must not stop the worker from reading the rest.
+    worker_pipe = _WorkerSidePipe(ValueError("chunk exceed the limit"), manager_pipe.written[-1])
+    received: list[Any] = []
+
+    async def _fake_loop(_task, progress_callback=None, approval_callback=None, turn_input=None, *, backends):
+        while not turn_input.has_pending():
+            await asyncio.sleep(0)
+        received.extend(await turn_input.drain())
+        worker_pipe.drained.set()
+        return {"type": "result", "task_id": "t1", "status": "done", "text": "ok"}
+
+    with patch.object(worker, "run_agent_loop", _fake_loop):
+        await asyncio.wait_for(worker._worker_async(worker_pipe, cast(Any, None)), timeout=1.0)
+
+    [message] = received
+    assert message.role == "user"
+    assert message.metadata[STEERING_METADATA_KEY] is True
+    assert message.content[0].text.endswith("wrap up with what you have")

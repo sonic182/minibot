@@ -16,6 +16,8 @@ from minibot.llm.tools.schema_utils import with_object_properties
 
 _TERMINAL_EVENTS = {"response.completed", "response.incomplete", "response.failed"}
 _RAW_ERROR_LOG_CHARS = 2000
+# stream_json parses response.read_chunks(), which aiosonic yields without decompressing.
+_STREAM_ACCEPT_ENCODING = "identity"
 _LOGGER = logging.getLogger("minibot.llm")
 
 
@@ -65,6 +67,8 @@ class PatchedOpenAIResponsesProvider(OpenAIResponsesProvider):
 
     def _stream_responses_request(self, url: str, payload: dict[str, Any], headers: HeadersType) -> Response:
         response = Response({}, self.__class__.name(), stream=True, stream_generator=None)
+        headers = {key: value for key, value in dict(headers).items() if key.lower() != "accept-encoding"}
+        headers["Accept-Encoding"] = _STREAM_ACCEPT_ENCODING
 
         async def _gen():
             accumulated_items: list[dict[str, Any]] = []

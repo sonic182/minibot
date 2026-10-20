@@ -1,0 +1,9 @@
+Send a message to a background worker task that is still running, without stopping it.
+
+Use this to steer a running task: narrow or change its scope, add a fact it is missing, or tell it to wrap up and return what it has so far. The worker reads the message between its steps and treats it as an instruction from you: a tool call already in progress finishes first, and the calls still queued in that step are skipped so it can act on the message.
+
+Provide:
+- task_id: identifier previously returned by spawn_task or delegate (a unique prefix of at least 8 characters also works).
+- message: the instruction or information for the worker. It cannot see this conversation, so make the message self-contained. At most 8000 characters.
+
+Returns delivered=true when the message was queued for the worker; a worker that is already writing its final answer may finish without reading it, so check the result with get_task. delivered=false means the task is not running here (not started, already finished, or running in another process); check it with get_task.

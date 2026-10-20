@@ -736,7 +736,7 @@ class _ApprovalPipe:
 async def _run_worker_asking_approval(pipe: _ApprovalPipe, tool_name: str = "mcp_mail__smtp_send_message") -> bool:
     outcome: list[bool] = []
 
-    async def _fake_loop(_task, progress_callback=None, approval_callback=None, *, backends):
+    async def _fake_loop(_task, progress_callback=None, approval_callback=None, turn_input=None, *, backends):
         outcome.append(
             await approval_callback(
                 tool_name,

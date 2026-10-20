@@ -1080,9 +1080,9 @@ class SqliteTaskQueueConfig(BaseModel):
 class TasksConfig(BaseModel):
     """Async task system settings. TOML section: ``[tasks]``
 
-    Gates both the task consumer service and the ``spawn_task``/``delegate``/``cancel_task``/``list_tasks``/
-    ``get_task`` tools. ``spawn_task`` and ``delegate`` are also the only ways to hand work to a specialist
-    agent, so disabling this section turns multi-agent orchestration off entirely.
+    Gates both the task consumer service and the ``spawn_task``/``delegate``/``cancel_task``/``message_task``/
+    ``list_tasks``/``get_task`` tools. ``spawn_task`` and ``delegate`` are also the only ways to hand work to a
+    specialist agent, so disabling this section turns multi-agent orchestration off entirely.
 
     - ``enabled`` — enable the async task system (default: ``true``; the ``sqlite`` backend
       needs no broker and no extra).
