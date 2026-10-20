@@ -1,22 +1,32 @@
-Run a short Python script that calls other tools and returns only what matters. Use it when a task needs several tool calls, when results must be filtered or combined before you read them, or when independent calls can run in parallel. For a single call, call the tool directly.
+Run a short Python script that calls your tools and returns only what matters. This is how you use every tool listed below, even for a single call: they are not available as direct tool calls. Filter or combine results in the script before you read them, and run independent calls in parallel.
 
-Scripts run in a sandbox with a subset of Python: no file system, network, environment or third-party imports, only the standard modules it provides (asyncio, json, re, math, datetime, ...). The only way to act on the world is the `tools` object: call a tool as `await tools.<identifier>(kw=value, ...)`, keyword arguments only. The identifier is the tool name with every character that is not valid in a Python name replaced by `_`; use exactly the identifier shown in the signature list. Argument names that are not valid Python names appear as `**{'my-key': str}`: pass them the same way, `**{'my-key': 'value'}`. A result is a plain dict, list or string; results reach the script in full (only tools with their own file spill, such as http_request, may still return a file path), so filter them before printing or returning. Tools that need approval still ask the user.
+Scripts run in a sandbox with a subset of Python: no file system, network, environment or third-party imports, only the standard modules it provides (asyncio, json, re, math, datetime, ...). Functions, comprehensions and the usual built-ins work. The only way to act on the world is the `tools` object: call a tool as `await tools.<identifier>(kw=value, ...)`, keyword arguments only. The identifier is the tool name with every character that is not valid in a Python name replaced by `_`; use exactly the identifier shown in the signature list. Argument names that are not valid Python names appear as `**{'my-key': str}`: pass them the same way, `**{'my-key': 'value'}`. A result is a plain dict, list or string; results reach the script in full (only tools with their own file spill, such as http_request, may still return a file path), so cut them before printing or returning. Tools that need approval still ask the user.
+
+Helpers, called without `await` or `tools.`:
+- `list_tools(query=None)`: `[{"name", "summary"}]` for the tools scripts can call, optionally only those whose name or description contains `query`.
+- `describe_tool(name)`: `{"name", "signature", "description", "parameters"}` for one tool. Use it before calling a tool whose signature is not listed below.
+- `text(value, limit=2000, unit="chars")`: `value` as text (strings as they are, anything else as indented JSON), cut to `limit` characters, lines (`unit="lines"`) or UTF-8 bytes (`unit="bytes"`), with a marker saying how much was left out. Use it to print or return a bounded view of a large result.
 
 - Errors: ValueError for rejected arguments, PermissionError for a denied approval (uncaught, it ends the script as denied), RuntimeError for any other failure. Catch with try/except to continue.
 - `print(...)` output and the value of the last expression (or a top-level `return`) come back to you; everything else stays out of your context, so print or return only what you need.
-- Output and the final value are each cut to a size limit, keeping their start and end. A script has a time limit covering its tool calls and a memory limit. A script that fails returns an error with the output printed before the failure.
+- Output and the final value are each cut to a size limit, keeping their start and end. A script has a memory limit and a time limit covering its tool calls; nested tools keep their own defaults (for example a `bash` command's timeout) inside it. For a script that runs a long call (a long `bash` command, a slow MCP call), pass `timeout_seconds` to give the whole script more time; leave it null to use the default. The turn's own time limit still applies. A script that fails returns an error with the output printed before the failure.
 - If `python_execute` is listed, pass it data with `await tools.python_execute(code=...)` for computation the sandbox cannot do.
 
-MCP tools: in bridge mode each remote tool is `tools.<prefix>_<server>__<remote_tool>(...)` and returns `{"ok", "server", "tool", "is_error", "result"}`. `result` is text (the joined text parts) whose format depends on the server: JSON for some, plain text blocks for others (for example `Title: ...\nURL: ...`). When unsure, print a short slice first, or parse defensively. An MCP-side error does not raise: check `ok` / `is_error`. In lazy mode the server exposes `<prefix>_<server>__list_tools()` (catalog with input_schema) and `<prefix>_<server>__call_tool(tool_name="...", arguments={...})`, which returns the same dict (or `{"ok": false, ...}` if the call could not be made).
+MCP tools: in bridge mode each remote tool is `tools.<prefix>_<server>__<remote_tool>(...)` and returns `{"ok", "server", "tool", "is_error", "result"}`. `result` is text (the joined text parts) whose format depends on the server: JSON for some, plain text blocks for others (for example `Title: ...\nURL: ...`). When unsure, print `text(result, limit=500)` first, or parse defensively. An MCP-side error does not raise: check `ok` / `is_error`. In lazy mode the server exposes `<prefix>_<server>__list_tools()` (catalog with input_schema) and `<prefix>_<server>__call_tool(tool_name="...", arguments={...})`, which returns the same dict (or `{"ok": false, ...}` if the call could not be made).
 
 Examples (names are generic; use the real ones from the signature list):
 
     import asyncio, json
+    # one call, bounded
+    print(text(await tools.memory_search(query="trip"), limit=40, unit="lines"))
     # parallel
     a, b = await asyncio.gather(tools.memory_search(query="trip"), tools.current_datetime())
     # sequential: each result feeds the next call
     hit = (await tools.memory_search(query="trip")).get("entries", [])[0]
     detail = await tools.memory_get(id=hit["id"])
+    # discovery
+    print(list_tools("mail"))
+    print(describe_tool("mcp_mail__imap_get_message")["signature"])
     # MCP: check ok, parse text, fan out, return a subset
     found = await tools.mcp_mail__imap_search_messages(query="invoice")
     if not found["ok"]:

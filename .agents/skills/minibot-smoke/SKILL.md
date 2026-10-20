@@ -22,6 +22,7 @@ takes a few seconds. With `-v`, look for the log lines the scenario is about.
 | Scenario | Covers |
 |---|---|
 | `task_steering.py` | The user asks the orchestrator to change a running sub-task's course: `spawn_task`, consumer lease, forked worker, `message_task` over the pipe, steering folded into the worker loop, result back on the console, and `delivered=false` once the task is done |
+| `codemode.py` | With `[tools.codemode]` on, the model is offered `run_tools_script` and the delegation tools but not the tools scripts call; one script uses `list_tools`, `describe_tool`, a nested tool call and `text()` |
 
 ## What is real and what is fake
 
@@ -44,7 +45,8 @@ removes it on exit.
 3. In `scenario()`, open `async with smoke_session(orchestrator=..., worker_policy=..., config=...)`;
    `config` is merged over `smoke_config()`. Talk with `await session.say(text)` and read with
    `await session.reply(until=predicate, timeout=...)`, which skips non-matching replies (status
-   notices, progress) and keeps them all in `session.replies`. Assert with `check(condition, msg)`,
+   notices, progress) and keeps them all in `session.replies`. `session.offered_tools(step)` returns the
+   tool names the orchestrator's provider was offered on a step. Assert with `check(condition, msg)`,
    return a small summary dict, and end the file with `run(scenario)`.
 4. Prove the scenario can fail: in a throwaway script, import it, break the behavior it covers
    (patch the method to a no-op) and confirm it prints FAIL.

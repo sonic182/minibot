@@ -179,7 +179,14 @@ class _SilentConsole:
 class SmokeSession:
     console: ConsoleService
     directory: Path
+    orchestrator_client: ScriptedLLMClient
     replies: list[str] = field(default_factory=list)
+
+    def offered_tools(self, step: int = -1) -> list[str]:
+        """Tool names the orchestrator's provider was offered on one step (default: the latest)."""
+        requests = self.orchestrator_client.complete_requests
+        check(bool(requests), "the orchestrator made no provider request yet")
+        return list(requests[step]["tool_names"])
 
     async def say(self, text: str) -> None:
         """Send a user message to the orchestrator, as the console channel would."""
@@ -224,14 +231,15 @@ async def smoke_session(
                 worker, "LLMClientFactory", lambda _settings: _factory(worker_policy or _no_worker, "worker")
             ),
         ):
+            factory = _factory(orchestrator, "orchestrator")
             async with console_session(
                 config_path=config_path,
-                llm_factory=_factory(orchestrator, "orchestrator"),
+                llm_factory=factory,
                 chat_id=1,
                 user_id=1,
                 console=_SilentConsole(),
             ) as console:
-                yield SmokeSession(console=console, directory=directory)
+                yield SmokeSession(console=console, directory=directory, orchestrator_client=factory.create_default())
 
 
 # --- running -------------------------------------------------------------------------------------

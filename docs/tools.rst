@@ -206,7 +206,8 @@ Tool Surface
      - ``run_tools_script``
      - ``[tools.codemode]``
      - Run a short Python script in a sandbox that calls the agent's other tools and returns only its printed
-       output and final value. See `Codemode scripts`_ below.
+       output and final value. When enabled, it replaces those tools as direct calls. See `Codemode scripts`_
+       below.
    * - Credential vault
      - ``list_secrets``
      - ``[vault] enabled`` (unlocked)
@@ -260,11 +261,33 @@ script calls other tools, combines and filters their results, and returns only w
 stays out of the model's context, and independent calls run in parallel with ``asyncio.gather``. It is off by
 default; enable it with ``[tools.codemode] enabled = true`` (see :doc:`config`).
 
+Codemode is a mode, not an extra tool: with it on, the tools a script can call are no longer offered to the model
+as direct tool calls, so every tool use goes through a script, a single call included. The model sees
+``run_tools_script`` plus the tools scripts cannot call, which stay direct:
+
+- the delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``, ``list_tasks``, ``get_task``,
+  ``cancel_task``, ``message_task``);
+- ``activate_skill``, ``list_skills`` and ``self_insert_artifact``, since they put content into the turn itself
+  (skill instructions, an image or document), which a script result cannot carry;
+- anything matching ``exclude``.
+
+If the agent's policy removes ``run_tools_script``, the other tools are offered directly again: with
+``[orchestration.main_agent] tools_deny = ["run_tools_script"]``, or with a ``tools_allow`` list that does not name
+it, so a main agent with ``tools_allow`` must list ``run_tools_script`` to use codemode. Usage instructions
+contributed for a tool (an MCP server's, for example) stay in the system prompt when the tool is only reachable
+from scripts, and short incoming audio is still auto-transcribed when ``transcribe_audio`` is. Some turn-level
+checks only see ``run_tools_script``, not the calls inside it:
+
+- recent-file tracking, so a file a script wrote is not remembered as a recent file;
+- the runtime's repeated-failure stop, so a script that keeps failing is bounded by the step and tool-call limits;
+- the ``llm_classifier`` tool-use guardrail, which judges against ``run_tools_script`` and the direct tools.
+
 .. code-block:: toml
 
    [tools.codemode]
    enabled = true
-   timeout_seconds = 60        # wall-clock limit for the whole script, nested tool calls included
+   timeout_seconds = 120       # default wall-clock limit for one script, nested tool calls included
+   max_timeout_seconds = 600   # the most a script may ask for with its timeout_seconds argument
    max_tool_calls = 50         # tool calls one script may make
    max_memory_mb = 64          # heap limit of the script itself
    max_output_chars = 20000    # cap on the printed output and on the returned value
@@ -276,8 +299,27 @@ no file system, network, environment or third-party imports, and the only way to
 namespace. Scripts call tools as ``await tools.<name>(keyword=value)``, keyword arguments only; every character of
 a tool name that is not valid in a Python identifier becomes ``_`` (``mcp_exa__web_search`` is unchanged,
 ``my-tool.v2`` becomes ``my_tool_v2``). The tool description lists a one-line signature per available tool,
-generated from its JSON schema (capped at about 6000 characters; tools beyond the cap are omitted from the list).
-A script prints with ``print`` and returns by ending on an expression or with a top-level ``return``:
+generated from its JSON schema, up to about 6000 characters; the tools beyond that are listed by name only.
+A script prints with ``print`` and returns by ending on an expression or with a top-level ``return``.
+
+Three helpers are called by name, without ``await`` or ``tools.``:
+
+``list_tools(query=None)``
+   ``[{"name", "summary"}]`` for the tools the script can call; with ``query``, only those whose name or
+   description contains it (case-insensitive).
+
+``describe_tool(name)``
+   ``{"name", "signature", "description", "parameters"}`` for one tool, by identifier or tool name; an unknown
+   name raises ``ValueError``.
+
+``text(value, limit=2000, unit="chars")``
+   ``value`` as text, strings as they are and anything else as indented JSON, cut to ``limit`` characters,
+   lines (``unit="lines"``) or UTF-8 bytes (``unit="bytes"``) keeping the start, with a marker saying how much
+   was left out.
+
+.. code-block:: python
+
+   print(text(await tools.memory_search(query="trip"), limit=40, unit="lines"))
 
 .. code-block:: python
 
@@ -325,17 +367,21 @@ What a script can call
    raises reaches the script as an exception (``ValueError`` for rejected arguments, ``PermissionError`` for a denied
    approval, ``RuntimeError`` otherwise); catch it to continue. A script that ends on an uncaught
    ``PermissionError`` from a denial returns the ``tool_approval:denied`` error, like a direct call; a denial the
-   script wraps in another exception type is an ordinary ``codemode:script_error``. The delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``,
-   ``list_tasks``, ``get_task``, ``cancel_task``, ``message_task``), ``run_tools_script`` itself and anything matching ``exclude`` are
-   never exposed, and nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
+   script wraps in another exception type is an ordinary ``codemode:script_error``. The tools listed above as direct,
+   ``run_tools_script`` itself and anything matching ``exclude`` are never exposed (they stay direct tools), and
+   nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
    ``mcp_<server>__list_tools`` and ``mcp_<server>__call_tool``. Large nested results arrive as a preview plus a file
-   path, as they do for a direct call, and a tool that returns a file or a message directive (``send_file``) loses
-   the directive when called from a script.
+   path, as they do for a direct call. A tool that returns a message directive loses it when called from a script,
+   which is why ``self_insert_artifact`` stays a direct tool.
 
 Time and call limits
    ``timeout_seconds`` is wall-clock time for the whole script, nested calls included, except the time a nested
    call spends waiting for an owner approval (``[tools.approval]``): the clock stops while any approval is pending,
    so a slow decision never ends the script, and the approval's own ``timeout_seconds`` still bounds the wait.
+   Since every tool use runs in a script, it is also the limit for a single long call. The model can ask for
+   another limit per script with the tool's ``timeout_seconds`` argument (``null`` keeps the default); a request
+   above ``max_timeout_seconds`` is lowered to it, and the turn's own deadline still applies. Nested tools keep
+   their own defaults inside the script, for example ``bash``'s ``default_timeout_seconds``.
    ``max_tool_calls`` caps how many tool calls one script makes; the call past the cap raises a ``ValueError``
    whose text starts with ``codemode:tool_call_limit`` (listed in ``tool_errors`` too), which the script may catch.
 
@@ -356,8 +402,9 @@ Nested calls and events
 Specialists
    In task workers the tool is opt-in like the other bundled extensions: list ``"codemode"`` in
    ``[tasks] worker_extensions`` and name ``run_tools_script`` in a specialist's ``tools_allow``; its scripts then
-   call the tools that specialist itself has. A ``tools_deny``-only specialist gets it too, and a task without an
-   agent never does.
+   call the tools that specialist itself has, and those tools are no longer direct calls for it. A
+   ``tools_deny``-only specialist gets it too, unless its ``tools_deny`` names ``run_tools_script``. A
+   ``tools_allow`` specialist that does not name it, and a task without an agent, keep their tools as direct calls.
 
 Trust model
    Monty keeps the script itself away from the file system, network and environment, and every effect is a tool

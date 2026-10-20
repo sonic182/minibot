@@ -142,7 +142,7 @@ class Dispatcher:
             getattr(audio_transcription_cfg, "auto_transcribe_max_duration_seconds", 45)
         )
         audio_auto_transcription_service = _build_audio_auto_transcription_service(
-            tools=main_agent_tools_view.tools,
+            tools=[*main_agent_tools_view.tools, *main_agent_tools_view.replaced_tools],
             enabled=auto_transcribe_enabled,
             max_duration_seconds=auto_transcribe_max_duration_seconds,
         )
@@ -167,7 +167,9 @@ class Dispatcher:
             preload_skill_catalog=settings.tools.skills.preload_catalog,
             event_bus=event_bus,
             task_handoff_callback=task_handoff_callback,
-            extension_prompt_fragments=extensions.prompt_fragments_for(main_agent_tools_view.tools),
+            extension_prompt_fragments=extensions.prompt_fragments_for(
+                [*main_agent_tools_view.tools, *main_agent_tools_view.replaced_tools]
+            ),
         )
         self._handler = LLMMessageHandler(turn_service)
         self._turn_service = turn_service
@@ -211,6 +213,7 @@ class Dispatcher:
             )
             if not strip_logs:
                 self._logger.debug("mcp tools enabled", extra={"mcp_tools_enabled": mcp_tool_names or ["none"]})
+        self._warn_if_codemode_inactive(main_agent_tools_view)
         if main_agent_tools_view.hidden_tool_names:
             self._logger.info(
                 "main agent tools hidden due to exclusive ownership",
@@ -263,13 +266,25 @@ class Dispatcher:
         self._main_agent_tool_names = sorted(binding.tool.name for binding in view.tools)
         self._turn_service.replace_tools(
             view.tools,
-            extension_prompt_fragments=self._extensions.prompt_fragments_for(view.tools),
+            extension_prompt_fragments=self._extensions.prompt_fragments_for([*view.tools, *view.replaced_tools]),
         )
         if view.hidden_tool_names:
             self._logger.info(
                 "main agent tools hidden due to exclusive ownership",
                 extra={"hidden_tools": view.hidden_tool_names},
             )
+        self._warn_if_codemode_inactive(view)
+
+    def _warn_if_codemode_inactive(self, view: MainAgentToolView) -> None:
+        codemode = getattr(self._settings.tools, "codemode", None)
+        if not getattr(codemode, "enabled", False):
+            return
+        if any(binding.tool.name == "run_tools_script" for binding in view.tools):
+            return
+        self._logger.warning(
+            "codemode is enabled but run_tools_script is not offered to the main agent (removed by its policy, "
+            "or no tool is callable from scripts); tools stay direct calls"
+        )
 
     @property
     def main_agent_tool_names(self) -> list[str]:

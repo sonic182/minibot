@@ -123,6 +123,11 @@ Extension API
    that already exists is skipped with a warning and the existing tool is kept. Runs in the daemon, the console and task workers; the bundled
    ``run_tools_script`` (:doc:`tools`) is built this way.
 
+   To take over tools instead of adding beside them, return ``DerivedTool(binding=..., replaces=frozenset(names))``
+   (from ``minibot.app.extensions``) in place of a plain binding: while the derived tool survives the agent's
+   policy, the tools named in ``replaces`` are no longer offered to the model, and the derived tool keeps calling
+   them itself. ``run_tools_script`` replaces every tool its scripts can call.
+
 ``mb.on(EventType)`` / ``mb.on(EventType, handler)``
    Observe internal events such as ``TurnCompletedEvent``. Handlers are async and lossy:
    slow handlers drop events rather than blocking MiniBot.

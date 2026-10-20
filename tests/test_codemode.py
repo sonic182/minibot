@@ -76,7 +76,7 @@ async def _codemode_tool(
     settings: Settings, tools: list[ToolBinding], event_bus: EventBus | None = None
 ) -> ToolBinding:
     registry = load_extensions(settings, event_bus or EventBus(), entrypoint="console")
-    (tool,) = derive_extension_tools(tools, settings=settings, extensions=registry, event_bus=event_bus)
+    (tool,) = derive_extension_tools(tools, settings=settings, extensions=registry, event_bus=event_bus).tools
     return tool
 
 
@@ -148,7 +148,7 @@ async def test_nested_results_reach_the_script_in_full_despite_output_spill(tmp_
         config=ToolOutputSpillConfig(spill_after_chars=1000),
     )
     if in_worker:
-        (tool,) = load_extensions(settings, bus, entrypoint="console").derive_tools(wrapped)
+        (tool,) = load_extensions(settings, bus, entrypoint="console").derive_tools(wrapped).tools
     else:
         tool = await _codemode_tool(settings, apply_tool_call_events(wrapped, event_bus=bus), bus)
 
@@ -294,6 +294,58 @@ async def test_failed_scripts_return_a_structured_error_with_partial_output(
 
 
 @pytest.mark.asyncio
+async def test_scripts_discover_tools_and_cut_results_with_text() -> None:
+    tool = await _codemode_tool(_settings(), _fake_tools())
+    code = """
+names = [entry["name"] for entry in list_tools()]
+flaky = list_tools("FLAKY")
+info = describe_tool("flaky-tool.v2")
+rows = {"rows": list(range(50))}
+try:
+    describe_tool("nope")
+except ValueError as exc:
+    print("unknown:", exc)
+{
+    "names": names,
+    "flaky": [entry["name"] for entry in flaky],
+    "signature": info["signature"],
+    "lines": text(rows, limit=3, unit="lines"),
+    "chars": text("abcdef", limit=4),
+    "bytes": text("ñññ", limit=3, unit="bytes"),
+    "whole": text("short"),
+}
+"""
+
+    result = await tool.handler({"code": code}, _CONTEXT)
+
+    assert result["ok"] is True, result
+    value = result["result"]
+    assert value["names"] == ["coded_failure", "flaky_tool_v2", "guarded_tool", "slow_lookup"]
+    assert value["flaky"] == ["flaky_tool_v2"]
+    assert value["signature"] == "await tools.flaky_tool_v2(*, label: str, delay: float | None = None)"
+    assert value["lines"] == '{\n  "rows": [\n    0,\n...[51 more lines]'
+    assert value["chars"] == "abcd\n...[2 more characters]"
+    assert value["bytes"] == "ñ\n...[4 more bytes]"
+    assert value["whole"] == "short"
+    assert "unknown: unknown tool 'nope'" in result["output"]
+
+
+@pytest.mark.asyncio
+async def test_a_script_can_ask_for_more_time_up_to_the_configured_maximum() -> None:
+    tool = await _codemode_tool(_settings(timeout_seconds=1, max_timeout_seconds=2), _fake_tools())
+    slow = "await tools.slow_lookup(label='x', delay={delay})\n'done'"
+
+    extended = await tool.handler({"code": slow.format(delay=1.3), "timeout_seconds": 2}, _CONTEXT)
+    capped = await tool.handler({"code": slow.format(delay=5), "timeout_seconds": 99}, _CONTEXT)
+    with pytest.raises(ToolInputError):
+        await tool.handler({"code": "1", "timeout_seconds": 0}, _CONTEXT)
+
+    assert extended["ok"] is True and extended["result"] == "done"
+    assert capped["error_code"] == "codemode:timeout" and "within 2 seconds" in capped["error"]
+    assert "timeout_seconds" in tool.tool.parameters["required"]
+
+
+@pytest.mark.asyncio
 async def test_long_output_keeps_start_and_end() -> None:
     tool = await _codemode_tool(_settings(max_output_chars=100), _fake_tools())
 
@@ -303,6 +355,28 @@ async def test_long_output_keeps_start_and_end() -> None:
     assert result["output"].startswith("S" * 50)
     assert result["output"].rstrip().endswith("E" * 40)
     assert "characters omitted" in result["output"]
+
+
+def test_the_main_agent_sees_only_the_script_and_the_tools_scripts_cannot_call() -> None:
+    settings = _settings(exclude=["coded_*"])
+    registry = load_extensions(settings, EventBus(), entrypoint="console")
+    tools = [*_fake_tools(), _binding("activate_skill", _slow_lookup), _binding("self_insert_artifact", _slow_lookup)]
+
+    def view(main_agent: MainAgentConfig) -> tuple[set[str], set[str]]:
+        result = main_agent_tool_view(
+            tools=tools,
+            orchestration_config=OrchestrationConfig(main_agent=main_agent),
+            agent_specs=[],
+            derive_tools=lambda final: derive_extension_tools(final, settings=settings, extensions=registry),
+        )
+        return {binding.tool.name for binding in result.tools}, {
+            binding.tool.name for binding in result.replaced_tools
+        }
+
+    offered, replaced = view(MainAgentConfig())
+    assert offered == {"run_tools_script", "spawn_task", "coded_failure", "activate_skill", "self_insert_artifact"}
+    assert replaced == {"slow_lookup", "flaky-tool.v2", "guarded_tool"}
+    assert view(MainAgentConfig(tools_deny=["run_tools_script"])) == ({binding.tool.name for binding in tools}, set())
 
 
 @pytest.mark.asyncio
@@ -359,12 +433,19 @@ async def test_worker_gets_the_tool_only_for_specialists_that_claim_it() -> None
         tools_allow=["run_tools_script", "slow_lookup"],
     )
     generic_names = {binding.tool.name for binding in derive(replace(generic, tools_allow=["slow_lookup"]))}
+    deny_only = replace(specialist, tools_allow=[], tools_deny=["guarded_tool"])
+    deny_only_names = {binding.tool.name for binding in derive(deny_only)}
+    denies_script = {
+        binding.tool.name for binding in derive(replace(deny_only, tools_deny=["guarded_tool", "run_tools_script"]))
+    }
     specialist_tools = derive(specialist)
     script = next(binding for binding in specialist_tools if binding.tool.name == "run_tools_script")
     result = await script.handler({"code": "await tools.flaky_tool_v2(label='x')"}, _CONTEXT)
 
-    assert "run_tools_script" not in generic_names
-    assert {binding.tool.name for binding in specialist_tools} == {"slow_lookup", "run_tools_script"}
+    assert "run_tools_script" not in generic_names and "slow_lookup" in generic_names
+    assert {binding.tool.name for binding in specialist_tools} == {"run_tools_script"}
+    assert "run_tools_script" in deny_only_names and "slow_lookup" not in deny_only_names
+    assert "run_tools_script" not in denies_script and "slow_lookup" in denies_script
     assert "flaky_tool_v2" not in script.tool.description
     assert result["error_code"] == "codemode:script_error"
 

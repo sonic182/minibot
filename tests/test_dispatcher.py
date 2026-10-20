@@ -732,3 +732,37 @@ async def test_dispatcher_runs_waiting_messages_after_a_turn_fails_outside_the_h
 
     assert handled == ["first", "waiting"]
     assert [reply.response.text for reply in replies] == ["first", "waiting"]
+
+
+def test_audio_auto_transcription_finds_transcribe_audio_when_codemode_replaced_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from llm_async.models import Tool
+
+    from minibot.app import dispatcher as dispatcher_module
+    from minibot.app.tool_capabilities import MainAgentToolView
+    from minibot.llm.tools.base import ToolBinding
+
+    def binding(name: str) -> ToolBinding:
+        async def handler(_payload, _context):
+            return {}
+
+        return ToolBinding(tool=Tool(name=name, description="d", parameters={"type": "object"}), handler=handler)
+
+    dependencies = _dispatcher_dependencies(monkeypatch, dispatcher_module, _StubHandlerBase)
+    view = MainAgentToolView(
+        tools=[binding("run_tools_script")], hidden_tool_names=[], replaced_tools=[binding("transcribe_audio")]
+    )
+    monkeypatch.setattr(dispatcher_module.Dispatcher, "_main_agent_view", lambda self, tools: view)
+    seen: list[list[str]] = []
+    original = dispatcher_module._build_audio_auto_transcription_service
+
+    def capture(*, tools, **kwargs):
+        seen.append([item.tool.name for item in tools])
+        return original(tools=tools, **kwargs)
+
+    monkeypatch.setattr(dispatcher_module, "_build_audio_auto_transcription_service", capture)
+
+    dispatcher_module.Dispatcher(EventBus(), **dependencies)
+
+    assert seen == [["run_tools_script", "transcribe_audio"]]

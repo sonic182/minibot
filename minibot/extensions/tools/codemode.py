@@ -13,15 +13,16 @@ from uuid import uuid4
 from llm_async.models import Tool
 
 from minibot.app.agent_policies import RESERVED_DELEGATION_TOOL_NAMES
-from minibot.app.extensions import ExtensionContext
+from minibot.app.extensions import DerivedTool, ExtensionContext
 from minibot.app.tool_approval import approval_wait_observer
 from minibot.app.tool_policy_utils import matches_any, normalize_patterns
 from minibot.config.schema import CodemodeToolConfig
 from minibot.core.tools import ToolContext, ToolPayload
 from minibot.llm.services.tool_executor import canonical_tool_name, normalize_tool_result
+from minibot.llm.tools.arg_utils import int_with_default
 from minibot.llm.tools.base import ToolBinding
 from minibot.llm.tools.description_loader import load_tool_description
-from minibot.llm.tools.schema_utils import single_required_field_object, string_field
+from minibot.llm.tools.schema_utils import nullable_integer, strict_object, string_field
 from minibot.llm.tools.script_signatures import admits_null, render_signature, unique_identifiers
 from minibot.shared.errors import TOOL_APPROVAL_DENIED, ToolInputError
 
@@ -33,6 +34,11 @@ MEMORY_LIMIT = "codemode:memory_limit"
 TOOL_CALL_LIMIT = "codemode:tool_call_limit"
 SANDBOX_FAILED = "codemode:sandbox_failed"
 _SIGNATURES_MAX_CHARS = 6000
+_SUMMARY_MAX_CHARS = 200
+_DIRECT_TOOL_NAMES = frozenset({"activate_skill", "list_skills", "self_insert_artifact"})
+_UNLISTED_NAMES_MAX = 100
+_TEXT_UNITS = ("chars", "lines", "bytes")
+_TEXT_DEFAULT_LIMIT = 2000
 _logger = logging.getLogger("minibot.codemode")
 _INSTALL_HINT = "run `poetry install --extras codemode` (or `pip install 'minibot[codemode]'`)"
 
@@ -54,13 +60,21 @@ def _import_monty() -> ModuleType:
         ) from exc
 
 
-def _derive(monty: ModuleType, config: CodemodeToolConfig, tools: Sequence[ToolBinding]) -> list[ToolBinding]:
+def _derive(monty: ModuleType, config: CodemodeToolConfig, tools: Sequence[ToolBinding]) -> list[DerivedTool]:
+    """``run_tools_script`` over every tool a script may call, replacing them as direct tools.
+
+    The delegation tools, ``_DIRECT_TOOL_NAMES`` and those matching ``exclude`` are not callable from scripts and stay
+    direct tools. ``_DIRECT_TOOL_NAMES`` put content into the turn itself, which a script result cannot carry: skill
+    instructions (the system prompt only advertises skills while the skill tools are attached) and
+    self_insert_artifact's message directive, which the runtime only accepts from that tool by name.
+    """
     excluded = normalize_patterns(config.exclude)
     callable_tools = sorted(
         (
             binding
             for binding in tools
             if binding.tool.name not in RESERVED_DELEGATION_TOOL_NAMES
+            and binding.tool.name not in _DIRECT_TOOL_NAMES
             and binding.tool.name != TOOL_NAME
             and not matches_any(canonical_tool_name(binding.tool.name), excluded)
         ),
@@ -69,7 +83,12 @@ def _derive(monty: ModuleType, config: CodemodeToolConfig, tools: Sequence[ToolB
     if not callable_tools:
         return []
     runner = _ScriptRunner(monty, config, callable_tools)
-    return [ToolBinding(tool=runner.schema(), handler=runner.handle)]
+    return [
+        DerivedTool(
+            binding=ToolBinding(tool=runner.schema(), handler=runner.handle),
+            replaces=frozenset(binding.tool.name for binding in callable_tools),
+        )
+    ]
 
 
 class _BoundedText:
@@ -163,38 +182,55 @@ class _ScriptRunner:
         return Tool(
             name=TOOL_NAME,
             description=self._description(),
-            parameters=single_required_field_object(
-                "code",
-                string_field(
-                    "Python script. Call tools as `await tools.<name>(keyword=value)`; "
-                    "print what you need and end with the value to return."
-                ),
+            parameters=strict_object(
+                {
+                    "code": string_field(
+                        "Python script. Call tools as `await tools.<name>(keyword=value)`; "
+                        "print what you need and end with the value to return."
+                    ),
+                    "timeout_seconds": nullable_integer(
+                        minimum=1,
+                        description=(
+                            f"Wall-clock limit for this script, nested tool calls included. null uses the default "
+                            f"({self._config.timeout_seconds}s); at most {self._config.max_timeout_seconds}s. "
+                            "The turn's own time limit still applies."
+                        ),
+                    ),
+                },
+                ["code", "timeout_seconds"],
             ),
         )
 
     def _description(self) -> str:
         static = load_tool_description(TOOL_NAME, package=__spec__.parent if __spec__ else __package__ or "")
         lines: list[str] = []
+        unlisted: list[str] = []
         used = 0
         for identifier, binding in self._tools.items():
             line = render_signature(identifier, binding.tool.description or "", binding.tool.parameters or {})
-            if used + len(line) + 1 > _SIGNATURES_MAX_CHARS:
-                break
+            if unlisted or used + len(line) + 1 > _SIGNATURES_MAX_CHARS:
+                unlisted.append(identifier)
+                continue
             lines.append(line)
             used += len(line) + 1
-        omitted = len(self._tools) - len(lines)
         header = "Tools available to scripts:"
-        footer = f"\n({omitted} more tools are omitted from this list.)" if omitted else ""
+        footer = ""
+        if unlisted:
+            shown = ", ".join(unlisted[:_UNLISTED_NAMES_MAX])
+            more = len(unlisted) - _UNLISTED_NAMES_MAX
+            rest = f", and {more} more (search them with list_tools(query))" if more > 0 else ""
+            footer = f"\nMore tools, without their signature here (use describe_tool(name) first): {shown}{rest}"
         return f"{static}\n\n{header}\n" + "\n".join(lines) + footer
 
     async def handle(self, payload: ToolPayload, context: ToolContext) -> dict[str, Any]:
         code = payload.get("code") if isinstance(payload, dict) else None
         if not isinstance(code, str) or not code.strip():
             raise ToolInputError("code must be a non-empty Python script", error_code="invalid_tool_arguments")
+        timeout_seconds = self._timeout_seconds(payload.get("timeout_seconds"))
         run = _Run(output=_BoundedText(self._config.max_output_chars))
         monty = self._monty
         limits = monty.ResourceLimits(
-            max_feed_duration_secs=float(self._config.timeout_seconds),
+            max_feed_duration_secs=float(timeout_seconds),
             max_memory=self._config.max_memory_mb * 1024 * 1024,
         )
         namespace = monty.ClassInstance(self._namespace(run, context), allowed_methods=frozenset(self._tools))
@@ -206,19 +242,20 @@ class _ScriptRunner:
             async with monty.AsyncMonty() as pool, pool.checkout(limits=limits) as session:
                 # Monty's feed limit only counts time inside the sandbox, not awaits on host tools, so the
                 # script's real wall-clock budget has to be enforced here.
-                async with asyncio.timeout(self._config.timeout_seconds) as timeout:
+                async with asyncio.timeout(timeout_seconds) as timeout:
                     deadline.attach(timeout)
                     observer_token = approval_wait_observer.set(deadline)
                     try:
                         value = await session.feed_run(
                             code,
                             inputs={"tools": namespace},
+                            external_lookup=self._helpers(),
                             print_callback=lambda _stream, text: run.output.write(text),
                         )
                     finally:
                         approval_wait_observer.reset(observer_token)
         except TimeoutError:
-            failure = (TIMEOUT, f"the script did not finish within {self._config.timeout_seconds} seconds", {})
+            failure = (TIMEOUT, f"the script did not finish within {timeout_seconds} seconds", {})
         except monty.MontySyntaxError as exc:
             failure = (SYNTAX_ERROR, str(exc), {})
         except monty.MontyRuntimeError as exc:
@@ -244,6 +281,50 @@ class _ScriptRunner:
             result["tool_errors"] = run.tool_errors
         return result
 
+    def _timeout_seconds(self, value: Any) -> int:
+        try:
+            return int_with_default(
+                value,
+                default=self._config.timeout_seconds,
+                field="timeout_seconds",
+                min_value=1,
+                max_value=self._config.max_timeout_seconds,
+                clamp_max=True,
+                type_error="timeout_seconds must be an integer or null",
+                min_error="timeout_seconds must be >= 1",
+            )
+        except ValueError as exc:
+            raise ToolInputError(str(exc), error_code="invalid_tool_arguments") from exc
+
+    def _helpers(self) -> dict[str, Callable[..., Any]]:
+        """Host functions scripts call by name: tool discovery and bounded text rendering."""
+        by_name = {binding.tool.name: identifier for identifier, binding in self._tools.items()}
+
+        def list_tools(query: str | None = None) -> list[dict[str, str]]:
+            needle = (query or "").strip().lower()
+            entries = []
+            for identifier, binding in self._tools.items():
+                description = binding.tool.description or ""
+                if needle and needle not in f"{identifier} {binding.tool.name} {description}".lower():
+                    continue
+                entries.append({"name": identifier, "summary": _summary(description)})
+            return entries
+
+        def describe_tool(name: str) -> dict[str, Any]:
+            identifier = name if name in self._tools else by_name.get(name)
+            if identifier is None:
+                raise ValueError(f"unknown tool {name!r}; list_tools() returns the names scripts can call")
+            binding = self._tools[identifier]
+            parameters = binding.tool.parameters or {}
+            return {
+                "name": identifier,
+                "signature": render_signature(identifier, "", parameters),
+                "description": binding.tool.description or "",
+                "parameters": parameters,
+            }
+
+        return {"list_tools": list_tools, "describe_tool": describe_tool, "text": render_text}
+
     def _classify_runtime_error(self, exc: Any) -> tuple[str, str, dict[str, Any]]:
         inner = exc.exception()
         message = exc.display("type-msg")
@@ -252,7 +333,10 @@ class _ScriptRunner:
         if isinstance(inner, MemoryError):
             return MEMORY_LIMIT, message, {}
         if isinstance(inner, AttributeError | NameError):
-            hint = "Scripts can only call the tools listed in this tool's description, as `await tools.<name>(...)`."
+            hint = (
+                "Scripts can only call the tools listed in this tool's description or by list_tools(), "
+                "as `await tools.<name>(...)`."
+            )
             return SCRIPT_ERROR, message, {"hint": hint}
         return SCRIPT_ERROR, message, {}
 
@@ -353,6 +437,41 @@ def _record_failure(run: _Run, tool_name: str, error_code: str) -> None:
     # The message is left out of the log: it may carry what the tool was given.
     run.tool_errors.append({"tool": tool_name, "error_code": error_code})
     _logger.warning("codemode nested tool call failed", extra={"tool": tool_name, "error_code": error_code})
+
+
+def render_text(value: Any, limit: int = _TEXT_DEFAULT_LIMIT, unit: str = "chars") -> str:
+    """``value`` as text cut to ``limit`` chars, lines or UTF-8 bytes, keeping the start.
+
+    Strings are kept as they are; anything else is rendered as indented JSON. A cut text ends with a marker
+    saying how much was left out; a byte cut inside a multi-byte character drops that character and counts it.
+    """
+    if unit not in _TEXT_UNITS:
+        raise ValueError(f"unit must be one of {', '.join(_TEXT_UNITS)}, not {unit!r}")
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise ValueError("limit must be a positive integer")
+    rendered = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    if unit == "lines":
+        lines = rendered.splitlines(keepends=True)
+        if len(lines) <= limit:
+            return rendered
+        return "".join(lines[:limit]).rstrip("\n") + f"\n...[{len(lines) - limit} more lines]"
+    if unit == "bytes":
+        encoded = rendered.encode("utf-8")
+        if len(encoded) <= limit:
+            return rendered
+        kept = encoded[:limit].decode("utf-8", errors="ignore")
+        return kept + f"\n...[{len(encoded) - len(kept.encode('utf-8'))} more bytes]"
+    if len(rendered) <= limit:
+        return rendered
+    return rendered[:limit] + f"\n...[{len(rendered) - limit} more characters]"
+
+
+def _summary(description: str) -> str:
+    for line in description.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped if len(stripped) <= _SUMMARY_MAX_CHARS else f"{stripped[: _SUMMARY_MAX_CHARS - 3]}..."
+    return ""
 
 
 def _plain(content: Any) -> Any:

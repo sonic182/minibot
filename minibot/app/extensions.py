@@ -26,9 +26,46 @@ if TYPE_CHECKING:
 
 EventHandler = Callable[[Any], Awaitable[None]]
 ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
-type ToolDeriver = Callable[[Sequence[ToolBinding]], Sequence[ToolBinding]]
+type ToolDeriver = Callable[[Sequence[ToolBinding]], Sequence[ToolBinding | DerivedTool]]
 type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
 type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
+
+
+@dataclass(frozen=True)
+class DerivedTool:
+    """A derived tool that takes over tools from the list it was built from.
+
+    While ``binding`` survives the agent's policy, the tools named in ``replaces`` are removed from what the
+    model sees; ``binding`` keeps calling them itself.
+    """
+
+    binding: ToolBinding
+    replaces: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class DerivedTools:
+    """What ``ExtensionRegistry.derive_tools`` returns: the derived bindings and what each one replaces."""
+
+    tools: list[ToolBinding] = field(default_factory=list)
+    replaces: dict[str, frozenset[str]] = field(default_factory=dict)
+
+    def with_tools(self, tools: Sequence[ToolBinding]) -> DerivedTools:
+        """The same replacements over re-wrapped bindings (wrappers keep the tool name)."""
+        return DerivedTools(tools=list(tools), replaces=self.replaces)
+
+    def merge(self, final_tools: Sequence[ToolBinding], visible: Sequence[ToolBinding]) -> list[ToolBinding]:
+        """``final_tools`` minus what the ``visible`` derived tools replace, followed by ``visible``.
+
+        ``visible`` is the subset of ``tools`` the agent's policy kept, so a derived tool the policy removed
+        replaces nothing.
+        """
+        replaced = self.replaced_names(visible)
+        return [binding for binding in final_tools if binding.tool.name not in replaced] + list(visible)
+
+    def replaced_names(self, visible: Sequence[ToolBinding]) -> set[str]:
+        """Names of the tools the ``visible`` derived tools take over."""
+        return {name for binding in visible for name in self.replaces.get(binding.tool.name, ())}
 
 
 WORKER_OPT_IN_MODULES = {
@@ -188,6 +225,10 @@ class ExtensionContext:
         event-wrapped like any tool and filtered by the same agent policy. The input list does not
         contain them, and it is rebuilt whenever the tool list is, so a deriver must be a pure function
         of its argument. Runs in the daemon, the console and task workers.
+
+        A deriver may return a ``DerivedTool`` instead of a plain binding to take over input tools: while
+        the derived tool survives the agent's policy, the tools it ``replaces`` are no longer shown to the
+        model.
         """
         self.tool_derivers.append(deriver)
 
@@ -251,7 +292,7 @@ class ExtensionRegistry:
     def tools_outside(self, names: Collection[str]) -> list[ToolBinding]:
         return [binding for context in self._contexts if context.name not in names for binding in context.tools]
 
-    def derive_tools(self, final_tools: Sequence[ToolBinding]) -> list[ToolBinding]:
+    def derive_tools(self, final_tools: Sequence[ToolBinding]) -> DerivedTools:
         """Run every ``add_tool_deriver`` function over ``final_tools`` and return only what they add.
 
         A derived tool whose name already exists (say an MCP server exposing ``run_tools_script``) is
@@ -260,9 +301,11 @@ class ExtensionRegistry:
         """
         existing = {binding.tool.name for binding in final_tools}
         derived: list[ToolBinding] = []
+        replaces: dict[str, frozenset[str]] = {}
         for context in self._contexts:
             for deriver in context.tool_derivers:
-                for binding in deriver(final_tools):
+                for item in deriver(final_tools):
+                    binding = item.binding if isinstance(item, DerivedTool) else item
                     if binding.tool.name in existing:
                         self._logger.warning(
                             "extension %r derived tool %r, which already exists; keeping the existing tool",
@@ -272,7 +315,9 @@ class ExtensionRegistry:
                         continue
                     existing.add(binding.tool.name)
                     derived.append(binding)
-        return derived
+                    if isinstance(item, DerivedTool) and item.replaces:
+                        replaces[binding.tool.name] = item.replaces
+        return DerivedTools(tools=derived, replaces=replaces)
 
     @property
     def routes(self) -> list[RouteSpec]:

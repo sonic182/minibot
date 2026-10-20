@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Codemode is now a mode.** With `[tools.codemode] enabled = true`, the tools a script can call are no longer
+  offered as direct tool calls: the model uses them through `run_tools_script`, a single call included. The
+  delegation tools, `activate_skill` / `list_skills` / `self_insert_artifact` and anything matching `exclude` stay
+  direct, and removing `run_tools_script` through the agent's policy (a `tools_deny`, or a `tools_allow` that does
+  not name it) brings the others back. The same applies to a task-worker specialist that gets
+  `run_tools_script` (named in its `tools_allow`, or not denied by a `tools_deny`-only spec). Extension prompt
+  fragments for tools only reachable from scripts (MCP server instructions) stay in the system prompt. Scripts
+  get three helpers: `list_tools(query)` and `describe_tool(name)` to discover tools (signatures beyond the
+  description's budget are now listed by name instead of being dropped), and `text(value, limit, unit)` to cut a
+  result to characters, lines or bytes. `[tools.codemode] timeout_seconds` now defaults to 120 (was 60), and
+  `run_tools_script` takes a `timeout_seconds` argument so the model can give one script more time, up to the
+  new `max_timeout_seconds` (default 600).
+- Extensions: a tool deriver can return `DerivedTool(binding, replaces=...)` to take over the tools it was built
+  from; `ExtensionRegistry.derive_tools` returns a `DerivedTools` with the bindings and what each replaces.
+
 ## [0.34.0] - 2026-10-20
 
 ### Added

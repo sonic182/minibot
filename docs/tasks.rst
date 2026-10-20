@@ -117,7 +117,7 @@ Worker limits live on ``[tasks]``:
   agent loses the tool that returns results to it. See :doc:`agents`.
 - ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
   (default ``[]``). ``"kv_memory"``, ``"rag"`` and ``"codemode"`` (the ``run_tools_script`` tool, which calls
-  the tools that specialist has) are accepted, each at most once, and each needs its ``[tools.*]`` section enabled. Their storage is prepared on the first call in each worker.
+  the tools that specialist has and replaces them as direct calls) are accepted, each at most once, and each needs its ``[tools.*]`` section enabled. Their storage is prepared on the first call in each worker.
 
   .. code-block:: toml
 
