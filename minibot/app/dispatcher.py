@@ -142,7 +142,7 @@ class Dispatcher:
             getattr(audio_transcription_cfg, "auto_transcribe_max_duration_seconds", 45)
         )
         audio_auto_transcription_service = _build_audio_auto_transcription_service(
-            tools=main_agent_tools_view.tools,
+            tools=[*main_agent_tools_view.tools, *main_agent_tools_view.replaced_tools],
             enabled=auto_transcribe_enabled,
             max_duration_seconds=auto_transcribe_max_duration_seconds,
         )

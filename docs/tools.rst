@@ -275,8 +275,12 @@ If the agent's policy removes ``run_tools_script``, the other tools are offered 
 ``[orchestration.main_agent] tools_deny = ["run_tools_script"]``, or with a ``tools_allow`` list that does not name
 it, so a main agent with ``tools_allow`` must list ``run_tools_script`` to use codemode. Usage instructions
 contributed for a tool (an MCP server's, for example) stay in the system prompt when the tool is only reachable
-from scripts. Recent-file tracking only sees direct file tool calls, so a file a script wrote is not remembered as
-a recent file.
+from scripts, and short incoming audio is still auto-transcribed when ``transcribe_audio`` is. Some turn-level
+checks only see ``run_tools_script``, not the calls inside it:
+
+- recent-file tracking, so a file a script wrote is not remembered as a recent file;
+- the runtime's repeated-failure stop, so a script that keeps failing is bounded by the step and tool-call limits;
+- the ``llm_classifier`` tool-use guardrail, which judges against ``run_tools_script`` and the direct tools.
 
 .. code-block:: toml
 
