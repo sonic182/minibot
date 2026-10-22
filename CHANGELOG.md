@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-22
+
 ### Added
 
 - The `llm_classifier` tool-use guardrail can run on its own model: `[orchestration] main_tool_use_guardrail_provider`,
@@ -1586,7 +1588,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.35.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.36.0...HEAD
+[0.36.0]: https://github.com/sonic182/minibot/compare/0.35.0..0.36.0
 [0.35.0]: https://github.com/sonic182/minibot/compare/0.34.0..0.35.0
 [0.34.0]: https://github.com/sonic182/minibot/compare/0.33.0..0.34.0
 [0.33.0]: https://github.com/sonic182/minibot/compare/0.32.0..0.33.0
