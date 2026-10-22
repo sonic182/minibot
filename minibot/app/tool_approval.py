@@ -6,7 +6,7 @@ import contextvars
 import json
 import logging
 import unicodedata
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Iterator, Sequence
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -18,12 +18,20 @@ from minibot.llm.services.tool_executor import canonical_tool_name, is_sensitive
 from minibot.llm.tools.base import ToolBinding
 from minibot.shared.errors import TOOL_APPROVAL_DENIED, ToolInputError
 
-Approver = Callable[[str, dict[str, Any], ToolContext], Awaitable[bool]]
+
+class Approver(Protocol):
+    """Asks the user to approve ``tool_name``; ``detail`` replaces the text built from ``arguments``."""
+
+    def __call__(
+        self, tool_name: str, arguments: dict[str, Any], context: ToolContext, /, *, detail: str | None = None
+    ) -> Awaitable[bool]: ...
+
 
 _DETAIL_MAX_CHARS = 3000
 _TRUNCATED_SUFFIX = "\n…(truncated)"
 _VALUE_MAX_CHARS = 1000
 _NO_ARGUMENTS = "(no arguments)"
+_FLAGGED_LINE_MAX_CHARS = 300
 NAME_MAX_CHARS = 200
 _ESCAPED_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 _ESCAPED_CHARS = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
@@ -32,7 +40,7 @@ _logger = logging.getLogger("minibot.tool_approval")
 
 
 class ApprovalWaitObserver(Protocol):
-    """Told when a gated call starts and stops waiting for the owner's answer."""
+    """Told when a call starts and stops a wait bounded by its own timeout (an owner approval, a safety check)."""
 
     def begin(self) -> None: ...
 
@@ -40,7 +48,8 @@ class ApprovalWaitObserver(Protocol):
 
 
 # A tool that runs other tools under its own deadline (codemode) installs an observer here so the owner's
-# thinking time is not charged to that deadline. The context is copied into tasks the caller spawns.
+# thinking time, and other waits with their own timeout, are not charged to that deadline. The context is
+# copied into tasks the caller spawns.
 approval_wait_observer: contextvars.ContextVar[ApprovalWaitObserver | None] = contextvars.ContextVar(
     "approval_wait_observer", default=None
 )
@@ -61,7 +70,7 @@ def apply_tool_approval(
     if not normalized:
         return list(bindings)
     return [
-        _wrap(binding, normalized, approve) if _may_need_approval(binding.tool.name, normalized) else binding
+        _wrap(binding, normalized, approve) if may_match_tool_patterns(binding.tool.name, normalized) else binding
         for binding in bindings
     ]
 
@@ -74,7 +83,8 @@ def effective_tool_name(tool_name: str, payload: ToolPayload) -> str:
     return name
 
 
-def _may_need_approval(tool_name: str, patterns: Sequence[str]) -> bool:
+def may_match_tool_patterns(tool_name: str, patterns: Sequence[str]) -> bool:
+    """Whether a call of ``tool_name`` can match ``patterns``: always for a lazy-mode MCP ``call_tool``."""
     name = canonical_tool_name(tool_name)
     return name.endswith(_LAZY_MCP_CALL_SUFFIX) or matches_any(name, patterns)
 
@@ -98,15 +108,39 @@ def _wrap(binding: ToolBinding, patterns: Sequence[str], approve: Approver) -> T
     return ToolBinding(tool=binding.tool, handler=handler)
 
 
-async def _approve_observed(approve: Approver, name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
+async def _approve_observed(
+    approve: Approver, name: str, arguments: dict[str, Any], context: ToolContext, *, detail: str | None = None
+) -> bool:
+    """Run ``approve`` under the wait observer; ``detail`` is passed only when set, so approvers written for
+    the three-argument call keep working."""
+    ask = approve(name, arguments, context) if detail is None else approve(name, arguments, context, detail=detail)
+    with outside_script_deadline():
+        return await ask
+
+
+@contextlib.contextmanager
+def outside_script_deadline() -> Iterator[None]:
+    """Report the enclosed wait to ``approval_wait_observer``, so an enclosing script deadline pauses for it."""
     observer = approval_wait_observer.get()
     if observer is None:
-        return await approve(name, arguments, context)
+        yield
+        return
     observer.begin()
     try:
-        return await approve(name, arguments, context)
+        yield
     finally:
         observer.end()
+
+
+def observed_approver(approve: Approver) -> Approver:
+    """``approve`` reporting its wait to ``approval_wait_observer``, as the approval gate itself does."""
+
+    async def observed(
+        tool_name: str, arguments: dict[str, Any], context: ToolContext, /, *, detail: str | None = None
+    ) -> bool:
+        return await _approve_observed(approve, tool_name, arguments, context, detail=detail)
+
+    return observed
 
 
 async def request_tool_approval(
@@ -132,7 +166,7 @@ async def request_tool_approval(
         await event_bus.publish(
             ToolApprovalRequestedEvent(
                 approval_id=approval_id,
-                tool_name=_escape(tool_name)[:NAME_MAX_CHARS],
+                tool_name=escape_approval_text(tool_name)[:NAME_MAX_CHARS],
                 channel=channel,
                 chat_id=chat_id,
                 detail=_cap_detail(detail) if detail is not None else format_approval_detail(arguments),
@@ -158,16 +192,44 @@ async def request_tool_approval(
     return False
 
 
-def format_approval_detail(arguments: dict[str, Any]) -> str:
-    """One block per argument, shortest first, each value capped on its own.
+def format_approval_detail(arguments: dict[str, Any], *, max_chars: int = _DETAIL_MAX_CHARS) -> str:
+    """One block per argument, shortest first, each value capped on its own, the whole within ``max_chars``.
 
     Empty values (``None``, blank strings, empty containers) are dropped. The model controls argument
     order and size, so a long body must never push a recipient out of view. Unicode format characters
     (bidi overrides, zero-width) are escaped so text cannot be shown reordered or hidden.
     """
-    pruned = _prune(_redact(arguments))
+    pruned = _prune(redact_arguments(arguments))
     blocks = sorted((_render_entry(str(key), value, "") for key, value in pruned.items()), key=len)
-    return _cap_detail("\n".join(f"- {block}" for block in blocks) or _NO_ARGUMENTS)
+    return _cap_detail("\n".join(f"- {block}" for block in blocks) or _NO_ARGUMENTS, max_chars)
+
+
+def format_flagged_detail(
+    headline: str, reason: str, instruction: str, arguments: dict[str, Any] | None, *, excerpt: str | None = None
+) -> str:
+    """An approval prompt for a call or result a check flagged: what and why, then the call's arguments.
+
+    ``reason`` comes from a model that may have read attacker-written text, and ``excerpt`` (the start of a
+    flagged result) is that text, so each is escaped onto one line and capped, like ``headline``, and the
+    arguments get the rest of the prompt's budget: neither can fake an argument line or push the real
+    arguments out of view.
+    """
+    lines = [_cap_line(headline), f"Reason: {_cap_line(reason)}"]
+    if excerpt is not None:
+        lines.append(f"Excerpt: {_cap_line(excerpt.strip()[: _FLAGGED_LINE_MAX_CHARS + 1])}")
+    lines.append(_cap_line(instruction))
+    header = "\n".join(lines)
+    if arguments is None:
+        return header
+    budget = _DETAIL_MAX_CHARS - len(header) - len(_TRUNCATED_SUFFIX) - 2
+    return f"{header}\n\n{format_approval_detail(arguments, max_chars=budget)}"
+
+
+def _cap_line(text: str) -> str:
+    line = escape_approval_text(text.strip())
+    if len(line) <= _FLAGGED_LINE_MAX_CHARS:
+        return line
+    return f"{line[:_FLAGGED_LINE_MAX_CHARS]}…"
 
 
 def _prune(value: Any) -> Any:
@@ -188,7 +250,7 @@ def _is_empty(value: Any) -> bool:
 
 
 def _render_entry(key: str, value: Any, indent: str) -> str:
-    label = f"{indent}{_escape(key)}:"
+    label = f"{indent}{escape_approval_text(key)}:"
     child_indent = f"{indent}  "
     if isinstance(value, dict):
         return "\n".join([label, *(_render_entry(str(name), child, child_indent) for name, child in value.items())])
@@ -204,20 +266,20 @@ def _render_item(item: Any, indent: str) -> str:
     return f"{indent}- {_render_value(item)}"
 
 
-def _cap_detail(text: str) -> str:
-    if len(text) <= _DETAIL_MAX_CHARS:
+def _cap_detail(text: str, max_chars: int = _DETAIL_MAX_CHARS) -> str:
+    if len(text) <= max_chars:
         return text
-    return f"{text[:_DETAIL_MAX_CHARS]}{_TRUNCATED_SUFFIX}"
+    return f"{text[:max_chars]}{_TRUNCATED_SUFFIX}"
 
 
 def _render_value(value: Any) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
     if len(text) > _VALUE_MAX_CHARS:
         text = f"{text[:_VALUE_MAX_CHARS]}…(+{len(text) - _VALUE_MAX_CHARS} chars)"
-    return _escape(text)
+    return escape_approval_text(text)
 
 
-def _escape(text: str) -> str:
+def escape_approval_text(text: str) -> str:
     """Keep each argument on one visible line: line breaks inside a value would let it fake extra
     argument lines (a spoofed ``to:`` under the real one)."""
     return "".join(
@@ -227,11 +289,13 @@ def _escape(text: str) -> str:
     )
 
 
-def _redact(value: Any) -> Any:
+def redact_arguments(value: Any) -> Any:
+    """``value`` with every sensitive key's value (``authorization``, ``token``, ...) replaced by ``***``."""
     if isinstance(value, dict):
         return {
-            str(key): "***" if is_sensitive_argument_key(str(key)) else _redact(item) for key, item in value.items()
+            str(key): "***" if is_sensitive_argument_key(str(key)) else redact_arguments(item)
+            for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_redact(item) for item in value]
+        return [redact_arguments(item) for item in value]
     return value

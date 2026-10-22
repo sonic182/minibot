@@ -44,6 +44,7 @@ from `mb.settings`. See `minibot/extensions/tools/utility.py`.
 | `mb.tool(func)` | name = `__name__`, description = docstring, schema = first arg's pydantic model |
 | `mb.add_tool(binding)` | escape hatch for a custom name, hand-written schema, or file-loaded description |
 | `mb.add_tool_deriver(deriver)` | tools built per agent from its final tool list (e.g. codemode); must be pure |
+| `mb.add_tool_wrapper(wrapper)` | `(bindings, approve) -> bindings` around every tool handler, innermost (before output spill), workers and codemode nested calls included (e.g. safety classifier); must keep names and be pure |
 | `mb.add_service(service)` | anything with async `start()`/`stop()` |
 | `mb.add_route` / `mb.add_prompt_fragment` / `mb.add_page` | HTTP routes, system-prompt fragments (optionally tied to tool names), web UI pages |
 
@@ -259,7 +260,7 @@ delegate / spawn_task (LLM tools)
           └─ worker_entry(pipe, backends)  app/tasks/worker.py
               └─ run_agent_loop(...)       app/tasks/worker.py
                   ├─ backends.load_settings(secrets)
-                  ├─ load_extensions(..., entrypoint="worker")   ← scheduler + utility + worker_extensions + user modules
+                  ├─ load_extensions(..., entrypoint="worker")   ← scheduler + safety + utility + worker_extensions + user modules
                   ├─ _resolve_task_spec(...)
                   ├─ _build_worker_tools(...)
                   ├─ _with_derived_tools(...)
@@ -268,8 +269,8 @@ delegate / spawn_task (LLM tools)
 
 Two traps:
 
-- **Workers load only the scheduler and utility bundles** (`_bundled_modules`,
-  `app/extensions.py`). Besides them, only user-configured `[extensions].modules` load there,
+- **Workers load only the scheduler, safety and utility bundles** (`_bundled_modules`,
+  `app/extensions.py`); safety adds no tools, only a tool wrapper gated by its own config. Besides them, only user-configured `[extensions].modules` load there,
   and bundled tool modules self-narrow when `mb.entrypoint == "worker"` (e.g. `read_docs`).
   To give workers a bundled extension tool, add its module to the worker branch. A bundle with a
   service (kv_memory, rag) or an opt-in feature (codemode) is opt-in instead: it is listed in

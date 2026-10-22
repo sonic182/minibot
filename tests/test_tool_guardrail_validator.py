@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from minibot.app.tool_guardrail_validator import ToolGuardrailValidator, _FailResult, _RetryResult, _ValidResult
+from minibot.app.tool_guardrail_validator import FailResult, RetryResult, ToolGuardrailValidator, ValidResult
 
 
 def test_tool_guardrail_validator_accepts_valid_payload() -> None:
@@ -10,7 +10,7 @@ def test_tool_guardrail_validator_accepts_valid_payload() -> None:
         {"requires_tools": True, "suggested_tool": "delete_file", "path": "tmp/a.txt", "reason": "delete request"}
     )
 
-    assert isinstance(result, _ValidResult)
+    assert isinstance(result, ValidResult)
     payload = validator.valid_payload(result)
     assert payload.requires_tools is True
     assert payload.suggested_tool == "delete_file"
@@ -24,6 +24,6 @@ def test_tool_guardrail_validator_retries_on_invalid_then_fails() -> None:
     first = validator.receive("not json")
     second = validator.receive("still not json")
 
-    assert isinstance(first, _RetryResult)
-    assert isinstance(second, _FailResult)
+    assert isinstance(first, RetryResult)
+    assert isinstance(second, FailResult)
     assert "invalid JSON" in second.reason

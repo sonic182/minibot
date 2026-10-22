@@ -545,6 +545,10 @@ class OrchestrationConfig(BaseModel):
     - ``main_tool_use_guardrail`` — optional guardrail before tool execution:
       ``"disabled"`` (default) or ``"llm_classifier"``. With ``[tools.codemode]`` on, the classifier only sees
       ``run_tools_script`` and the direct tools, not the calls a script makes.
+    - ``main_tool_use_guardrail_provider``, ``main_tool_use_guardrail_model`` and
+      ``main_tool_use_guardrail_reasoning_effort`` — run the classifier on its own model instead of the main
+      agent's, for example a cheap model with ``"low"`` reasoning. Each one left unset keeps the main agent's
+      value. The provider is a ``[providers.<name>]`` section name (default: unset).
     - ``main_agent`` — tool allow/deny policy for the main agent (``[orchestration.main_agent]``).
     - ``specialists`` — whether owner-defined specialists are used at all
       (``[orchestration.specialists]``).
@@ -556,6 +560,9 @@ class OrchestrationConfig(BaseModel):
     tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
     shared_mcp_servers: list[str] = Field(default_factory=list)
     main_tool_use_guardrail: Literal["disabled", "llm_classifier"] = "disabled"
+    main_tool_use_guardrail_provider: str | None = None
+    main_tool_use_guardrail_model: str | None = None
+    main_tool_use_guardrail_reasoning_effort: str | None = None
     main_agent: MainAgentConfig = MainAgentConfig()
     specialists: SpecialistsConfig = Field(default_factory=SpecialistsConfig)
     agent_management: AgentManagementConfig = Field(default_factory=AgentManagementConfig)
@@ -947,9 +954,9 @@ class CodemodeToolConfig(BaseModel):
 
     - ``enabled`` — switch the agent to codemode (default: ``false``).
     - ``timeout_seconds`` — wall-clock limit for one script, nested tool calls included; the time a nested call
-      spends waiting for an owner approval is not counted (default: ``120``). With codemode every tool call runs
-      in a script, so this also bounds a single long call such as ``bash``; the model can ask for another limit
-      per script with the tool's ``timeout_seconds`` argument.
+      spends waiting for an owner approval or a safety classifier check is not counted (default: ``120``).
+      With codemode every tool call runs in a script, so this also bounds a single long call such as ``bash``;
+      the model can ask for another limit per script with the tool's ``timeout_seconds`` argument.
     - ``max_timeout_seconds`` — the highest limit a script may ask for; larger requests are lowered to it
       (default: ``600``). The turn's own deadline (``[runtime] agent_timeout_seconds``) still applies.
     - ``max_tool_calls`` — how many tool calls one script may make; the next call raises a catchable
@@ -978,6 +985,67 @@ class CodemodeToolConfig(BaseModel):
         if self.timeout_seconds > self.max_timeout_seconds:
             raise ValueError("tools.codemode.timeout_seconds must not exceed max_timeout_seconds")
         return self
+
+
+class SafetyClassifierToolConfig(BaseModel):
+    """An LLM check on risky tool calls and on untrusted tool results. TOML section: ``[tools.safety_classifier]``
+
+    A second, cheap model looks at a call before it runs and at a result before the agent sees it, and answers
+    with a structured ``safe``/``unsafe`` verdict and a reason. A ``safe`` verdict lets the call or result
+    through; anything else, including failures and timeouts, asks the user with the ``[tools.approval]``
+    buttons, the classifier's reason shown in the prompt. The classifier never blocks on its own. It is a
+    best-effort filter, not a security boundary: it can itself be steered by injected text in what it checks.
+
+    - ``enabled`` — turn the checks on (default: ``false``). Covers the main agent and task workers alike,
+      so a delegated agent reading mail is checked too; calls a ``run_tools_script`` script makes are checked
+      one by one.
+    - ``provider`` / ``model`` / ``reasoning_effort`` — the classifier's own LLM: a ``[providers.<name>]``
+      key or an API format name (``openai``, ``claude``, ...), its model and reasoning effort. Each one left
+      unset keeps the main ``[llm]`` value (default: unset). An unknown ``provider`` fails config loading, and
+      so does a ``provider`` without a ``model``, since the main ``[llm]`` model may not exist there.
+    - ``check_input`` — fnmatch patterns of tool names whose arguments are checked before the call runs
+      (default: ``["bash", "python_execute", "http_request", "install_skill", "schedule_prompt"]``). An
+      ``unsafe`` call, such as ``bash`` reading ``.env`` and sending it out with ``curl``, runs only if the user
+      approves it; a denial returns the same ``tool_approval:denied`` error as ``[tools.approval]``.
+    - ``check_output`` — fnmatch patterns of tool names whose result is checked after the call for text
+      aimed at an AI agent, i.e. prompt injection (default: ``["http_request"]``; add sources of untrusted text
+      such as ``mcp_exa__*`` or ``mcp_mail__imap_get_message*``). A flagged result is held back until the user
+      releases it, the prompt showing its first 300 characters on one escaped ``Excerpt:`` line; a denial
+      replaces it with a ``tool_output_withheld`` error.
+    - ``max_output_chars`` — the size of one classifier call (default: ``20000``). A longer result, or
+      longer serialized call arguments, is split into chunks of this size, classified concurrently; any
+      flagged chunk flags the whole. Consecutive chunks overlap by a quarter of ``max_output_chars``, at most
+      500 characters, so text written across a chunk boundary is still seen whole.
+    - ``max_output_chunks`` — the most chunks one check may use (default: ``5``). A result or set of
+      arguments needing more chunks (a little under ``max_output_chars * max_output_chunks`` characters,
+      because of the overlap) is not sent to the classifier: the user is asked as if the check had failed,
+      so nothing passes unchecked.
+    - ``timeout_seconds`` — limit for one classifier call, retries included (default: ``30``).
+
+    The classifier's provider receives the checked call arguments, with sensitive keys such as
+    ``authorization`` or ``token`` redacted, and the checked results in full. MCP tools match their exposed
+    name, also in ``lazy`` mode. When the classifier fails, times out or still returns no valid verdict after
+    two retries, the user is asked as if it had flagged the call. Channels without approval buttons, such as the
+    console, deny every flagged call and withhold every flagged result. Errors a tool raises are not
+    checked, only results it returns. Each check is one more model call per chunk; ``http_request`` is in both
+    default lists, so each request costs at least two. Waiting for the user counts against the turn or task
+    deadline as with ``[tools.approval]``; neither that wait nor the classifier's calls count against a
+    ``run_tools_script`` script's ``timeout_seconds``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    provider: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
+    check_input: ToolPatterns = Field(
+        default_factory=lambda: ["bash", "python_execute", "http_request", "install_skill", "schedule_prompt"]
+    )
+    check_output: ToolPatterns = Field(default_factory=lambda: ["http_request"])
+    max_output_chars: PositiveInt = 20000
+    max_output_chunks: PositiveInt = 5
+    timeout_seconds: PositiveInt = 30
 
 
 class ToolApprovalConfig(BaseModel):
@@ -1027,6 +1095,7 @@ class ToolsConfig(BaseModel):
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
     rag: RagToolConfig = RagToolConfig()
     codemode: CodemodeToolConfig = CodemodeToolConfig()
+    safety_classifier: SafetyClassifierToolConfig = SafetyClassifierToolConfig()
 
 
 class RabbitMQConsumerConfig(BaseModel):
@@ -1324,6 +1393,31 @@ class Settings(BaseModel):
             valid = ", ".join(PROVIDER_API_FORMATS)
             raise ValueError(
                 f"[providers.{name}] must set api_format (one of {valid}) because its name is not an API format"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_safety_classifier_provider(self) -> Settings:
+        """The safety classifier's ``provider`` must name a ``[providers.<name>]`` section or an API format,
+        and comes with its own ``model``.
+
+        Any other name would fall through to the OpenAI Chat Completions client at the first check, and a
+        provider that does not host the main ``[llm]`` model would reject it; either way every check fails
+        and the user is asked about every call.
+        """
+        config = self.tools.safety_classifier
+        provider = (config.provider or "").strip().lower()
+        if not config.enabled or not provider:
+            return self
+        if provider not in PROVIDER_API_FORMATS and provider not in self.providers:
+            known = ", ".join(sorted({*PROVIDER_API_FORMATS, *self.providers}))
+            raise ValueError(
+                f"[tools.safety_classifier].provider {config.provider!r} is not a known provider ({known})"
+            )
+        if not (config.model or "").strip():
+            raise ValueError(
+                "[tools.safety_classifier].model is required when provider is set: the [llm] model may not exist "
+                f"on {config.provider!r}"
             )
         return self
 

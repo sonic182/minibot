@@ -111,11 +111,11 @@ description living outside `minibot/` ships broken.
 
 ## Bundled extensions are implicit
 
-Fifteen modules load automatically for the daemon and console and appear nowhere in
+Sixteen modules load automatically for the daemon and console and appear nowhere in
 `config.toml` (`_bundled_modules` in `app/extensions.py`): the integrations decision, rag, mcp,
 rabbitmq; the services scheduler, tasks; and the tool modules agent_management, codemode,
-execution, media, memory, network, utility, vault, workspace. Telegram is prepended for the
-`daemon` entrypoint only. **Workers load only the scheduler and utility bundles**, plus
+execution, media, memory, network, safety, utility, vault, workspace. Telegram is prepended for the
+`daemon` entrypoint only. **Workers load only the scheduler, safety and utility bundles**, plus
 kv_memory / rag / codemode when listed in `[tasks] worker_extensions` (`WORKER_OPT_IN_MODULES`).
 `extensions/tools/graph.py` is the exception: opt-in through `[extensions].modules`.
 

@@ -187,7 +187,9 @@ async def _worker_async(pipe: Any, backends: WorkerBackends) -> None:
         async def emit_progress(progress: dict[str, Any]) -> None:
             writer_pipe.write(json.dumps({"type": "progress", "progress": progress}).encode() + b"\n")
 
-        async def request_approval(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
+        async def request_approval(
+            tool_name: str, arguments: dict[str, Any], context: ToolContext, /, *, detail: str | None = None
+        ) -> bool:
             approval_id = uuid4().hex
             future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
             pending_approvals[approval_id] = future
@@ -195,7 +197,7 @@ async def _worker_async(pipe: Any, backends: WorkerBackends) -> None:
                 "type": "approval_request",
                 "approval_id": approval_id,
                 "tool_name": tool_name[:NAME_MAX_CHARS],
-                "detail": format_approval_detail(arguments),
+                "detail": detail if detail is not None else format_approval_detail(arguments),
                 "channel": context.channel,
                 "chat_id": context.chat_id,
             }
@@ -305,6 +307,8 @@ async def run_agent_loop(
                 managed_storage=backends.build_storage(settings),
                 extension_tools=extensions.tools,
                 mcp_bindings=mcp_bindings,
+                extensions=extensions,
+                approve=approve,
             ),
             patterns=settings.tools.approval.require_approval,
             approve=approve,
@@ -422,7 +426,9 @@ async def run_agent_loop(
         await _close_mcp_clients(mcp_clients)
 
 
-async def _deny_approval(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
+async def _deny_approval(
+    tool_name: str, arguments: dict[str, Any], context: ToolContext, /, *, detail: str | None = None
+) -> bool:
     return False
 
 
@@ -431,6 +437,8 @@ def _build_worker_tools(
     settings: Settings,
     spec: AgentSpec,
     managed_storage: FileStorage | None,
+    extensions: ExtensionRegistry,
+    approve: Approver,
     extension_tools: Sequence[ToolBinding] = (),
     mcp_bindings: Sequence[ToolBinding] = (),
 ) -> list[ToolBinding]:
@@ -473,7 +481,7 @@ def _build_worker_tools(
         filter_tools_for_agent(bindings, spec, mcp_name_prefix=settings.tools.mcp.name_prefix)
     )
     return apply_tool_output_spill(
-        scoped,
+        extensions.wrap_tools(scoped, approve),
         storage=managed_storage,
         config=settings.tools.tool_output_spill,
     )
@@ -499,7 +507,12 @@ def _with_derived_tools(
         filter_tools_for_agent(derived.tools, spec, mcp_name_prefix=settings.tools.mcp.name_prefix)
     )
     return derived.merge(
-        tools, apply_tool_approval(visible, patterns=settings.tools.approval.require_approval, approve=approve)
+        tools,
+        apply_tool_approval(
+            extensions.wrap_tools(visible, approve),
+            patterns=settings.tools.approval.require_approval,
+            approve=approve,
+        ),
     )
 
 

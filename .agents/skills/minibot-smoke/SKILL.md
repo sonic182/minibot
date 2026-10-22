@@ -23,6 +23,7 @@ takes a few seconds. With `-v`, look for the log lines the scenario is about.
 |---|---|
 | `task_steering.py` | The user asks the orchestrator to change a running sub-task's course: `spawn_task`, consumer lease, forked worker, `message_task` over the pipe, steering folded into the worker loop, result back on the console, and `delivered=false` once the task is done |
 | `codemode.py` | With `[tools.codemode]` on, the model is offered `run_tools_script` and the delegation tools but not the tools scripts call; one script uses `list_tools`, `describe_tool`, a nested tool call and `text()` |
+| `safety.py` | With `[tools.safety_classifier]` on and a fake classifier that flags everything, a `bash` call is denied before it runs and a `wait` result is withheld, in the orchestrator and in a forked task worker (the console has no approval buttons) |
 
 ## What is real and what is fake
 

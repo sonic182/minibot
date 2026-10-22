@@ -26,7 +26,11 @@ from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_capabilities import MainAgentToolView, main_agent_tool_view
 from minibot.app.tool_factory import build_enabled_tools, derive_extension_tools
-from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
+from minibot.app.tool_use_guardrail import (
+    LLMClassifierToolUseGuardrail,
+    NoopToolUseGuardrail,
+    guardrail_llm_client,
+)
 from minibot.app.turn_inbox import TurnInbox
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentDefinitionReader
@@ -131,7 +135,7 @@ class Dispatcher:
         guardrail_mode = settings.orchestration.main_tool_use_guardrail
         if guardrail_mode == "llm_classifier":
             tool_use_guardrail: NoopToolUseGuardrail | LLMClassifierToolUseGuardrail = LLMClassifierToolUseGuardrail(
-                llm_client=llm_client,
+                llm_client=guardrail_llm_client(settings.orchestration, llm_client, llm_factory),
                 tools=main_agent_tools_view.tools,
             )
         else:
@@ -234,6 +238,7 @@ class Dispatcher:
             extension_tools=self._extensions.tools,
             managed_storage=self._managed_storage,
             config_path=self._config_path,
+            wrap_tools=self._extensions.wrap_tools,
         )
 
     def _main_agent_view(self, tools: list[ToolBinding]) -> MainAgentToolView:

@@ -429,7 +429,10 @@ Tool Configuration
      - ``enabled``, ``backend``, ``sqlite_url``/``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
    * - ``[tools.codemode]``
      - ``CodemodeToolConfig``
-     - ``enabled`` (replaces the tools scripts can call as direct tools), ``timeout_seconds`` (default ``120``; time spent waiting for a ``[tools.approval]`` answer is not counted), ``max_timeout_seconds`` (default ``600``; the most a script may ask for with its ``timeout_seconds`` argument), ``max_tool_calls`` (default ``50``; the extra call raises a catchable ``codemode:tool_call_limit`` error), ``max_memory_mb``, ``max_output_chars``, ``exclude``; needs the ``codemode`` extra; see :doc:`tools`
+     - ``enabled`` (replaces the tools scripts can call as direct tools), ``timeout_seconds`` (default ``120``; time spent waiting for a ``[tools.approval]`` answer or a ``[tools.safety_classifier]`` check is not counted), ``max_timeout_seconds`` (default ``600``; the most a script may ask for with its ``timeout_seconds`` argument), ``max_tool_calls`` (default ``50``; the extra call raises a catchable ``codemode:tool_call_limit`` error), ``max_memory_mb``, ``max_output_chars``, ``exclude``; needs the ``codemode`` extra; see :doc:`tools`
+   * - ``[tools.safety_classifier]``
+     - ``SafetyClassifierToolConfig``
+     - ``enabled`` (default ``false``), ``provider``/``model``/``reasoning_effort`` (the classifier's LLM; unset keeps ``[llm]``), ``check_input`` (patterns checked before the call runs), ``check_output`` (patterns whose result is checked for prompt injection), ``max_output_chars`` (default ``20000``; the size of one classifier call, longer arguments or results are checked in chunks), ``max_output_chunks`` (default ``5``; beyond ``max_output_chars * max_output_chunks`` the user is asked instead), ``timeout_seconds`` (default ``30``); a ``safe`` verdict lets the call or result through, anything else (failures and timeouts included) asks the user with the ``[tools.approval]`` buttons, and the classifier never blocks on its own; a best-effort filter, not a security boundary; covers task workers too; see :doc:`tools`
    * - ``[tasks]``
      - ``TasksConfig``
      - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``worker_max_steps``, ``worker_max_tool_calls``, ``max_concurrent_workers``, ``delegation_mode``, ``history``, ``worker_extensions``, ``sqlite``
@@ -512,4 +515,7 @@ Tool Config Models
    :no-members:
 
 .. autoclass:: minibot.adapters.config.schema.RagToolConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.SafetyClassifierToolConfig
    :no-members:

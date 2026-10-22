@@ -3,10 +3,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
-from minibot.app.tool_guardrail_validator import ToolGuardrailValidator, _FailResult, _RetryResult, _ValidResult
+from minibot.app.llm_client_factory import LLMClientFactory
+from minibot.app.tool_guardrail_validator import FailResult, RetryResult, ToolGuardrailValidator, ValidResult
+from minibot.config.schema import OrchestrationConfig
 from minibot.core.agent_runtime import AgentMessage, AgentState
+from minibot.core.agents import AgentSpec
 from minibot.core.tools import ToolContext
 from minibot.llm.tools.base import ToolBinding
 
@@ -36,6 +40,25 @@ class ToolUseGuardrail(Protocol):
     ) -> GuardrailDecision: ...
 
     def replace_tools(self, tools: Sequence[ToolBinding]) -> None: ...
+
+
+def guardrail_llm_client(config: OrchestrationConfig, main_client: Any, llm_factory: LLMClientFactory) -> Any:
+    """The client the classifier runs on: the main agent's unless ``main_tool_use_guardrail_*`` names another."""
+    provider = config.main_tool_use_guardrail_provider
+    model = config.main_tool_use_guardrail_model
+    effort = config.main_tool_use_guardrail_reasoning_effort
+    if provider is None and model is None and effort is None:
+        return main_client
+    spec = AgentSpec(
+        name="tool_use_guardrail",
+        description="",
+        system_prompt="",
+        source_path=Path("."),
+        model_provider=provider,
+        model=model,
+        reasoning_effort=effort,
+    )
+    return llm_factory.create_for_agent(spec)
 
 
 class NoopToolUseGuardrail:
@@ -107,10 +130,10 @@ class LLMClassifierToolUseGuardrail:
                     tokens += raw_tokens
                 result = validator.receive(generation.payload)
                 attempts = result.attempts
-                if isinstance(result, _ValidResult):
+                if isinstance(result, ValidResult):
                     payload = validator.valid_payload(result)
                     break
-                if isinstance(result, _RetryResult):
+                if isinstance(result, RetryResult):
                     prompt_patch = result.prompt_patch.strip()
                     self._logger.warning(
                         "tool requirement classifier output invalid; retrying",
@@ -122,7 +145,7 @@ class LLMClassifierToolUseGuardrail:
                         },
                     )
                     continue
-                if isinstance(result, _FailResult):
+                if isinstance(result, FailResult):
                     self._logger.warning(
                         "tool requirement classifier validation failed",
                         extra={

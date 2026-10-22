@@ -6,6 +6,7 @@ import sys
 import textwrap
 from pathlib import Path
 from typing import get_args
+from unittest.mock import AsyncMock
 
 import pytest
 from llm_async.models import ToolCall
@@ -82,7 +83,7 @@ async def test_load_extensions_collects_tools_and_delivers_events(
     assert sys.modules["ext_ok"].seen_turns == ["turn-7"]
 
 
-def test_load_extensions_for_worker_loads_only_the_scheduler_and_utility_bundles(
+def test_load_extensions_for_worker_loads_only_the_scheduler_safety_and_utility_bundles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_module(tmp_path, monkeypatch, "ext_worker", "def register(mb):\n    pass\n")
@@ -94,10 +95,25 @@ def test_load_extensions_for_worker_loads_only_the_scheduler_and_utility_bundles
 
     assert registry.names() == [
         "minibot.extensions.services.scheduler",
+        "minibot.extensions.tools.safety",
         "minibot.extensions.tools.utility",
         "ext_worker",
     ]
     assert {binding.tool.name for binding in registry.tools} == {"current_datetime", "calculate_expression"}
+
+
+def test_a_tool_wrapper_that_drops_a_tool_fails_naming_its_extension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = "def register(mb):\n    mb.add_tool_wrapper(lambda bindings, approve: bindings[1:])\n"
+    _write_module(tmp_path, monkeypatch, "ext_dropper", source)
+    settings = Settings.from_dict(
+        {"extensions": {"modules": ["ext_dropper"]}, "scheduler": {"prompts": {"enabled": False}}}
+    )
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+
+    with pytest.raises(ValueError, match="extension 'ext_dropper': a tool wrapper must keep every tool"):
+        registry.wrap_tools(registry.tools, AsyncMock())
 
 
 def test_load_extensions_for_worker_exposes_scheduler_tools_without_pages(tmp_path: Path) -> None:

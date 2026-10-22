@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus, EventSubscription
+from minibot.app.tool_approval import Approver, observed_approver
 from minibot.config.schema import Settings
 from minibot.core.events import BaseEvent
 from minibot.core.secrets import SecretVault
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 EventHandler = Callable[[Any], Awaitable[None]]
 ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
 type ToolDeriver = Callable[[Sequence[ToolBinding]], Sequence[ToolBinding | DerivedTool]]
+type ToolWrapper = Callable[[Sequence[ToolBinding], Approver], Sequence[ToolBinding]]
 type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
 type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 
@@ -89,6 +91,7 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint, worker_extensions: Sequenc
         "minibot.extensions.tools.media",
         "minibot.extensions.tools.memory",
         "minibot.extensions.tools.network",
+        "minibot.extensions.tools.safety",
         "minibot.extensions.tools.utility",
         "minibot.extensions.tools.vault",
         "minibot.extensions.tools.workspace",
@@ -97,10 +100,11 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint, worker_extensions: Sequenc
         return ("minibot.extensions.channels.telegram", *common)
     if entrypoint == "console":
         return common
-    # Workers retain their deliberately narrower tool assembly: the scheduler and utility tools, the
-    # bundles opted in through [tasks].worker_extensions, plus user-configured extensions.
+    # Workers retain their deliberately narrower tool assembly: the scheduler, safety-check and utility
+    # modules, the bundles opted in through [tasks].worker_extensions, plus user-configured extensions.
     return (
         "minibot.extensions.services.scheduler",
+        "minibot.extensions.tools.safety",
         "minibot.extensions.tools.utility",
         *(WORKER_OPT_IN_MODULES[name] for name in worker_extensions),
     )
@@ -147,6 +151,7 @@ class ExtensionContext:
     refresh_tools: Callable[[], Awaitable[None]] | None = None
     tools: list[ToolBinding] = field(default_factory=list)
     tool_derivers: list[ToolDeriver] = field(default_factory=list)
+    tool_wrappers: list[ToolWrapper] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
     routes: list[RouteSpec] = field(default_factory=list)
@@ -232,6 +237,20 @@ class ExtensionContext:
         """
         self.tool_derivers.append(deriver)
 
+    def add_tool_wrapper(self, wrapper: ToolWrapper) -> None:
+        """Wrap the handlers of every tool an agent can call, to check or change calls and results.
+
+        ``wrapper`` gets the bindings and an ``Approver`` that asks the user in the chat the call came from
+        (denied where the channel has no approval buttons), and returns one binding per input binding, in the
+        same order and with the same tool names; keep ``spill_after_chars`` (``dataclasses.replace``). It
+        covers core, extension, MCP and derived tools alike, in the daemon, the console and task workers,
+        and runs again whenever the tool list is rebuilt, so it must be a pure function of its arguments.
+        Wrappers sit innermost: they see the raw result before output spill, while ``[tools.approval]`` and
+        tool-call events stay outside them. Calls nested in a codemode script go through them too, with
+        ``context.parent_call_id`` set.
+        """
+        self.tool_wrappers.append(wrapper)
+
     def add_service(self, service: ExtensionService) -> None:
         self.services.append(service)
 
@@ -288,6 +307,18 @@ class ExtensionRegistry:
     @property
     def tools(self) -> list[ToolBinding]:
         return [binding for context in self._contexts for binding in context.tools]
+
+    def wrap_tools(self, bindings: Sequence[ToolBinding], approve: Approver) -> list[ToolBinding]:
+        """Apply every ``add_tool_wrapper`` function to ``bindings``, in extension load order."""
+        wrapped = list(bindings)
+        observed = observed_approver(approve)
+        for context in self._contexts:
+            for wrapper in context.tool_wrappers:
+                result = list(wrapper(wrapped, observed))
+                if [binding.tool.name for binding in result] != [binding.tool.name for binding in wrapped]:
+                    raise ValueError(f"extension {context.name!r}: a tool wrapper must keep every tool and its name")
+                wrapped = result
+        return wrapped
 
     def tools_outside(self, names: Collection[str]) -> list[ToolBinding]:
         return [binding for context in self._contexts if context.name not in names for binding in context.tools]
@@ -351,6 +382,7 @@ class ExtensionRegistry:
                 "name": context.name,
                 "tools": len(context.tools),
                 "tool_derivers": len(context.tool_derivers),
+                "tool_wrappers": len(context.tool_wrappers),
                 "services": len(context.services),
                 "subscriptions": len(context.subscriptions),
                 "routes": len(context.routes),
