@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The `llm_classifier` tool-use guardrail can run on its own model: `[orchestration] main_tool_use_guardrail_provider`,
+  `main_tool_use_guardrail_model` and `main_tool_use_guardrail_reasoning_effort` (each one unset keeps the main
+  agent's value), so the classifier can be a cheap model with low reasoning.
+- `[tools.safety_classifier]`: a cheap LLM classifier that checks the arguments of risky tool calls before they run
+  (`check_input`, default `bash`, `python_execute`, `http_request`, `install_skill`, `schedule_prompt`) and the results
+  of untrusted tools for prompt injection before the agent reads them (`check_output`, default `http_request`). A
+  `safe` verdict lets the call or result through; a flagged call or result, a classifier failure or a timeout asks the
+  user with the approval buttons, the classifier's reason in the prompt (and, for a result, an escaped 300-character
+  excerpt), and the classifier never blocks on its own; a denied call returns `tool_approval:denied`, a withheld result
+  `tool_output_withheld`. Covers the main agent, task workers and calls made from `run_tools_script` scripts. The
+  classifier's `provider`, `model` and `reasoning_effort` default to the main agent's; an unknown `provider`, or a
+  `provider` without a `model`, fails config loading. Arguments and results longer than `max_output_chars` are
+  classified in concurrent overlapping chunks, up to `max_output_chunks` (default 5); anything longer asks the user.
+  Arguments reach the classifier with sensitive keys redacted, and the classifier's reason is shown escaped and capped
+  above the real arguments; the `tool_output_withheld` notice the agent gets carries none of the classifier's text.
+  Classifier calls inside a `run_tools_script` script do not count against its `timeout_seconds`. A best-effort filter,
+  not a security boundary: the classifier can itself be steered by injected text in what it checks. Off by default.
+- Extension API: `mb.add_tool_wrapper(wrapper)` wraps the handler of every tool an agent can call (core,
+  extension, MCP and derived tools, in the daemon, the console and task workers), innermost, before output spill,
+  and receives an approver that asks the user with a custom prompt. The web dashboard now counts tool derivers and
+  tool wrappers as an extension's contributions.
+
 ## [0.35.0] - 2026-10-21
 
 ### Added

@@ -43,6 +43,11 @@ Recommendations
 - Prefer explicit sandbox isolation for untrusted code (``sandbox_mode``: ``none``, ``basic``, ``rlimit``, ``cgroup``, or ``jail``; default is ``basic``).
 - Run the daemon as a non-privileged user; mount only the data directory in Docker.
 - Store credentials in the ``[vault]`` rather than in ``config.toml`` or the process environment.
+- Consider ``[tools.safety_classifier]`` when the agent runs shell or HTTP tools or reads untrusted text
+  (web pages, mail): a cheap model flags risky calls and prompt-injected results, and the user decides on each
+  flagged one with the approval buttons, while a ``safe`` verdict passes without asking (see :doc:`tools`). It is
+  a best-effort filter, not a security boundary: the classifier can itself be steered by injected text in what
+  it checks.
 
 Credential vault
 ----------------

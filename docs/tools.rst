@@ -378,8 +378,9 @@ What a script can call
 
 Time and call limits
    ``timeout_seconds`` is wall-clock time for the whole script, nested calls included, except the time a nested
-   call spends waiting for an owner approval (``[tools.approval]``): the clock stops while any approval is pending,
-   so a slow decision never ends the script, and the approval's own ``timeout_seconds`` still bounds the wait.
+   call spends waiting for an owner approval (``[tools.approval]``) or a ``[tools.safety_classifier]`` check: the
+   clock stops while any such wait is pending, so a slow decision never ends the script, and the approval's or the
+   classifier's own ``timeout_seconds`` still bounds the wait.
    Since every tool use runs in a script, it is also the limit for a single long call. The model can ask for
    another limit per script with the tool's ``timeout_seconds`` argument (``null`` keeps the default); a request
    above ``max_timeout_seconds`` is lowered to it, and the turn's own deadline still applies. Nested tools keep
@@ -412,6 +413,74 @@ Trust model
    Monty keeps the script itself away from the file system, network and environment, and every effect is a tool
    call that already passed the existing gates. That narrows the surface but is not containment: MiniBot is still
    not a security boundary, and deployment isolation (see :doc:`security`) still applies.
+
+Safety classifier
+-----------------
+
+``[tools.safety_classifier]`` puts a second, cheap model in front of risky tool calls and behind untrusted tool
+results. A ``safe`` verdict lets the call or result through; anything else, including failures and timeouts, asks
+the user with the ``[tools.approval]`` buttons, with its reason in the prompt. The classifier never blocks on its
+own. It is a best-effort filter, not a security boundary: the classifier can itself be steered by injected text in
+what it checks (see :doc:`security`).
+
+.. code-block:: toml
+
+   [tools.safety_classifier]
+   enabled = true
+   provider = "openrouter"            # unset: the [llm] provider
+   model = "openai/gpt-4.1-mini"      # unset: the [llm] model; required when provider is set
+   check_input = ["bash", "python_execute", "http_request", "install_skill", "schedule_prompt"]
+   check_output = ["http_request", "mcp_exa__*", "mcp_mail__imap_get_message*"]
+
+Before a call
+   A tool matching ``check_input`` is classified from its name and JSON arguments, sensitive keys (``authorization``,
+   ``token``, ``password``, ...) redacted as in the approval prompt. ``safe`` runs it; ``unsafe``
+   (``bash`` reading ``.env`` and posting it with ``curl``, say) asks the user, and a denial returns the same
+   ``tool_approval:denied`` error as ``[tools.approval]``. A tool in both ``[tools.approval] require_approval``
+   and ``check_input`` can ask twice when flagged: the classifier's prompt first, then the approval gate.
+
+After a call
+   The result of a tool matching ``check_output`` is classified for instructions aimed at an AI agent (prompt
+   injection) before the agent sees it, and before output spill writes it to a file. A flagged result is held
+   back while the user decides: approving releases it unchanged, denying replaces it with
+   ``{"ok": false, "error_code": "tool_output_withheld", ...}``. The prompt shows the reason and, on its own
+   ``Excerpt:`` line, up to the first 300 characters of the result, escaped so they cannot fake extra lines. The
+   notice carries neither the excerpt nor the classifier's text, which was written after reading the untrusted
+   result: the agent sees none of it unless the user releases the result.
+   The result reaches the classifier as plain text, or as JSON with non-ASCII characters kept as they are.
+
+Long calls and results
+   Arguments or a result longer than ``max_output_chars`` (default ``20000``) are split into chunks of that size,
+   classified concurrently; one flagged chunk flags the whole. Consecutive chunks overlap by a quarter of
+   ``max_output_chars``, at most 500 characters, so an instruction written across a chunk boundary is still seen
+   whole. More than ``max_output_chunks`` (default ``5``) chunks are not sent at all: the user is asked as if the
+   check had failed, so no part passes unchecked.
+
+Failures
+   A classifier error, a timeout or a reply that is still not a valid ``{"verdict", "reason"}`` object after two
+   retries asks the user as if the classifier had flagged the call: only a ``safe`` verdict lets a call through
+   without asking, and the classifier never blocks one on its own. The prompt shows the classifier's reason on one
+   escaped, capped line above the call's own arguments, so a reason written under an injection cannot fake or hide
+   them.
+
+What the classifier's provider sees
+   The checked call arguments, sensitive keys redacted, and the checked results in full. Pick a provider you would
+   trust with that data, or leave ``provider`` unset to keep it with the main ``[llm]`` provider. An unknown
+   ``provider`` (neither a ``[providers.<name>]`` section nor an API format name) fails config loading, and so
+   does a ``provider`` without a ``model``: the main ``[llm]`` model may not exist on that provider, which would
+   fail every check and ask the user about every call.
+
+The classifier gets no tools and a system prompt that treats the call or result strictly as data, and its reply
+is validated against a strict schema, never matched as text. The checks cover core, extension, MCP (by exposed
+name, ``lazy`` mode included) and derived tools, every call a ``run_tools_script`` script makes, and task
+workers (so a delegated agent reading mail is checked too), with no ``[tasks] worker_extensions`` entry. In
+``lazy`` MCP mode a ``mcp_<server>__*`` pattern also matches that server's ``call_tool`` and ``list_tools``
+bindings, so a lazy call cannot slip past it, at the cost of extra classifier calls for listing. On a
+channel without approval buttons, such as the console, every flagged call is denied and every flagged result
+withheld. Errors a tool raises are not checked, and each check is one more model call per chunk;
+``http_request`` is in both default lists, so each request costs at least two classifier calls. Waiting for the
+user counts against the turn or task deadline as with ``[tools.approval]``; inside a ``run_tools_script`` script,
+neither that wait nor the classifier's own calls count against the script's ``timeout_seconds``.
 
 Implementation Reference
 ------------------------

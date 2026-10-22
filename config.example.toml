@@ -322,7 +322,7 @@ max_limit = 100
 # workers add "codemode" to [tasks] worker_extensions and name run_tools_script in the specialist's tools_allow.
 # [tools.codemode]
 # enabled = true
-# timeout_seconds = 120      # default wall clock for one script, nested tool calls included (approval waits excluded)
+# timeout_seconds = 120      # wall clock for one script, nested calls included (approval/safety waits excluded)
 # max_timeout_seconds = 600  # the most a script may ask for with its own timeout_seconds argument
 # max_tool_calls = 50        # tool calls one script may make; the next one raises codemode:tool_call_limit
 # max_memory_mb = 64         # heap limit of the script itself
@@ -436,6 +436,23 @@ require_approval = []
 # scheduled prompt, a delegated task) is denied rather than approved.
 # require_approval = ["create_agent", "update_agent", "delete_agent"]
 timeout_seconds = 1800
+
+# An LLM check on risky calls (before they run) and on untrusted results (prompt injection) before the
+# agent reads them. A safe verdict passes; anything else, failures included, is put to the user with the
+# approval buttons; channels without buttons (the console) deny. Also covers task workers. A best-effort
+# filter, not a security boundary: injected text can steer the classifier too.
+[tools.safety_classifier]
+enabled = false
+# provider = "openrouter"        # unset: the [llm] provider
+# model = "openai/gpt-4.1-mini"  # unset: the [llm] model; required when provider is set
+# reasoning_effort = "low"       # unset: the [llm] value
+# A tool in both [tools.approval] require_approval and check_input can ask twice when flagged.
+check_input = ["bash", "python_execute", "http_request", "install_skill", "schedule_prompt"]
+check_output = ["http_request"]
+# check_output = ["http_request", "mcp_exa__*", "mcp_mail__imap_get_message*"]
+max_output_chars = 20000         # one classifier call; longer arguments or results are checked in overlapping chunks
+max_output_chunks = 5            # beyond max_output_chars * max_output_chunks, the user is asked instead
+timeout_seconds = 30
 
 # Optional sleep/wait tool.
 [tools.wait]

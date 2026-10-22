@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast, overload
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -28,30 +28,40 @@ class ToolGuardrailPayload(BaseModel):
 
 
 @dataclass(frozen=True)
-class _ValidResult:
-    parsed: ToolGuardrailPayload
+class ValidResult[PayloadT: BaseModel]:
+    parsed: PayloadT
     attempts: int
 
 
 @dataclass(frozen=True)
-class _RetryResult:
+class RetryResult:
     attempts: int
     reason: str
     prompt_patch: str
 
 
 @dataclass(frozen=True)
-class _FailResult:
+class FailResult:
     attempts: int
     reason: str
 
 
-class ToolGuardrailValidator:
-    def __init__(self, *, max_attempts: int = 3) -> None:
+class ToolGuardrailValidator[PayloadT: BaseModel]:
+    """Parses a classifier's JSON reply into ``payload_model`` (default: ``ToolGuardrailPayload``), asking for a
+    bounded number of retries."""
+
+    @overload
+    def __init__(self: ToolGuardrailValidator[ToolGuardrailPayload], *, max_attempts: int = 3) -> None: ...
+
+    @overload
+    def __init__(self, *, max_attempts: int = 3, payload_model: type[PayloadT]) -> None: ...
+
+    def __init__(self, *, max_attempts: int = 3, payload_model: type[BaseModel] = ToolGuardrailPayload) -> None:
         self._max_attempts = max(1, max_attempts)
+        self._payload_model = cast(type[PayloadT], payload_model)
         self._attempts = 0
 
-    def receive(self, payload: Any) -> _ValidResult | _RetryResult | _FailResult:
+    def receive(self, payload: Any) -> ValidResult[PayloadT] | RetryResult | FailResult:
         self._attempts += 1
         raw = _to_raw_text(payload)
         text = _strip_fences(raw)
@@ -60,26 +70,26 @@ class ToolGuardrailValidator:
         except (json.JSONDecodeError, ValueError) as exc:
             reason = f"invalid JSON: {exc}"
             if self._attempts <= self._max_attempts:
-                return _RetryResult(
+                return RetryResult(
                     attempts=self._attempts,
                     reason=reason,
                     prompt_patch=f"Your previous response was not valid JSON. Error: {exc}. Return only a JSON object.",  # noqa: E501
                 )
-            return _FailResult(attempts=self._attempts, reason=reason)
+            return FailResult(attempts=self._attempts, reason=reason)
         try:
-            parsed = ToolGuardrailPayload.model_validate(data)
+            parsed = self._payload_model.model_validate(data)
         except ValidationError as exc:
             reason = f"schema validation failed: {exc}"
             if self._attempts <= self._max_attempts:
-                return _RetryResult(
+                return RetryResult(
                     attempts=self._attempts,
                     reason=reason,
                     prompt_patch=f"Your previous response did not match the expected schema. {exc}",
                 )
-            return _FailResult(attempts=self._attempts, reason=reason)
-        return _ValidResult(parsed=parsed, attempts=self._attempts)
+            return FailResult(attempts=self._attempts, reason=reason)
+        return ValidResult(parsed=parsed, attempts=self._attempts)
 
-    def valid_payload(self, result: _ValidResult) -> ToolGuardrailPayload:
+    def valid_payload(self, result: ValidResult[PayloadT]) -> PayloadT:
         return result.parsed
 
 
