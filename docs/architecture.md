@@ -83,7 +83,7 @@ minibot/
    ownership mode) and invokes `LLMMessageHandler`.
 5. The handler loads history, composes system prompt fragments, and builds tool context.
 6. The main agent (`minibot`) runs its tool loop in `AgentRuntime`.
-7. Delegation is tool-driven and asynchronous: `spawn_task` enqueues the work, the task
+7. Delegation is tool-driven and asynchronous: `delegate` or `spawn_task` enqueues the work, the task
    consumer leases it, and a worker subprocess applies the specialist's tool policy and
    runs it. Its answer is published later as its own `OutboundEvent`.
 8. The handler returns `ChannelResponse` with metadata (`primary_agent`, token trace).
@@ -108,7 +108,7 @@ flowchart TD
     H --> SUP[Main Agent Runtime]
     SUP --> DEC{Need specialist?}
     DEC -->|no| FINAL[Main agent final answer]
-    DEC -->|yes| ST[spawn_task tool]
+    DEC -->|yes| ST[delegate / spawn_task tool]
     ST --> Q[(Task queue)]
     ST --> ACK[task_id acknowledged, turn ends]
     Q --> CON[Task consumer leases]

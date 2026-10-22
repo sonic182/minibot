@@ -33,6 +33,17 @@ names, descriptions, and complete input schemas, then call ``call_tool`` with th
 name and arguments. MiniBot initializes lazy servers at startup to obtain that metadata, but
 defers ``tools/list`` until the catalog is requested.
 
+In both modes a call returns the server's text content whole, with binary payloads (images, and
+``data``/``base64``/``bytes``/``blob`` fields such as an embedded resource's) replaced by a marker. A result up to
+``inline_result_chars`` (default 25,000) characters (measured on the serialized result, so escaped newlines and
+non-ASCII text count more) stays inline, even when ``[tools.tool_output_spill]`` ``spill_after_chars`` is lower, so
+a typical web search result reaches the model directly. A larger result, error results included, is handled by the
+generic output spill (``[tools.tool_output_spill]``, see :doc:`config`): the model gets a preview and the path of a
+managed file holding the whole text. When spill cannot run (it is disabled, file storage is off, which is the
+default, or no read-back tool is attached) or the tool is listed in ``exclude_tools``, the result is cut at
+``inline_result_chars`` and marked ``output_truncated``. Inside a codemode script the result reaches the script in
+full; cut it there with ``text(value, limit=...)`` (see :doc:`tools`).
+
 Configuration
 -------------
 
@@ -67,10 +78,14 @@ HTTP transport example:
    url = "http://127.0.0.1:8765/mcp"
    headers = {}
    catalog_cache_ttl_seconds = 60
+   inline_result_chars = 25000
 
 ``mode`` defaults to ``"bridge"`` for compatibility. For ``"lazy"`` servers,
 ``catalog_cache_ttl_seconds`` controls automatic catalog discovery before a direct ``call_tool``;
 set it to ``0`` to disable the cache. An explicit ``list_tools`` call always refreshes the catalog.
+
+``inline_result_chars`` (default ``25000``, both modes) is the largest result of that server that reaches the
+model inline; see the result-size rules above. Raise it for a server whose normal results are a little larger.
 
 See :doc:`mcp_servers` for recommended servers (email, long-term memory) and how to run local MCP
 binaries, including under Docker.

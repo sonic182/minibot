@@ -59,11 +59,13 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
         )
         self._fts_enabled = False
 
-    async def initialize(self) -> None:
+    async def initialize(self, *, rebuild_index: bool = True) -> None:
         async with self._engine.begin() as connection:
+            if connection.dialect.name == "sqlite":
+                await connection.exec_driver_sql("BEGIN IMMEDIATE")
             await connection.run_sync(self._create_schema)
             if self._database_url.drivername.startswith("sqlite"):
-                self._fts_enabled = await self._initialize_fts(connection)
+                self._fts_enabled = await self._initialize_fts(connection, rebuild_index=rebuild_index)
 
     @staticmethod
     def _create_schema(sync_connection: Connection) -> None:
@@ -268,8 +270,11 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
                 offset=resolved_offset,
             )
 
-    async def _initialize_fts(self, connection: Any) -> bool:
+    async def _initialize_fts(self, connection: Any, *, rebuild_index: bool) -> bool:
         try:
+            existed = await connection.scalar(
+                text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'kv_memory_fts'")
+            )
             await connection.execute(
                 text(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS kv_memory_fts USING "
@@ -299,7 +304,8 @@ class SQLAlchemyKeyValueMemory(KeyValueMemory):
                     "END"
                 )
             )
-            await connection.execute(text("INSERT INTO kv_memory_fts(kv_memory_fts) VALUES('rebuild')"))
+            if rebuild_index or not existed:
+                await connection.execute(text("INSERT INTO kv_memory_fts(kv_memory_fts) VALUES('rebuild')"))
         except SQLAlchemyError:
             return False
         return True

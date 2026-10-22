@@ -11,7 +11,7 @@ model never sees them.
 
 .. note::
 
-   ``spawn_task`` is also the only way to delegate to a specialist agent (see :doc:`agents`), so
+   ``spawn_task`` and ``delegate`` are also the only ways to hand work to a specialist agent (see :doc:`agents`), so
    disabling this section disables multi-agent orchestration too. The reverse does not hold:
    ``[orchestration.specialists].enabled = false`` keeps the task system and its generic worker
    while removing the specialist roster and named delegation. With ``[tasks]`` off and
@@ -52,16 +52,24 @@ Tool Surface
    * - Tool
      - Purpose
    * - ``spawn_task``
-     - Queue a worker task from a ``prompt``. Optionally target a specialist with ``agent_name``,
-       pass structured ``context_json``, and cap ``timeout_seconds`` (no greater than the configured
-       worker timeout). Without it, a named specialist's own ``timeout_seconds`` applies. Steps and
-       tool calls are bounded only by ``worker_max_steps`` / ``worker_max_tool_calls``.
-       ``continue_turn`` returns the result to the main agent as a new turn instead of sending the
-       worker's answer straight to the user; when unset, ``[tasks] continue_turn_default`` decides
-       (default ``false``), and ``[tasks] continue_turn_mode = "always"`` overrides the model's choice.
-       See :doc:`agents`.
+     - Queue a worker task from a ``prompt`` whose answer goes straight to the user. Optionally target a
+       specialist with ``agent_name``, pass structured ``context_json``, and cap ``timeout_seconds`` (no
+       greater than the configured worker timeout). Without it, a named specialist's own
+       ``timeout_seconds`` applies. Steps and tool calls are bounded only by ``worker_max_steps`` /
+       ``worker_max_tool_calls``. Registered only when ``[tasks] delegation_mode = "auto"`` (the default).
+   * - ``delegate``
+     - Same parameters as ``spawn_task``, for when the main agent needs the result: it comes back as a new
+       turn instead of going to the user. Always registered. Limited to three delegations per turn and
+       three chained turns deep. See :doc:`agents`.
    * - ``cancel_task``
      - Cancel an active task by ``task_id``.
+   * - ``message_task``
+     - Send a ``message`` (at most 8000 characters) to a task that is still running, without stopping it: narrow its scope, add a
+       missing fact, or tell it to wrap up. The worker folds it in as an instruction between steps: a tool
+       call in progress finishes first, and the calls still queued in that step are skipped. ``delivered =
+       true`` means the message was queued; a worker already writing its final answer can finish without
+       reading it. Returns ``delivered = false`` when the task is not running in this process: not started
+       yet, already finished, or leased by another consumer.
    * - ``list_tasks``
      - List the owner's tasks, optionally filtered by ``status`` (up to 100).
    * - ``get_task``
@@ -75,7 +83,7 @@ Statuses
 A task moves through ``pending``, ``leased``, ``running``, and a terminal state: ``done``,
 ``failed``, ``cancelled``, or ``timed_out``. A ``retrying`` task was redelivered after a failed
 attempt. These are the persisted, filterable states (``list_tasks`` accepts them); the
-``status = "queued"`` returned by ``spawn_task`` is only an immediate acknowledgement that the
+``status = "queued"`` returned by ``spawn_task`` and ``delegate`` is only an immediate acknowledgement that the
 task was enqueued, not a stored state. Each record also carries a ``stop_reason`` (for example
 ``completed``, ``max_steps``, ``max_tool_calls``, ``timeout``, or ``provider_error``) that
 explains why the worker stopped.
@@ -101,11 +109,28 @@ Worker limits live on ``[tasks]``:
 - ``worker_timeout_seconds`` — hard per-task processing timeout (default ``1800``).
 - ``worker_max_steps`` / ``worker_max_tool_calls`` — optional ceilings, or ``"unlimited"`` (the default).
 - ``max_concurrent_workers`` — maximum parallel handlers (default ``4``).
-- ``continue_turn_default`` — what ``spawn_task`` does when ``continue_turn`` is unset (default ``false``);
-  see :doc:`agents`.
-- ``continue_turn_mode`` — ``"auto"`` (default) lets the model choose per task through ``continue_turn``;
-  ``"always"`` ignores the model's choice and returns every result to the main agent as a new turn, falling
-  back to direct delivery past the continuation limit. ``continue_turn_default`` has no effect in that mode.
+- ``delegation_mode`` — ``"auto"`` (default) registers both ``delegate`` and ``spawn_task`` and the model picks
+  by tool; ``"delegate"`` registers only ``delegate``, so every result returns to the main agent as a new turn,
+  falling back to direct delivery past the continuation limit. It replaces ``continue_turn_mode = "always"``;
+  the removed ``continue_turn_mode`` and ``continue_turn_default`` keys are rejected at config load. A
+  ``[orchestration.main_agent] tools_allow`` list must name ``delegate`` as well as ``spawn_task``, or the main
+  agent loses the tool that returns results to it. See :doc:`agents`.
+- ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
+  (default ``[]``). ``"kv_memory"``, ``"rag"`` and ``"codemode"`` (the ``run_tools_script`` tool, which calls
+  the tools that specialist has and replaces them as direct calls) are accepted, each at most once, and each needs its ``[tools.*]`` section enabled. Their storage is prepared on the first call in each worker.
+
+  .. code-block:: toml
+
+     [tasks]
+     worker_extensions = ["rag"]
+
+  Only a specialist that claims the tools gets them, for example with ``tools_allow: ["rag_*"]``. A
+  specialist that sets only ``tools_deny`` gets every tool it does not deny, these included. A task
+  without an agent never gets them. MCP servers need no entry here: a specialist claims them through
+  ``mcp_servers``.
+
+  Each worker process is separate, so a task that calls RAG loads the embedding model (and the reranker for
+  a search) itself: expect that latency on its first RAG call and that memory per concurrent worker.
 
 .. warning::
 
@@ -116,8 +141,9 @@ Worker limits live on ``[tasks]``:
 Operational notes
 -----------------
 
-- Task workers build their own tool registry: configured extension tools are available, but worker
-  registries do not start extension services or event subscriptions.
-- ``spawn_task`` requires channel context so the worker knows where to post progress and results.
-- ``spawn_task`` returns a ``task_id`` immediately with ``status = "queued"``; poll it with
+- Task workers build their own tool registry: configured extension tools and the bundles listed in
+  ``worker_extensions`` are available, but worker registries do not start extension services or event
+  subscriptions.
+- ``spawn_task`` and ``delegate`` require channel context so the worker knows where to post progress and results.
+- ``spawn_task`` and ``delegate`` return a ``task_id`` immediately with ``status = "queued"``; poll it with
   ``get_task`` rather than waiting in the turn.

@@ -5,15 +5,17 @@ import logging
 import sys
 import textwrap
 from pathlib import Path
+from typing import get_args
+from unittest.mock import AsyncMock
 
 import pytest
 from llm_async.models import ToolCall
 from pydantic import ValidationError
 
-from minibot.adapters.config.schema import Settings
+from minibot.adapters.config.schema import Settings, TasksConfig
 from minibot.adapters.scheduler.sqlalchemy_prompt_store import SQLAlchemyScheduledPromptStore
 from minibot.app.event_bus import EventBus
-from minibot.app.extensions import ExtensionContext, load_extensions
+from minibot.app.extensions import WORKER_OPT_IN_MODULES, ExtensionContext, load_extensions
 from minibot.core.channels import ChannelResponse
 from minibot.core.events import OutboundEvent, TurnCompletedEvent
 from minibot.llm.services.tool_executor import execute_tool_calls_for_runtime
@@ -81,7 +83,7 @@ async def test_load_extensions_collects_tools_and_delivers_events(
     assert sys.modules["ext_ok"].seen_turns == ["turn-7"]
 
 
-def test_load_extensions_for_worker_loads_only_the_scheduler_and_utility_bundles(
+def test_load_extensions_for_worker_loads_only_the_scheduler_safety_and_utility_bundles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_module(tmp_path, monkeypatch, "ext_worker", "def register(mb):\n    pass\n")
@@ -93,10 +95,25 @@ def test_load_extensions_for_worker_loads_only_the_scheduler_and_utility_bundles
 
     assert registry.names() == [
         "minibot.extensions.services.scheduler",
+        "minibot.extensions.tools.safety",
         "minibot.extensions.tools.utility",
         "ext_worker",
     ]
     assert {binding.tool.name for binding in registry.tools} == {"current_datetime", "calculate_expression"}
+
+
+def test_a_tool_wrapper_that_drops_a_tool_fails_naming_its_extension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = "def register(mb):\n    mb.add_tool_wrapper(lambda bindings, approve: bindings[1:])\n"
+    _write_module(tmp_path, monkeypatch, "ext_dropper", source)
+    settings = Settings.from_dict(
+        {"extensions": {"modules": ["ext_dropper"]}, "scheduler": {"prompts": {"enabled": False}}}
+    )
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+
+    with pytest.raises(ValueError, match="extension 'ext_dropper': a tool wrapper must keep every tool"):
+        registry.wrap_tools(registry.tools, AsyncMock())
 
 
 def test_load_extensions_for_worker_exposes_scheduler_tools_without_pages(tmp_path: Path) -> None:
@@ -155,6 +172,70 @@ async def test_worker_scheduler_tool_initializes_schema_and_keeps_chat_context(t
     ):
         other_jobs = await handlers["list_scheduled_prompts"]({}, other_context)
         assert other_jobs["jobs"] == []
+
+
+@pytest.mark.asyncio
+async def test_worker_opted_in_kv_memory_prepares_a_fresh_database_on_first_call(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {
+            "runtime": {"owner_id": "owner-1"},
+            "scheduler": {"prompts": {"enabled": False}},
+            "tools": {"kv_memory": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'kv.db'}"}},
+            "tasks": {"worker_extensions": ["kv_memory"]},
+        }
+    )
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+    handlers = {binding.tool.name: binding.handler for binding in registry.tools}
+    context = ToolContext(owner_id="owner-1", channel="telegram", chat_id=42, user_id=7)
+
+    created = await asyncio.gather(
+        handlers["memory_create"]({"title": "Wifi", "data": "password is hunter2", "category": "otros"}, context),
+        handlers["memory_create"]({"title": "Bike", "data": "lock code 4521", "category": "otros"}, context),
+    )
+    found = await handlers["memory_search"]({"query": "hunter2"}, context)
+
+    assert "minibot.extensions.tools.memory" in registry.names()
+    assert all(result["created"] for result in created)
+    assert [entry["title"] for entry in found["entries"]] == ["Wifi"]
+
+
+def test_every_worker_extension_name_maps_to_a_module() -> None:
+    (literal,) = get_args(TasksConfig.model_fields["worker_extensions"].annotation)
+
+    assert set(get_args(literal)) == WORKER_OPT_IN_MODULES.keys()
+
+
+def test_worker_extensions_require_their_tool_to_be_enabled() -> None:
+    with pytest.raises(ValidationError, match=r'lists "rag" but \[tools.rag\].enabled is false'):
+        Settings.from_dict({"tasks": {"worker_extensions": ["rag"]}})
+    with pytest.raises(ValidationError, match="must not list an extension twice"):
+        Settings.from_dict(
+            {"tools": {"kv_memory": {"enabled": True}}, "tasks": {"worker_extensions": ["kv_memory"] * 2}}
+        )
+
+    settings = Settings.from_dict({"tasks": {"enabled": False, "worker_extensions": ["rag"]}})
+
+    assert settings.tasks.worker_extensions == ["rag"]
+
+
+@pytest.mark.asyncio
+async def test_worker_opted_in_rag_prepares_a_fresh_store_on_first_call(tmp_path: Path) -> None:
+    settings = Settings.from_dict(
+        {
+            "scheduler": {"prompts": {"enabled": False}},
+            "tools": {
+                "file_storage": {"enabled": True, "root_dir": str(tmp_path / "files")},
+                "rag": {"enabled": True, "sqlite_url": f"sqlite+aiosqlite:///{tmp_path / 'rag.db'}"},
+            },
+            "tasks": {"worker_extensions": ["rag"]},
+        }
+    )
+    registry = load_extensions(settings, EventBus(), logging.getLogger("test.extensions"), entrypoint="worker")
+    handlers = {binding.tool.name: binding.handler for binding in registry.tools}
+
+    listed = await handlers["rag_list_metadata"]({}, ToolContext(owner_id="primary"))
+
+    assert listed == {"tags": [], "categories": [], "filenames": []}
 
 
 def test_load_extensions_fails_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -446,3 +527,36 @@ def test_rag_stays_quiet_when_the_backend_choice_is_unambiguous(monkeypatch: pyt
     )
 
     assert emitted == []
+
+
+def test_derive_tools_skips_a_clashing_name_and_keeps_the_existing_tool(caplog: pytest.LogCaptureFixture) -> None:
+    from llm_async.models import Tool
+
+    from minibot.app.extensions import ExtensionRegistry
+    from minibot.llm.tools.base import ToolBinding
+
+    async def original(_: dict, __: ToolContext) -> dict:
+        return {"ok": True}
+
+    def binding(name: str) -> ToolBinding:
+        return ToolBinding(
+            tool=Tool(name=name, description=name, parameters={"type": "object", "properties": {}}),
+            handler=original,
+        )
+
+    context = ExtensionContext(
+        name="derivers",
+        config={},
+        settings=Settings(),
+        event_bus=EventBus(),
+        logger=logging.getLogger("test.extensions.derive"),
+    )
+    context.add_tool_deriver(lambda tools: [binding("run_tools_script"), binding("extra")])
+    registry = ExtensionRegistry([context], logging.getLogger("test.extensions.derive"))
+    existing = binding("run_tools_script")
+
+    with caplog.at_level(logging.WARNING, logger="test.extensions.derive"):
+        derived = registry.derive_tools([existing])
+
+    assert [item.tool.name for item in derived.tools] == ["extra"]
+    assert "run_tools_script" in caplog.text and "derivers" in caplog.text

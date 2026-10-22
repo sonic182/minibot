@@ -15,31 +15,34 @@ Delegation Tools
 
 - ``fetch_agent_info`` — inspect a specialist's name, description, defaults and system prompt.
   Always enabled when specialist definitions exist.
-- ``spawn_task`` — delegate to a specialist by exact ``agent_name``. Requires ``[tasks].enabled``
-  (on by default; the SQLite backend needs no broker). See :doc:`tasks`.
+- ``delegate`` — hand work to a specialist by exact ``agent_name`` when the main agent needs the result to
+  keep working. The result comes back as a new turn. Requires ``[tasks].enabled`` (on by default; the SQLite
+  backend needs no broker). See :doc:`tasks`.
+- ``spawn_task`` — the same hand-off, but the worker's answer is the final deliverable and goes straight to
+  the user. Registered only with ``[tasks] delegation_mode = "auto"`` (the default).
 
-Delegation is **asynchronous**: ``spawn_task`` returns a ``task_id`` and the main agent does not
-wait inside the turn. By default the worker's answer, including any files it produced, is sent
-straight to the conversation as a later message (fire and forget). A short notice with the agent,
-the task id and the outcome is also recorded in the conversation history as a user message, so the
-main agent knows the task finished and can call ``get_task`` for its result on the user's next
-message. The worker's output itself is never written to the history. Pass
-``continue_turn: true`` when the main agent needs the result to keep working, such as a second
-step that depends on it or a comparison: the result then comes back as a new turn, saved to the
-conversation history, and the main agent answers from it instead of the raw worker text. Failures
-and timeouts come back the same way, so the agent can explain or retry. Worker output reaches the
-model marked as untrusted data. One turn can start at most three continuing tasks, and a chain of
-continuing tasks is limited to three levels. ``[tasks] continue_turn_default = true`` makes
-continuing the default when the model leaves ``continue_turn`` unset; past the limits such a task
-falls back to fire and forget instead of failing. ``[tasks] continue_turn_mode = "always"`` goes
-further: the model's ``continue_turn`` is ignored and every task continues the turn, with the same
-fallback past the limits. The default, ``"auto"``, leaves the choice to the model. A rate-limit retry
-notice still goes straight to the user, and a continuing task that is cancelled does not report back. Use ``get_task`` to retrieve a
-result, ``list_tasks`` to see what is running, and ``cancel_task`` to stop one.
+Delegation is **asynchronous**: both tools return a ``task_id`` and the main agent does not wait inside the
+turn. With ``spawn_task`` the worker's answer, including any files it produced, is sent straight to the
+conversation as a later message (fire and forget). A short notice with the agent, the task id and the outcome
+is also recorded in the conversation history as a user message, so the main agent knows the task finished and
+can call ``get_task`` for its result on the user's next message. The worker's output itself is never written
+to the history. Use ``delegate`` when the main agent needs the result to keep working, such as a second step
+that depends on it or a comparison: the result then comes back as a new turn, saved to the conversation
+history, and the main agent answers from it instead of the raw worker text. Failures and timeouts come back
+the same way, so the agent can explain or retry. Worker output reaches the model marked as untrusted data.
+One turn can start at most three delegations, and a chain of delegated tasks is limited to three levels; past
+either limit ``delegate`` is rejected with ``task:continuation_limit`` and the model answers the user or uses
+``spawn_task``. ``[tasks] delegation_mode = "delegate"`` registers only ``delegate`` (no ``spawn_task``), so
+every task continues the turn; past the limits it falls back to fire and forget instead of failing, and its
+result reports ``"continue_turn": false``. The default, ``"auto"``, leaves the choice to the model through the
+tool it calls. The removed ``continue_turn_mode = "always"`` is now ``delegation_mode = "delegate"``, and
+``continue_turn_default`` is gone. A rate-limit retry notice still goes straight to the user, and a
+delegated task that is cancelled does not report back. Use ``get_task`` to retrieve a result, ``list_tasks``
+to see what is running, ``message_task`` to steer one that is still running, and ``cancel_task`` to stop one.
 
 Two switches decide whether any of this exists. ``[orchestration.specialists].enabled`` (default
 ``true``) is the one for specialists themselves: with it off, the roster, ``fetch_agent_info`` and
-named delegation all disappear, and ``spawn_task`` still runs a generic worker. ``[tasks].enabled``
+named delegation all disappear, and ``delegate`` and ``spawn_task`` still run a generic worker. ``[tasks].enabled``
 (default ``true``) is the execution backend, so the default follows it: with tasks off and the key
 omitted the roster is disabled. An explicit ``[orchestration.specialists].enabled = true`` with
 ``[tasks].enabled = false`` is a config error rather than a roster nothing can act on. Turning
@@ -66,7 +69,7 @@ The four modes, all reachable by config alone:
      - What exists
    * - No specialists
      - ``[orchestration.specialists] enabled = false``
-     - No roster, no ``fetch_agent_info``, no named delegation. ``spawn_task`` still runs a generic
+     - No roster, no ``fetch_agent_info``, no named delegation. ``delegate`` and ``spawn_task`` still run a generic
        worker while ``[tasks]`` is on.
    * - Owner-only (default)
      - both management switches false
@@ -133,7 +136,7 @@ Frontmatter fields: ``name``, ``description``, ``mode`` (always ``"agent"``), ``
 (default ``true``), ``model_provider``, ``model``, ``temperature``, ``max_new_tokens``,
 ``omit_temperature`` (send no temperature at all, for models that reject the parameter),
 ``reasoning_effort``, ``max_tool_iterations``, ``timeout_seconds`` (per-agent wall-clock budget; it is the
-default when a ``spawn_task`` call names no ``timeout_seconds`` of its own, capped by
+default when a ``spawn_task`` or ``delegate`` call names no ``timeout_seconds`` of its own, capped by
 ``[tasks].worker_timeout_seconds``), ``tools_allow``,
 ``tools_deny``, ``mcp_servers``.
 
@@ -259,7 +262,7 @@ that mostly call one tool and summarize.
 Retargeting One Call
 --------------------
 
-The frontmatter above is the agent's default, not a fixed binding. ``spawn_task`` accepts
+The frontmatter above is the agent's default, not a fixed binding. ``spawn_task`` and ``delegate`` accept
 ``model_provider``, ``model`` and ``reasoning_effort`` for a single task, so the main agent can
 honour a request like *"run that on the deepseek subagent, high effort"* without a config change or
 a restart. The specialist's prompt, tool scope and timeouts are unchanged; only the target model is.

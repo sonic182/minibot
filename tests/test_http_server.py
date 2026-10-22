@@ -121,6 +121,7 @@ async def dashboard_server():
         extensions=[
             {"name": "scheduler", "tools": 2, "services": 1, "subscriptions": 0, "routes": 0},
             {"name": "rabbitmq", "tools": 0, "services": 0, "subscriptions": 0, "routes": 0},
+            {"name": "codemode", "tools": 0, "tool_derivers": 1, "services": 0, "subscriptions": 0, "routes": 0},
         ],
         tool_names=["send_message", "web_search"],
         routes=[("/ping", _pong, ("GET",))],
@@ -163,6 +164,8 @@ async def test_dashboard_marks_extensions_that_contributed_nothing(dashboard_ser
         # scheduler registered things, rabbitmq bailed out of register() -- loaded but idle.
         assert "2 tools &middot; 1 service" in body or "2 tools · 1 service" in body
         assert "inactive" in body
+        # codemode only registers a tool deriver; that still counts as active.
+        assert "1 tool deriver" in body
 
 
 @pytest.mark.asyncio

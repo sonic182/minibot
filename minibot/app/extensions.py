@@ -5,7 +5,7 @@ import contextlib
 import importlib
 import inspect
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, get_type_hints
 
@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus, EventSubscription
+from minibot.app.tool_approval import Approver, observed_approver
 from minibot.config.schema import Settings
 from minibot.core.events import BaseEvent
 from minibot.core.secrets import SecretVault
@@ -26,11 +27,57 @@ if TYPE_CHECKING:
 
 EventHandler = Callable[[Any], Awaitable[None]]
 ToolFunc = Callable[[Any, ToolContext], Awaitable[Any]]
+type ToolDeriver = Callable[[Sequence[ToolBinding]], Sequence[ToolBinding | DerivedTool]]
+type ToolWrapper = Callable[[Sequence[ToolBinding], Approver], Sequence[ToolBinding]]
 type ExtensionEntrypoint = Literal["daemon", "console", "worker"]
 type RouteSpec = tuple[str, Callable[[Any], Awaitable[Any]], tuple[str, ...]]
 
 
-def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
+@dataclass(frozen=True)
+class DerivedTool:
+    """A derived tool that takes over tools from the list it was built from.
+
+    While ``binding`` survives the agent's policy, the tools named in ``replaces`` are removed from what the
+    model sees; ``binding`` keeps calling them itself.
+    """
+
+    binding: ToolBinding
+    replaces: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class DerivedTools:
+    """What ``ExtensionRegistry.derive_tools`` returns: the derived bindings and what each one replaces."""
+
+    tools: list[ToolBinding] = field(default_factory=list)
+    replaces: dict[str, frozenset[str]] = field(default_factory=dict)
+
+    def with_tools(self, tools: Sequence[ToolBinding]) -> DerivedTools:
+        """The same replacements over re-wrapped bindings (wrappers keep the tool name)."""
+        return DerivedTools(tools=list(tools), replaces=self.replaces)
+
+    def merge(self, final_tools: Sequence[ToolBinding], visible: Sequence[ToolBinding]) -> list[ToolBinding]:
+        """``final_tools`` minus what the ``visible`` derived tools replace, followed by ``visible``.
+
+        ``visible`` is the subset of ``tools`` the agent's policy kept, so a derived tool the policy removed
+        replaces nothing.
+        """
+        replaced = self.replaced_names(visible)
+        return [binding for binding in final_tools if binding.tool.name not in replaced] + list(visible)
+
+    def replaced_names(self, visible: Sequence[ToolBinding]) -> set[str]:
+        """Names of the tools the ``visible`` derived tools take over."""
+        return {name for binding in visible for name in self.replaces.get(binding.tool.name, ())}
+
+
+WORKER_OPT_IN_MODULES = {
+    "kv_memory": "minibot.extensions.tools.memory",
+    "rag": "minibot.extensions.integrations.rag",
+    "codemode": "minibot.extensions.tools.codemode",
+}
+
+
+def _bundled_modules(entrypoint: ExtensionEntrypoint, worker_extensions: Sequence[str] = ()) -> tuple[str, ...]:
     common = (
         "minibot.extensions.integrations.decision",
         "minibot.extensions.integrations.rag",
@@ -39,10 +86,12 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
         "minibot.extensions.services.scheduler",
         "minibot.extensions.services.tasks",
         "minibot.extensions.tools.agent_management",
+        "minibot.extensions.tools.codemode",
         "minibot.extensions.tools.execution",
         "minibot.extensions.tools.media",
         "minibot.extensions.tools.memory",
         "minibot.extensions.tools.network",
+        "minibot.extensions.tools.safety",
         "minibot.extensions.tools.utility",
         "minibot.extensions.tools.vault",
         "minibot.extensions.tools.workspace",
@@ -51,9 +100,14 @@ def _bundled_modules(entrypoint: ExtensionEntrypoint) -> tuple[str, ...]:
         return ("minibot.extensions.channels.telegram", *common)
     if entrypoint == "console":
         return common
-    # Workers retain their deliberately narrower tool assembly: the scheduler and utility tools
-    # plus user-configured extensions.
-    return ("minibot.extensions.services.scheduler", "minibot.extensions.tools.utility")
+    # Workers retain their deliberately narrower tool assembly: the scheduler, safety-check and utility
+    # modules, the bundles opted in through [tasks].worker_extensions, plus user-configured extensions.
+    return (
+        "minibot.extensions.services.scheduler",
+        "minibot.extensions.tools.safety",
+        "minibot.extensions.tools.utility",
+        *(WORKER_OPT_IN_MODULES[name] for name in worker_extensions),
+    )
 
 
 class ExtensionService(Protocol):
@@ -96,6 +150,8 @@ class ExtensionContext:
     agent_management: AgentManagementService | None = None
     refresh_tools: Callable[[], Awaitable[None]] | None = None
     tools: list[ToolBinding] = field(default_factory=list)
+    tool_derivers: list[ToolDeriver] = field(default_factory=list)
+    tool_wrappers: list[ToolWrapper] = field(default_factory=list)
     subscriptions: list[tuple[type[BaseEvent], EventHandler]] = field(default_factory=list)
     services: list[ExtensionService] = field(default_factory=list)
     routes: list[RouteSpec] = field(default_factory=list)
@@ -164,6 +220,37 @@ class ExtensionContext:
             return
         self.tools.extend(bindings)
 
+    def add_tool_deriver(self, deriver: ToolDeriver) -> None:
+        """Contribute tools built from the tool list an agent ends up with.
+
+        ``add_tool`` registers before any agent exists, so a tool that must act on other tools (call
+        them, describe them) cannot be built there. ``deriver`` runs once per agent, with the final
+        list: after approval, event and output-spill wrapping, ``tools_allow``/``tools_deny`` and the
+        removal of the delegation tools. It returns the extra bindings, which are then approval- and
+        event-wrapped like any tool and filtered by the same agent policy. The input list does not
+        contain them, and it is rebuilt whenever the tool list is, so a deriver must be a pure function
+        of its argument. Runs in the daemon, the console and task workers.
+
+        A deriver may return a ``DerivedTool`` instead of a plain binding to take over input tools: while
+        the derived tool survives the agent's policy, the tools it ``replaces`` are no longer shown to the
+        model.
+        """
+        self.tool_derivers.append(deriver)
+
+    def add_tool_wrapper(self, wrapper: ToolWrapper) -> None:
+        """Wrap the handlers of every tool an agent can call, to check or change calls and results.
+
+        ``wrapper`` gets the bindings and an ``Approver`` that asks the user in the chat the call came from
+        (denied where the channel has no approval buttons), and returns one binding per input binding, in the
+        same order and with the same tool names; keep ``spill_after_chars`` (``dataclasses.replace``). It
+        covers core, extension, MCP and derived tools alike, in the daemon, the console and task workers,
+        and runs again whenever the tool list is rebuilt, so it must be a pure function of its arguments.
+        Wrappers sit innermost: they see the raw result before output spill, while ``[tools.approval]`` and
+        tool-call events stay outside them. Calls nested in a codemode script go through them too, with
+        ``context.parent_call_id`` set.
+        """
+        self.tool_wrappers.append(wrapper)
+
     def add_service(self, service: ExtensionService) -> None:
         self.services.append(service)
 
@@ -221,6 +308,48 @@ class ExtensionRegistry:
     def tools(self) -> list[ToolBinding]:
         return [binding for context in self._contexts for binding in context.tools]
 
+    def wrap_tools(self, bindings: Sequence[ToolBinding], approve: Approver) -> list[ToolBinding]:
+        """Apply every ``add_tool_wrapper`` function to ``bindings``, in extension load order."""
+        wrapped = list(bindings)
+        observed = observed_approver(approve)
+        for context in self._contexts:
+            for wrapper in context.tool_wrappers:
+                result = list(wrapper(wrapped, observed))
+                if [binding.tool.name for binding in result] != [binding.tool.name for binding in wrapped]:
+                    raise ValueError(f"extension {context.name!r}: a tool wrapper must keep every tool and its name")
+                wrapped = result
+        return wrapped
+
+    def tools_outside(self, names: Collection[str]) -> list[ToolBinding]:
+        return [binding for context in self._contexts if context.name not in names for binding in context.tools]
+
+    def derive_tools(self, final_tools: Sequence[ToolBinding]) -> DerivedTools:
+        """Run every ``add_tool_deriver`` function over ``final_tools`` and return only what they add.
+
+        A derived tool whose name already exists (say an MCP server exposing ``run_tools_script``) is
+        skipped with a warning and the existing tool is kept: this runs on every tool refresh and in
+        workers, so raising would break turns at runtime.
+        """
+        existing = {binding.tool.name for binding in final_tools}
+        derived: list[ToolBinding] = []
+        replaces: dict[str, frozenset[str]] = {}
+        for context in self._contexts:
+            for deriver in context.tool_derivers:
+                for item in deriver(final_tools):
+                    binding = item.binding if isinstance(item, DerivedTool) else item
+                    if binding.tool.name in existing:
+                        self._logger.warning(
+                            "extension %r derived tool %r, which already exists; keeping the existing tool",
+                            context.name,
+                            binding.tool.name,
+                        )
+                        continue
+                    existing.add(binding.tool.name)
+                    derived.append(binding)
+                    if isinstance(item, DerivedTool) and item.replaces:
+                        replaces[binding.tool.name] = item.replaces
+        return DerivedTools(tools=derived, replaces=replaces)
+
     @property
     def routes(self) -> list[RouteSpec]:
         return [route for context in self._contexts for route in context.routes]
@@ -252,6 +381,8 @@ class ExtensionRegistry:
             {
                 "name": context.name,
                 "tools": len(context.tools),
+                "tool_derivers": len(context.tool_derivers),
+                "tool_wrappers": len(context.tool_wrappers),
                 "services": len(context.services),
                 "subscriptions": len(context.subscriptions),
                 "routes": len(context.routes),
@@ -317,7 +448,7 @@ def load_extensions(
     """
     log = logger or logging.getLogger("minibot.extensions")
     contexts: list[ExtensionContext] = []
-    for name in (*_bundled_modules(entrypoint), *settings.extensions.modules):
+    for name in (*_bundled_modules(entrypoint, settings.tasks.worker_extensions), *settings.extensions.modules):
         try:
             module = importlib.import_module(name)
         except Exception as exc:

@@ -170,7 +170,7 @@ tool name, because only an exact name can be checked against a pattern without e
 list. A managed definition may not use ``tools_deny`` at all — it grants every tool except the
 listed ones, so no ceiling can bound it — and it claims MCP servers through ``mcp_servers`` rather
 than through tool names. ``providers`` restricts which model provider a managed agent may target,
-including a ``spawn_task`` model override; the provider the daemon already runs on is always
+including a ``spawn_task`` or ``delegate`` model override; the provider the daemon already runs on is always
 allowed, since reusing it is not an escalation. Owner-authored agents are not subject to the
 ceiling, so their permissions stay exactly as the owner wrote them.
 
@@ -251,11 +251,11 @@ The default is ``"sqlite"``. A config written before that default changed and le
 unset now uses the SQLite queue; set ``backend = "rabbitmq"`` explicitly to keep using the broker.
 
 By default a worker starts with no context: it sees only its system prompt, the task ``prompt`` and
-``context_json``, and the ``spawn_task`` description tells the main agent so. ``[tasks].history = true``
+``context_json``, and the ``spawn_task`` and ``delegate`` descriptions tell the main agent so. ``[tasks].history = true``
 gives worker conversations a persistent history instead. It needs ``backend = "sqlite"``.
 
 A conversation is a named agent in a chat, or that agent plus a ``session`` name the main agent passes to
-``spawn_task`` (for example one per client). A general worker only gets a conversation when it is given a
+``spawn_task`` or ``delegate`` (for example one per client). A general worker only gets a conversation when it is given a
 ``session``; otherwise it starts empty as before. Every finished task appends its prompt and answer to the
 conversation, each capped at 8000 characters (failed or timed-out tasks append nothing), and the next task
 receives it before its own prompt. Tasks of one conversation run one at a time: the queue does not lease a
@@ -263,7 +263,7 @@ task while another task of the same conversation is leased or running, so a late
 the earlier result. Different sessions run in parallel. When the stored history grows past roughly 16 KB
 and the model's context limit is known, the worker summarizes it before running and the summary replaces
 it; when the limit is unknown nothing is summarized and the worker only receives the newest messages that
-fit in about 32 KB. Tasks without a chat (no ``chat_id``) never get a history. ``fresh = true`` on ``spawn_task`` clears the conversation before a task, and the tool description
+fit in about 32 KB. Tasks without a chat (no ``chat_id``) never get a history. ``fresh = true`` on ``spawn_task`` or ``delegate`` clears the conversation before a task, and the tool description
 switches to explain all this:
 
 .. code-block:: toml
@@ -398,7 +398,7 @@ Tool Configuration
      - ``enabled``, ``host``, ``port``, ``auth_token``, ``basic_auth_user``, ``basic_auth_password``, ``chat_upload_*``; see `HTTP server`_ above
    * - ``[tools.tool_output_spill]``
      - ``ToolOutputSpillConfig``
-     - ``enabled``, ``spill_after_chars``, ``preview_chars``, ``subdir``, ``exclude_tools``; applies to every tool result (not just ``http_request``)
+     - ``enabled``, ``spill_after_chars``, ``preview_chars``, ``subdir``, ``exclude_tools``; applies to every tool result (not just ``http_request``), except calls made from a codemode script
    * - ``[tools.apply_patch]``
      - ``ApplyPatchToolConfig``
      - ``enabled``, ``restrict_to_workspace``, ``workspace_root``, ``allow_outside_workspace``, ``max_patch_bytes``
@@ -419,7 +419,7 @@ Tool Configuration
      - ``enabled``, ``name_prefix``, ``timeout_seconds``, ``reload``, ``servers``
    * - ``[[tools.mcp.servers]]``
      - ``MCPServerConfig``
-     - ``name``, ``transport``, stdio command fields, HTTP fields, tool allow/deny filters
+     - ``name``, ``transport``, stdio command fields, HTTP fields, tool allow/deny filters, ``inline_result_chars`` (default ``25000``: larger results go to the output spill, or are cut to it without spill; see :doc:`mcp`)
    * - ``[tools.skills]``
      - ``SkillsToolConfig``
      - ``enabled``, ``paths``, ``preload_catalog``, ``native``, ``native_disabled``, ``write_path``,
@@ -427,9 +427,15 @@ Tool Configuration
    * - ``[tools.rag]``
      - ``RagToolConfig``
      - ``enabled``, ``backend``, ``sqlite_url``/``qdrant_url``, ``collection_name``, ``embedding``, ``rerank``, chunk/search settings; see :doc:`rag`
+   * - ``[tools.codemode]``
+     - ``CodemodeToolConfig``
+     - ``enabled`` (replaces the tools scripts can call as direct tools), ``timeout_seconds`` (default ``120``; time spent waiting for a ``[tools.approval]`` answer or a ``[tools.safety_classifier]`` check is not counted), ``max_timeout_seconds`` (default ``600``; the most a script may ask for with its ``timeout_seconds`` argument), ``max_tool_calls`` (default ``50``; the extra call raises a catchable ``codemode:tool_call_limit`` error), ``max_memory_mb``, ``max_output_chars``, ``exclude``; needs the ``codemode`` extra; see :doc:`tools`
+   * - ``[tools.safety_classifier]``
+     - ``SafetyClassifierToolConfig``
+     - ``enabled`` (default ``false``), ``provider``/``model``/``reasoning_effort`` (the classifier's LLM; unset keeps ``[llm]``), ``check_input`` (patterns checked before the call runs), ``check_output`` (patterns whose result is checked for prompt injection), ``max_output_chars`` (default ``20000``; the size of one classifier call, longer arguments or results are checked in chunks), ``max_output_chunks`` (default ``5``; beyond ``max_output_chars * max_output_chunks`` the user is asked instead), ``timeout_seconds`` (default ``30``); a ``safe`` verdict lets the call or result through, anything else (failures and timeouts included) asks the user with the ``[tools.approval]`` buttons, and the classifier never blocks on its own; a best-effort filter, not a security boundary; covers task workers too; see :doc:`tools`
    * - ``[tasks]``
      - ``TasksConfig``
-     - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``worker_max_steps``, ``worker_max_tool_calls``, ``max_concurrent_workers``, ``continue_turn_default``, ``continue_turn_mode``, ``history``, ``sqlite``
+     - ``enabled``, ``backend``, ``worker_timeout_seconds``, ``worker_max_steps``, ``worker_max_tool_calls``, ``max_concurrent_workers``, ``delegation_mode``, ``history``, ``worker_extensions``, ``sqlite``
    * - ``[tasks.sqlite]``
      - ``SqliteTaskQueueConfig``
      - ``sqlite_url``, ``poll_interval_seconds``, ``lease_timeout_seconds``, ``batch_size``, ``max_attempts``, ``done_retention_seconds``; terminal rows and compact event history are retained for 30 days by default
@@ -509,4 +515,7 @@ Tool Config Models
    :no-members:
 
 .. autoclass:: minibot.adapters.config.schema.RagToolConfig
+   :no-members:
+
+.. autoclass:: minibot.adapters.config.schema.SafetyClassifierToolConfig
    :no-members:

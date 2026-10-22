@@ -543,7 +543,12 @@ class OrchestrationConfig(BaseModel):
     - ``shared_mcp_servers`` — MCP server names whose tools stay visible to the main agent even when a
       specialist claims them under an exclusive ownership mode (default: empty).
     - ``main_tool_use_guardrail`` — optional guardrail before tool execution:
-      ``"disabled"`` (default) or ``"llm_classifier"``.
+      ``"disabled"`` (default) or ``"llm_classifier"``. With ``[tools.codemode]`` on, the classifier only sees
+      ``run_tools_script`` and the direct tools, not the calls a script makes.
+    - ``main_tool_use_guardrail_provider``, ``main_tool_use_guardrail_model`` and
+      ``main_tool_use_guardrail_reasoning_effort`` — run the classifier on its own model instead of the main
+      agent's, for example a cheap model with ``"low"`` reasoning. Each one left unset keeps the main agent's
+      value. The provider is a ``[providers.<name>]`` section name (default: unset).
     - ``main_agent`` — tool allow/deny policy for the main agent (``[orchestration.main_agent]``).
     - ``specialists`` — whether owner-defined specialists are used at all
       (``[orchestration.specialists]``).
@@ -555,6 +560,9 @@ class OrchestrationConfig(BaseModel):
     tool_ownership_mode: Literal["shared", "exclusive", "exclusive_mcp"] = "shared"
     shared_mcp_servers: list[str] = Field(default_factory=list)
     main_tool_use_guardrail: Literal["disabled", "llm_classifier"] = "disabled"
+    main_tool_use_guardrail_provider: str | None = None
+    main_tool_use_guardrail_model: str | None = None
+    main_tool_use_guardrail_reasoning_effort: str | None = None
     main_agent: MainAgentConfig = MainAgentConfig()
     specialists: SpecialistsConfig = Field(default_factory=SpecialistsConfig)
     agent_management: AgentManagementConfig = Field(default_factory=AgentManagementConfig)
@@ -763,7 +771,8 @@ class ToolOutputSpillConfig(BaseModel):
     file storage is enabled and the agent also has a read-back tool available
     (``grep``, ``code_read``, ``read_file`` or ``bash``). ``activate_skill`` spills only
     past 64,000 characters (or ``spill_after_chars``, if larger), so skill instructions
-    normally arrive inline.
+    normally arrive inline; MCP tools spill only past their server's ``inline_result_chars``. Error results spill
+    too, keeping ``ok: false`` and their short fields.
     """
 
     enabled: bool = True
@@ -801,6 +810,9 @@ class MCPServerConfig(BaseModel):
     enabled_tools: list[str] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
     catalog_cache_ttl_seconds: Annotated[int, Field(ge=0)] = 60
+    # Results up to this size stay inline (a web search result is about 25,000 characters); larger ones go
+    # whole to the output-spill file, or are cut to it where spill cannot run.
+    inline_result_chars: PositiveInt = 25000
 
 
 class MCPToolConfig(BaseModel):
@@ -930,6 +942,112 @@ class RagToolConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class CodemodeToolConfig(BaseModel):
+    """Model-written Python scripts that call tools. TOML section: ``[tools.codemode]``
+
+    Adds one tool, ``run_tools_script``, that runs a short Python script in a sandbox (Pydantic's Monty
+    interpreter); the script calls the agent's other tools as ``await tools.<name>(...)`` and only its
+    printed output and final value come back to the model. The tools a script can call are then no longer
+    offered as direct calls; the delegation tools, ``activate_skill``/``list_skills``/``self_insert_artifact``
+    and those matching ``exclude`` stay direct.
+    Requires the ``codemode`` extra: ``poetry install --extras codemode``.
+
+    - ``enabled`` — switch the agent to codemode (default: ``false``).
+    - ``timeout_seconds`` — wall-clock limit for one script, nested tool calls included; the time a nested call
+      spends waiting for an owner approval or a safety classifier check is not counted (default: ``120``).
+      With codemode every tool call runs in a script, so this also bounds a single long call such as ``bash``;
+      the model can ask for another limit per script with the tool's ``timeout_seconds`` argument.
+    - ``max_timeout_seconds`` — the highest limit a script may ask for; larger requests are lowered to it
+      (default: ``600``). The turn's own deadline (``[runtime] agent_timeout_seconds``) still applies.
+    - ``max_tool_calls`` — how many tool calls one script may make; the next call raises a catchable
+      ``codemode:tool_call_limit`` error (default: ``50``). These calls do not count against the turn's own
+      tool-call limit, so a turn may make up to this many per script.
+    - ``max_memory_mb`` — heap limit of the script itself, in MiB (default: ``64``).
+    - ``max_output_chars`` — cap on the printed output and on the returned value; longer text keeps its start
+      and end (default: ``20000``).
+    - ``exclude`` — fnmatch patterns of tool names scripts cannot call; they stay direct tools (default: empty).
+      The delegation tools, ``activate_skill``/``list_skills``/``self_insert_artifact`` and
+      ``run_tools_script`` itself are always excluded.
+    """
+
+    enabled: bool = False
+    timeout_seconds: PositiveInt = 120
+    max_timeout_seconds: PositiveInt = 600
+    max_tool_calls: PositiveInt = 50
+    max_memory_mb: PositiveInt = 64
+    max_output_chars: PositiveInt = 20000
+    exclude: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _timeout_within_max(self) -> CodemodeToolConfig:
+        if self.timeout_seconds > self.max_timeout_seconds:
+            raise ValueError("tools.codemode.timeout_seconds must not exceed max_timeout_seconds")
+        return self
+
+
+class SafetyClassifierToolConfig(BaseModel):
+    """An LLM check on risky tool calls and on untrusted tool results. TOML section: ``[tools.safety_classifier]``
+
+    A second, cheap model looks at a call before it runs and at a result before the agent sees it, and answers
+    with a structured ``safe``/``unsafe`` verdict and a reason. A ``safe`` verdict lets the call or result
+    through; anything else, including failures and timeouts, asks the user with the ``[tools.approval]``
+    buttons, the classifier's reason shown in the prompt. The classifier never blocks on its own. It is a
+    best-effort filter, not a security boundary: it can itself be steered by injected text in what it checks.
+
+    - ``enabled`` — turn the checks on (default: ``false``). Covers the main agent and task workers alike,
+      so a delegated agent reading mail is checked too; calls a ``run_tools_script`` script makes are checked
+      one by one.
+    - ``provider`` / ``model`` / ``reasoning_effort`` — the classifier's own LLM: a ``[providers.<name>]``
+      key or an API format name (``openai``, ``claude``, ...), its model and reasoning effort. Each one left
+      unset keeps the main ``[llm]`` value (default: unset). An unknown ``provider`` fails config loading, and
+      so does a ``provider`` without a ``model``, since the main ``[llm]`` model may not exist there.
+    - ``check_input`` — fnmatch patterns of tool names whose arguments are checked before the call runs
+      (default: ``["bash", "python_execute", "http_request", "install_skill", "schedule_prompt"]``). An
+      ``unsafe`` call, such as ``bash`` reading ``.env`` and sending it out with ``curl``, runs only if the user
+      approves it; a denial returns the same ``tool_approval:denied`` error as ``[tools.approval]``.
+    - ``check_output`` — fnmatch patterns of tool names whose result is checked after the call for text
+      aimed at an AI agent, i.e. prompt injection (default: ``["http_request"]``; add sources of untrusted text
+      such as ``mcp_exa__*`` or ``mcp_mail__imap_get_message*``). A flagged result is held back until the user
+      releases it, the prompt showing its first 300 characters on one escaped ``Excerpt:`` line; a denial
+      replaces it with a ``tool_output_withheld`` error.
+    - ``max_output_chars`` — the size of one classifier call (default: ``20000``). A longer result, or
+      longer serialized call arguments, is split into chunks of this size, classified concurrently; any
+      flagged chunk flags the whole. Consecutive chunks overlap by a quarter of ``max_output_chars``, at most
+      500 characters, so text written across a chunk boundary is still seen whole.
+    - ``max_output_chunks`` — the most chunks one check may use (default: ``5``). A result or set of
+      arguments needing more chunks (a little under ``max_output_chars * max_output_chunks`` characters,
+      because of the overlap) is not sent to the classifier: the user is asked as if the check had failed,
+      so nothing passes unchecked.
+    - ``timeout_seconds`` — limit for one classifier call, retries included (default: ``30``).
+
+    The classifier's provider receives the checked call arguments, with sensitive keys such as
+    ``authorization`` or ``token`` redacted, and the checked results in full. MCP tools match their exposed
+    name, also in ``lazy`` mode. When the classifier fails, times out or still returns no valid verdict after
+    two retries, the user is asked as if it had flagged the call. Channels without approval buttons, such as the
+    console, deny every flagged call and withhold every flagged result. Errors a tool raises are not
+    checked, only results it returns. Each check is one more model call per chunk; ``http_request`` is in both
+    default lists, so each request costs at least two. Waiting for the user counts against the turn or task
+    deadline as with ``[tools.approval]``; neither that wait nor the classifier's calls count against a
+    ``run_tools_script`` script's ``timeout_seconds``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    provider: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
+    check_input: ToolPatterns = Field(
+        default_factory=lambda: ["bash", "python_execute", "http_request", "install_skill", "schedule_prompt"]
+    )
+    check_output: ToolPatterns = Field(default_factory=lambda: ["http_request"])
+    max_output_chars: PositiveInt = 20000
+    max_output_chunks: PositiveInt = 5
+    timeout_seconds: PositiveInt = 30
+
+
 class ToolApprovalConfig(BaseModel):
     """Human approval before dangerous tool calls. TOML section: ``[tools.approval]``
 
@@ -976,6 +1094,8 @@ class ToolsConfig(BaseModel):
     mcp: MCPToolConfig = MCPToolConfig()
     skills: SkillsToolConfig = Field(default_factory=SkillsToolConfig)
     rag: RagToolConfig = RagToolConfig()
+    codemode: CodemodeToolConfig = CodemodeToolConfig()
+    safety_classifier: SafetyClassifierToolConfig = SafetyClassifierToolConfig()
 
 
 class RabbitMQConsumerConfig(BaseModel):
@@ -1049,9 +1169,9 @@ class SqliteTaskQueueConfig(BaseModel):
 class TasksConfig(BaseModel):
     """Async task system settings. TOML section: ``[tasks]``
 
-    Gates both the task consumer service and the ``spawn_task``/``cancel_task``/``list_tasks``/``get_task`` tools.
-    ``spawn_task`` is also the only way to delegate to a specialist agent, so disabling this
-    section turns multi-agent orchestration off entirely.
+    Gates both the task consumer service and the ``spawn_task``/``delegate``/``cancel_task``/``message_task``/
+    ``list_tasks``/``get_task`` tools. ``spawn_task`` and ``delegate`` are also the only ways to hand work to a
+    specialist agent, so disabling this section turns multi-agent orchestration off entirely.
 
     - ``enabled`` — enable the async task system (default: ``true``; the ``sqlite`` backend
       needs no broker and no extra).
@@ -1061,13 +1181,12 @@ class TasksConfig(BaseModel):
     - ``worker_max_steps`` — optional execution-step ceiling; ``"unlimited"`` disables it (default).
     - ``worker_max_tool_calls`` — optional tool-call ceiling; ``"unlimited"`` disables it (default).
     - ``max_concurrent_workers`` — maximum parallel task handlers (default: ``4``).
-    - ``continue_turn_default`` — what ``spawn_task`` does when the model leaves ``continue_turn`` unset
-      (default: ``false``). ``true`` returns every result to the main agent as a new turn; once a turn reaches
-      the continuation limit, further tasks fall back to delivering straight to the chat instead of failing.
-    - ``continue_turn_mode`` — ``"auto"`` (default) lets the model choose per task through ``continue_turn``, with
-      ``continue_turn_default`` covering an unset value. ``"always"`` ignores the model's choice and returns every
-      result to the main agent as a new turn, falling back to direct delivery at the continuation limit;
-      ``continue_turn_default`` has no effect in that mode.
+    - ``delegation_mode`` — which delegation tools the main agent gets. ``"auto"`` (default) attaches both:
+      ``delegate`` when the model needs the result to keep working (it comes back as a new turn) and
+      ``spawn_task`` when the worker's answer is the final deliverable (it goes straight to the chat).
+      ``"delegate"`` attaches only ``delegate``, so every result returns to the main agent as a new turn; past
+      the continuation limit it delivers straight to the chat instead of failing. Replaces the removed
+      ``continue_turn_mode = "always"``; ``continue_turn_mode`` and ``continue_turn_default`` are rejected.
     - ``history`` — keep a persistent history per worker conversation (default: ``false``; needs
       ``backend = "sqlite"``). A conversation is a named agent in a chat, ``task:<channel>:<chat_id>:<agent_name>``,
       or that plus a ``session`` name passed to ``spawn_task``; general workers only get one when given a
@@ -1075,6 +1194,14 @@ class TasksConfig(BaseModel):
       stored in the ``[memory]`` database, and tasks of one conversation run one at a time, later ones waiting in
       the queue. A large history is summarized before the next task when the model's context limit is known, and
       ``spawn_task`` gains ``fresh`` to clear it first. With ``false`` every worker starts with no history.
+    - ``worker_extensions`` — bundled tool extensions a worker loads on top of the scheduler and utility ones
+      (default: ``[]``). ``"kv_memory"`` adds the ``[tools.kv_memory]`` tools, ``"rag"`` the ``[tools.rag]``
+      tools and ``"codemode"`` the ``run_tools_script`` tool (``[tools.codemode]``), which calls the tools that
+      specialist itself has. Only a specialist that names them in ``tools_allow`` gets them (a
+      ``tools_deny``-only specialist gets every tool it does not deny, these included); a ``spawn_task`` without
+      an agent never does. Each listed extension needs its ``[tools.*]`` section enabled, and must appear once.
+      Storage is prepared on the first call in each worker; RAG also loads its embedding model in every worker
+      that calls it.
     - ``sqlite`` — queue storage settings used when ``backend = "sqlite"``; see ``[tasks.sqlite]``.
     """
 
@@ -1084,10 +1211,28 @@ class TasksConfig(BaseModel):
     worker_max_steps: TaskLimitValue = "unlimited"
     worker_max_tool_calls: TaskLimitValue = "unlimited"
     max_concurrent_workers: PositiveInt = 4
-    continue_turn_default: bool = False
-    continue_turn_mode: Literal["auto", "always"] = "auto"
+    delegation_mode: Literal["auto", "delegate"] = "auto"
     history: bool = False
+    worker_extensions: list[Literal["kv_memory", "rag", "codemode"]] = Field(default_factory=list)
     sqlite: SqliteTaskQueueConfig = SqliteTaskQueueConfig()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_continue_turn_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "continue_turn_mode" in data:
+                raise ValueError(
+                    'tasks.continue_turn_mode was removed: replace continue_turn_mode = "always" with '
+                    'delegation_mode = "delegate", or delete it if it is "auto"; also delete '
+                    "continue_turn_default if present"
+                )
+            if "continue_turn_default" in data:
+                raise ValueError(
+                    "tasks.continue_turn_default was removed: delete it, the model now picks the `delegate` tool "
+                    "(result comes back to it) or `spawn_task` (answer goes to the user); "
+                    'set delegation_mode = "delegate" to offer only `delegate`'
+                )
+        return data
 
     @model_validator(mode="after")
     def _validate_lease_outlives_worker(self) -> TasksConfig:
@@ -1100,6 +1245,8 @@ class TasksConfig(BaseModel):
             )
         if self.history and self.backend != "sqlite":
             raise ValueError('tasks.history requires tasks.backend = "sqlite"')
+        if len(set(self.worker_extensions)) != len(self.worker_extensions):
+            raise ValueError("tasks.worker_extensions must not list an extension twice")
         return self
 
 
@@ -1250,6 +1397,31 @@ class Settings(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _validate_safety_classifier_provider(self) -> Settings:
+        """The safety classifier's ``provider`` must name a ``[providers.<name>]`` section or an API format,
+        and comes with its own ``model``.
+
+        Any other name would fall through to the OpenAI Chat Completions client at the first check, and a
+        provider that does not host the main ``[llm]`` model would reject it; either way every check fails
+        and the user is asked about every call.
+        """
+        config = self.tools.safety_classifier
+        provider = (config.provider or "").strip().lower()
+        if not config.enabled or not provider:
+            return self
+        if provider not in PROVIDER_API_FORMATS and provider not in self.providers:
+            known = ", ".join(sorted({*PROVIDER_API_FORMATS, *self.providers}))
+            raise ValueError(
+                f"[tools.safety_classifier].provider {config.provider!r} is not a known provider ({known})"
+            )
+        if not (config.model or "").strip():
+            raise ValueError(
+                "[tools.safety_classifier].model is required when provider is set: the [llm] model may not exist "
+                f"on {config.provider!r}"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _validate_specialist_activation(self) -> Settings:
         """Specialists and agent management need their prerequisites enabled.
 
@@ -1268,6 +1440,15 @@ class Settings(BaseModel):
             specialists.enabled = False
         if self.orchestration.agent_management.active and not specialists.enabled:
             raise ValueError("[orchestration.agent_management] requires [orchestration.specialists].enabled = true")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_worker_extensions(self) -> Settings:
+        if not self.tasks.enabled:
+            return self
+        for name in self.tasks.worker_extensions:
+            if not getattr(self.tools, name).enabled:
+                raise ValueError(f'tasks.worker_extensions lists "{name}" but [tools.{name}].enabled is false')
         return self
 
     @classmethod

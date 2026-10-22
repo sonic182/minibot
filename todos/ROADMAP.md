@@ -12,7 +12,7 @@ User → MiniBot → agent ──┼─ scheduled task
                          └─ external agent (ACP)
 ```
 
-What made this possible is the combination of `spawn_task`, `continue_turn` (a worker's result can
+What made this possible is the combination of `spawn_task`, `delegate` (a worker's result can
 feed the main agent's next step instead of ending in a dead-end message), specialists with their own
 tools and providers, runtime agent reload, the approval gate and `get_settings` / `minibot-docs`.
 The work ahead therefore favours making delegation, interruption and cancellation dependable over
@@ -25,27 +25,35 @@ so the order here is the order to work in, not the numeric order.
 
 | priority | phase | topic | status |
 |---|---|---|---|
-| 1 | 12 | opt-in bundled extensions for task workers | in progress |
-| 2 | 8 | runtime reliability leftovers | container smoke test, scheduler timezone decision |
-| 3 | 3b | steering leftovers | steering workers and specialists, `/stop` on the console |
-| 4 | 9 | delegation semantics: `delegate` versus `spawn_task` | pending, investigate first |
-| 5 | 10 | external agents (ACP) as an agent runtime backend | pending, experimental through `acpx` first |
-| 6 | 11 | task observability | pending |
-| 7 | 4 | MCP OAuth (#65) | demand-driven: only when an MCP server in use requires it |
-| 8 | 5, 6 | security defence in depth: guardrail heuristics, bash hardening | pending, lower priority than the deterministic controls already shipped |
+| 1 | 11 | task observability | pending |
+| 2 | 10 | external agents (ACP) as an agent runtime backend | pending, experimental through `acpx` first |
+| 3 | 3b | steering leftovers | steering workers and specialists, deferred until the addressee is decided |
+| 4 | 4 | MCP OAuth (issue #65) | demand-driven: only when an MCP server in use requires it |
+| 5 | 5, 6 | security defence in depth: guardrail heuristics, bash hardening | pending, lower priority than the deterministic controls already shipped |
+| 6 | 14 | self-evolution behind an opt-in (`[evolution]`) | designed, see todos/SELF_EVOLUTION.md |
 
 Shipped and removed from this file: 0 bash env default, 1 credential vault, 2 skills for specialist
 agents, 3 native skills, runtime self-knowledge and agent management, 3b main-agent steering and `/stop`
-(Telegram, web), 7 shared tool construction with task workers, 8 task lifecycle, bounded output, MCP HTTP
-and approval binding (#112, 0.29.0). Git history keeps their design notes.
+(Telegram, web, and `Esc` in the console TUI), 7 shared tool construction with task workers, 8 task lifecycle,
+bounded output, MCP HTTP and approval binding (PR #112, released in 0.29.0) plus the container smoke test of task
+cancellation, 12 opt-in bundled extensions for task workers (`[tasks] worker_extensions`), 9 delegation semantics
+(`delegate` versus background `spawn_task`, `[tasks] delegation_mode`), 13 codemode (`run_tools_script`, Python that
+calls tools in a Monty sandbox, `[tools.codemode]`, built over an agent's final tool list through
+`ExtensionContext.add_tool_deriver`). The commit history keeps their design notes.
+
+Decided: scheduler cron expressions stay in UTC, as documented in `docs/scheduler.rst`; there is no
+`[scheduler]` timezone setting.
 
 Dropped: a native SMTP tool. Mail is covered by an MCP server (`docs/mcp_servers.rst`) behind the
 `[tools.approval]` gate, so there is nothing left for MiniBot to own.
 
-Parked on purpose: more self-modification (agent auto-evolution, automatic skill or tool creation,
-self-tuning prompts, autonomous agent spawning). `create_agent` / `update_agent` / `delete_agent` /
-`reload_agents` are enough metaprogramming; the effort goes into delegate, interrupt, resume, cancel
-and observe.
+Self-modification is planned only behind an explicit opt-in (`[evolution]`, Phase 14, see
+`todos/SELF_EVOLUTION.md`). Still out, on purpose: activation without an owner approval, autonomous
+agent spawning, self-tuning prompts, edits to `config.toml` or to the agent ceiling, and edits to
+MiniBot's own source. Skill authoring by the model is deferred to v2 (`todos/SELF_EVOLUTION.md`,
+section 10, Later (v2)). `create_agent` / `update_agent` / `delete_agent` / `reload_agents` stay the
+model's way to author specialists; the effort goes into delegate, interrupt, resume, cancel and
+observe first.
 
 ## Trust model
 
@@ -84,44 +92,13 @@ Worth stating this plainly in the README/docs, roughly:
 > workloads or deployments with sensitive host data, run MiniBot inside an
 > appropriately isolated environment.
 
-## [ ] Phase 12 — Opt-in bundled extensions for task workers (priority 1)
+## Known gaps
 
-Workers load only the scheduler and utility bundled extensions (`_bundled_modules` in
-`minibot/app/extensions.py`), so a specialist agent that lists `rag_*` (or kv memory, MCP tools) in
-`tools_allow` gets nothing: those extensions return early for `entrypoint == "worker"`
-(`minibot/extensions/integrations/rag.py`, `tools/memory.py`, `integrations/mcp.py`). Found when a
-model-authored `rag_manager` agent answered that it had no RAG tools.
+Deliberately left, still true after the runtime reliability work (Phase 8, shipped):
 
-The scheduler precedent (#110) shows that registering the tools is the small part. The daemon-side
-`start()` work does not run in a worker, so each extension needs lazy initialization and a lock
-against concurrent workers (`SQLAlchemyScheduledPromptStore._session`), plus isolation tests.
-
-Shape: one config mechanism instead of a per-extension flag, e.g. `[tasks.worker] extensions = [...]`
-naming the bundled extensions a worker loads on top of the scheduler and utility ones. Default empty, so
-nothing changes for existing deployments.
-
-- Each extension that can be listed must be safe to register without its service: lazy init, no
-  schema race (SQLite) and no per-worker heavy state at import time. RAG models already load lazily and die
-  with the worker subprocess, but every task that uses RAG pays the load.
-- Document the option in `docs/config.rst`, and update `docs/extensions.rst` and `docs/tasks.rst`, which
-  say workers only get configured extension tools.
-- If RAG ever ships as an MCP server, prefer that for RAG: a long-lived MCP process shares the embedding
-  model across tasks, which this mechanism cannot.
-
-## [ ] Phase 8 — Runtime reliability (priority 2)
-
-`spawn_task` sits closer to the centre of the system with every release, so cancel, timeout, SIGTERM,
-process-tree cleanup and resource limits have to be boring and dependable before more intelligence is
-added on top. The bulk of it shipped in #112 (0.29.0). Still open:
-
-- [ ] Smoke test in the container: cancel a task running `bash sleep 300` and confirm nothing is left
-  behind (the code path is covered by unit tests, not exercised against a real container yet).
-- [ ] Scheduler timezone. Cron expressions run in UTC (documented in `docs/scheduler.rst`); decide whether
-  a `[scheduler]` timezone setting is worth it. Scheduled-prompt retries only cover a failing event-bus
-  publish, not a failing turn.
-
-Known gaps, deliberately left:
-
+- A `bash` command that detaches a process into its own session (`setsid`) escapes the process-group kill on
+  cancel and timeout; only container or VM isolation bounds that.
+- Scheduled-prompt retries only cover a failing event-bus publish, not a failing turn.
 - Stdio MCP clients are bound to one event loop: `MCPClient._ensure_stdio_runtime` kills and respawns the
   server process whenever a different loop calls in (startup `asyncio.run` versus the daemon loop).
 - `Retry-After` from the provider cannot be honoured: `llm_async` raises a bare `Exception("HTTP 429: ...")`
@@ -135,35 +112,15 @@ Known gaps, deliberately left:
 ## [ ] Phase 3b — Steering leftovers (priority 3)
 
 Steering and `/stop` shipped for the main agent: the dispatcher hands same-chat messages to the running turn
-(`app/turn_inbox.py`), and `/stop` exists on Telegram and in the web chat. Still open:
+(`app/turn_inbox.py`), and `/stop` exists on Telegram, in the web chat and as `Esc` in the console TUI. Still open:
 
-- [ ] `/stop` on the console channel.
 - [ ] Steering a specific worker or specialist. Deferred on purpose: with several active tasks, "change this"
   needs an unambiguous addressee, so decide how the owner names the target before building anything.
 
 Trust model: pending messages are owner input like any other, no new surface. `/stop` must remain
 owner-only.
 
-## [ ] Phase 9 — Delegation semantics (priority 4)
-
-`spawn_task` now covers two different intents: *do this independently in the background* and *do this and
-bring me the result, because I need it for my next step* (`continue_turn`). `continue_turn_mode = "always"`
-(0.28) is a configuration patch over what is really a semantic distinction the model should not have to
-decide per call.
-
-Investigate before adding anything:
-
-- Offer `delegate(agent, task)` as the "I need the result" operation, implemented as `spawn_task` with
-  `continue_turn` forced on. Keep `spawn_task` for fire-and-forget background work. Same mechanism
-  underneath, one decision fewer for the model.
-- Converge the flags (`continue_turn`, `continue_turn_default`, `continue_turn_mode`, continuation depth
-  and limit) towards one concept, roughly `mode = "background" | "delegate"`: background means direct
-  delivery, delegate means the result becomes a continuation. Depth and limit stay as implementation
-  detail.
-- Decide whether this replaces the existing flags or only adds a friendlier entry point. No code until
-  that is settled.
-
-## [ ] Phase 10 — External agents through ACP (priority 5)
+## [ ] Phase 10 — External agents through ACP (priority 2)
 
 The goal is for MiniBot to be the control plane in front of other agents (Claude, Codex, OpenCode, Pi),
 keeping Telegram, memory, scheduling, approvals and MCP as the stable interface. ACP is **not** another LLM
@@ -192,7 +149,7 @@ model: opus
 You are the architecture specialist.
 ```
 
-`spawn_task(agent="architect", ...)` (or `delegate`, Phase 9) then runs it like any other specialist. The
+`spawn_task(agent="architect", ...)` (or `delegate`) then runs it like any other specialist. The
 pieces that already exist are the reason this fits: task id, timeouts, cancel, result, continuation, tool
 approvals, agent definitions and provider overrides. ACP is one more way to execute a worker.
 
@@ -204,11 +161,11 @@ Staging, validating before absorbing:
 3. Only after weeks of use, when the needed subset of ACP is known, consider a native ACP client.
 
 Depends on Phase 8 (cancel and process-tree cleanup must be dependable for a long-lived external process)
-and benefits from Phase 9. Trust model: an external agent has its own tools and filesystem access, so it is
+and fits `delegate`, which returns its result to the main agent. Trust model: an external agent has its own tools and filesystem access, so it is
 subject to the same deployment-isolation reasoning as `bash` (see Phase 6) and should sit behind the
 approval gate.
 
-## [ ] Phase 11 — Task observability (priority 6)
+## [ ] Phase 11 — Task observability (priority 1)
 
 As delegation grows (specialists, continuations, external agents), the owner needs to see what happened:
 
@@ -219,7 +176,7 @@ As delegation grows (specialists, continuations, external agents), the owner nee
 
 Small and incremental; builds on the task records that already exist, no new subsystem.
 
-## [ ] Phase 4 — MCP OAuth (issue #65) — demand-driven (priority 7)
+## [ ] Phase 4 — MCP OAuth (issue #65) — demand-driven (priority 4)
 
 Scope: alternative 1 only (auth-code + PKCE + manual callback paste). No HTTP
 callback endpoint, no device flow.
@@ -265,7 +222,7 @@ implementation that happens to work against two test servers:
   a new one, so the loser of that race gets locked out. Needs a lock keyed by
   `(server_name, issuer)`.
 
-## [ ] Phase 5 — Guardrail enhancements (priority 8, defence in depth)
+## [ ] Phase 5 — Guardrail enhancements (priority 5, defence in depth)
 
 Not a duplicate of the credential vault. Under its destination-bound model,
 the LLM never has a secret reference to put in an argument at all, so nothing
@@ -281,7 +238,7 @@ call's arguments:
 - `GuardrailDecision` gains a `credential_exposure` field (structured, not
   regex/text classification, per project convention).
 
-## [ ] Phase 6 — bash tool hardening (mixed priority — see Trust model) (priority 8)
+## [ ] Phase 6 — bash tool hardening (mixed priority — see Trust model) (priority 5)
 
 Two different things live in this phase, deliberately split by who owns
 them:
@@ -369,6 +326,35 @@ deliverable — see Trust model):
 3. Containerize tool execution itself (run `bash`/`python_exec` inside a
    throwaway container per call) — strongest isolation, biggest change to
    the deployment model (today MiniBot assumes a plain host process).
+
+## [ ] Phase 14 — Self-evolution (opt-in) (priority 6)
+
+MiniBot authors its own extensions and restarts to load them, only when `[evolution] enabled = true`. It is off by
+default, and with it off nothing new is exposed. Full design: `todos/SELF_EVOLUTION.md`.
+
+- Authoring is free: the model writes and statically checks a standalone `register(mb)` module in a dedicated
+  workspace, never in MiniBot's source. Only static checks run before activation; the first import of model code
+  happens after the owner's approval, in a subprocess.
+- Activation needs the approval of the configured owner (`[evolution] owner_user_id`) for the exact bytes. The full
+  source goes to the owner as a file, the hash in the approval is the hash activated, and the approved hash is checked
+  again at activation and at boot. Calls to evolved tools and to `evo_rollback` need the same owner approval, and
+  non-owner turns are refused without a prompt.
+- Activation writes a state file, not `config.toml`. A restart is a graceful stop that exits 75 once the daemon is
+  idle; new turns are refused after a 10-minute wait. Docker and systemd restart it.
+- An unclean exit counts as a failure, whether or not the set reached healthy; a clean stop does not. A set that boots
+  more than `max_boots_per_hour` times in an hour is passed over even when its exits were clean.
+  A failing set is passed over and the boot falls back: candidate, then promoted, then previous, then core only.
+- Ceilings the code enforces: module and tool name prefixes, workspace-only paths, size and count, no name collisions,
+  no vault and redacted settings for evolved code.
+- Trust: this makes self-change explicit, reviewed and reversible. It does not isolate activated code, and the
+  host-write tools (`bash`, `python_exec`, `apply_patch`, stdio MCP servers) can bypass the gate, so they stay off or
+  are acknowledged.
+
+Prerequisites, pre-existing gaps the design depends on: a poison pending turn can crash-loop boots, a graceful stop
+mid-turn drops the turn, and queued messages live only in memory.
+
+Steps, each its own PR with its own tests: 1 config and validation; 2 restart and boot safety; 3 author and validate;
+4 activate with approval; 5 rollback and boot notice.
 
 ## Explicitly deferred
 

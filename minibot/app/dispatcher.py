@@ -7,6 +7,7 @@ from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.agent_roster import AgentRosterChange, reload_agent_roster
@@ -24,8 +25,12 @@ from minibot.app.incoming_files_context import build_history_user_entry
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_registry import SkillRegistry
 from minibot.app.tool_capabilities import MainAgentToolView, main_agent_tool_view
-from minibot.app.tool_factory import build_enabled_tools
-from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, NoopToolUseGuardrail
+from minibot.app.tool_factory import build_enabled_tools, derive_extension_tools
+from minibot.app.tool_use_guardrail import (
+    LLMClassifierToolUseGuardrail,
+    NoopToolUseGuardrail,
+    guardrail_llm_client,
+)
 from minibot.app.turn_inbox import TurnInbox
 from minibot.config.schema import Settings
 from minibot.core.agents import AgentDefinitionReader
@@ -130,7 +135,7 @@ class Dispatcher:
         guardrail_mode = settings.orchestration.main_tool_use_guardrail
         if guardrail_mode == "llm_classifier":
             tool_use_guardrail: NoopToolUseGuardrail | LLMClassifierToolUseGuardrail = LLMClassifierToolUseGuardrail(
-                llm_client=llm_client,
+                llm_client=guardrail_llm_client(settings.orchestration, llm_client, llm_factory),
                 tools=main_agent_tools_view.tools,
             )
         else:
@@ -141,7 +146,7 @@ class Dispatcher:
             getattr(audio_transcription_cfg, "auto_transcribe_max_duration_seconds", 45)
         )
         audio_auto_transcription_service = _build_audio_auto_transcription_service(
-            tools=main_agent_tools_view.tools,
+            tools=[*main_agent_tools_view.tools, *main_agent_tools_view.replaced_tools],
             enabled=auto_transcribe_enabled,
             max_duration_seconds=auto_transcribe_max_duration_seconds,
         )
@@ -166,7 +171,9 @@ class Dispatcher:
             preload_skill_catalog=settings.tools.skills.preload_catalog,
             event_bus=event_bus,
             task_handoff_callback=task_handoff_callback,
-            extension_prompt_fragments=extensions.prompt_fragments_for(main_agent_tools_view.tools),
+            extension_prompt_fragments=extensions.prompt_fragments_for(
+                [*main_agent_tools_view.tools, *main_agent_tools_view.replaced_tools]
+            ),
         )
         self._handler = LLMMessageHandler(turn_service)
         self._turn_service = turn_service
@@ -210,6 +217,7 @@ class Dispatcher:
             )
             if not strip_logs:
                 self._logger.debug("mcp tools enabled", extra={"mcp_tools_enabled": mcp_tool_names or ["none"]})
+        self._warn_if_derived_tools_withheld(main_agent_tools_view)
         if main_agent_tools_view.hidden_tool_names:
             self._logger.info(
                 "main agent tools hidden due to exclusive ownership",
@@ -230,6 +238,7 @@ class Dispatcher:
             extension_tools=self._extensions.tools,
             managed_storage=self._managed_storage,
             config_path=self._config_path,
+            wrap_tools=self._extensions.wrap_tools,
         )
 
     def _main_agent_view(self, tools: list[ToolBinding]) -> MainAgentToolView:
@@ -238,6 +247,9 @@ class Dispatcher:
             orchestration_config=self._settings.orchestration,
             agent_specs=self._agent_registry.all(),
             mcp_name_prefix=self._settings.tools.mcp.name_prefix,
+            derive_tools=lambda final_tools: derive_extension_tools(
+                final_tools, settings=self._settings, extensions=self._extensions, event_bus=self._event_bus
+            ),
         )
 
     async def refresh_agent_roster(self, reader: AgentDefinitionReader) -> AgentRosterChange:
@@ -259,12 +271,20 @@ class Dispatcher:
         self._main_agent_tool_names = sorted(binding.tool.name for binding in view.tools)
         self._turn_service.replace_tools(
             view.tools,
-            extension_prompt_fragments=self._extensions.prompt_fragments_for(view.tools),
+            extension_prompt_fragments=self._extensions.prompt_fragments_for([*view.tools, *view.replaced_tools]),
         )
         if view.hidden_tool_names:
             self._logger.info(
                 "main agent tools hidden due to exclusive ownership",
                 extra={"hidden_tools": view.hidden_tool_names},
+            )
+        self._warn_if_derived_tools_withheld(view)
+
+    def _warn_if_derived_tools_withheld(self, view: MainAgentToolView) -> None:
+        if view.withheld_derived_tool_names:
+            self._logger.warning(
+                "main agent policy removed derived tools; the tools they replace stay direct calls",
+                extra={"derived_tools": view.withheld_derived_tool_names},
             )
 
     @property
@@ -382,7 +402,9 @@ class Dispatcher:
             or active.task.done()
             or active.session_id != session_identifier(event.channel, event.chat_id)
         ):
-            await self._publish_text(event.channel, event.chat_id, _NOTHING_TO_STOP_REPLY)
+            await self._publish_text(
+                event.channel, event.chat_id, _NOTHING_TO_STOP_REPLY, metadata={"turn_stop": "nothing_running"}
+            )
             return
         self._logger.info("stopping the running turn", extra={"turn_id": active.event.event_id})
         active.stopped = True
@@ -418,7 +440,9 @@ class Dispatcher:
                 await self._pending_turns.clear_pending(queued.event_id)
         await self._publish_text(message.channel, chat_id, _STOPPED_REPLY)
 
-    async def _publish_text(self, channel: str, chat_id: int, text: str) -> None:
+    async def _publish_text(
+        self, channel: str, chat_id: int, text: str, *, metadata: dict[str, Any] | None = None
+    ) -> None:
         try:
             await self._event_bus.publish(
                 OutboundEvent(
@@ -427,7 +451,7 @@ class Dispatcher:
                         chat_id=chat_id,
                         text=text,
                         render=RenderableResponse(kind="text", text=text),
-                        metadata={"should_reply": True},
+                        metadata={"should_reply": True, **(metadata or {})},
                     )
                 )
             )

@@ -15,9 +15,11 @@ MODEL_OVERRIDE_KEYS = ("model_provider", "model", "reasoning_effort")
 RESERVED_DELEGATION_TOOL_NAMES = {
     "fetch_agent_info",
     "spawn_task",
+    "delegate",
     "list_tasks",
     "get_task",
     "cancel_task",
+    "message_task",
 }
 
 

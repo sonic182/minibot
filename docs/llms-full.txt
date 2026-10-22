@@ -108,7 +108,7 @@ reranking. Set `backend = "qdrant"` to use a Qdrant instance instead.
 ## Async tasks
 
 `[tasks]` queues long-running work to a background worker and exposes `spawn_task`, `get_task`,
-`list_tasks`, and `cancel_task`. `backend = "sqlite"` (default) needs no broker; `"rabbitmq"`
+`list_tasks`, `cancel_task`, and `message_task`. `backend = "sqlite"` (default) needs no broker; `"rabbitmq"`
 requires the `rabbitmq` extra. Worker limits and retention live under `[tasks]` and
 `[tasks.sqlite]`.
 

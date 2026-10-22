@@ -6,7 +6,7 @@ description: Create, edit or delete a specialist agent at runtime. Use when the 
 # Creating a specialist agent
 
 A specialist agent is a Markdown file: frontmatter plus a system prompt body. It gets its own model,
-its own tool grants and its own instructions, and you delegate work to it with `spawn_task`.
+its own tool grants and its own instructions, and you delegate work to it with `delegate` (or `spawn_task`, when attached).
 
 Use the management tools, never a file write:
 

@@ -25,6 +25,7 @@ OPTIONAL_THIRD_PARTY = (
     "sentence_transformers",
     "mcp",
     "networkx",
+    "pydantic_monty",
 )
 
 _IMPORT_WITH_OPTIONALS_BLOCKED = """

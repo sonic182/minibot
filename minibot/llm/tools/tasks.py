@@ -36,6 +36,8 @@ from minibot.shared.errors import ToolInputError
 
 _RESULT_PREVIEW_CHARS = 300
 _SESSION_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_FINISHED_STATUSES = {TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.TIMED_OUT}
+_MAX_TASK_MESSAGE_CHARS = 8000
 _AMBIGUOUS_PREFIX_REASON = "ambiguous task id prefix: more than one task matches, use more characters of the id"
 
 
@@ -62,14 +64,21 @@ class TaskTools:
         self._providers = list(providers)
 
     def bindings(self) -> list[ToolBinding]:
-        return [
-            ToolBinding(tool=self._spawn_schema(), handler=self._spawn_task),
-            ToolBinding(tool=self._cancel_schema(), handler=self._cancel_task),
-            ToolBinding(tool=self._list_schema(), handler=self._list_tasks),
-            ToolBinding(tool=self._get_schema(), handler=self._get_task),
-        ]
+        bindings: list[ToolBinding] = []
+        if self._config.delegation_mode == "auto":
+            bindings.append(ToolBinding(tool=self._task_schema("spawn_task"), handler=self._spawn_task))
+        bindings.extend(
+            [
+                ToolBinding(tool=self._task_schema("delegate"), handler=self._delegate),
+                ToolBinding(tool=self._cancel_schema(), handler=self._cancel_task),
+                ToolBinding(tool=self._message_schema(), handler=self._message_task),
+                ToolBinding(tool=self._list_schema(), handler=self._list_tasks),
+                ToolBinding(tool=self._get_schema(), handler=self._get_task),
+            ]
+        )
+        return bindings
 
-    def _spawn_schema(self) -> Tool:
+    def _task_schema(self, name: str) -> Tool:
         properties: dict[str, Any] = {
             "prompt": {
                 "type": "string",
@@ -106,14 +115,6 @@ class TaskTools:
                 "type": ["string", "null"],
                 "description": "Optional reasoning budget for this task (provider-specific).",
             },
-            "continue_turn": {
-                "type": ["boolean", "null"],
-                "description": (
-                    "True to get the result back as a new turn so you can keep working on it; "
-                    "false to deliver the worker's answer straight to the user; null uses the "
-                    "configured default."
-                ),
-            },
         }
         if self._config.history:
             properties["fresh"] = {
@@ -128,8 +129,8 @@ class TaskTools:
                 ),
             }
         return Tool(
-            name="spawn_task",
-            description=load_tool_description("spawn_task_history" if self._config.history else "spawn_task"),
+            name=name,
+            description=load_tool_description(f"{name}_history" if self._config.history else name),
             parameters=strict_object(properties=properties, required=["prompt"]),
         )
 
@@ -138,8 +139,26 @@ class TaskTools:
             name="cancel_task",
             description=load_tool_description("cancel_task"),
             parameters=strict_object(
-                properties={"task_id": {"type": "string", "description": "Task identifier returned by spawn_task."}},
+                properties={
+                    "task_id": {"type": "string", "description": "Task identifier returned by spawn_task or delegate."}
+                },
                 required=["task_id"],
+            ),
+        )
+
+    def _message_schema(self) -> Tool:
+        return Tool(
+            name="message_task",
+            description=load_tool_description("message_task"),
+            parameters=strict_object(
+                properties={
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task identifier returned by spawn_task or delegate.",
+                    },
+                    "message": {"type": "string", "description": "Instruction or information for the worker."},
+                },
+                required=["task_id", "message"],
             ),
         )
 
@@ -173,6 +192,12 @@ class TaskTools:
         )
 
     async def _spawn_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._enqueue(payload, context, continue_turn=False)
+
+    async def _delegate(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        return await self._enqueue(payload, context, continue_turn=True)
+
+    async def _enqueue(self, payload: dict[str, Any], context: ToolContext, *, continue_turn: bool) -> dict[str, Any]:
         task_id = str(uuid4())
         channel = require_channel(context, message="channel context is required for task spawning")
         owner_id = self._owner_id(context)
@@ -198,11 +223,10 @@ class TaskTools:
         task_context = _coerce_task_context(payload)
         limits = _resolve_limits(payload, self._config, spec_timeout_seconds=spec.timeout_seconds if spec else None)
         history_session = self._history_session(payload, channel, context.chat_id, agent_name)
-        continuation_depth = _resolve_continuation_depth(
-            payload,
-            context,
-            default=self._config.continue_turn_default,
-            mode=self._config.continue_turn_mode,
+        continuation_depth = (
+            _resolve_continuation_depth(context, fallback=self._config.delegation_mode == "delegate")
+            if continue_turn
+            else None
         )
         try:
             await self._producer.enqueue(
@@ -259,19 +283,41 @@ class TaskTools:
         return f"{key}:{session}" if session else key
 
     async def _cancel_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        task_id = require_non_empty_str(payload, "task_id")
-        if self._task_repository is not None:
-            try:
-                task = await self._task_repository.get(task_id, self._owner_id(context))
-            except AmbiguousTaskIdError:
-                return {"task_id": task_id, "cancelled": False, "reason": _AMBIGUOUS_PREFIX_REASON}
-            if task is None:
-                return {"task_id": task_id, "cancelled": False, "reason": "not found"}
-            task_id = task.request.task_id
+        task_id, _record, reason = await self._resolve_task_id(require_non_empty_str(payload, "task_id"), context)
+        if reason is not None:
+            return {"task_id": task_id, "cancelled": False, "reason": reason}
         cancelled = await self._task_manager.cancel(task_id)
         if not cancelled and self._task_repository is not None:
             cancelled = await self._task_repository.mark_cancelled(task_id)
         return {"task_id": task_id, "cancelled": cancelled}
+
+    async def _message_task(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        message = require_non_empty_str(payload, "message")
+        if len(message) > _MAX_TASK_MESSAGE_CHARS:
+            raise ToolInputError(
+                f"message is {len(message)} characters; the limit is {_MAX_TASK_MESSAGE_CHARS}. "
+                "Send a shorter instruction, or save the content to a file and point the task to it.",
+                error_code="task:message_too_long",
+            )
+        task_id, record, reason = await self._resolve_task_id(require_non_empty_str(payload, "task_id"), context)
+        if reason is None and record is not None and record.status in _FINISHED_STATUSES:
+            reason = f"task already {record.status.value}"
+        if reason is not None:
+            return {"task_id": task_id, "delivered": False, "reason": reason}
+        if not self._task_manager.send_message(task_id, message):
+            return {"task_id": task_id, "delivered": False, "reason": "task is not running in this process"}
+        return {"task_id": task_id, "delivered": True}
+
+    async def _resolve_task_id(self, task_id: str, context: ToolContext) -> tuple[str, TaskRecord | None, str | None]:
+        if self._task_repository is None:
+            return task_id, None, None
+        try:
+            task = await self._task_repository.get(task_id, self._owner_id(context))
+        except AmbiguousTaskIdError:
+            return task_id, None, _AMBIGUOUS_PREFIX_REASON
+        if task is None:
+            return task_id, None, "not found"
+        return task.request.task_id, task, None
 
     async def _list_tasks(self, payload: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         status = _status_filter(payload.get("status"))
@@ -350,36 +396,27 @@ def _resolve_limits(
     )
 
 
-def _resolve_continuation_depth(
-    payload: dict[str, Any], context: ToolContext, *, default: bool, mode: str = "auto"
-) -> int | None:
-    if mode == "always":
-        continue_turn = None
-        default = True
-    else:
-        continue_turn = payload.get("continue_turn")
-    if continue_turn is not None and not isinstance(continue_turn, bool):
-        raise ToolInputError("continue_turn must be a boolean or null", error_code="invalid_tool_arguments")
-    if continue_turn is None:
-        if not default:
-            return None
-        if context.task_chain_depth >= MAX_TASK_CONTINUATIONS:
-            return None
-        if context.claim_task_continuation is not None and not context.claim_task_continuation():
-            return None
-        return context.task_chain_depth + 1
-    if not continue_turn:
-        return None
+def _resolve_continuation_depth(context: ToolContext, *, fallback: bool) -> int | None:
+    """Claim a continuation slot for a delegated task, or ``None`` to deliver its answer directly.
+
+    Past the chain or per-turn limit the call is rejected, unless ``fallback`` (``delegation_mode =
+    "delegate"``) is set: there ``delegate`` is the only tool, so rejecting would leave the model no way
+    to hand the work off.
+    """
     if context.task_chain_depth >= MAX_TASK_CONTINUATIONS:
+        if fallback:
+            return None
         raise ToolInputError(
             f"This turn already continues from {context.task_chain_depth} chained tasks, which is the limit. "
-            "Answer the user now, or spawn the task with continue_turn false.",
+            "Answer the user now, or hand the task off with spawn_task.",
             error_code="task:continuation_limit",
         )
     if context.claim_task_continuation is not None and not context.claim_task_continuation():
+        if fallback:
+            return None
         raise ToolInputError(
-            f"This turn already started {MAX_TASK_CONTINUATIONS} tasks with continue_turn, which is the limit. "
-            "Wait for their results, or spawn this task with continue_turn false.",
+            f"This turn already delegated {MAX_TASK_CONTINUATIONS} tasks, which is the limit. "
+            "Wait for their results, or hand this task off with spawn_task.",
             error_code="task:continuation_limit",
         )
     return context.task_chain_depth + 1

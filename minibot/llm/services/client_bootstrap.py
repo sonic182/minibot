@@ -16,6 +16,9 @@ OPENROUTER_ATTRIBUTION_HEADERS = {
     "X-OpenRouter-Title": "MiniBot",
     "X-OpenRouter-Categories": "personal-agent,cli-agent",
 }
+PROVIDER_TRANSPORT_HEADERS = {
+    "Accept-Encoding": "gzip, deflate",
+}
 
 
 def create_provider(config: LLMMConfig) -> tuple[Any, str]:
@@ -57,14 +60,18 @@ def create_provider(config: LLMMConfig) -> tuple[Any, str]:
             provider_kwargs["base_url"] = normalized_base_url
         provider = provider_cls(**provider_kwargs)
 
-    extra_headers = dict(getattr(config, "extra_headers", None) or {})
+    configured_headers = getattr(config, "extra_headers", None) or {}
+    configured_names = {name.lower() for name in configured_headers}
+    extra_headers = {
+        **{name: value for name, value in PROVIDER_TRANSPORT_HEADERS.items() if name.lower() not in configured_names},
+        **configured_headers,
+    }
     if provider_name == "openrouter" and config.openrouter.attribution_enabled:
         extra_headers.update(OPENROUTER_ATTRIBUTION_HEADERS)
-    if extra_headers:
-        # llm_async has no constructor hook for extra headers; overriding the accessor covers
-        # every call path (acomplete, streaming and provider.request) in one place.
-        default_headers = provider._default_headers
-        provider._default_headers = lambda: {**default_headers(), **extra_headers}
+    # llm_async has no constructor hook for extra headers; overriding the accessor covers
+    # every call path (acomplete, streaming and provider.request) in one place.
+    default_headers = provider._default_headers
+    provider._default_headers = lambda: {**default_headers(), **extra_headers}
     return provider, provider_name
 
 

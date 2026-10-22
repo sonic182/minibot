@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -144,6 +145,19 @@ async def test_facet_counts_scalar_and_list_values(tmp_path):
 
     assert filenames == [{"value": "notes.md", "count": 2}, {"value": "other.md", "count": 1}]
     assert tags == [{"value": "work", "count": 3}]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_ensure_collection_shares_a_fresh_database(tmp_path):
+    config = RagToolConfig(enabled=True, sqlite_url=f"sqlite+aiosqlite:///{tmp_path}/shared.db")
+    stores = [SqliteVectorStore(config) for _ in range(8)]
+    try:
+        results = await asyncio.gather(
+            *(store.ensure_collection(COLLECTION, 2) for store in stores), return_exceptions=True
+        )
+        assert results == [None] * len(stores)
+    finally:
+        await asyncio.gather(*(store._engine.dispose() for store in stores))
 
 
 @pytest.mark.asyncio

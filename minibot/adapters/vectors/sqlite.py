@@ -5,7 +5,7 @@ from collections import Counter
 from typing import Any
 
 import numpy as np
-from sqlalchemy import JSON, Index, Integer, LargeBinary, String, delete, select
+from sqlalchemy import JSON, Index, Integer, LargeBinary, String, delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
@@ -62,17 +62,18 @@ class SqliteVectorStore:
 
     async def ensure_collection(self, collection_name: str, vector_size: int) -> None:
         async with self._engine.begin() as connection:
+            if connection.dialect.name == "sqlite":
+                await connection.exec_driver_sql("BEGIN IMMEDIATE")
             await connection.run_sync(RagBase.metadata.create_all)
-
-        async with self._session_factory() as session:
-            record = await session.get(RagCollection, collection_name)
-            if record is None:
-                session.add(RagCollection(name=collection_name, vector_size=vector_size))
-                await session.commit()
+            stored_size = await connection.scalar(
+                select(RagCollection.vector_size).where(RagCollection.name == collection_name)
+            )
+            if stored_size is None:
+                await connection.execute(insert(RagCollection).values(name=collection_name, vector_size=vector_size))
                 return
-            if record.vector_size != vector_size:
+            if stored_size != vector_size:
                 raise ValueError(
-                    f"rag collection '{collection_name}' has vector size {record.vector_size}, expected {vector_size}"
+                    f"rag collection '{collection_name}' has vector size {stored_size}, expected {vector_size}"
                 )
 
     async def create_payload_index(self, collection_name: str, field_name: str, field_schema: str = "keyword") -> None:

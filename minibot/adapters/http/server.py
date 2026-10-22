@@ -134,7 +134,14 @@ def _format_uptime(delta: timedelta) -> str:
     return f"{minutes}m"
 
 
-_CONTRIBUTIONS = (("tools", "tool"), ("services", "service"), ("subscriptions", "subscription"), ("routes", "route"))
+_CONTRIBUTIONS = (
+    ("tools", "tool"),
+    ("tool_derivers", "tool deriver"),
+    ("tool_wrappers", "tool wrapper"),
+    ("services", "service"),
+    ("subscriptions", "subscription"),
+    ("routes", "route"),
+)
 
 
 def _describe_extensions(summaries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

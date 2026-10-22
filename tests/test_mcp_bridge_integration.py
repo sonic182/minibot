@@ -15,6 +15,8 @@ import pytest
 
 pytest.importorskip("mcp")
 
+from llm_async.models import Tool
+
 from minibot import __version__ as minibot_version
 from minibot.adapters.config.schema import (
     CalculatorToolConfig,
@@ -29,18 +31,23 @@ from minibot.adapters.config.schema import (
     SchedulerConfig,
     Settings,
     TimeToolConfig,
+    ToolOutputSpillConfig,
     ToolsConfig,
 )
+from minibot.adapters.files.local_storage import LocalFileStorage
 from minibot.adapters.mcp.client import MCPClient, MCPServerMetadata, MCPToolCallResult, MCPToolDefinition
 from minibot.app.event_bus import EventBus
 from minibot.app.extensions import ExtensionContext
-from minibot.llm.tools.base import ToolContext
+from minibot.app.mcp_servers import mcp_discovery_kwargs
+from minibot.llm.services.tool_executor import normalize_tool_result
+from minibot.llm.tools.base import ToolBinding, ToolContext
 from minibot.llm.tools.mcp_bridge import (
     MCPLazyToolBridge,
     MCPToolBridge,
     build_mcp_bindings,
     build_mcp_bindings_async,
 )
+from minibot.llm.tools.output_spill import apply_tool_output_spill
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "mcp"
 
@@ -262,6 +269,96 @@ async def test_mcp_bridge_call_does_not_block_the_event_loop() -> None:
     await ticker_task
 
     assert ticks >= 5
+
+
+class _LongResultMCPClient(_LazyMCPClient):
+    def __init__(self, text: str) -> None:
+        super().__init__(tools=[MCPToolDefinition(name="fetch", description="Fetch.", input_schema={})])
+        self.text = text
+
+    def list_tools_blocking(self) -> list[MCPToolDefinition]:
+        return self.tools
+
+    async def call_tool(self, tool_name: str, payload: dict[str, object]) -> MCPToolCallResult:
+        return MCPToolCallResult(content=[{"type": "text", "text": self.text}])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["bridge", "lazy"])
+async def test_a_long_mcp_result_reaches_the_output_spill_file_whole(tmp_path: Path, mode: str) -> None:
+    text = "start-" + "x" * 25_000 + "-end-of-result"
+    client = _LongResultMCPClient(text)
+    if mode == "bridge":
+        bindings = MCPToolBridge(server_name="docs", client=cast(MCPClient, client)).build_bindings()
+        name, payload = "mcp_docs__fetch", {}
+    else:
+        bindings = MCPLazyToolBridge(server_name="docs", client=cast(MCPClient, client)).build_bindings()
+        name, payload = "mcp_docs__call_tool", {"tool_name": "fetch", "arguments": {}}
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10_000_000)
+    readback = ToolBinding(tool=Tool(name="grep", description="g", parameters={"type": "object"}), handler=None)
+    wrapped = {
+        binding.tool.name: binding
+        for binding in apply_tool_output_spill([*bindings, readback], storage=storage, config=ToolOutputSpillConfig())
+    }
+
+    result = normalize_tool_result(await wrapped[name].handler(payload, ToolContext(owner_id="tester")))
+
+    assert result.content["output_storage"] == "managed_file"
+    saved = (tmp_path / result.content["output_file_path"]).read_text(encoding="utf-8")
+    assert json.loads(saved)["result"] == text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["bridge", "lazy"])
+async def test_a_server_inline_result_chars_keeps_a_larger_result_inline(tmp_path: Path, mode: str) -> None:
+    text = "x" * 35_000
+    server = MCPServerConfig(name="docs", mode=mode, inline_result_chars=40_000)
+    bindings = build_mcp_bindings(
+        **mcp_discovery_kwargs(server, client=cast(MCPClient, _LongResultMCPClient(text)), name_prefix="mcp")
+    )
+    name, payload = (
+        ("mcp_docs__fetch", {})
+        if mode == "bridge"
+        else ("mcp_docs__call_tool", {"tool_name": "fetch", "arguments": {}})
+    )
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10_000_000)
+    readback = ToolBinding(tool=Tool(name="grep", description="g", parameters={"type": "object"}), handler=None)
+    wrapped = {
+        binding.tool.name: binding
+        for binding in apply_tool_output_spill([*bindings, readback], storage=storage, config=ToolOutputSpillConfig())
+    }
+
+    result = normalize_tool_result(await wrapped[name].handler(payload, ToolContext(owner_id="tester")))
+
+    assert result.content["result"] == text
+
+
+@pytest.mark.asyncio
+async def test_mcp_results_up_to_25k_stay_inline_with_resource_text_whole_and_blobs_hidden(tmp_path: Path) -> None:
+    client = _LongResultMCPClient("")
+    resource_text = "r" * 12_000 + "-resource-end"
+    parts = [
+        {"type": "resource", "resource": {"uri": "file:///a.txt", "text": resource_text}},
+        {"type": "resource", "resource": {"uri": "file:///a.pdf", "mimeType": "application/pdf", "blob": "Q" * 5000}},
+        {"type": "text", "text": "t" * 10_000},
+    ]
+
+    async def call_tool(tool_name: str, payload: dict[str, object]) -> MCPToolCallResult:
+        return MCPToolCallResult(content=parts)
+
+    client.call_tool = call_tool  # type: ignore[method-assign]
+    bindings = MCPToolBridge(server_name="docs", client=cast(MCPClient, client)).build_bindings()
+    readback = ToolBinding(tool=Tool(name="grep", description="g", parameters={"type": "object"}), handler=None)
+    storage = LocalFileStorage(root_dir=str(tmp_path), max_write_bytes=10_000_000)
+    spilled = apply_tool_output_spill([*bindings, readback], storage=storage, config=ToolOutputSpillConfig())
+    (without_spill,) = apply_tool_output_spill(bindings, storage=None, config=ToolOutputSpillConfig())
+
+    inline = normalize_tool_result(await spilled[0].handler({}, ToolContext(owner_id="tester"))).content
+    unspilled = normalize_tool_result(await without_spill.handler({}, ToolContext(owner_id="tester"))).content
+
+    assert resource_text in inline["result"]
+    assert "<omitted 5000 chars>" in inline["result"] and "Q" * 300 not in inline["result"]
+    assert unspilled == inline
 
 
 @pytest.mark.asyncio

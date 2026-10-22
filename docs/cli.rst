@@ -70,9 +70,12 @@ Console channel
    * - ``--timeout-seconds FLOAT``
      - Per-turn timeout; values below ``120`` are clamped to ``120``.
    * - ``--config PATH``
-     - Path to a ``config.toml`` file.
+     - Path to a ``config.toml`` file. It is exported as ``MINIBOT_CONFIG``, so task workers load the same file.
    * - ``--verbose``
      - Also log to stdout in addition to the log file.
+
+In the TUI, ``Esc`` stops the reply that is running, like ``/stop`` on Telegram (see :doc:`events`). The plain loop
+and ``--once`` have no stop key.
 
 Interactive TUI keys: ``Enter`` sends, ``Ctrl+J`` inserts a newline, and ``Ctrl+T`` toggles display
 of model thinking.

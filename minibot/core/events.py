@@ -137,6 +137,9 @@ class ToolCallEvent(BaseEvent):
     this event is published — the raw argument payload (which can hold credentials, e.g.
     ``http_request`` headers, ``bash`` env, ``python_execute`` code) never leaves the tool-execution
     layer. Safe to log, persist, or forward to any subscriber, including extensions.
+
+    ``parent_call_id`` is the ``call_id`` of the tool call that made this one, for tools that call other
+    tools (``run_tools_script``); ``None`` for calls the model made directly.
     """
 
     event_type: str = "tool_call"
@@ -149,6 +152,7 @@ class ToolCallEvent(BaseEvent):
     chat_id: int | None = None
     detail: str = ""
     error: str | None = None
+    parent_call_id: str | None = None
 
 
 class ToolApprovalRequestedEvent(BaseEvent):

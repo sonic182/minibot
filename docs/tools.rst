@@ -168,14 +168,24 @@ Tool Surface
      - ``[tools.skills] install = true``
      - Preview or install a published skill from GitHub or an archive URL.
    * - Async tasks
-     - ``spawn_task``
+     - ``delegate``
      - ``[tasks]``
-     - Queue a background worker task; the only way to delegate to a specialist agent. Can override
-       ``model_provider``, ``model`` and ``reasoning_effort`` for that one task.
+     - Queue a background worker task whose result comes back to the main agent as a new turn; with
+       ``spawn_task``, the only way to hand work to a specialist agent. Can override ``model_provider``,
+       ``model`` and ``reasoning_effort`` for that one task.
+   * - Async tasks
+     - ``spawn_task``
+     - ``[tasks] delegation_mode = "auto"``
+     - Queue a background worker task whose answer goes straight to the user. Same parameters as
+       ``delegate``; not registered when ``delegation_mode = "delegate"``.
    * - Async tasks
      - ``cancel_task``
      - ``[tasks]``
      - Cancel an active background task by ID.
+   * - Async tasks
+     - ``message_task``
+     - ``[tasks]``
+     - Send an instruction to a running background task; the worker reads it between steps.
    * - Async tasks
      - ``list_tasks``
      - ``[tasks]``
@@ -192,6 +202,12 @@ Tool Surface
      - ``rag_index``, ``rag_search``, ``rag_list_metadata``, ``rag_delete``
      - ``[tools.rag]``
      - Index text files into the configured vector store and retrieve semantically relevant chunks.
+   * - Scripting
+     - ``run_tools_script``
+     - ``[tools.codemode]``
+     - Run a short Python script in a sandbox that calls the agent's other tools and returns only its printed
+       output and final value. When enabled, it replaces those tools as direct calls. See `Codemode scripts`_
+       below.
    * - Credential vault
      - ``list_secrets``
      - ``[vault] enabled`` (unlocked)
@@ -218,7 +234,11 @@ Runtime Notes
   plus a managed-file pointer the agent can read back with ``grep``, ``code_read``, ``read_file``, or
   ``bash``. Tools in ``exclude_tools`` (``http_request`` and ``pre_response`` by default) are
   skipped since they already manage their own output size. ``activate_skill`` spills only past
-  64,000 characters (or ``spill_after_chars``, if larger), so skill instructions normally arrive inline.
+  64,000 characters (or ``spill_after_chars``, if larger), so skill instructions normally arrive inline,
+  and MCP tools only past their server's ``inline_result_chars`` (default 25,000; see :doc:`mcp`). Error results spill too; the spilled result
+  keeps ``ok: false`` and the failure's short fields. Spill does not apply to calls made from a
+  ``run_tools_script`` script: the result goes to the script, not the model, so the script can filter it, and
+  the script's own output limits protect the context.
 - ``[tools.audio_transcription]`` requires the ``stt`` extra: ``pip install "minibot[stt]"``.
 - ``[tools.http_client]`` needs no extra: selectolax ships with the base install and renders HTML
   as compact semantic text instead of plain-text extraction.
@@ -231,7 +251,236 @@ Runtime Notes
   ``backend = "sqlite"`` needs no service; ``"qdrant"`` needs a running instance. See :doc:`rag`.
 - The relation graph requires the ``graph`` extra and the ``minibot.extensions.tools.graph``
   extension. It persists typed edges in SQLite; see :doc:`graph`.
+- ``[tools.codemode]`` requires the ``codemode`` extra (``pip install "minibot[codemode]"``, or
+  ``poetry install --extras codemode``); enabling it without the extra stops startup with that hint.
 - Hidden compatibility aliases are normalized at execution time; prefer the public names in the table.
+
+Codemode scripts
+----------------
+
+``run_tools_script`` lets the model write one short Python script instead of making a tool call per step. The
+script calls other tools, combines and filters their results, and returns only what matters: each nested result
+stays out of the model's context, and independent calls run in parallel with ``asyncio.gather``. It is off by
+default; enable it with ``[tools.codemode] enabled = true`` (see :doc:`config`).
+
+Codemode is a mode, not an extra tool: with it on, the tools a script can call are no longer offered to the model
+as direct tool calls, so every tool use goes through a script, a single call included. The model sees
+``run_tools_script`` plus the tools scripts cannot call, which stay direct:
+
+- the delegation tools (``delegate``, ``spawn_task``, ``fetch_agent_info``, ``list_tasks``, ``get_task``,
+  ``cancel_task``, ``message_task``);
+- ``activate_skill``, ``list_skills`` and ``self_insert_artifact``, since they put content into the turn itself
+  (skill instructions, an image or document), which a script result cannot carry;
+- anything matching ``exclude``.
+
+If the agent's policy removes ``run_tools_script``, the other tools are offered directly again: with
+``[orchestration.main_agent] tools_deny = ["run_tools_script"]``, or with a ``tools_allow`` list that does not name
+it, so a main agent with ``tools_allow`` must list ``run_tools_script`` to use codemode. Usage instructions
+contributed for a tool (an MCP server's, for example) stay in the system prompt when the tool is only reachable
+from scripts, and short incoming audio is still auto-transcribed when ``transcribe_audio`` is. Some turn-level
+checks only see ``run_tools_script``, not the calls inside it:
+
+- recent-file tracking, so a file a script wrote is not remembered as a recent file;
+- the runtime's repeated-failure stop, so a script that keeps failing is bounded by the step and tool-call limits;
+- the ``llm_classifier`` tool-use guardrail, which judges against ``run_tools_script`` and the direct tools.
+
+.. code-block:: toml
+
+   [tools.codemode]
+   enabled = true
+   timeout_seconds = 120       # default wall-clock limit for one script, nested tool calls included
+   max_timeout_seconds = 600   # the most a script may ask for with its timeout_seconds argument
+   max_tool_calls = 50         # tool calls one script may make
+   max_memory_mb = 64          # heap limit of the script itself
+   max_output_chars = 20000    # cap on the printed output and on the returned value
+   exclude = ["mcp_mail__*"]   # tool names scripts can never call
+
+Scripts run in `Pydantic Monty <https://github.com/pydantic/monty>`_, a Python interpreter written in Rust that
+runs in a pool of worker subprocesses, so a crash cannot take the daemon down. It implements a subset of Python:
+no file system, network, environment or third-party imports, and the only way to act on the world is the ``tools``
+namespace. Scripts call tools as ``await tools.<name>(keyword=value)``, keyword arguments only; every character of
+a tool name that is not valid in a Python identifier becomes ``_`` (``mcp_exa__web_search`` is unchanged,
+``my-tool.v2`` becomes ``my_tool_v2``). The tool description lists a one-line signature per available tool,
+generated from its JSON schema, up to about 6000 characters; the tools beyond that are listed by name only.
+A script prints with ``print`` and returns by ending on an expression or with a top-level ``return``.
+
+Three helpers are called by name, without ``await`` or ``tools.``:
+
+``list_tools(query=None)``
+   ``[{"name", "summary"}]`` for the tools the script can call; with ``query``, only those whose name or
+   description contains it (case-insensitive).
+
+``describe_tool(name)``
+   ``{"name", "signature", "description", "parameters"}`` for one tool, by identifier or tool name; an unknown
+   name raises ``ValueError``.
+
+``text(value, limit=2000, unit="chars")``
+   ``value`` as text, strings as they are and anything else as indented JSON, cut to ``limit`` characters,
+   lines (``unit="lines"``) or UTF-8 bytes (``unit="bytes"``) keeping the start, with a marker saying how much
+   was left out.
+
+.. code-block:: python
+
+   print(text(await tools.memory_search(query="trip"), limit=40, unit="lines"))
+
+.. code-block:: python
+
+   import asyncio
+
+   first, second = await asyncio.gather(
+       tools.memory_search(query="trip"),
+       tools.current_datetime(),
+   )
+   try:
+       await tools.http_request(url="https://example.org/missing")
+   except ValueError as exc:
+       print("skipped:", exc)
+   {"now": second, "titles": [entry["title"] for entry in first["entries"]][:5]}
+
+MCP tools are ordinary tools to a script, with three differences to keep in mind. In bridge mode each remote tool is
+``tools.<prefix>_<server>__<remote_tool>(...)`` and returns ``{"ok", "server", "tool", "is_error", "result"}``, where
+``result`` is usually text (the joined text parts, often JSON that needs ``json.loads``). An error reported by the MCP
+server does not raise: it comes back with ``ok: false`` / ``is_error: true``, so the script must check it. In lazy mode the
+server exposes ``<prefix>_<server>__list_tools()`` (the catalog with each ``input_schema``) and
+``<prefix>_<server>__call_tool(tool_name=..., arguments={...})``, which returns the same dict.
+
+.. code-block:: python
+
+   import asyncio, json
+
+   found = await tools.mcp_mail__imap_search_messages(query="invoice")
+   if not found["ok"]:
+       return {"error": found["result"]}
+   ids = json.loads(found["result"])["ids"][:5]
+   msgs = await asyncio.gather(*[tools.mcp_mail__imap_get_message(id=i) for i in ids])
+   return [json.loads(m["result"])["subject"] for m in msgs if m["ok"]]
+
+A call whose result feeds the next one is a plain sequence of ``await`` statements. When ``python_execute`` is
+available, a script can pass it data with ``tools.python_execute(code=...)`` for computation the sandbox cannot do.
+
+The result is ``{"ok": true, "output": "<printed text>", "result": <final value>}``. Output and the final value are
+each cut to ``max_output_chars`` keeping their start and end, with a marker for what was omitted.
+
+What a script can call
+   The tools the agent sees after its ``tools_allow`` / ``tools_deny`` and ownership filtering, built after
+   approval, event and output-spill wrapping, minus the delegation tools and anything matching ``exclude`` (below).
+   A tool the agent cannot see is not callable from a script, and a tool listed in ``require_approval`` still asks
+   the owner for every nested call. A tool that
+   raises reaches the script as an exception (``ValueError`` for rejected arguments, ``PermissionError`` for a denied
+   approval, ``RuntimeError`` otherwise); catch it to continue. A script that ends on an uncaught
+   ``PermissionError`` from a denial returns the ``tool_approval:denied`` error, like a direct call; a denial the
+   script wraps in another exception type is an ordinary ``codemode:script_error``. The tools listed above as direct,
+   ``run_tools_script`` itself and anything matching ``exclude`` are never exposed (they stay direct tools), and
+   nested calls do not count against the agent's own per-turn tool-call cap. MCP tools appear under their exposed names; for lazy MCP servers that means
+   ``mcp_<server>__list_tools`` and ``mcp_<server>__call_tool``. Large nested results arrive as a preview plus a file
+   path, as they do for a direct call. A tool that returns a message directive loses it when called from a script,
+   which is why ``self_insert_artifact`` stays a direct tool.
+
+Time and call limits
+   ``timeout_seconds`` is wall-clock time for the whole script, nested calls included, except the time a nested
+   call spends waiting for an owner approval (``[tools.approval]``) or a ``[tools.safety_classifier]`` check: the
+   clock stops while any such wait is pending, so a slow decision never ends the script, and the approval's or the
+   classifier's own ``timeout_seconds`` still bounds the wait.
+   Since every tool use runs in a script, it is also the limit for a single long call. The model can ask for
+   another limit per script with the tool's ``timeout_seconds`` argument (``null`` keeps the default); a request
+   above ``max_timeout_seconds`` is lowered to it, and the turn's own deadline still applies. Nested tools keep
+   their own defaults inside the script, for example ``bash``'s ``default_timeout_seconds``.
+   ``max_tool_calls`` caps how many tool calls one script makes; the call past the cap raises a ``ValueError``
+   whose text starts with ``codemode:tool_call_limit`` (listed in ``tool_errors`` too), which the script may catch.
+
+Failures
+   A script that fails returns ``{"ok": false, "error_code": ..., "error": ..., "output": <partial output>}``.
+   ``error_code`` is ``codemode:syntax_error``, ``codemode:timeout``, ``codemode:memory_limit``,
+   ``codemode:script_error`` (any uncaught exception, with a ``hint`` when it named a tool that does not exist) or
+   ``codemode:sandbox_failed``. ``tool_errors`` lists the nested calls that failed, as tool name and error code (the tool's own
+   ``error_code`` when it raised one, ``tool_execution_failed`` otherwise). Each failed nested call is also logged at
+   warning level with the tool name and error code, never its arguments or message.
+   Calls that already ran are not undone, and calls still running at a timeout are cancelled.
+
+Nested calls and events
+   Every nested call publishes its own ``ToolCallEvent`` whose ``parent_call_id`` is the ``call_id`` of the
+   ``run_tools_script`` call (see :doc:`events`). The web chat and the console subscribe to these events;
+   Telegram does not.
+
+Specialists
+   In task workers the tool is opt-in like the other bundled extensions: list ``"codemode"`` in
+   ``[tasks] worker_extensions`` and name ``run_tools_script`` in a specialist's ``tools_allow``; its scripts then
+   call the tools that specialist itself has, and those tools are no longer direct calls for it. A
+   ``tools_deny``-only specialist gets it too, unless its ``tools_deny`` names ``run_tools_script``. A
+   ``tools_allow`` specialist that does not name it, and a task without an agent, keep their tools as direct calls.
+
+Trust model
+   Monty keeps the script itself away from the file system, network and environment, and every effect is a tool
+   call that already passed the existing gates. That narrows the surface but is not containment: MiniBot is still
+   not a security boundary, and deployment isolation (see :doc:`security`) still applies.
+
+Safety classifier
+-----------------
+
+``[tools.safety_classifier]`` puts a second, cheap model in front of risky tool calls and behind untrusted tool
+results. A ``safe`` verdict lets the call or result through; anything else, including failures and timeouts, asks
+the user with the ``[tools.approval]`` buttons, with its reason in the prompt. The classifier never blocks on its
+own. It is a best-effort filter, not a security boundary: the classifier can itself be steered by injected text in
+what it checks (see :doc:`security`).
+
+.. code-block:: toml
+
+   [tools.safety_classifier]
+   enabled = true
+   provider = "openrouter"            # unset: the [llm] provider
+   model = "openai/gpt-4.1-mini"      # unset: the [llm] model; required when provider is set
+   check_input = ["bash", "python_execute", "http_request", "install_skill", "schedule_prompt"]
+   check_output = ["http_request", "mcp_exa__*", "mcp_mail__imap_get_message*"]
+
+Before a call
+   A tool matching ``check_input`` is classified from its name and JSON arguments, sensitive keys (``authorization``,
+   ``token``, ``password``, ...) redacted as in the approval prompt. ``safe`` runs it; ``unsafe``
+   (``bash`` reading ``.env`` and posting it with ``curl``, say) asks the user, and a denial returns the same
+   ``tool_approval:denied`` error as ``[tools.approval]``. A tool in both ``[tools.approval] require_approval``
+   and ``check_input`` can ask twice when flagged: the classifier's prompt first, then the approval gate.
+
+After a call
+   The result of a tool matching ``check_output`` is classified for instructions aimed at an AI agent (prompt
+   injection) before the agent sees it, and before output spill writes it to a file. A flagged result is held
+   back while the user decides: approving releases it unchanged, denying replaces it with
+   ``{"ok": false, "error_code": "tool_output_withheld", ...}``. The prompt shows the reason and, on its own
+   ``Excerpt:`` line, up to the first 300 characters of the result, escaped so they cannot fake extra lines. The
+   notice carries neither the excerpt nor the classifier's text, which was written after reading the untrusted
+   result: the agent sees none of it unless the user releases the result.
+   The result reaches the classifier as plain text, or as JSON with non-ASCII characters kept as they are.
+
+Long calls and results
+   Arguments or a result longer than ``max_output_chars`` (default ``20000``) are split into chunks of that size,
+   classified concurrently; one flagged chunk flags the whole. Consecutive chunks overlap by a quarter of
+   ``max_output_chars``, at most 500 characters, so an instruction written across a chunk boundary is still seen
+   whole. More than ``max_output_chunks`` (default ``5``) chunks are not sent at all: the user is asked as if the
+   check had failed, so no part passes unchecked.
+
+Failures
+   A classifier error, a timeout or a reply that is still not a valid ``{"verdict", "reason"}`` object after two
+   retries asks the user as if the classifier had flagged the call: only a ``safe`` verdict lets a call through
+   without asking, and the classifier never blocks one on its own. The prompt shows the classifier's reason on one
+   escaped, capped line above the call's own arguments, so a reason written under an injection cannot fake or hide
+   them.
+
+What the classifier's provider sees
+   The checked call arguments, sensitive keys redacted, and the checked results in full. Pick a provider you would
+   trust with that data, or leave ``provider`` unset to keep it with the main ``[llm]`` provider. An unknown
+   ``provider`` (neither a ``[providers.<name>]`` section nor an API format name) fails config loading, and so
+   does a ``provider`` without a ``model``: the main ``[llm]`` model may not exist on that provider, which would
+   fail every check and ask the user about every call.
+
+The classifier gets no tools and a system prompt that treats the call or result strictly as data, and its reply
+is validated against a strict schema, never matched as text. The checks cover core, extension, MCP (by exposed
+name, ``lazy`` mode included) and derived tools, every call a ``run_tools_script`` script makes, and task
+workers (so a delegated agent reading mail is checked too), with no ``[tasks] worker_extensions`` entry. In
+``lazy`` MCP mode a ``mcp_<server>__*`` pattern also matches that server's ``call_tool`` and ``list_tools``
+bindings, so a lazy call cannot slip past it, at the cost of extra classifier calls for listing. On a
+channel without approval buttons, such as the console, every flagged call is denied and every flagged result
+withheld. Errors a tool raises are not checked, and each check is one more model call per chunk;
+``http_request`` is in both default lists, so each request costs at least two classifier calls. Waiting for the
+user counts against the turn or task deadline as with ``[tools.approval]``; inside a ``run_tools_script`` script,
+neither that wait nor the classifier's own calls count against the script's ``timeout_seconds``.
 
 Implementation Reference
 ------------------------

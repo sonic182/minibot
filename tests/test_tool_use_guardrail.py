@@ -5,7 +5,8 @@ from typing import Any
 import pytest
 from llm_async.models import Tool
 
-from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail
+from minibot.app.tool_use_guardrail import LLMClassifierToolUseGuardrail, guardrail_llm_client
+from minibot.config.schema import OrchestrationConfig
 from minibot.core.agent_runtime import AgentMessage, AgentState, MessagePart
 from minibot.llm.services.models import LLMGeneration
 from minibot.llm.tools.base import ToolBinding, ToolContext
@@ -239,3 +240,28 @@ def _delete_binding() -> ToolBinding:
         tool=Tool(name="delete_file", description="delete tool", parameters={"type": "object"}),
         handler=_handler,
     )
+
+
+class _RecordingFactory:
+    def __init__(self) -> None:
+        self.specs: list[Any] = []
+
+    def create_for_agent(self, spec: Any) -> str:
+        self.specs.append(spec)
+        return "guardrail-client"
+
+
+def test_guardrail_runs_on_the_main_client_unless_its_own_model_is_configured() -> None:
+    factory = _RecordingFactory()
+
+    assert guardrail_llm_client(OrchestrationConfig(), "main-client", factory) == "main-client"  # type: ignore[arg-type]
+    assert factory.specs == []
+
+    config = OrchestrationConfig(
+        main_tool_use_guardrail_provider="chatgpt_codex",
+        main_tool_use_guardrail_model="gpt-6-luna",
+        main_tool_use_guardrail_reasoning_effort="low",
+    )
+    assert guardrail_llm_client(config, "main-client", factory) == "guardrail-client"  # type: ignore[arg-type]
+    (spec,) = factory.specs
+    assert (spec.model_provider, spec.model, spec.reasoning_effort) == ("chatgpt_codex", "gpt-6-luna", "low")

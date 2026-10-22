@@ -7,6 +7,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-22
+
+### Added
+
+- The `llm_classifier` tool-use guardrail can run on its own model: `[orchestration] main_tool_use_guardrail_provider`,
+  `main_tool_use_guardrail_model` and `main_tool_use_guardrail_reasoning_effort` (each one unset keeps the main
+  agent's value), so the classifier can be a cheap model with low reasoning.
+- `[tools.safety_classifier]`: a cheap LLM classifier that checks the arguments of risky tool calls before they run
+  (`check_input`, default `bash`, `python_execute`, `http_request`, `install_skill`, `schedule_prompt`) and the results
+  of untrusted tools for prompt injection before the agent reads them (`check_output`, default `http_request`). A
+  `safe` verdict lets the call or result through; a flagged call or result, a classifier failure or a timeout asks the
+  user with the approval buttons, the classifier's reason in the prompt (and, for a result, an escaped 300-character
+  excerpt), and the classifier never blocks on its own; a denied call returns `tool_approval:denied`, a withheld result
+  `tool_output_withheld`. Covers the main agent, task workers and calls made from `run_tools_script` scripts. The
+  classifier's `provider`, `model` and `reasoning_effort` default to the main agent's; an unknown `provider`, or a
+  `provider` without a `model`, fails config loading. Arguments and results longer than `max_output_chars` are
+  classified in concurrent overlapping chunks, up to `max_output_chunks` (default 5); anything longer asks the user.
+  Arguments reach the classifier with sensitive keys redacted, and the classifier's reason is shown escaped and capped
+  above the real arguments; the `tool_output_withheld` notice the agent gets carries none of the classifier's text.
+  Classifier calls inside a `run_tools_script` script do not count against its `timeout_seconds`. A best-effort filter,
+  not a security boundary: the classifier can itself be steered by injected text in what it checks. Off by default.
+- Extension API: `mb.add_tool_wrapper(wrapper)` wraps the handler of every tool an agent can call (core,
+  extension, MCP and derived tools, in the daemon, the console and task workers), innermost, before output spill,
+  and receives an approver that asks the user with a custom prompt. The web dashboard now counts tool derivers and
+  tool wrappers as an extension's contributions.
+
+## [0.35.0] - 2026-10-21
+
+### Added
+
+- A tool binding can raise its own output-spill threshold (`ToolBinding.spill_after_chars`); it never
+  lowers the configured one. Where spill cannot run, the binding's results are cut to it.
+
+### Changed
+
+- **Codemode is now a mode.** With `[tools.codemode] enabled = true`, the tools a script can call are no longer
+  offered as direct tool calls: the model uses them through `run_tools_script`, a single call included. The
+  delegation tools, `activate_skill` / `list_skills` / `self_insert_artifact` and anything matching `exclude` stay
+  direct, and removing `run_tools_script` through the agent's policy (a `tools_deny`, or a `tools_allow` that does
+  not name it) brings the others back. The same applies to a task-worker specialist that gets
+  `run_tools_script` (named in its `tools_allow`, or not denied by a `tools_deny`-only spec). Extension prompt
+  fragments for tools only reachable from scripts (MCP server instructions) stay in the system prompt. Scripts
+  get three helpers: `list_tools(query)` and `describe_tool(name)` to discover tools (signatures beyond the
+  description's budget are now listed by name instead of being dropped), and `text(value, limit, unit)` to cut a
+  result to characters, lines or bytes. `[tools.codemode] timeout_seconds` now defaults to 120 (was 60), and
+  `run_tools_script` takes a `timeout_seconds` argument so the model can give one script more time, up to the
+  new `max_timeout_seconds` (default 600).
+- Extensions: a tool deriver can return `DerivedTool(binding, replaces=...)` to take over the tools it was built
+  from; `ExtensionRegistry.derive_tools` returns a `DerivedTools` with the bindings and what each replaces.
+
+### Fixed
+
+- MCP results are no longer cut to 12,000 characters per text block, in bridge and lazy mode. A result up to
+  25,000 characters stays inline (a web search result is about that size); a larger one is saved whole to the
+  managed spill file, so its end is no longer lost. Where spill cannot run (file storage off, the default, or no
+  read-back tool), the result is cut at 25,000 characters, with a preview marked `output_truncated`. The limit is
+  set per server with `[[tools.mcp.servers]] inline_result_chars` (default 25,000). Binary
+  payloads, now including embedded-resource `blob` fields, are replaced by a marker.
+- Failed tool results now spill like successful ones, so a huge error no longer rides inline. The spilled result
+  keeps `ok: false` and the failure's short fields (such as `error_code` and the repeated-failure signature).
+
+## [0.34.0] - 2026-10-20
+
+### Added
+
+- **`message_task`: steer a running background task.** The main agent can send a message to a task that is
+  still running, for example to narrow its scope or tell it to wrap up with what it has, without cancelling it.
+  The worker folds the message into its loop between steps, like a user message that arrives mid-turn.
+  `delivered` is `false` when the task is not running in this process.
+
+### Changed
+
+- LLM provider requests send `Accept-Encoding: gzip, deflate`, so providers can compress their responses.
+  Configured `extra_headers` can still override it, in any letter case. Streamed Responses and Codex
+  requests always ask for `identity`, even over a configured value, because the stream is parsed
+  without decompressing it.
+- `aiosonic` bumped to 1.3.3 (and `onecache` to 0.10). It fixes `http_request` failing with
+  `unparseable status line` after a server sent `Transfer-Encoding` with extra whitespace, which left the chunked
+  body unread on a pooled connection.
+
+## [0.33.0] - 2026-10-16
+
+### Added
+
+- **Codemode: `run_tools_script`, Python that calls tools.** With `[tools.codemode] enabled = true` (and the new
+  `codemode` extra, `poetry install --extras codemode`) the model can write one short script that calls the tools the
+  agent sees (after its allow/deny and ownership filtering, minus the delegation tools and `exclude`) as
+  `await tools.<name>(keyword=value)`, runs independent calls in parallel with `asyncio.gather`, and gets back only
+  the printed output and the final value. Scripts run in Pydantic's Monty sandbox in worker subprocesses, with
+  `timeout_seconds` (owner approval waits are not counted), `max_tool_calls`, `max_memory_mb` and `max_output_chars`
+  limits and an `exclude` pattern list. Nested calls use the agent's real, already wrapped tools, so approval gates,
+  events apply (output spill does not: results reach the script in full),  a failed nested call keeps its `error_code`, and its tool name and `error_code` are logged at WARNING without the message, and a failed script
+  returns a structured error with its partial output. Task workers get it through
+  `[tasks] worker_extensions = ["codemode"]` plus `run_tools_script` in a specialist's `tools_allow`. See
+  `docs/tools.rst`.
+- **`ExtensionContext.add_tool_deriver()`**, a generic extension hook that builds tools from the final tool list an
+  agent ends up with (after approval, event and spill wrapping and `tools_allow`/`tools_deny`), for the main agent and
+  for task workers. `ToolCallEvent` gains an optional `parent_call_id` and `ToolContext` gains `call_id` and
+  `parent_call_id`, so a tool that calls other tools can link its nested calls.
+
+- **`Esc` stops the running reply in the console TUI**, like `/stop` on Telegram and the stop button in the web chat.
+  The dispatcher's `Nothing is running.` reply now carries `metadata["turn_stop"] = "nothing_running"`, and the
+  console TUI shows it as a warning ("Nothing to stop yet; press Esc again.") instead of a reply, so a stop that raced
+  the answer is not taken as the reply to the next message.
+
+### Changed
+
+- **BREAKING: `delegate` and `spawn_task` replace the `continue_turn` flag.** Delegation now has two tools: `delegate`
+  for when the model needs the worker's result (it comes back as a new turn) and `spawn_task` for when the worker's
+  answer is the final deliverable (it goes straight to the user). `spawn_task` loses its `continue_turn` argument and
+  always delivers directly. `delegate` takes the same parameters and is limited to three delegations per turn and
+  three chained turns deep; past either limit it is rejected with `task:continuation_limit`. `[tasks]
+  continue_turn_mode` and `continue_turn_default` are removed and rejected at config load, with the replacement in the
+  error. Migrate `continue_turn_mode = "always"` to `delegation_mode = "delegate"` (only `delegate` is registered, and
+  past the limits it delivers directly instead of failing); delete `continue_turn_mode = "auto"` and
+  `continue_turn_default`, since the model now picks the tool. The new `delegation_mode` defaults to `"auto"`, which
+  registers both tools. A `[orchestration.main_agent] tools_allow` list must add `delegate`. `delegate` is a reserved
+  delegation tool, so specialists never inherit it.
+
+### Fixed
+
+- **`minibot console --config` now reaches task workers.** Workers reload settings from `MINIBOT_CONFIG` or
+  `./config.toml`, so a console started with `--config` ran its tasks on a different file. The console now exports
+  the path as `MINIBOT_CONFIG`.
+
 ## [0.32.0] - 2026-10-11
 
 ### Changed
@@ -1463,7 +1588,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release.
 
-[Unreleased]: https://github.com/sonic182/minibot/compare/0.32.0...HEAD
+[Unreleased]: https://github.com/sonic182/minibot/compare/0.36.0...HEAD
+[0.36.0]: https://github.com/sonic182/minibot/compare/0.35.0..0.36.0
+[0.35.0]: https://github.com/sonic182/minibot/compare/0.34.0..0.35.0
+[0.34.0]: https://github.com/sonic182/minibot/compare/0.33.0..0.34.0
+[0.33.0]: https://github.com/sonic182/minibot/compare/0.32.0..0.33.0
 [0.32.0]: https://github.com/sonic182/minibot/compare/0.31.0..0.32.0
 [0.31.0]: https://github.com/sonic182/minibot/compare/0.30.0..0.31.0
 [0.30.0]: https://github.com/sonic182/minibot/compare/0.29.0..0.30.0

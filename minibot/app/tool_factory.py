@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from minibot.app.agent_registry import AgentRegistry
 from minibot.app.event_bus import EventBus
+from minibot.app.extensions import DerivedTools, ExtensionRegistry
 from minibot.app.llm_client_factory import LLMClientFactory
 from minibot.app.skill_definitions_loader import NATIVE_SKILLS_DIR, parse_skill_file
 from minibot.app.skill_registry import SkillRegistry
@@ -33,8 +34,13 @@ def build_enabled_tools(
     extension_tools: Sequence[ToolBinding] | None = None,
     managed_storage: FileStorage | None = None,
     config_path: Path | None = None,
+    wrap_tools: Callable[[Sequence[ToolBinding], Approver], list[ToolBinding]] | None = None,
 ) -> list[ToolBinding]:
-    """Build core tools, then merge contributions from loaded extensions."""
+    """Build core tools, then merge contributions from loaded extensions.
+
+    ``wrap_tools`` (``ExtensionRegistry.wrap_tools``) applies the extension tool wrappers innermost, before
+    output spill, approval and tool-call events.
+    """
     tools = ChatMemoryTool(memory, max_history_messages=settings.memory.max_history_messages).bindings()
     tools.extend(
         SettingsInfoTool(
@@ -66,6 +72,9 @@ def build_enabled_tools(
     ):
         tools.extend(AgentInfoTool(registry=agent_registry, providers=llm_factory.available_providers()).bindings())
     _ensure_unique_tool_names(tools)
+    approve = _event_bus_approver(event_bus, settings.tools.approval.timeout_seconds)
+    if wrap_tools is not None:
+        tools = wrap_tools(tools, approve)
     return apply_tool_call_events(
         apply_tool_approval(
             apply_tool_output_spill(
@@ -74,14 +83,44 @@ def build_enabled_tools(
                 config=settings.tools.tool_output_spill,
             ),
             patterns=settings.tools.approval.require_approval,
-            approve=_event_bus_approver(event_bus, settings.tools.approval.timeout_seconds),
+            approve=approve,
         ),
         event_bus=event_bus,
     )
 
 
+def derive_extension_tools(
+    final_tools: Sequence[ToolBinding],
+    *,
+    settings: Settings,
+    extensions: ExtensionRegistry,
+    event_bus: EventBus | None = None,
+) -> DerivedTools:
+    """Extension-derived tools over ``final_tools``, wrapped like the tools `build_enabled_tools` returns.
+
+    Output spill is skipped on purpose: derived tools bound their own output. The calls they make go through
+    the spill wrapper on ``final_tools``, which leaves calls nested in a script (``parent_call_id`` set) inline.
+    """
+    derived = extensions.derive_tools(final_tools)
+    if not derived.tools:
+        return derived
+    approve = _event_bus_approver(event_bus, settings.tools.approval.timeout_seconds)
+    return derived.with_tools(
+        apply_tool_call_events(
+            apply_tool_approval(
+                extensions.wrap_tools(derived.tools, approve),
+                patterns=settings.tools.approval.require_approval,
+                approve=approve,
+            ),
+            event_bus=event_bus,
+        )
+    )
+
+
 def _event_bus_approver(event_bus: EventBus | None, timeout_seconds: float) -> Approver:
-    async def approve(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> bool:
+    async def approve(
+        tool_name: str, arguments: dict[str, Any], context: ToolContext, /, *, detail: str | None = None
+    ) -> bool:
         if event_bus is None:
             return False
         return await request_tool_approval(
@@ -92,6 +131,7 @@ def _event_bus_approver(event_bus: EventBus | None, timeout_seconds: float) -> A
             chat_id=context.chat_id,
             timeout_seconds=timeout_seconds,
             supports_tool_approval=context.channel_capabilities.supports_tool_approval,
+            detail=detail,
             requester_user_id=context.user_id,
         )
 

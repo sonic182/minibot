@@ -213,20 +213,35 @@ def _worker_agent_registry() -> AgentRegistry:
 
 
 def test_prompt_service_announces_spawn_task_delegation_and_the_specialist_roster() -> None:
-    tools = _tool_bindings("spawn_task", "cancel_task", "list_tasks", "fetch_agent_info")
+    tools = _tool_bindings("delegate", "spawn_task", "cancel_task", "list_tasks", "fetch_agent_info")
     prompt_service = _prompt_service(tools=tools, agent_registry=_worker_agent_registry())
 
     prompt = prompt_service.compose_system_prompt("telegram")
 
-    assert "Delegation is available now via `spawn_task`" in prompt
-    assert "`spawn_task` targets one of 1 listed specialist agents" in prompt
+    assert "Delegation is available now via `delegate` and `spawn_task`" in prompt
+    assert "`delegate` and `spawn_task` target one of 1 listed specialist agents" in prompt
     assert "`fetch_agent_info` is available" in prompt
     assert 'metadata.source == "task_worker"' in prompt
-    assert "`continue_turn`" in prompt
+    assert "Use `delegate` whenever a step remains" in prompt
+    assert "Use `spawn_task` only when the worker's answer is the final deliverable" in prompt
+    assert "continue_turn" not in prompt
     assert 'metadata.source == "task_result"' in prompt
     assert "Use `list_tasks` to verify which tasks are still active." in prompt
     # The roster itself is what makes agent_name usable; it hangs off spawn_task being attached.
     assert "worker" in prompt
+
+
+def test_prompt_service_announces_delegation_when_only_delegate_is_attached() -> None:
+    tools = _tool_bindings("delegate", "cancel_task", "list_tasks", "fetch_agent_info")
+    prompt_service = _prompt_service(tools=tools, agent_registry=_worker_agent_registry())
+
+    prompt = prompt_service.compose_system_prompt("telegram")
+
+    assert "Delegation is available now via `delegate`," in prompt
+    assert "Use `spawn_task` only when" not in prompt
+    assert "Use `delegate` whenever a step remains" in prompt
+    assert 'metadata.source == "task_worker"' in prompt
+    assert "Does work" in prompt
 
 
 def test_prompt_service_drops_delegation_and_roster_without_task_tools() -> None:
@@ -236,7 +251,7 @@ def test_prompt_service_drops_delegation_and_roster_without_task_tools() -> None
     prompt = prompt_service.compose_system_prompt("telegram")
 
     assert "Delegation is unavailable in this turn" in prompt
-    assert "Delegation is available now via `spawn_task`" not in prompt
+    assert "Delegation is available now via" not in prompt
     assert "Does work" not in prompt
     assert 'metadata.source == "task_worker"' not in prompt
 

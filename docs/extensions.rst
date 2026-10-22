@@ -112,6 +112,34 @@ Extension API
    Add a typed decorator-based tool or explicit ``ToolBinding`` instances. Use ``add_tool``
    for a custom tool name or hand-written JSON schema.
 
+``mb.add_tool_deriver(deriver)``
+   Contribute tools built from the tool list an agent ends up with. ``add_tool`` registers before any agent
+   exists, so it cannot build a tool that acts on other tools. ``deriver`` is a plain function that takes the
+   agent's final ``Sequence[ToolBinding]`` (after approval, event and output-spill wrapping, ``tools_allow`` /
+   ``tools_deny`` and the removal of the delegation tools) and returns the extra bindings. It runs once per agent
+   and again whenever the tool list is rebuilt, so keep it a pure function of its argument. The returned tools get
+   approval and event wrapping and are then filtered by the same agent policy (the main agent's allow/deny, a
+   specialist's ``tools_allow``/``tools_deny``); they are not part of the list the deriver received, and a name
+   that already exists is skipped with a warning and the existing tool is kept. Runs in the daemon, the console and task workers; the bundled
+   ``run_tools_script`` (:doc:`tools`) is built this way.
+
+   To take over tools instead of adding beside them, return ``DerivedTool(binding=..., replaces=frozenset(names))``
+   (from ``minibot.app.extensions``) in place of a plain binding: while the derived tool survives the agent's
+   policy, the tools named in ``replaces`` are no longer offered to the model, and the derived tool keeps calling
+   them itself. ``run_tools_script`` replaces every tool its scripts can call.
+
+``mb.add_tool_wrapper(wrapper)``
+   Wrap the handler of every tool an agent can call, to check or change its calls and results. ``wrapper`` is a
+   plain function ``(bindings, approve) -> bindings`` that returns one binding per input binding, in the same
+   order and with the same names (keep ``spill_after_chars``, e.g. with ``dataclasses.replace``); anything else
+   fails the tool build. ``approve(tool_name, arguments, context, detail=...)`` asks the user in the chat the call
+   came from with the ``[tools.approval]`` buttons and returns ``True`` only on an explicit approval; it denies on
+   channels without buttons. Wrappers cover core, extension, MCP and derived tools in the daemon, the console and
+   task workers, and run again whenever the tool list is rebuilt, so keep them pure. They sit innermost: they see
+   a tool's raw result before output spill, while ``[tools.approval]`` and tool-call events stay outside them.
+   Calls nested in a ``run_tools_script`` script go through them too, with ``context.parent_call_id`` set. The
+   bundled ``[tools.safety_classifier]`` (:doc:`tools`) is built this way.
+
 ``mb.on(EventType)`` / ``mb.on(EventType, handler)``
    Observe internal events such as ``TurnCompletedEvent``. Handlers are async and lossy:
    slow handlers drop events rather than blocking MiniBot.
@@ -139,8 +167,8 @@ Operational rules
   inside ``register()`` cannot be resolved.
 - Check ``mb.entrypoint`` before adding channel services. Only the daemon runs channels.
 - Configured extension tools are available to task workers, but worker registries do not start
-  extension services or event subscriptions. The scheduler is the one bundled extension a worker
-  loads, and it contributes tools only.
+  extension services or event subscriptions. A worker loads the scheduler, safety and utility bundles,
+  plus the ones listed in ``[tasks] worker_extensions``, and they contribute tools and tool wrappers only.
 
 For the full type signatures behind ``mb``, see :doc:`extension-api`.
 
