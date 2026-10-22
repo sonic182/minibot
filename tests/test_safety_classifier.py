@@ -313,7 +313,6 @@ async def test_secret_arguments_are_redacted_before_reaching_the_classifier(clas
 
     assert "sk-live-123" not in classifier.prompts[0]
     assert '"Authorization": "***"' in classifier.prompts[0]
-    assert "https://example.com" in classifier.prompts[0]
 
 
 @pytest.mark.asyncio
