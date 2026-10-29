@@ -63,13 +63,14 @@ result URLs.
 
 Anonymous requests use Parallel's ``fast`` search mode and lower rate limits, and the search settings that a
 client can override are ignored. With a Parallel API key you get higher limits: store it in the vault (see
-:doc:`vault`) and add ``auth_secret = "parallel_api_key"`` to the entry, which sends it as the
+:doc:`vault`; ``auth_secret`` needs ``[vault] enabled = true``) and add ``auth_secret = "parallel_api_key"`` to the entry, which sends it as the
 ``Authorization: Bearer`` token Parallel documents. Queries and URLs leave your machine for Parallel, so
 read its `customer terms <https://parallel.ai/customer-terms>`_ and
 `privacy policy <https://parallel.ai/privacy-policy>`_ before using it with anything sensitive.
 
 The tools only read, but the pages they return are untrusted input, so the same prompt-injection
-precautions as for Exa apply.
+precautions as for Exa apply: see the notes at the end of the Exa section above for keeping the server on the
+main agent (``shared_mcp_servers``, ``tools_deny``) and for approvals on tools that send or delete data.
 
 Running local MCP binaries
 --------------------------
