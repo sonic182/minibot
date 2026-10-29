@@ -99,6 +99,96 @@ async def test_service_retries_on_publish_failure(tmp_path: Path) -> None:
     assert stored.run_at > datetime.now(UTC)
 
 
+class _FlakyBus(EventBus):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failing = True
+
+    async def publish(self, event):  # type: ignore[override]
+        if self.failing:
+            raise RuntimeError("boom")
+        await super().publish(event)
+
+
+async def _flaky_service(tmp_path: Path) -> tuple[ScheduledPromptService, SQLAlchemyScheduledPromptStore, _FlakyBus]:
+    config = _config(tmp_path / "scheduler.db")
+    store = SQLAlchemyScheduledPromptStore(config)
+    await store.initialize()
+    bus = _FlakyBus()
+    return ScheduledPromptService(store, bus, config), store, bus
+
+
+@pytest.mark.asyncio
+async def test_interval_recurrence_keeps_its_slot_after_a_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    svc, store, bus = await _flaky_service(tmp_path)
+    slot = datetime(2026, 1, 1, 9, 0, 0, tzinfo=UTC)
+    now = slot
+    monkeypatch.setattr(scheduler_module, "utcnow", lambda: now)
+    job = await svc.schedule_prompt(
+        owner_id="tenant",
+        channel="telegram",
+        text="daily",
+        run_at=slot,
+        recurrence=PromptRecurrence.INTERVAL,
+        recurrence_interval_seconds=86400,
+    )
+
+    now = slot + timedelta(seconds=1)
+    await svc.run_pending()
+    retried = await store.get(job.id)
+    assert retried is not None
+    assert retried.run_at > slot
+    assert retried.slot_at == slot
+
+    now = retried.run_at + timedelta(seconds=1)
+    bus.failing = False
+    await svc.run_pending()
+
+    stored = await store.get(job.id)
+    assert stored is not None
+    assert stored.status == ScheduledPromptStatus.PENDING
+    assert stored.run_at == slot + timedelta(days=1)
+    assert stored.slot_at is None
+
+
+@pytest.mark.asyncio
+async def test_exhausted_retries_skip_a_recurring_occurrence_but_fail_a_one_shot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    svc, store, _ = await _flaky_service(tmp_path)
+    slot = datetime(2026, 1, 1, 9, 0, 0, tzinfo=UTC)
+    now = slot
+    monkeypatch.setattr(scheduler_module, "utcnow", lambda: now)
+    recurring = await svc.schedule_prompt(
+        owner_id="tenant",
+        channel="telegram",
+        text="daily",
+        run_at=slot,
+        recurrence=PromptRecurrence.INTERVAL,
+        recurrence_interval_seconds=86400,
+    )
+    one_shot = await svc.schedule_prompt(owner_id="tenant", channel="telegram", text="once", run_at=slot)
+
+    now = slot + timedelta(seconds=1)
+    await svc.run_pending()
+    now = now + timedelta(minutes=10)
+    await svc.run_pending()
+
+    stored = await store.get(recurring.id)
+    assert stored is not None
+    assert stored.status == ScheduledPromptStatus.PENDING
+    assert stored.run_at == slot + timedelta(days=1)
+    assert stored.retry_count == 0
+    assert stored.last_error == "boom"
+    failed = await store.get(one_shot.id)
+    assert failed is not None
+    assert failed.status == ScheduledPromptStatus.FAILED
+
+
 @pytest.mark.asyncio
 async def test_background_scheduler_wakes_for_near_term_jobs(tmp_path: Path) -> None:
     db_path = tmp_path / "scheduler.db"

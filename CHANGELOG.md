@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Scheduled prompts: a retry no longer shifts an interval job's schedule.** A failed injection moved `run_at` to the
+  retry time, and the next occurrence was then stepped from it, so a daily 09:00 prompt that failed once kept running
+  at about 09:00:35. The original slot is now kept (new `slot_at` column, added automatically to existing databases).
+- **Scheduled prompts: exhausting `max_attempts` no longer ends a recurring series.** A recurring job that cannot be
+  injected after its last attempt now skips that occurrence and moves to the next one, keeping the error in
+  `last_error`; before, the whole series was marked `failed`. One-time jobs still end as `failed`.
+
 ## [0.36.0] - 2026-10-22
 
 ### Added
