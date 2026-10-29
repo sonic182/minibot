@@ -3,10 +3,10 @@ Suggested MCP Servers
 
 .. meta::
    :description: Recommended MCP servers for Minibot (web search, email, long-term memory) and how to run them as local binaries, including Docker.
-   :keywords: MCP servers, Exa MCP, web search AI agent, email MCP, IMAP SMTP AI agent, graphmem, AI memory MCP, local MCP binary
+   :keywords: MCP servers, Exa MCP, Parallel Search MCP, keyless web search, web search AI agent, email MCP, IMAP SMTP AI agent, graphmem, AI memory MCP, local MCP binary
 
-These are MCP servers we run with MiniBot day to day. Exa is a hosted server reached over HTTP; the
-email and memory servers ship as a single prebuilt binary and run over ``stdio`` with no extra
+These are MCP servers we run with MiniBot day to day. Exa and Parallel are hosted servers reached over
+HTTP; the email and memory servers ship as a single prebuilt binary and run over ``stdio`` with no extra
 runtime. See :doc:`mcp` for how MCP tools are named and filtered.
 
 Web search: Exa
@@ -33,6 +33,43 @@ only read, so they stay on the main agent here (list it in ``[orchestration] sha
 specialist also claims it, and make sure ``[orchestration.main_agent] tools_deny`` does not hide
 ``mcp*``); keep tools that send or delete data behind
 ``[tools.approval]`` (see the email section below).
+
+Web search without an API key: Parallel
+---------------------------------------
+
+`Parallel <https://parallel.ai>`_ hosts a `Search MCP <https://docs.parallel.ai/integrations/mcp/search-mcp>`_
+whose ``/mcp`` endpoint is free to use with no account or API key, which makes it a quick way to give the
+agent web search and page fetching. It is opt-in and sits next to the Exa setup above; neither replaces the
+other. Add it over HTTP:
+
+.. code-block:: toml
+
+   [[tools.mcp.servers]]
+   name = "parallel"
+   transport = "http"
+   url = "https://search.parallel.ai/mcp"
+
+This exposes ``mcp_parallel__web_search`` (search with relevant excerpts per result) and
+``mcp_parallel__web_fetch`` (extract the content of up to 20 URLs). Use ``enabled_tools`` to expose only one of
+them. To check it, ask the agent something that needs current information and a source page, for example:
+
+.. code-block:: text
+
+   Search the web for the latest stable Python 3 release, then fetch the python.org page that
+   announces it and quote the release date.
+
+The agent should call ``mcp_parallel__web_search`` first and then ``mcp_parallel__web_fetch`` on one of the
+result URLs.
+
+Anonymous requests use Parallel's ``fast`` search mode and lower rate limits, and the search settings that a
+client can override are ignored. With a Parallel API key you get higher limits: store it in the vault (see
+:doc:`vault`) and add ``auth_secret = "parallel_api_key"`` to the entry, which sends it as the
+``Authorization: Bearer`` token Parallel documents. Queries and URLs leave your machine for Parallel, so
+read its `customer terms <https://parallel.ai/customer-terms>`_ and
+`privacy policy <https://parallel.ai/privacy-policy>`_ before using it with anything sensitive.
+
+The tools only read, but the pages they return are untrusted input, so the same prompt-injection
+precautions as for Exa apply.
 
 Running local MCP binaries
 --------------------------

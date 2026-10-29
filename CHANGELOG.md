@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Keyless web search recipe.** `docs/mcp_servers.rst` documents the opt-in Parallel Search MCP
+  (`https://search.parallel.ai/mcp`), which needs no account or API key, with a copyable HTTP configuration, a
+  prompt to try it, the optional `auth_secret` setup for higher limits and the terms and privacy links. The Exa
+  setup and the defaults are unchanged.
+
 ### Fixed
 
 - **Scheduled prompts: a retry no longer shifts an interval job's schedule.** A failed injection moved `run_at` to the
