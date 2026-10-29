@@ -155,7 +155,7 @@ async def test_interval_recurrence_keeps_its_slot_after_a_retry(
 
 
 @pytest.mark.asyncio
-async def test_exhausted_retries_skip_a_recurring_occurrence_but_fail_a_one_shot(
+async def test_exhausted_retries_skip_a_recurring_occurrence_but_fail_jobs_without_a_next_one(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -172,6 +172,15 @@ async def test_exhausted_retries_skip_a_recurring_occurrence_but_fail_a_one_shot
         recurrence_interval_seconds=86400,
     )
     one_shot = await svc.schedule_prompt(owner_id="tenant", channel="telegram", text="once", run_at=slot)
+    ending = await svc.schedule_prompt(
+        owner_id="tenant",
+        channel="telegram",
+        text="ends soon",
+        run_at=slot,
+        recurrence=PromptRecurrence.INTERVAL,
+        recurrence_interval_seconds=86400,
+        recurrence_end_at=slot + timedelta(hours=1),
+    )
 
     now = slot + timedelta(seconds=1)
     await svc.run_pending()
@@ -184,9 +193,10 @@ async def test_exhausted_retries_skip_a_recurring_occurrence_but_fail_a_one_shot
     assert stored.run_at == slot + timedelta(days=1)
     assert stored.retry_count == 0
     assert stored.last_error == "boom"
-    failed = await store.get(one_shot.id)
-    assert failed is not None
-    assert failed.status == ScheduledPromptStatus.FAILED
+    for job_id in (one_shot.id, ending.id):
+        failed = await store.get(job_id)
+        assert failed is not None
+        assert failed.status == ScheduledPromptStatus.FAILED
 
 
 @pytest.mark.asyncio
