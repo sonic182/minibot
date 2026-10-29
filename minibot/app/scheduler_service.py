@@ -277,12 +277,7 @@ class ScheduledPromptService:
 
         next_run = self._next_run_for_recurrence(job)
         if next_run is not None:
-            await self._repository.reschedule_recurring(job.id, next_run)
-            self._schedule_wake(next_run)
-            self._logger.info(
-                "scheduled prompt recurrence rescheduled",
-                extra={"job_id": job.id, "next_run_at": next_run.isoformat()},
-            )
+            await self._reschedule_recurring(job, next_run)
             return
 
         await self._repository.mark_completed(job.id)
@@ -300,8 +295,24 @@ class ScheduledPromptService:
         )
         await self._event_bus.publish(MessageEvent(message=message))
 
+    async def _reschedule_recurring(self, job: ScheduledPrompt, next_run: datetime, error: str | None = None) -> None:
+        await self._repository.reschedule_recurring(job.id, next_run, error)
+        self._schedule_wake(next_run)
+        self._logger.info(
+            "scheduled prompt recurrence rescheduled",
+            extra={"job_id": job.id, "next_run_at": next_run.isoformat()},
+        )
+
     async def _handle_dispatch_failure(self, job: ScheduledPrompt, error: str | None) -> None:
         if job.retry_count + 1 >= job.max_attempts:
+            next_run = self._next_run_for_recurrence(job)
+            if next_run is not None:
+                self._logger.error(
+                    "scheduled prompt occurrence failed; skipping to the next one",
+                    extra={"job_id": job.id, "error": error},
+                )
+                await self._reschedule_recurring(job, next_run, error)
+                return
             await self._repository.mark_failed(job.id, error)
             self._logger.error(
                 "scheduled prompt failed permanently",
@@ -428,11 +439,12 @@ class ScheduledPromptService:
             return None
 
         now = utcnow()
-        next_run = job.run_at
+        slot = job.slot_at or job.run_at
+        next_run = slot
         if next_run <= now:
-            elapsed_seconds = (now - job.run_at).total_seconds()
+            elapsed_seconds = (now - slot).total_seconds()
             steps = int(elapsed_seconds // interval) + 1
-            next_run = job.run_at + timedelta(seconds=steps * interval)
+            next_run = slot + timedelta(seconds=steps * interval)
             if steps >= 2:
                 self._logger.warning(
                     "skipped recurrence intervals",

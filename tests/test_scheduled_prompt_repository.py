@@ -51,6 +51,7 @@ async def test_concurrent_first_use_initializes_shared_schema(tmp_path: Path, le
                 "recurrence_interval_seconds",
                 "recurrence_cron_expression",
                 "recurrence_end_at",
+                "slot_at",
             ):
                 connection.execute(f"ALTER TABLE scheduled_prompts DROP COLUMN {column}")
 

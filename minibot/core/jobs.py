@@ -48,6 +48,7 @@ class ScheduledPrompt:
     recurrence_interval_seconds: int | None = None
     recurrence_cron_expression: str | None = None
     recurrence_end_at: datetime | None = None
+    slot_at: datetime | None = None
 
     def should_retry(self) -> bool:
         return self.retry_count < self.max_attempts
@@ -87,7 +88,7 @@ class ScheduledPromptRepository(Protocol):
 
     async def retry_job(self, job_id: str, next_run_at: datetime, error: str | None = None) -> None: ...
 
-    async def reschedule_recurring(self, job_id: str, next_run_at: datetime) -> None: ...
+    async def reschedule_recurring(self, job_id: str, next_run_at: datetime, error: str | None = None) -> None: ...
 
     async def mark_failed(self, job_id: str, error: str | None = None) -> None: ...
 

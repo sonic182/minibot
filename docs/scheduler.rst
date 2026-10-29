@@ -32,6 +32,9 @@ How It Works
 - Jobs survive restarts — they are stored in SQLite and polled on startup.
 - A job is retried (up to its ``max_attempts``) only when injecting the prompt fails. If the turn it
   starts fails later, the job is not retried; the user gets a short failure reply instead.
+- A retry does not move a recurring job off its schedule: an interval job keeps stepping from its original slot.
+  When a recurring job exhausts its attempts, only that occurrence is skipped: the job moves to its next
+  occurrence and keeps the error in ``last_error``. A one-time job is marked ``failed``.
 - The minimum recurrence interval is ``scheduler.prompts.min_recurrence_interval_seconds`` (default: ``60`` seconds).
 
 Configuration

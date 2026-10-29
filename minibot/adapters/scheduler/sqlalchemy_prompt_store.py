@@ -55,6 +55,7 @@ class ScheduledPromptModel(Base):
     recurrence_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recurrence_cron_expression: Mapped[str | None] = mapped_column(String(128), nullable=True)
     recurrence_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    slot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
@@ -109,6 +110,8 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             )
         if "recurrence_end_at" not in columns:
             connection.execute(text("ALTER TABLE scheduled_prompts ADD COLUMN recurrence_end_at DATETIME"))
+        if "slot_at" not in columns:
+            connection.execute(text("ALTER TABLE scheduled_prompts ADD COLUMN slot_at DATETIME"))
 
     async def create(self, prompt: ScheduledPromptCreate) -> ScheduledPrompt:
         metadata = dict(prompt.metadata or {})
@@ -176,6 +179,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
                 .values(
                     status=ScheduledPromptStatus.PENDING.value,
                     run_at=ensure_utc(next_run_at),
+                    slot_at=func.coalesce(ScheduledPromptModel.slot_at, ScheduledPromptModel.run_at),
                     lease_expires_at=None,
                     last_error=error,
                     retry_count=ScheduledPromptModel.retry_count + 1,
@@ -184,7 +188,7 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             )
             await session.commit()
 
-    async def reschedule_recurring(self, job_id: str, next_run_at: datetime) -> None:
+    async def reschedule_recurring(self, job_id: str, next_run_at: datetime, error: str | None = None) -> None:
         now = utcnow()
         async with self._session() as session:
             await session.execute(
@@ -193,8 +197,9 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
                 .values(
                     status=ScheduledPromptStatus.PENDING.value,
                     run_at=ensure_utc(next_run_at),
+                    slot_at=None,
                     lease_expires_at=None,
-                    last_error=None,
+                    last_error=error,
                     retry_count=0,
                     updated_at=now,
                 )
@@ -321,4 +326,5 @@ class SQLAlchemyScheduledPromptStore(ScheduledPromptRepository):
             recurrence_interval_seconds=model.recurrence_interval_seconds,
             recurrence_cron_expression=model.recurrence_cron_expression,
             recurrence_end_at=_as_utc(model.recurrence_end_at),
+            slot_at=_as_utc(model.slot_at),
         )
