@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import re
-import time
 from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
 from contextlib import suppress
@@ -13,18 +12,19 @@ from typing import Any, Literal
 
 import aiosonic
 from aiosonic.exceptions import ConnectionDisconnected
+from aiosonic.pools import PoolConfig
 
 from minibot import __version__
 from minibot.core.mcp import MCPServerMetadata, MCPToolCallResult, MCPToolDefinition
 
 _PROTOCOL_VERSION = "2024-11-05"
+_HTTP_MAX_CONN_IDLE_MS = 4000
 
 
 class MCPClient:
     _STDIO_READ_CHUNK_SIZE = 64 * 1024
     _STDERR_TAIL_BYTES = 4 * 1024
     _STDERR_SETTLE_SECONDS = 1.0
-    _HTTP_IDLE_RECONNECT_SECONDS = 4.0
 
     def __init__(
         self,
@@ -58,8 +58,6 @@ class MCPClient:
         self._http_client: Any = None
         self._http_init_lock: asyncio.Lock | None = None
         self._http_loop: asyncio.AbstractEventLoop | None = None
-        self._http_in_flight = 0
-        self._http_last_used = 0.0
         self._stdio_process: asyncio.subprocess.Process | None = None
         self._stdio_loop: asyncio.AbstractEventLoop | None = None
         self._stdio_lock: asyncio.Lock | None = None
@@ -143,7 +141,9 @@ class MCPClient:
     def _ensure_http_runtime(self) -> tuple[Any, asyncio.Lock]:
         loop = asyncio.get_running_loop()
         if self._http_client is None or self._http_init_lock is None or self._http_loop is not loop:
-            self._http_client = self._http_client_class()
+            pool_config = PoolConfig(max_conn_idle_ms=_HTTP_MAX_CONN_IDLE_MS)
+            connector = aiosonic.TCPConnector(pool_configs={":default": pool_config})
+            self._http_client = self._http_client_class(connector=connector)
             self._http_init_lock = asyncio.Lock()
             self._http_loop = loop
         return self._http_client, self._http_init_lock
@@ -359,9 +359,7 @@ class MCPClient:
     async def _post_http(self, payload: dict[str, Any]) -> tuple[int, bytes]:
         if not self._url:
             raise ValueError("mcp http url is required")
-        await self._drop_idle_http_connections()
         client, _ = self._ensure_http_runtime()
-        self._http_in_flight += 1
         try:
             response = await asyncio.wait_for(
                 client.post(
@@ -377,20 +375,7 @@ class MCPClient:
             body = await asyncio.wait_for(response.content(), timeout=self._timeout_seconds)
         except ConnectionDisconnected as exc:
             raise RuntimeError("mcp http error: server closed the connection before responding") from exc
-        finally:
-            self._http_in_flight -= 1
-            self._http_last_used = time.monotonic()
         return int(response.status_code), body
-
-    async def _drop_idle_http_connections(self) -> None:
-        client = self._http_client
-        if client is None or self._http_in_flight or self._http_loop is not asyncio.get_running_loop():
-            return
-        if time.monotonic() - self._http_last_used < self._HTTP_IDLE_RECONNECT_SECONDS:
-            return
-        self._http_client = self._http_client_class()
-        with suppress(Exception):
-            await client.aclose()
 
     def _build_http_headers(self) -> dict[str, str]:
         headers = {

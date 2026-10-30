@@ -689,6 +689,9 @@ class _ScriptedMCPServer:
         self.headers.append(headers)
         if self.drop_tool_calls and body.get("method") == "tools/call":
             return False
+        params = body.get("params")
+        if isinstance(params, dict) and params.get("arguments", {}).get("delay"):
+            await asyncio.sleep(params["arguments"]["delay"])
         status, payload, content_type = self._respond(body, headers)
         data = payload.encode()
         connection = "keep-alive" if keep_alive else "close"
@@ -760,21 +763,24 @@ def test_mcp_http_reinitializes_once_when_the_session_expires() -> None:
     assert [req.get("method") for req in script.requests].count("initialize") == 2
 
 
-def test_mcp_http_opens_new_connections_after_an_idle_pause_the_server_closed_them_in() -> None:
+def test_mcp_http_does_not_reuse_connections_the_server_closed_while_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("minibot.adapters.mcp.client._HTTP_MAX_CONN_IDLE_MS", 150)
     script = _ScriptedMCPServer()
     script.keep_alive_idle_seconds = 0.1
 
     async def scenario(client: MCPClient) -> None:
-        client._HTTP_IDLE_RECONNECT_SECONDS = 0.2
+        slow = asyncio.create_task(client.call_tool("ping", {"delay": 1.0}))
         await asyncio.gather(*(client.call_tool("ping", {}) for _ in range(3)))
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.5)
         result = await client.call_tool("ping", {})
         assert result.is_error is False
+        assert not slow.done()
+        await slow
 
     asyncio.run(_with_scripted_server(script, scenario))
 
     methods = [req.get("method") for req in script.requests]
-    assert methods.count("tools/call") == 4
+    assert methods.count("tools/call") == 5
     assert methods.count("initialize") == 1
 
 
