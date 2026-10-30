@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCP over HTTP: a call after an idle pause no longer fails on a closed keep-alive connection.** Servers such as
+  Node's default HTTP server close idle keep-alive sockets after 5 seconds, so a tool call made after waiting for a
+  tool approval was written to a dead socket and failed with an empty error, without reaching the server. A request
+  dropped on a reused connection is now sent again over another one (5 attempts at most). A drop on a fresh
+  connection is not retried, because the server may have run it, and now reports that the server closed the
+  connection before responding.
+
 ## [0.36.1] - 2026-10-29
 
 ### Added

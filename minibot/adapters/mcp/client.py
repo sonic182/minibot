@@ -11,11 +11,13 @@ from threading import Event, Lock, Thread
 from typing import Any, Literal
 
 import aiosonic
+from aiosonic.exceptions import ConnectionDisconnected
 
 from minibot import __version__
 from minibot.core.mcp import MCPServerMetadata, MCPToolCallResult, MCPToolDefinition
 
 _PROTOCOL_VERSION = "2024-11-05"
+_HTTP_MAX_ATTEMPTS = 5
 
 
 class MCPClient:
@@ -355,19 +357,29 @@ class MCPClient:
         if not self._url:
             raise ValueError("mcp http url is required")
         client, _ = self._ensure_http_runtime()
-        response = await asyncio.wait_for(
-            client.post(
-                self._url,
-                headers=self._build_http_headers(),
-                data=json.dumps(payload).encode("utf-8"),
-            ),
-            timeout=self._timeout_seconds,
-        )
+        data = json.dumps(payload).encode("utf-8")
+        for attempt in range(1, _HTTP_MAX_ATTEMPTS + 1):
+            try:
+                response = await self._send_http_post(client, data)
+                break
+            except ConnectionDisconnected as exc:
+                if not exc.reused_connection or attempt == _HTTP_MAX_ATTEMPTS:
+                    raise RuntimeError("mcp http error: server closed the connection before responding") from exc
+                self._logger.info(
+                    "mcp http keep-alive connection dropped; retrying",
+                    extra={"server": self._server_name, "attempt": attempt},
+                )
         session_id = _extract_header_value(response, "mcp-session-id")
         if session_id:
             self._http_session_id = session_id
         body = await asyncio.wait_for(response.content(), timeout=self._timeout_seconds)
         return int(response.status_code), body
+
+    async def _send_http_post(self, client: Any, data: bytes) -> Any:
+        return await asyncio.wait_for(
+            client.post(self._url, headers=self._build_http_headers(), data=data),
+            timeout=self._timeout_seconds,
+        )
 
     def _build_http_headers(self) -> dict[str, str]:
         headers = {
