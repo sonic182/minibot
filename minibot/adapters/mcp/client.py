@@ -11,11 +11,14 @@ from threading import Event, Lock, Thread
 from typing import Any, Literal
 
 import aiosonic
+from aiosonic.exceptions import ConnectionDisconnected
+from aiosonic.pools import PoolConfig
 
 from minibot import __version__
 from minibot.core.mcp import MCPServerMetadata, MCPToolCallResult, MCPToolDefinition
 
 _PROTOCOL_VERSION = "2024-11-05"
+_HTTP_MAX_CONN_IDLE_MS = 4000
 
 
 class MCPClient:
@@ -138,7 +141,9 @@ class MCPClient:
     def _ensure_http_runtime(self) -> tuple[Any, asyncio.Lock]:
         loop = asyncio.get_running_loop()
         if self._http_client is None or self._http_init_lock is None or self._http_loop is not loop:
-            self._http_client = self._http_client_class()
+            pool_config = PoolConfig(max_conn_idle_ms=_HTTP_MAX_CONN_IDLE_MS)
+            connector = aiosonic.TCPConnector(pool_configs={":default": pool_config})
+            self._http_client = self._http_client_class(connector=connector)
             self._http_init_lock = asyncio.Lock()
             self._http_loop = loop
         return self._http_client, self._http_init_lock
@@ -355,18 +360,22 @@ class MCPClient:
         if not self._url:
             raise ValueError("mcp http url is required")
         client, _ = self._ensure_http_runtime()
-        response = await asyncio.wait_for(
-            client.post(
-                self._url,
-                headers=self._build_http_headers(),
-                data=json.dumps(payload).encode("utf-8"),
-            ),
-            timeout=self._timeout_seconds,
-        )
-        session_id = _extract_header_value(response, "mcp-session-id")
-        if session_id:
-            self._http_session_id = session_id
-        body = await asyncio.wait_for(response.content(), timeout=self._timeout_seconds)
+        try:
+            response = await asyncio.wait_for(
+                client.post(
+                    self._url,
+                    headers=self._build_http_headers(),
+                    data=json.dumps(payload).encode("utf-8"),
+                ),
+                timeout=self._timeout_seconds,
+            )
+            session_id = _extract_header_value(response, "mcp-session-id")
+            if session_id:
+                self._http_session_id = session_id
+            body = await asyncio.wait_for(response.content(), timeout=self._timeout_seconds)
+        except ConnectionDisconnected as exc:
+            connection = "reused" if exc.reused_connection else "new"
+            raise RuntimeError(f"mcp http error: server closed the {connection} connection before responding") from exc
         return int(response.status_code), body
 
     def _build_http_headers(self) -> dict[str, str]:

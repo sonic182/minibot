@@ -664,23 +664,44 @@ class _ScriptedMCPServer:
         self.expire_session_once = False
         self.sse = False
         self.fail_status: int | None = None
+        self.keep_alive_idle_seconds: float | None = None
+        self.drop_tool_calls = False
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        raw = await reader.readuntil(b"\r\n\r\n")
+        idle = self.keep_alive_idle_seconds
+        try:
+            while True:
+                raw = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=idle)
+                responded = await self._serve_one(raw, reader, writer, keep_alive=idle is not None)
+                if not responded or idle is None:
+                    break
+        except (TimeoutError, asyncio.IncompleteReadError, ConnectionResetError):
+            pass
+        writer.close()
+
+    async def _serve_one(
+        self, raw: bytes, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *, keep_alive: bool
+    ) -> bool:
         head = raw.decode().split("\r\n")
         headers = {line.split(":", 1)[0].lower(): line.split(":", 1)[1].strip() for line in head[1:] if ":" in line}
         body = json.loads(await reader.readexactly(int(headers.get("content-length", "0"))))
         self.requests.append(body)
         self.headers.append(headers)
+        if self.drop_tool_calls and body.get("method") == "tools/call":
+            return False
+        params = body.get("params")
+        if isinstance(params, dict) and params.get("arguments", {}).get("delay"):
+            await asyncio.sleep(params["arguments"]["delay"])
         status, payload, content_type = self._respond(body, headers)
         data = payload.encode()
+        connection = "keep-alive" if keep_alive else "close"
         writer.write(
             f"HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\nMcp-Session-Id: sess-1\r\n"
-            f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
+            f"Content-Length: {len(data)}\r\nConnection: {connection}\r\n\r\n".encode()
             + data
         )
         await writer.drain()
-        writer.close()
+        return True
 
     def _respond(self, body: dict[str, object], headers: dict[str, str]) -> tuple[int, str, str]:
         method = body.get("method")
@@ -740,6 +761,40 @@ def test_mcp_http_reinitializes_once_when_the_session_expires() -> None:
     asyncio.run(_with_scripted_server(script, scenario))
 
     assert [req.get("method") for req in script.requests].count("initialize") == 2
+
+
+def test_mcp_http_does_not_reuse_connections_the_server_closed_while_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("minibot.adapters.mcp.client._HTTP_MAX_CONN_IDLE_MS", 100)
+    script = _ScriptedMCPServer()
+    script.keep_alive_idle_seconds = 0.3
+
+    async def scenario(client: MCPClient) -> None:
+        slow = asyncio.create_task(client.call_tool("ping", {"delay": 2.0}))
+        await asyncio.gather(*(client.call_tool("ping", {}) for _ in range(3)))
+        await asyncio.sleep(0.5)
+        result = await client.call_tool("ping", {})
+        assert result.is_error is False
+        assert not slow.done()
+        await slow
+
+    asyncio.run(_with_scripted_server(script, scenario))
+
+    methods = [req.get("method") for req in script.requests]
+    assert methods.count("tools/call") == 5
+    assert methods.count("initialize") == 1
+
+
+def test_mcp_http_does_not_resend_a_tool_call_the_server_dropped() -> None:
+    script = _ScriptedMCPServer()
+    script.drop_tool_calls = True
+
+    async def scenario(client: MCPClient) -> None:
+        with pytest.raises(RuntimeError, match="closed the new connection before responding"):
+            await client.call_tool("ping", {})
+
+    asyncio.run(_with_scripted_server(script, scenario))
+
+    assert [req.get("method") for req in script.requests].count("tools/call") == 1
 
 
 def test_mcp_http_reports_non_success_status() -> None:

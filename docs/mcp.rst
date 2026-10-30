@@ -84,6 +84,12 @@ HTTP transport example:
 ``catalog_cache_ttl_seconds`` controls automatic catalog discovery before a direct ``call_tool``;
 set it to ``0`` to disable the cache. An explicit ``list_tools`` call always refreshes the catalog.
 
+HTTP servers are reached over keep-alive connections, and a connection idle for more than 4 seconds is replaced
+by a new one. That fits servers whose keep-alive timeout is at least about 5 seconds, such as Node and uvicorn. A
+server that closes idle connections sooner (gunicorn's default is 2 seconds) can make a call fail with
+``server closed the reused connection before responding``. MiniBot never resends such a call, because the server
+may already have run the tool.
+
 ``inline_result_chars`` (default ``25000``, both modes) is the largest result of that server that reaches the
 model inline; see the result-size rules above. Raise it for a server whose normal results are a little larger.
 
