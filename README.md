@@ -1,6 +1,7 @@
 ![MiniBot — Self-hosted, auditable, extensible](docs/_static/minibot-banner.png)
 
 [![PyPI version](https://img.shields.io/pypi/v/minibot)](https://pypi.org/project/minibot/)
+[![PyPI Stats](https://img.shields.io/pypi/dm/minibot)](https://pypistats.org/packages/minibot)
 
 Your personal AI assistant for Telegram - self-hosted, auditable, extensible, and intentionally opinionated.
 
