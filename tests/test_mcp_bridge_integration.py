@@ -764,12 +764,12 @@ def test_mcp_http_reinitializes_once_when_the_session_expires() -> None:
 
 
 def test_mcp_http_does_not_reuse_connections_the_server_closed_while_idle(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("minibot.adapters.mcp.client._HTTP_MAX_CONN_IDLE_MS", 150)
+    monkeypatch.setattr("minibot.adapters.mcp.client._HTTP_MAX_CONN_IDLE_MS", 100)
     script = _ScriptedMCPServer()
-    script.keep_alive_idle_seconds = 0.1
+    script.keep_alive_idle_seconds = 0.3
 
     async def scenario(client: MCPClient) -> None:
-        slow = asyncio.create_task(client.call_tool("ping", {"delay": 1.0}))
+        slow = asyncio.create_task(client.call_tool("ping", {"delay": 2.0}))
         await asyncio.gather(*(client.call_tool("ping", {}) for _ in range(3)))
         await asyncio.sleep(0.5)
         result = await client.call_tool("ping", {})
@@ -789,7 +789,7 @@ def test_mcp_http_does_not_resend_a_tool_call_the_server_dropped() -> None:
     script.drop_tool_calls = True
 
     async def scenario(client: MCPClient) -> None:
-        with pytest.raises(RuntimeError, match="closed the connection before responding"):
+        with pytest.raises(RuntimeError, match="closed the new connection before responding"):
             await client.call_tool("ping", {})
 
     asyncio.run(_with_scripted_server(script, scenario))

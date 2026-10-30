@@ -374,7 +374,8 @@ class MCPClient:
                 self._http_session_id = session_id
             body = await asyncio.wait_for(response.content(), timeout=self._timeout_seconds)
         except ConnectionDisconnected as exc:
-            raise RuntimeError("mcp http error: server closed the connection before responding") from exc
+            connection = "reused" if exc.reused_connection else "new"
+            raise RuntimeError(f"mcp http error: server closed the {connection} connection before responding") from exc
         return int(response.status_code), body
 
     def _build_http_headers(self) -> dict[str, str]:
