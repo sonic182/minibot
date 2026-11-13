@@ -210,11 +210,19 @@ Credentials default to ``~/.minibot/auth_codex.json``. To store them elsewhere, 
 ``auth_path`` under ``[providers.chatgpt_codex]``. ``minibot configure`` can perform the same login
 and model selection interactively.
 
-Every Codex client (the main model, the safety classifier, specialist agents and forked task workers)
-shares this file. Each token refresh rotates the refresh token, so a refresh takes an exclusive lock on
-``auth_codex.json.lock`` next to it, re-reads the file and reuses credentials another client already
-refreshed. The refreshed file is written to a temporary file in the same directory and renamed into place,
-so the whole directory, not just the file, must be writable by the MiniBot user.
+Every Codex client (the main model, the safety classifier, specialist agents, forked task workers and the
+startup ``/models`` lookup) shares this file. Each token refresh rotates the refresh token, so a refresh takes an
+exclusive lock on ``auth_codex.json.lock`` next to it, re-reads the file and reuses credentials another client
+already refreshed. A refresh already sent is finished and saved even if the request that triggered it is
+cancelled. The refreshed file keeps its permission bits, is written to a temporary file in the same directory
+and renamed into place, so:
+
+- mount the whole directory, not the single file, and make it writable by the user MiniBot runs as;
+- keep it on a local filesystem, since the lock may not be shared across network or VM file shares;
+- after a refresh the file belongs to that user, so run ``minibot codex login`` as the same user (uid 1000 in
+  the container) and while MiniBot is stopped, because a login does not take the lock.
+
+If the file is missing or unreadable when a refresh is due, the request fails with a message to log in again.
 
 The Codex ``/models`` endpoint hides models newer than the client version it is told about, so a new
 model may be missing from the list until that version is raised. MiniBot sends ``0.160.0`` by default;

@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,6 +13,8 @@ from minibot.llm.providers import openai_responses as openai_responses_module
 from minibot.llm.providers.codex import PatchedCodexProvider
 from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvider
 from minibot.llm.services.runtime_message_renderer import RuntimeMessageRenderer
+
+_UNUSED_AUTH_PATH = Path("auth_codex.json")
 
 
 def _provider() -> PatchedOpenAIResponsesProvider:
@@ -43,7 +46,7 @@ def test_messages_to_input_replays_reasoning_item_before_function_call() -> None
 def test_codex_parse_response_keeps_raw_reasoning_items() -> None:
     reasoning_item = {"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"}
     function_call = {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "noop", "arguments": "{}"}
-    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"))
+    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"), auth_path=_UNUSED_AUTH_PATH)
 
     message = provider._parse_response({"output": [reasoning_item, function_call]})
 
@@ -59,7 +62,7 @@ def test_codex_messages_to_input_replays_reasoning_item_before_function_call() -
         {"role": "assistant", "content": "", "reasoning_details": [reasoning_item], "tool_calls": [tool_call]},
         {"type": "function_call_output", "call_id": "fc_1", "output": "2026-09-13"},
     ]
-    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"))
+    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"), auth_path=_UNUSED_AUTH_PATH)
 
     result = provider._messages_to_input(messages)
 
@@ -142,7 +145,9 @@ async def test_codex_lists_models_with_the_configured_client_version(configured:
     async def fresh_credentials() -> None:
         return None
 
-    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"), models_client_version=configured)
+    provider = PatchedCodexProvider(
+        CodexCredentials(access_token="test-token"), auth_path=_UNUSED_AUTH_PATH, models_client_version=configured
+    )
     provider.request = request
     provider._ensure_fresh_credentials = fresh_credentials
 
@@ -272,7 +277,7 @@ def test_formatted_tools_give_every_object_schema_properties() -> None:
 
 
 def test_codex_messages_to_input_keeps_later_system_messages_as_developer_items() -> None:
-    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"))
+    provider = PatchedCodexProvider(CodexCredentials(access_token="test-token"), auth_path=_UNUSED_AUTH_PATH)
     messages = [
         {"role": "system", "content": "main prompt"},
         {"role": "user", "content": "hi"},

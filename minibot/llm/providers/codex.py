@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import fcntl
 import os
+import stat
 import tempfile
 import time
 from collections.abc import AsyncIterator
@@ -11,7 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from llm_async.models import Response
-from llm_async_codex import CodexCredentials, CodexProvider, load_credentials, refresh_credentials
+from llm_async_codex import (
+    CodexAuthError,
+    CodexCredentials,
+    CodexLoginError,
+    CodexProvider,
+    load_credentials,
+    refresh_credentials,
+)
 from llm_async_codex.oauth import TOKEN_REFRESH_SAFETY_MARGIN_SECONDS
 
 from minibot.config.schema import CodexConfig
@@ -35,29 +43,41 @@ class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
     refresh runs under a file lock, re-reads the file first and adopts credentials another provider already
     refreshed instead of spending a refresh token that was rotated away. The lock is a polled non-blocking
     ``flock`` so a cancelled waiter leaves no thread behind holding it, and the refreshed file is written to a
-    temporary sibling and renamed so readers outside the lock never see it half-written."""
+    temporary sibling and renamed so readers outside the lock never see it half-written. A refresh request already
+    sent is finished and saved even when the caller is cancelled, because the server has rotated the token by then
+    and dropping the response would revoke the only valid refresh token. ``auth_path`` is required so no provider
+    can refresh outside the lock or fall back to the Codex CLI's own auth file."""
 
     _stream_responses_request = PatchedOpenAIResponsesProvider._stream_responses_request
 
-    def __init__(self, *args: Any, models_client_version: str | None = None, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        credentials: CodexCredentials,
+        *,
+        auth_path: Path,
+        models_client_version: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(credentials, auth_path=auth_path, **kwargs)
         self._models_client_version = models_client_version or CodexConfig().version
 
     async def _ensure_fresh_credentials(self) -> None:
-        if self.auth_path is None:
-            await super()._ensure_fresh_credentials()
-            return
         if not _needs_refresh(self.credentials):
             return
         async with self._refresh_lock:
             if not _needs_refresh(self.credentials):
                 return
             async with _auth_file_lock(self.auth_path):
-                stored = load_credentials(self.auth_path)
+                stored = _load_stored_credentials(self.auth_path)
+                cancelled = False
                 if _needs_refresh(stored):
-                    stored = await _refresh_atomically(stored, self.auth_path)
+                    stored, cancelled = await _finish_despite_cancellation(
+                        asyncio.ensure_future(_refresh_atomically(stored, self.auth_path))
+                    )
                 self.credentials = stored
                 self.api_key = stored.access_token
+            if cancelled:
+                raise asyncio.CancelledError
 
     async def _ensure_models_cache(self) -> list[dict[str, Any]]:
         await self._ensure_fresh_credentials()
@@ -81,6 +101,26 @@ def _needs_refresh(credentials: CodexCredentials) -> bool:
     if not credentials.refresh_token or credentials.expires_at is None:
         return False
     return time.time() >= credentials.expires_at - TOKEN_REFRESH_SAFETY_MARGIN_SECONDS
+
+
+def _load_stored_credentials(auth_path: Path) -> CodexCredentials:
+    try:
+        return load_credentials(auth_path)
+    except CodexAuthError as exc:
+        raise CodexLoginError(f"{exc}; run `minibot codex login` to log in again") from exc
+
+
+async def _finish_despite_cancellation(
+    refresh: asyncio.Future[CodexCredentials],
+) -> tuple[CodexCredentials, bool]:
+    cancelled = False
+    while True:
+        try:
+            return await asyncio.shield(refresh), cancelled
+        except asyncio.CancelledError:
+            if refresh.cancelled():
+                raise
+            cancelled = True
 
 
 @contextlib.asynccontextmanager
@@ -108,6 +148,10 @@ async def _refresh_atomically(credentials: CodexCredentials, auth_path: Path) ->
     os.close(handle)
     try:
         refreshed = await refresh_credentials(credentials, Path(temp_name))
+        with contextlib.suppress(FileNotFoundError):
+            os.chmod(temp_name, stat.S_IMODE(os.stat(auth_path).st_mode))
+        with open(temp_name, "rb") as stream:
+            os.fsync(stream.fileno())
         os.replace(temp_name, auth_path)
     except BaseException:
         with contextlib.suppress(OSError):

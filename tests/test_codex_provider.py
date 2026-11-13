@@ -12,6 +12,7 @@ from llm_async_codex import CodexCredentials, CodexLoginError, load_credentials,
 from llm_async_codex import oauth as codex_oauth  # noqa: E402
 
 from minibot.llm.providers.codex import PatchedCodexProvider  # noqa: E402
+from minibot.llm.services import codex_setup  # noqa: E402
 
 
 class _RotatingTokenServer:
@@ -19,6 +20,7 @@ class _RotatingTokenServer:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.response_delay = 0.0
         self._current = "rt-0"
 
     async def refresh(self, refresh_token: str) -> dict[str, Any]:
@@ -27,6 +29,7 @@ class _RotatingTokenServer:
             raise CodexLoginError("token refresh failed: 401")
         self.calls += 1
         self._current = f"rt-{self.calls}"
+        await asyncio.sleep(self.response_delay)
         return {"access_token": f"at-{self.calls}", "refresh_token": self._current, "expires_in": 3600}
 
 
@@ -75,3 +78,40 @@ async def test_concurrent_refreshes_across_providers_hit_the_server_once(
     assert all(provider.credentials == stored for provider in providers)
     assert stored.refresh_token == "rt-1"
     assert list(auth_path.parent.glob("*.tmp")) == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_cancelled_after_the_server_rotated_still_saves_the_new_token(
+    server: _RotatingTokenServer, auth_path: Path
+) -> None:
+    server.response_delay = 0.2
+    cancelled = _provider(auth_path)
+
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.05):
+            await cancelled._ensure_fresh_credentials()
+
+    assert load_credentials(auth_path).refresh_token == "rt-1"
+    later = _provider(auth_path)
+    await later._ensure_fresh_credentials()
+    assert server.calls == 1
+    assert later.api_key == "at-1"
+
+
+@pytest.mark.asyncio
+async def test_model_lookup_refreshes_through_the_shared_auth_file(
+    server: _RotatingTokenServer, auth_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main = _provider(auth_path)
+
+    async def _models(self: PatchedCodexProvider, method: str, path: str) -> dict[str, Any]:
+        return {"models": [{"slug": "gpt-x", "context_window": 1000, "max_context_window": 2000}]}
+
+    monkeypatch.setattr(PatchedCodexProvider, "request", _models)
+    capabilities = await codex_setup.get_model_capabilities(auth_path, "gpt-x")
+    await main._ensure_fresh_credentials()
+
+    assert capabilities is not None
+    assert server.calls == 1
+    assert load_credentials(auth_path).refresh_token == "rt-1"
+    assert main.api_key == "at-1"
