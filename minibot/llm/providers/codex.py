@@ -19,9 +19,9 @@ from llm_async_codex import (
     CodexLoginError,
     CodexProvider,
     load_credentials,
-    refresh_credentials,
     save_credentials,
 )
+from llm_async_codex import oauth as codex_oauth
 from llm_async_codex.oauth import TOKEN_REFRESH_SAFETY_MARGIN_SECONDS
 
 from minibot.config.schema import CodexConfig
@@ -77,7 +77,7 @@ class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
                 cancelled = False
                 if _needs_refresh(stored):
                     stored, cancelled = await _finish_despite_cancellation(
-                        asyncio.ensure_future(_refresh_atomically(stored, self.auth_path))
+                        asyncio.ensure_future(_refresh_and_save(stored, self.auth_path))
                     )
                 self.credentials = stored
                 self.api_key = stored.access_token
@@ -126,13 +126,22 @@ async def _finish_despite_cancellation(
             if refresh.cancelled():
                 raise
             cancelled = True
+        except BaseException as exc:
+            if cancelled:
+                raise asyncio.CancelledError from exc
+            raise
 
 
 @contextlib.asynccontextmanager
 async def _auth_file_lock(auth_path: Path) -> AsyncIterator[None]:
     lock_path = auth_path.with_name(f"{auth_path.name}.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise CodexLoginError(
+            f"cannot open {lock_path}: {exc}; the directory holding the Codex auth file must be writable"
+        ) from exc
     try:
         while True:
             try:
@@ -148,21 +157,19 @@ async def _auth_file_lock(auth_path: Path) -> AsyncIterator[None]:
         os.close(fd)
 
 
-async def _refresh_atomically(credentials: CodexCredentials, auth_path: Path) -> CodexCredentials:
-    handle, temp_name = tempfile.mkstemp(dir=auth_path.parent, prefix=f".{auth_path.name}.", suffix=".tmp")
-    os.close(handle)
+async def _refresh_and_save(credentials: CodexCredentials, auth_path: Path) -> CodexCredentials:
+    tokens = await codex_oauth.refresh_access_token(credentials.refresh_token)
+    expires_in = tokens.get("expires_in")
+    refreshed = CodexCredentials(
+        access_token=tokens["access_token"],
+        refresh_token=tokens.get("refresh_token") or credentials.refresh_token,
+        account_id=codex_oauth.extract_account_id(tokens) or credentials.account_id,
+        expires_at=time.time() + expires_in if isinstance(expires_in, (int, float)) else None,
+    )
     try:
-        refreshed = await refresh_credentials(credentials, Path(temp_name))
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(temp_name)
-        raise
-    try:
-        _replace_durably(Path(temp_name), auth_path)
+        _replace_durably(refreshed, auth_path)
     except OSError:
         _logger.warning("could not replace the Codex auth file atomically; writing it in place", exc_info=True)
-        with contextlib.suppress(OSError):
-            os.unlink(temp_name)
         try:
             save_credentials(refreshed, auth_path)
         except OSError:
@@ -172,14 +179,25 @@ async def _refresh_atomically(credentials: CodexCredentials, auth_path: Path) ->
     return refreshed
 
 
-def _replace_durably(temp_path: Path, auth_path: Path) -> None:
-    with contextlib.suppress(FileNotFoundError):
-        os.chmod(temp_path, stat.S_IMODE(os.stat(auth_path).st_mode))
-    with open(temp_path, "rb") as stream:
-        os.fsync(stream.fileno())
-    os.replace(temp_path, auth_path)
-    directory = os.open(auth_path.parent, os.O_RDONLY)
+def _replace_durably(credentials: CodexCredentials, auth_path: Path) -> None:
+    handle, temp_name = tempfile.mkstemp(dir=auth_path.parent, prefix=f".{auth_path.name}.", suffix=".tmp")
+    os.close(handle)
     try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+        save_credentials(credentials, Path(temp_name))
+        with contextlib.suppress(FileNotFoundError):
+            os.chmod(temp_name, stat.S_IMODE(os.stat(auth_path).st_mode))
+        with open(temp_name, "rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temp_name, auth_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name)
+        raise
+    try:
+        directory = os.open(auth_path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except OSError:
+        _logger.warning("could not fsync the Codex auth directory", exc_info=True)

@@ -490,11 +490,12 @@ def _configure_chatgpt_codex(document: Any, settings: Settings) -> _ConfiguredPr
     )
 
 
-def _ensure_codex_login(auth_path: Path) -> Any:
+def _ensure_codex_login(auth_path: Path) -> None:
     from minibot.app.codex_setup import CodexCredentialsError, load_codex_credentials, login_to_codex
 
     try:
-        return load_codex_credentials(auth_path)
+        load_codex_credentials(auth_path)
+        return
     except CodexCredentialsError:
         pass
     _write(f"Not logged in to ChatGPT Codex yet (looked for {auth_path}).\n")
@@ -503,7 +504,7 @@ def _ensure_codex_login(auth_path: Path) -> Any:
     )
     device_code = method == _CODEX_DEVICE_LOGIN
     _write("Starting Codex login" + (" (device code)...\n" if device_code else " (browser)...\n"))
-    return asyncio.run(login_to_codex(device_code=device_code, auth_path=auth_path))
+    asyncio.run(login_to_codex(device_code=device_code, auth_path=auth_path))
 
 
 def _codex_models(auth_path: Path, client_version: str) -> list[str]:
