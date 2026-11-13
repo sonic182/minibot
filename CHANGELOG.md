@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-read it first and reuse credentials another client already refreshed; the file is replaced atomically. The
   startup `/models` lookup and `minibot configure` now refresh through the same file instead of writing rotated
   tokens to the Codex CLI's `~/.codex/auth.json`, and a refresh already sent is saved even when its caller is
-  cancelled (for example by the safety classifier's timeout).
+  cancelled (for example by the safety classifier's timeout). Upgrade note: mount the directory holding
+  `auth_codex.json` (not the single file) and keep it writable by the MiniBot user, which now owns the refreshed
+  file; see `docs/providers.rst`.
 - **MCP over HTTP: a call after an idle pause no longer fails on a closed keep-alive connection.** Servers such as
   Node's default HTTP server close idle keep-alive sockets after 5 seconds, so a tool call made after waiting for a
   tool approval was written to a dead socket and failed with an empty error, without reaching the server. A pooled

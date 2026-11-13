@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import logging
 import os
 import stat
 import tempfile
@@ -19,6 +20,7 @@ from llm_async_codex import (
     CodexProvider,
     load_credentials,
     refresh_credentials,
+    save_credentials,
 )
 from llm_async_codex.oauth import TOKEN_REFRESH_SAFETY_MARGIN_SECONDS
 
@@ -26,6 +28,7 @@ from minibot.config.schema import CodexConfig
 from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvider
 
 _LOCK_POLL_SECONDS = 0.05
+_logger = logging.getLogger("minibot.codex_provider")
 
 
 class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
@@ -39,14 +42,16 @@ class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
     version ``llm-async-codex`` hardcodes, because the endpoint hides models newer than the client version.
 
     The auth file is the shared source of truth for credentials. Several providers (main client, safety
-    classifier, forked task workers) read the same file, and every refresh rotates the refresh token, so a
-    refresh runs under a file lock, re-reads the file first and adopts credentials another provider already
-    refreshed instead of spending a refresh token that was rotated away. The lock is a polled non-blocking
-    ``flock`` so a cancelled waiter leaves no thread behind holding it, and the refreshed file is written to a
-    temporary sibling and renamed so readers outside the lock never see it half-written. A refresh request already
-    sent is finished and saved even when the caller is cancelled, because the server has rotated the token by then
-    and dropping the response would revoke the only valid refresh token. ``auth_path`` is required so no provider
-    can refresh outside the lock or fall back to the Codex CLI's own auth file."""
+    classifier, forked task workers, the startup model lookup) read the same file, and every refresh rotates
+    the refresh token, so a refresh runs under a file lock, re-reads the file first and adopts credentials
+    another provider already refreshed instead of spending a refresh token that was rotated away.
+
+    The lock is a polled non-blocking ``flock`` so a cancelled waiter leaves no thread behind holding it. The
+    refreshed file is written to a temporary sibling and renamed so readers outside the lock never see it
+    half-written; if the rename fails (for example on a bind-mounted single file) it is written in place.
+    Once the server has answered a refresh, its tokens are always kept: the refresh is finished even when the
+    caller is cancelled, because the old refresh token is already revoked. ``auth_path`` is required so no
+    provider can refresh outside the lock or fall back to the Codex CLI's own auth file."""
 
     _stream_responses_request = PatchedOpenAIResponsesProvider._stream_responses_request
 
@@ -148,13 +153,33 @@ async def _refresh_atomically(credentials: CodexCredentials, auth_path: Path) ->
     os.close(handle)
     try:
         refreshed = await refresh_credentials(credentials, Path(temp_name))
-        with contextlib.suppress(FileNotFoundError):
-            os.chmod(temp_name, stat.S_IMODE(os.stat(auth_path).st_mode))
-        with open(temp_name, "rb") as stream:
-            os.fsync(stream.fileno())
-        os.replace(temp_name, auth_path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(temp_name)
         raise
+    try:
+        _replace_durably(Path(temp_name), auth_path)
+    except OSError:
+        _logger.warning("could not replace the Codex auth file atomically; writing it in place", exc_info=True)
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name)
+        try:
+            save_credentials(refreshed, auth_path)
+        except OSError:
+            _logger.error(
+                "could not save refreshed Codex credentials; other clients will need a new login", exc_info=True
+            )
     return refreshed
+
+
+def _replace_durably(temp_path: Path, auth_path: Path) -> None:
+    with contextlib.suppress(FileNotFoundError):
+        os.chmod(temp_path, stat.S_IMODE(os.stat(auth_path).st_mode))
+    with open(temp_path, "rb") as stream:
+        os.fsync(stream.fileno())
+    os.replace(temp_path, auth_path)
+    directory = os.open(auth_path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)

@@ -11,6 +11,7 @@ pytest.importorskip("llm_async_codex")
 from llm_async_codex import CodexCredentials, CodexLoginError, load_credentials, save_credentials  # noqa: E402
 from llm_async_codex import oauth as codex_oauth  # noqa: E402
 
+from minibot.llm.providers import codex as codex_module  # noqa: E402
 from minibot.llm.providers.codex import PatchedCodexProvider  # noqa: E402
 from minibot.llm.services import codex_setup  # noqa: E402
 
@@ -115,3 +116,20 @@ async def test_model_lookup_refreshes_through_the_shared_auth_file(
     assert server.calls == 1
     assert load_credentials(auth_path).refresh_token == "rt-1"
     assert main.api_key == "at-1"
+
+
+@pytest.mark.asyncio
+async def test_failed_rename_after_refresh_still_keeps_the_rotated_token(
+    server: _RotatingTokenServer, auth_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _busy(src: object, dst: object) -> None:
+        raise OSError(16, "Device or resource busy")
+
+    monkeypatch.setattr(codex_module.os, "replace", _busy)
+    provider = _provider(auth_path)
+
+    await provider._ensure_fresh_credentials()
+
+    assert provider.api_key == "at-1"
+    assert load_credentials(auth_path).refresh_token == "rt-1"
+    assert list(auth_path.parent.glob("*.tmp")) == []
