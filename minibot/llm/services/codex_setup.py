@@ -53,9 +53,9 @@ async def login(*, device_code: bool, auth_path: Path, verbose: bool = False) ->
         raise CodexLoginError(str(exc)) from exc
 
 
-async def list_model_slugs(credentials: Any, *, client_version: str | None = None) -> list[str]:
-    """List models available to the authenticated Codex account."""
-    provider = _provider(credentials, client_version)
+async def list_model_slugs(auth_path: Path, *, client_version: str | None = None) -> list[str]:
+    """List models available to the Codex account logged in at ``auth_path``."""
+    provider = _provider(auth_path, client_version)
     try:
         return await provider.list_model_slugs()
     finally:
@@ -64,19 +64,19 @@ async def list_model_slugs(credentials: Any, *, client_version: str | None = Non
 
 async def get_model_capabilities(auth_path: Path, model_name: str, *, client_version: str | None = None) -> Any:
     """Return capabilities for a model available to the authenticated account."""
-    provider = _provider(load_credentials(auth_path), client_version)
+    provider = _provider(auth_path, client_version)
     try:
         return await provider.get_model_capabilities(model_name)
     finally:
         await provider.client.aclose()
 
 
-def _provider(credentials: Any, client_version: str | None) -> Any:
+def _provider(auth_path: Path, client_version: str | None) -> Any:
     try:
         from minibot.llm.providers.codex import PatchedCodexProvider
     except ImportError as exc:
         raise CodexDependencyError(_dependency_message()) from exc
-    return PatchedCodexProvider(credentials, models_client_version=client_version)
+    return PatchedCodexProvider(load_credentials(auth_path), auth_path=auth_path, models_client_version=client_version)
 
 
 def _dependency_message() -> str:

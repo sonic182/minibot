@@ -29,9 +29,9 @@ async def login_to_codex(*, device_code: bool, auth_path: Path, verbose: bool = 
     return await login(device_code=device_code, auth_path=auth_path, verbose=verbose)
 
 
-async def list_codex_model_slugs(credentials: Any, *, client_version: str | None = None) -> list[str]:
-    """List models exposed by the authenticated Codex account."""
-    return await list_model_slugs(credentials, client_version=client_version)
+async def list_codex_model_slugs(auth_path: Path, *, client_version: str | None = None) -> list[str]:
+    """List models exposed by the Codex account logged in at ``auth_path``."""
+    return await list_model_slugs(auth_path, client_version=client_version)
 
 
 __all__ = [
