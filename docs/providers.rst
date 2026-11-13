@@ -212,7 +212,7 @@ and model selection interactively.
 
 Every Codex client (the main model, the safety classifier, specialist agents, forked task workers and the
 startup ``/models`` lookup) shares this file. Each token refresh rotates the refresh token, so
-``llm-async-codex`` (0.3.0 or later) refreshes under an exclusive lock on ``auth_codex.json.lock`` next to it,
+``llm-async-codex`` 0.3.0 refreshes under an exclusive lock on ``auth_codex.json.lock`` next to it,
 re-reads the file and reuses credentials another client already refreshed. A refresh already sent is kept even
 if the request that triggered it is cancelled. The refreshed file keeps its permission bits and is written to a
 temporary file in the same directory and renamed into place, so:
@@ -221,7 +221,9 @@ temporary file in the same directory and renamed into place, so:
   that there is no lock, refreshes are coordinated only within each client, and a warning is logged;
 - keep it on a local filesystem, since the lock may not be shared across network or VM file shares;
 - after a refresh the file belongs to that user, so run ``minibot codex login`` as the same user (uid 1000 in
-  the container).
+  the container);
+- to switch to a different ChatGPT account, stop MiniBot before logging in: running clients keep refreshing the
+  account they started with and would write it back over the new login.
 
 The Codex ``/models`` endpoint hides models newer than the client version it is told about, so a new
 model may be missing from the list until that version is raised. MiniBot sends ``0.160.0`` by default;
