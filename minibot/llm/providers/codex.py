@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import fcntl
+import os
+import tempfile
+import time
+from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from llm_async.models import Response
-from llm_async_codex import CodexProvider
+from llm_async_codex import CodexCredentials, CodexProvider, load_credentials, refresh_credentials
+from llm_async_codex.oauth import TOKEN_REFRESH_SAFETY_MARGIN_SECONDS
 
 from minibot.config.schema import CodexConfig
 from minibot.llm.providers.openai_responses import PatchedOpenAIResponsesProvider
+
+_LOCK_POLL_SECONDS = 0.05
 
 
 class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
@@ -17,13 +28,36 @@ class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
     Base order keeps MiniBot's native tool formatting while retaining Codex-specific behaviour.
 
     The model list is requested with ``models_client_version`` (``[codex] version``) rather than the
-    version ``llm-async-codex`` hardcodes, because the endpoint hides models newer than the client version."""
+    version ``llm-async-codex`` hardcodes, because the endpoint hides models newer than the client version.
+
+    The auth file is the shared source of truth for credentials. Several providers (main client, safety
+    classifier, forked task workers) read the same file, and every refresh rotates the refresh token, so a
+    refresh runs under a file lock, re-reads the file first and adopts credentials another provider already
+    refreshed instead of spending a refresh token that was rotated away. The lock is a polled non-blocking
+    ``flock`` so a cancelled waiter leaves no thread behind holding it, and the refreshed file is written to a
+    temporary sibling and renamed so readers outside the lock never see it half-written."""
 
     _stream_responses_request = PatchedOpenAIResponsesProvider._stream_responses_request
 
     def __init__(self, *args: Any, models_client_version: str | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._models_client_version = models_client_version or CodexConfig().version
+
+    async def _ensure_fresh_credentials(self) -> None:
+        if self.auth_path is None:
+            await super()._ensure_fresh_credentials()
+            return
+        if not _needs_refresh(self.credentials):
+            return
+        async with self._refresh_lock:
+            if not _needs_refresh(self.credentials):
+                return
+            async with _auth_file_lock(self.auth_path):
+                stored = load_credentials(self.auth_path)
+                if _needs_refresh(stored):
+                    stored = await _refresh_atomically(stored, self.auth_path)
+                self.credentials = stored
+                self.api_key = stored.access_token
 
     async def _ensure_models_cache(self) -> list[dict[str, Any]]:
         await self._ensure_fresh_credentials()
@@ -41,3 +75,42 @@ class PatchedCodexProvider(CodexProvider, PatchedOpenAIResponsesProvider):
             async for _ in response.stream_generator:
                 pass
         return response
+
+
+def _needs_refresh(credentials: CodexCredentials) -> bool:
+    if not credentials.refresh_token or credentials.expires_at is None:
+        return False
+    return time.time() >= credentials.expires_at - TOKEN_REFRESH_SAFETY_MARGIN_SECONDS
+
+
+@contextlib.asynccontextmanager
+async def _auth_file_lock(auth_path: Path) -> AsyncIterator[None]:
+    lock_path = auth_path.with_name(f"{auth_path.name}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                await asyncio.sleep(_LOCK_POLL_SECONDS)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+async def _refresh_atomically(credentials: CodexCredentials, auth_path: Path) -> CodexCredentials:
+    handle, temp_name = tempfile.mkstemp(dir=auth_path.parent, prefix=f".{auth_path.name}.", suffix=".tmp")
+    os.close(handle)
+    try:
+        refreshed = await refresh_credentials(credentials, Path(temp_name))
+        os.replace(temp_name, auth_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name)
+        raise
+    return refreshed
